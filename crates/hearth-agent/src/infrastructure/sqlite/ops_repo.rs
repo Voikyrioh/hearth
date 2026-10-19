@@ -394,7 +394,11 @@ impl OpJournal for SqliteOpJournal {
 
     async fn purge_finished(&self, before: OffsetDateTime) -> Result<u64, StoreError> {
         let limit = format_date(RESOURCE, before)?;
-        let mut tx = self.pool.begin().await.map_err(storage(RESOURCE))?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(storage(RESOURCE))?;
         sqlx::query!(
             "DELETE FROM service_op_steps WHERE op_id IN
                  (SELECT id FROM service_ops WHERE finished_at IS NOT NULL AND finished_at < ?)",
@@ -416,7 +420,11 @@ impl OpJournal for SqliteOpJournal {
 
     async fn prune_finished_beyond(&self, keep: u32) -> Result<u64, StoreError> {
         let keep = i64::from(keep);
-        let mut tx = self.pool.begin().await.map_err(storage(RESOURCE))?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(storage(RESOURCE))?;
         // Les plus récemment terminées restent ; une opération non terminée n'a pas de `finished_at` et n'est
         // donc jamais candidate. Le journal d'étapes part d'abord (clé étrangère).
         const KEPT: &str = "SELECT id FROM service_ops WHERE finished_at IS NOT NULL

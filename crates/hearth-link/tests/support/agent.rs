@@ -438,6 +438,12 @@ impl TestAgent {
                     timings: engine_timings(),
                     log_brake: self.brake,
                     lifecycle: hearth_agent::application::service_lifecycle::LifecycleTimings::production(),
+                    host_ports: Arc::new(
+                        hearth_agent::infrastructure::host::listening_ports::SystemHostPorts::new(),
+                    ),
+                    free_space: Arc::new(hearth_agent::infrastructure::install::SystemHost),
+                    deploy: hearth_agent::application::deployments::DeployTimings::production(),
+                    safe_fs: None,
                 },
             )
             .await

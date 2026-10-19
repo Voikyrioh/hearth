@@ -3,6 +3,7 @@
 //! Il rend une structure applicative ; la conversion vers le type du fil
 //! (`hearth_proto::api::hello::HelloResponse`) est faite par `entrypoint/http`.
 
+use hearth_proto::api::deploy::CAPABILITY_SERVICE_DEPLOY;
 use hearth_proto::api::service_logs::CAPABILITY_SERVICE_LOGS;
 use hearth_proto::api::service_ops::CAPABILITY_SERVICE_OPS;
 use hearth_proto::api::services::{
@@ -53,8 +54,10 @@ impl HelloService {
                     CAPABILITY_SERVICE_LOGS,
                     CAPABILITY_SERVICE_ADOPTION,
                     // Lire, décider et annuler une opération, et la suivre en direct (HRT-144) : ces routes et
-                    // ce message existent. Rien d'autre n'est annoncé (ni démarrer, ni déployer).
+                    // ce message existent.
                     CAPABILITY_SERVICE_OPS,
+                    // Déployer une image (HRT-68) : `POST /deployments`, sa vérification et les bornes de la machine.
+                    CAPABILITY_SERVICE_DEPLOY,
                 ],
             },
         }
@@ -107,7 +110,8 @@ mod tests {
                 "service-rights",
                 "service-logs",
                 "service-adoption",
-                "service-ops"
+                "service-ops",
+                "service-deploy"
             ]
         );
     }

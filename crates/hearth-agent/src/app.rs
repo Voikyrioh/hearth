@@ -18,17 +18,19 @@ pub use update::{Updating, run_supervisor, update_service};
 use crate::application::accounts::AccountService;
 use crate::application::attack_mode::AttackModeService;
 use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
+use crate::application::deployments::{DeployContext, DeployTimings, Deployments, FolderGuard};
 use crate::application::elevation::Elevations;
+use crate::application::folders::FolderFacts;
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
     AuditFeed, AuditSink, BootInfo, ChallengeCrypto, Clock, ContainerEngine, CryptoError,
-    FingerprintSecretError, FingerprintSecretStore, GpuProbe, HashError, HostEnvironment, IdGen,
-    IdentityError, IdentityStore, InstallHost, MonotonicClock, PasswordHasher, PublicIdentity,
-    RequestFingerprinter, SecurityFeed, ServiceObserver, ServiceSupervisor, Store, StoreError,
-    SystemProbe, TokenGen,
+    FingerprintSecretError, FingerprintSecretStore, FreeSpace, GpuProbe, HashError,
+    HostEnvironment, HostPorts, IdGen, IdentityError, IdentityStore, InstallHost, MonotonicClock,
+    PasswordHasher, PublicIdentity, RequestFingerprinter, SafeFs, SecurityFeed, ServiceObserver,
+    ServiceSupervisor, Store, StoreError, SystemProbe, TokenGen,
 };
 use crate::application::secret_vault::{KeyStatus, SecretVault};
 use crate::application::security::SecurityService;
@@ -65,6 +67,9 @@ use crate::infrastructure::data_dir;
 use crate::infrastructure::engine::BollardEngine;
 use crate::infrastructure::fingerprint::{HmacFingerprinter, NoFingerprint};
 use crate::infrastructure::fingerprint_secret::FileFingerprintSecretStore;
+use crate::infrastructure::fs::{SERVICES_DIR, SystemSafeFs};
+use crate::infrastructure::host::folders::SystemFolders;
+use crate::infrastructure::host::listening_ports::SystemHostPorts;
 use crate::infrastructure::ids::UlidGen;
 use crate::infrastructure::install::SystemHost;
 use crate::infrastructure::ops_observer::{
@@ -194,6 +199,15 @@ pub struct EngineParts {
     pub log_brake: BrakeSettings,
     /// La surveillance qui suit une action de cycle de vie (HRT-64) ; les tests la raccourcissent.
     pub lifecycle: LifecycleTimings,
+    /// Les programmes qui écoutent des ports du serveur (HRT-68) ; les tests y posent un faux.
+    pub host_ports: Arc<dyn HostPorts>,
+    /// L'espace libre là où le moteur range ses images (HRT-68) ; les tests y posent un faux.
+    pub free_space: Arc<dyn FreeSpace>,
+    /// Les délais d'un déploiement (HRT-68) ; les tests les raccourcissent.
+    pub deploy: DeployTimings,
+    /// Les dossiers de données des services (HRT-145, HRT-68). `None` : le vrai, sous le dossier de données de
+    /// l'agent ; les tests y posent un faux en mémoire.
+    pub safe_fs: Option<Arc<dyn SafeFs>>,
 }
 
 impl EngineParts {
@@ -213,6 +227,10 @@ impl EngineParts {
             timings: EngineTimings::production(),
             log_brake: BrakeSettings::production(),
             lifecycle: LifecycleTimings::production(),
+            host_ports: Arc::new(SystemHostPorts::new()),
+            free_space: Arc::new(SystemHost),
+            deploy: DeployTimings::production(),
+            safe_fs: None,
         }
     }
 }
@@ -318,9 +336,12 @@ pub struct ServiceFoundations {
     pub specs: Arc<ServiceSpecs>,
     pub vault: Arc<SecretVault>,
     pub ops: Arc<ServiceOps>,
-    /// Les actions de cycle de vie que l'arrêt précédent a interrompues (HRT-64) : le démarrage de l'agent les
-    /// consigne au journal d'activité.
+    /// Les actions de cycle de vie et les déploiements que l'arrêt précédent a interrompus (HRT-64, HRT-68) : le
+    /// démarrage de l'agent les consigne au journal d'activité.
     pub interrupted_actions: Vec<InterruptedAction>,
+    /// Les déploiements interrompus avant la création de leur conteneur (HRT-68) : le démarrage retire leur
+    /// description (elle garderait le nom) et leur dossier de données.
+    pub abandoned_deploys: Vec<crate::domain::services::ServiceKey>,
 }
 
 /// Le socle SANS moteur : les opérations restées en plein geste sont classées avec l'observateur « illisible »
@@ -416,6 +437,7 @@ pub async fn service_foundations_observed(
         vault,
         ops,
         interrupted_actions: summary.interrupted_actions,
+        abandoned_deploys: summary.abandoned_deploys,
     })
 }
 
@@ -747,11 +769,17 @@ pub async fn start_engined(
     // restées en plein geste sont classées avant d'accepter la moindre requête.
     // La reprise regarde le VRAI moteur (compte les conteneurs du service de chaque opération non terminée,
     // sans jamais lui écrire).
+    // Un seul dépôt pour les services supervisés, les adoptions, les arrêts voulus (HRT-64) et les conteneurs que
+    // l'agent a créés (HRT-68).
+    let service_repo = Arc::new(SqliteServiceRepo::new(database.database().pool().clone()));
     let observer = EngineObserver::new(
         engine.engine.clone(),
-        Arc::new(SpecRecordedContainers::new(Arc::new(SqliteSpecRepo::new(
-            database.database().pool().clone(),
-        )))),
+        Arc::new(
+            SpecRecordedContainers::new(Arc::new(SqliteSpecRepo::new(
+                database.database().pool().clone(),
+            )))
+            .with_containers(service_repo.clone()),
+        ),
     );
     let foundations = service_foundations_observed(
         &config.data_dir,
@@ -788,8 +816,6 @@ pub async fn start_engined(
     let sessions = services.sessions.clone();
     let container_engine = engine.engine.clone();
     let supervisor = engine.supervisor.clone();
-    // Un seul dépôt pour les services supervisés, les adoptions et les arrêts voulus (HRT-64).
-    let service_repo = Arc::new(SqliteServiceRepo::new(database.database().pool().clone()));
     let registry = ServicesRegistry::with_supervision(
         engine.engine,
         engine.supervisor,
@@ -804,12 +830,14 @@ pub async fn start_engined(
     registry.set_audit(services.audit_sink.clone());
     // Les arrêts voulus depuis Hearth survivent à un redémarrage de l'agent (HRT-64, BR-LIFE-010).
     registry.set_intents(service_repo.clone());
+    // Les conteneurs que l'agent a créés : seuls ceux-là sont « créés par Hearth » (ADR-0037, HRT-68).
+    registry.set_containers(service_repo.clone());
     let service_lifecycle = ServiceLifecycle::new(
         registry.clone(),
         foundations.ops.clone(),
         container_engine.clone(),
         supervisor,
-        service_repo,
+        service_repo.clone(),
         services.audit_sink.clone(),
         adapters.clock.clone(),
         engine.lifecycle,
@@ -821,6 +849,64 @@ pub async fn start_engined(
         &foundations.interrupted_actions,
     )
     .await;
+    // Les déploiements interrompus avant la création de leur conteneur n'ont rien laissé : leur description et leur
+    // dossier de données partent avant d'accepter la moindre requête (BR-DEPLOY-019).
+    let safe_fs: Arc<dyn SafeFs> = engine
+        .safe_fs
+        .unwrap_or_else(|| Arc::new(SystemSafeFs::new(config.data_dir.clone())));
+    for key in &foundations.abandoned_deploys {
+        if let Err(error) = foundations.specs.forget(key).await {
+            tracing::warn!(%error, "description d'un déploiement abandonné non retirée");
+        }
+        match safe_fs.remove_service_root(key) {
+            Ok(()) | Err(crate::application::ports::FsError::NotFound) => {}
+            Err(_) => tracing::warn!("dossier d'un déploiement abandonné non retiré"),
+        }
+    }
+    let services_root = config
+        .data_dir
+        .join(SERVICES_DIR)
+        .to_string_lossy()
+        .into_owned();
+    // Ce que l'agent sait de lui-même, pour juger un dossier du serveur (BR-DEPLOY-012) : sans l'un de ces faits,
+    // aucun dossier du serveur n'est jugé (et tous restent refusés).
+    let folders = FolderFacts::new(
+        config.engine.socket.to_string_lossy(),
+        "/var/lib/docker",
+        services_root.clone(),
+        std::iter::once(config.data_dir.to_string_lossy().into_owned())
+            .chain(
+                std::env::current_exe()
+                    .ok()
+                    .map(|exe| exe.to_string_lossy().into_owned()),
+            )
+            .collect(),
+    )
+    .ok()
+    .map(|facts| FolderGuard {
+        host: Arc::new(SystemFolders::new()),
+        facts,
+    });
+    let deployments = Deployments::new(
+        registry.clone(),
+        foundations.ops.clone(),
+        foundations.specs.clone(),
+        container_engine.clone(),
+        engine.host_ports,
+        engine.free_space,
+        safe_fs,
+        service_repo.clone(),
+        services.audit_sink.clone(),
+        adapters.ids.clone(),
+        adapters.clock.clone(),
+        DeployContext {
+            install_id: identity.install_id.to_string(),
+            agent_port: config.port,
+            services_root,
+            folders,
+            timings: engine.deploy,
+        },
+    );
     let service_logs = Arc::new(ServiceLogs::new(
         registry.clone(),
         container_engine,
@@ -859,6 +945,7 @@ pub async fn start_engined(
         service_adoption,
         service_ops,
         service_lifecycle,
+        deployments,
         stream,
         erasure_pending: database.erasure_pending(),
     });

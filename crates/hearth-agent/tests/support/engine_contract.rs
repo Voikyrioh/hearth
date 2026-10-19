@@ -11,7 +11,10 @@
 //! Les journaux (HRT-66) y sont lus aussi : fin, dernières lignes, reprise par curseur, suivi, terminal,
 //! ligne géante, pilote `none`, conteneur inconnu. Les trois ordres que le port écrit (HRT-64 : démarrer,
 //! arrêter, redémarrer) y sont éprouvés par le port lui-même (`writes`) : déjà dans l'état, délai de grâce et
-//! code 137, arrêt propre, port pris, conteneur inconnu.
+//! code 137, arrêt propre, port pris, conteneur inconnu. Les cinq que le déploiement ajoute (HRT-68 : `image_present`,
+//! `pull`, `create`, `remove`, `info`) y sont éprouvés de même (`deploys`) : récupération avec progression et
+//! abandon, échecs d'image typés (image inconnue, version inconnue), création depuis le plan fermé (étiquettes,
+//! limites, `unless-stopped`, ports, montage, variables), nom déjà pris, port pris au démarrage, suppression.
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 
 use std::sync::Arc;
@@ -20,12 +23,16 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use hearth_agent::application::ports::{ContainerEngine, EngineError, LogQuery};
+use hearth_agent::domain::secret::Secret;
 use hearth_agent::domain::services::logs::{
     LogLine, LogSource, RESUME_WINDOW_LINES, RankTracker, ResumeFilter, Verdict,
 };
+use hearth_agent::domain::services::plan::{Bind, ContainerPlan};
+use hearth_agent::domain::services::spec::{SpecPort, SpecProtocol, SpecRestart};
 use hearth_agent::domain::services::{
     EngineState, Observation, PortProtocol, ProbeOutcome, RunState, classify_probe,
 };
+use hearth_agent::domain::services::{KeyKind, MountType, ServiceKey};
 
 /// Ce que l'exécutant fait faire à son moteur pour préparer le décor.
 #[derive(Debug, Clone)]
@@ -64,6 +71,17 @@ pub trait Harness: Send + Sync {
     async fn remove(&self, id: &str);
     /// Le conteneur (qui tourne) écrit cette ligne sur cette sortie.
     async fn print(&self, id: &str, source: LogSource, text: &str);
+
+    /// Une petite image qui se lance (`sleep`) : `dépôt:version`.
+    fn image(&self) -> String;
+    /// Retire l'image du serveur pour forcer une récupération (sans effet si elle n'y est pas).
+    async fn forget_image(&self, image: &str);
+    /// Une image que le registre ne connaît pas.
+    fn missing_image(&self) -> String;
+    /// Une version qui n'existe pas dans le dépôt de `image()`.
+    fn missing_tag(&self) -> String;
+    /// Un dossier du serveur qui existe, à monter dans un conteneur.
+    fn scratch_dir(&self) -> String;
 }
 
 /// La variable sentinelle : ni son nom ni sa valeur ne doivent ressortir d'un `Debug`. Le nom est lu
@@ -285,9 +303,12 @@ pub async fn run(harness: &dyn Harness, prefix: &str) {
     // 9. Les ordres que le port écrit (HRT-64).
     writes(harness, &engine, prefix).await;
 
-    // Nettoyage.
+    // Nettoyage : plus aucun conteneur du décor n'utilise l'image, que la suite suivante retire pour la récupérer.
     harness.remove(&running).await;
     harness.remove(&exited).await;
+
+    // 10. Récupérer, créer, supprimer (HRT-68).
+    deploys(harness, &engine, prefix).await;
 }
 
 const ALL_LINES: LogQuery = LogQuery {
@@ -682,4 +703,222 @@ async fn writes(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefix
         engine.restart(&nowhere, Duration::from_secs(1)).await,
         Err(EngineError::NotFound)
     );
+}
+
+/// Un plan de création du contrat : `sleep 300`, une variable sentinelle, un port, un dossier monté, des limites.
+fn plan_for(
+    harness: &dyn Harness,
+    name: &str,
+    image: &str,
+    host_port: u16,
+    key: &ServiceKey,
+) -> ContainerPlan {
+    let ulid = key.as_str().strip_prefix("h_").unwrap().to_owned();
+    ContainerPlan {
+        name: name.to_owned(),
+        image: image.to_owned(),
+        labels: [
+            ("io.hearth.managed", "true"),
+            ("io.hearth.service-id", ulid.as_str()),
+            ("io.hearth.install-id", "contract"),
+            ("io.hearth.created-by", "contract"),
+            ("io.hearth.spec-rev", "1"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect(),
+        env: vec![(Secret::from(SENTINEL_NAME), Secret::from(SENTINEL_VALUE))],
+        command: Some(vec![Secret::from("sleep"), Secret::from("300")]),
+        ports: vec![SpecPort {
+            host_port,
+            container_port: 80,
+            protocol: SpecProtocol::Tcp,
+        }],
+        binds: vec![Bind {
+            host_path: harness.scratch_dir(),
+            target: "/data".to_owned(),
+            read_only: false,
+        }],
+        restart: SpecRestart::UnlessStopped,
+        cpu_millis: 500,
+        memory_bytes: 64 * 1024 * 1024,
+        stdin_open: false,
+        stop_grace_s: None,
+    }
+}
+
+/// Récupérer une image avec sa progression, ses échecs typés et son abandon ; créer un conteneur depuis le plan
+/// fermé ; le nom pris, le port pris, la suppression, l'image qui manque (HRT-68, BR-DEPLOY-017, BR-DEPLOY-019).
+async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefix: &str) {
+    // Les bornes de la machine : lues sur la machine.
+    let info = engine.info().await.expect("info");
+    assert!(info.cpus >= 1 && info.memory_bytes > 0, "{info:?}");
+    assert!(
+        info.storage_dir
+            .as_deref()
+            .is_some_and(|dir| dir.starts_with('/'))
+    );
+
+    let image = harness.image();
+    // Récupérer : la progression ne recule jamais, le flux finit, l'image est là ensuite.
+    harness.forget_image(&image).await;
+    assert!(!engine.image_present(&image).await.expect("présence"));
+    let mut pull = engine.pull(&image);
+    let mut percents = Vec::new();
+    while let Some(item) = pull.next().await {
+        let progress = item.expect("récupération");
+        if let Some(percent) = progress.percent {
+            percents.push(percent);
+        }
+    }
+    assert!(
+        percents.windows(2).all(|pair| pair[0] <= pair[1]),
+        "la progression ne recule jamais : {percents:?}"
+    );
+    assert!(engine.image_present(&image).await.expect("présence"));
+
+    // Abandonner une récupération : la connexion se ferme, rien n'est créé, l'image se récupère ensuite.
+    harness.forget_image(&image).await;
+    let mut abandoned = engine.pull(&image);
+    let _ = tokio::time::timeout(Duration::from_secs(5), abandoned.next()).await;
+    drop(abandoned);
+    let mut again = engine.pull(&image);
+    while let Some(item) = again.next().await {
+        item.expect("récupération après un abandon");
+    }
+    assert!(engine.image_present(&image).await.expect("présence"));
+
+    // Les échecs sont typés, jamais le texte du moteur.
+    // Un registre public peut limiter le débit (ce n'est pas un défaut testé) : on réessaie un peu plus tard.
+    let first_failure = |reference: String, what: &'static str| {
+        let engine = engine.clone();
+        async move {
+            let mut failure = None;
+            for attempt in 0..6 {
+                let mut pull = engine.pull(&reference);
+                let found = pull.next().await.expect("un résultat").expect_err(what);
+                if found != EngineError::RegistryRateLimited || attempt == 5 {
+                    failure = Some(found);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(20)).await;
+            }
+            failure.expect("un échec")
+        }
+    };
+    let failure = first_failure(harness.missing_image(), "image inconnue").await;
+    assert!(
+        matches!(
+            failure,
+            EngineError::ImageNotFound
+                | EngineError::ImagePrivateOrMissing
+                | EngineError::TagNotFound
+        ),
+        "image inconnue : {failure:?}"
+    );
+    assert!(!format!("{failure} {failure:?}").contains(&harness.missing_image()));
+    let failure = first_failure(harness.missing_tag(), "version inconnue").await;
+    assert!(
+        matches!(
+            failure,
+            EngineError::TagNotFound
+                | EngineError::ImageNotFound
+                | EngineError::ImagePrivateOrMissing
+        ),
+        "version inconnue : {failure:?}"
+    );
+
+    // Créer depuis le plan fermé : ni démarré, ni sans étiquettes, ni sans limites.
+    let key = ServiceKey::for_hearth("01JZ0000000000000000000001").expect("clé");
+    assert_eq!(key.kind(), KeyKind::Hearth);
+    let name = format!("{prefix}-d-web");
+    let id = engine
+        .create(&plan_for(harness, &name, &image, 18_091, &key))
+        .await
+        .expect("créer");
+    let created = engine
+        .inspect(&id)
+        .await
+        .expect("inspection")
+        .expect("existe");
+    assert_eq!(created.run_state, RunState::Created, "créé, pas démarré");
+    assert_eq!(created.name, name);
+    assert_eq!(
+        created.hearth_key.as_ref(),
+        Some(&key),
+        "étiquette du service"
+    );
+    assert_eq!(
+        created.restart,
+        hearth_agent::domain::services::RestartPolicy::UnlessStopped
+    );
+    assert_eq!(created.memory_limit_bytes, Some(64 * 1024 * 1024));
+    assert_eq!(created.cpu_millis, Some(500));
+    assert!(
+        created.ports.iter().any(|port| port.host_port == 18_091
+            && port.container_port == 80
+            && port.protocol == PortProtocol::Tcp),
+        "{:?}",
+        created.ports
+    );
+    assert!(
+        created
+            .mounts
+            .iter()
+            .any(|mount| mount.kind == MountType::Folder
+                && mount.target == "/data"
+                && !mount.read_only),
+        "{:?}",
+        created.mounts
+    );
+    assert!(!created.env_names.is_empty());
+    // Le moteur a reçu la variable et sa valeur : seul lui les a.
+    let env = engine.env(&id).await.expect("variables").expect("existe");
+    assert!(
+        env.iter()
+            .any(|entry| entry.value.expose() == SENTINEL_VALUE)
+    );
+    assert!(created.command.as_ref().is_some_and(|c| !c.is_empty()));
+
+    // Le nom est pris : un second conteneur du même nom est refusé, sans texte du moteur.
+    let other = ServiceKey::for_hearth("01JZ0000000000000000000002").expect("clé");
+    let taken = engine
+        .create(&plan_for(harness, &name, &image, 18_092, &other))
+        .await
+        .expect_err("nom pris");
+    assert_eq!(taken, EngineError::NameTaken);
+    assert!(!format!("{taken} {taken:?}").contains(&name));
+
+    // L'image absente : « introuvable », jamais créé.
+    let mut no_image = plan_for(
+        harness,
+        &format!("{prefix}-d-noimage"),
+        &image,
+        18_093,
+        &other,
+    );
+    no_image.image = format!(
+        "{}-never-pulled:1",
+        harness.missing_image().split(':').next().unwrap()
+    );
+    assert_eq!(engine.create(&no_image).await, Err(EngineError::NotFound));
+
+    // Démarrer, puis un second conteneur sur le même port : refusé au démarrage, supprimé ensuite.
+    engine.start(&id).await.expect("démarrer");
+    assert!(running(engine, &id).await);
+    let rival_name = format!("{prefix}-d-rival");
+    let rival = engine
+        .create(&plan_for(harness, &rival_name, &image, 18_091, &other))
+        .await
+        .expect("créer le rival");
+    assert_eq!(engine.start(&rival).await, Err(EngineError::PortInUse));
+    assert!(!running(engine, &rival).await);
+    engine.remove(&rival).await.expect("supprimer le rival");
+    assert!(engine.inspect(&rival).await.expect("inspection").is_none());
+    // Supprimer ce qui n'existe plus réussit : le but est atteint.
+    engine.remove(&rival).await.expect("déjà supprimé");
+
+    // Supprimer un conteneur qui tourne (pas de conteneur orphelin).
+    engine.remove(&id).await.expect("supprimer");
+    assert!(find(engine, &name).await.is_none());
 }

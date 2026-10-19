@@ -29,8 +29,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::application::ports::{
-    ContainerEngine, OpRecord, RecordedContainers, RecordedService, ServiceObserver,
-    ServiceSpecRepo, StoreError,
+    ContainerEngine, OpRecord, RecordedContainers, RecordedService, ServiceContainers,
+    ServiceObserver, ServiceSpecRepo, StoreError,
 };
 use crate::domain::ops::{Observed, Presence, StepRecord, observed_from_presence};
 use crate::domain::services::{KeyKind, ServiceKey};
@@ -45,21 +45,40 @@ impl ServiceObserver for UnobservedState {
 }
 
 /// Ce que la base de l'agent consigne des conteneurs d'un service : le service est connu s'il a une
-/// description courante. L'agent ne consigne pas encore d'identifiant de conteneur (le geste qui crée le
-/// conteneur arrive avec les lots suivants) : un service connu rend donc `KnownWithoutContainers`.
+/// description courante ; ses conteneurs sont ceux que l'agent a créés et consignés (`service_containers`,
+/// HRT-68). Sans table de conteneurs (tests d'avant le déploiement), un service connu rend
+/// `KnownWithoutContainers`.
 pub struct SpecRecordedContainers {
     specs: Arc<dyn ServiceSpecRepo>,
+    containers: Option<Arc<dyn ServiceContainers>>,
 }
 
 impl SpecRecordedContainers {
     pub fn new(specs: Arc<dyn ServiceSpecRepo>) -> Self {
-        Self { specs }
+        Self {
+            specs,
+            containers: None,
+        }
+    }
+
+    /// Les conteneurs que l'agent a créés (HRT-68).
+    pub fn with_containers(mut self, containers: Arc<dyn ServiceContainers>) -> Self {
+        self.containers = Some(containers);
+        self
     }
 }
 
 #[async_trait]
 impl RecordedContainers for SpecRecordedContainers {
     async fn recorded(&self, key: &ServiceKey) -> Result<RecordedService, StoreError> {
+        // Les conteneurs consignés passent avant la description : un échec avant la fin d'un déploiement
+        // retire la description, jamais un conteneur que l'agent a créé.
+        if let Some(containers) = &self.containers {
+            let ids = containers.of(key).await?;
+            if !ids.is_empty() {
+                return Ok(RecordedService::Containers(ids));
+            }
+        }
         Ok(match self.specs.current(key).await? {
             Some(_) => RecordedService::KnownWithoutContainers,
             None => RecordedService::Unknown,

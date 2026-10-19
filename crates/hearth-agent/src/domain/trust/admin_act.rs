@@ -164,8 +164,8 @@ mod tests {
             ),
             (
                 AdminAct::ServiceDeploy {
-                    name: "jeu",
-                    image: "x:1",
+                    name: "jeu".into(),
+                    image: "x:1".into(),
                     digest: [0; 32],
                     env_count: 0,
                     command: false,

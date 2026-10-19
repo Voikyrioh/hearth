@@ -143,6 +143,14 @@ pub enum OperationCauseDto {
     Timeout,
     Interrupted,
     ServiceNotFound,
+    ImageNotFound,
+    TagNotFound,
+    ImagePrivateOrMissing,
+    RegistryUnreachable,
+    RegistryRateLimited,
+    PlatformMismatch,
+    DiskFull,
+    NameTaken,
     Unknown,
 }
 
@@ -168,6 +176,14 @@ impl From<OperationCause> for OperationCauseDto {
             OperationCause::Timeout => Self::Timeout,
             OperationCause::Interrupted => Self::Interrupted,
             OperationCause::ServiceNotFound => Self::ServiceNotFound,
+            OperationCause::ImageNotFound => Self::ImageNotFound,
+            OperationCause::TagNotFound => Self::TagNotFound,
+            OperationCause::ImagePrivateOrMissing => Self::ImagePrivateOrMissing,
+            OperationCause::RegistryUnreachable => Self::RegistryUnreachable,
+            OperationCause::RegistryRateLimited => Self::RegistryRateLimited,
+            OperationCause::PlatformMismatch => Self::PlatformMismatch,
+            OperationCause::DiskFull => Self::DiskFull,
+            OperationCause::NameTaken => Self::NameTaken,
             OperationCause::Unknown => Self::Unknown,
         }
     }

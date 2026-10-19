@@ -127,6 +127,31 @@ impl Harness for RealHarness {
         };
         docker(&["exec", id, "sh", "-c", script, text]);
     }
+
+    fn image(&self) -> String {
+        IMAGE.to_owned()
+    }
+
+    /// Retire l'image du serveur : sans effet si un conteneur en vit encore (les conteneurs du contrat sont
+    /// supprimés avant) ou si elle n'y est pas.
+    async fn forget_image(&self, image: &str) {
+        let _ = Command::new("docker").args(["rmi", image]).output();
+    }
+
+    fn missing_image(&self) -> String {
+        "public.ecr.aws/docker/library/hearth-contract-nope:1".to_owned()
+    }
+
+    fn missing_tag(&self) -> String {
+        "public.ecr.aws/docker/library/busybox:hearth-no-such-tag".to_owned()
+    }
+
+    fn scratch_dir(&self) -> String {
+        let dir =
+            std::env::temp_dir().join(format!("hearth-contract-scratch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dossier du décor");
+        dir.to_string_lossy().into_owned()
+    }
 }
 
 #[tokio::test]
@@ -456,5 +481,85 @@ async fn a_service_writing_a_thousand_lines_a_second_is_read_without_loss_for_th
         );
     }
     drop(stream);
+    remove_leftovers();
+}
+
+/// HRT-68, BR-DEPLOY-021 : un service créé par Hearth (`unless-stopped`) revient quand le DÉMON redémarre, sauf
+/// s'il a été arrêté à la main. Redémarre le démon du runner (`sudo systemctl restart docker`) : posé seulement
+/// par la CI (`HEARTH_TEST_DAEMON_RESTART=1`), jamais sur un poste.
+#[tokio::test]
+#[ignore = "vrai moteur : HEARTH_TEST_ENGINE=1 HEARTH_TEST_DAEMON_RESTART=1, redémarre le démon (sudo systemctl)"]
+async fn an_unless_stopped_service_comes_back_after_the_daemon_restarts_unless_it_was_stopped() {
+    use hearth_agent::application::ports::ContainerEngine;
+    use hearth_agent::domain::secret::Secret;
+    use hearth_agent::domain::services::plan::ContainerPlan;
+    use hearth_agent::domain::services::spec::SpecRestart;
+    if !enabled() || std::env::var("HEARTH_TEST_DAEMON_RESTART").as_deref() != Ok("1") {
+        eprintln!(
+            "HEARTH_TEST_ENGINE=1 et HEARTH_TEST_DAEMON_RESTART=1 ne sont pas posés : test non exécuté"
+        );
+        return;
+    }
+    image_pull::ensure(IMAGE);
+    remove_leftovers();
+    let engine = BollardEngine::unix(socket());
+    let plan = |name: &str| ContainerPlan {
+        name: name.to_owned(),
+        image: IMAGE.to_owned(),
+        labels: std::collections::BTreeMap::new(),
+        env: vec![],
+        command: Some(vec![Secret::from("sleep"), Secret::from("300")]),
+        ports: vec![],
+        binds: vec![],
+        restart: SpecRestart::UnlessStopped,
+        cpu_millis: 500,
+        memory_bytes: 64 * 1024 * 1024,
+        stdin_open: false,
+        stop_grace_s: None,
+    };
+    let kept = engine
+        .create(&plan(&format!("{PREFIX}-restart-kept")))
+        .await
+        .expect("créer");
+    let stopped = engine
+        .create(&plan(&format!("{PREFIX}-restart-stopped")))
+        .await
+        .expect("créer");
+    // Le vrai moteur accepte et garde ce que Hearth pose d'office (ADR-0041 §5).
+    assert_eq!(
+        docker(&[
+            "inspect",
+            "-f",
+            "{{.HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}}",
+            &kept
+        ]),
+        "[no-new-privileges] 4096"
+    );
+    engine.start(&kept).await.expect("démarrer");
+    engine.start(&stopped).await.expect("démarrer");
+    engine
+        .stop(&stopped, Duration::from_secs(1))
+        .await
+        .expect("arrêter à la main");
+    let status = Command::new("sudo")
+        .args(["systemctl", "restart", "docker"])
+        .status()
+        .expect("sudo systemctl");
+    assert!(status.success(), "le démon doit redémarrer");
+    let running = |id: &str| docker(&["inspect", "-f", "{{.State.Running}}", id]) == "true";
+    let started = Instant::now();
+    while !running(&kept) {
+        assert!(
+            started.elapsed() < Duration::from_secs(90),
+            "le service `unless-stopped` doit revenir après le redémarrage du démon"
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    // Laisse au démon le temps de relancer ce qu'il doit relancer : celui qu'on a arrêté ne revient pas.
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert!(
+        !running(&stopped),
+        "un service arrêté à la main reste arrêté"
+    );
     remove_leftovers();
 }

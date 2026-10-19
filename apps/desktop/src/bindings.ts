@@ -1020,7 +1020,7 @@ export type NoticeKind =
 /**  L'écoute a pris du retard : des changements ont pu être manqués (états relus). */
 "lagged";
 
-export type OperationCauseDto = "not_executed" | "runs_with_previous" | "runs_with_new" | "intent_without_done" | "step_failed" | "two_states" | "state_unknown" | "decision_expired" | "cancelled_by_account" | "decided_by_account" | "forced_stop" | "port_in_use" | "stopped_right_after_start" | "engine_unavailable" | "engine_refused" | "restarted_by_host" | "timeout" | "interrupted" | "service_not_found" | "unknown";
+export type OperationCauseDto = "not_executed" | "runs_with_previous" | "runs_with_new" | "intent_without_done" | "step_failed" | "two_states" | "state_unknown" | "decision_expired" | "cancelled_by_account" | "decided_by_account" | "forced_stop" | "port_in_use" | "stopped_right_after_start" | "engine_unavailable" | "engine_refused" | "restarted_by_host" | "timeout" | "interrupted" | "service_not_found" | "image_not_found" | "tag_not_found" | "image_private_or_missing" | "registry_unreachable" | "registry_rate_limited" | "platform_mismatch" | "disk_full" | "name_taken" | "unknown";
 
 /**  Ce qui a changé pour une opération. */
 export type OperationChangeDto = 

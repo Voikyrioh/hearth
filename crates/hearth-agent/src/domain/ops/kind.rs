@@ -353,10 +353,26 @@ pub enum Cause {
     Interrupted,
     /// Le service n'existait plus au moment de l'action (BR-LIFE-015).
     ServiceNotFound,
+    /// Déployer (HRT-68, BR-DEPLOY-017) : l'image n'existe pas.
+    ImageNotFound,
+    /// L'image existe mais pas cette version.
+    TagNotFound,
+    /// Le registre dit la même chose d'une image privée et d'une image inconnue.
+    ImagePrivateOrMissing,
+    /// Le registre est injoignable depuis le serveur.
+    RegistryUnreachable,
+    /// La limite de téléchargements du registre est atteinte.
+    RegistryRateLimited,
+    /// L'image n'existe pas pour l'architecture du serveur.
+    PlatformMismatch,
+    /// Le disque du moteur est plein.
+    DiskFull,
+    /// Un conteneur a pris le nom entre la vérification et la création (BR-DEPLOY-025).
+    NameTaken,
 }
 
 impl Cause {
-    pub const ALL: [Cause; 19] = [
+    pub const ALL: [Cause; 27] = [
         Self::NotExecuted,
         Self::RunsWithPrevious,
         Self::RunsWithNew,
@@ -376,6 +392,14 @@ impl Cause {
         Self::Timeout,
         Self::Interrupted,
         Self::ServiceNotFound,
+        Self::ImageNotFound,
+        Self::TagNotFound,
+        Self::ImagePrivateOrMissing,
+        Self::RegistryUnreachable,
+        Self::RegistryRateLimited,
+        Self::PlatformMismatch,
+        Self::DiskFull,
+        Self::NameTaken,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -399,6 +423,14 @@ impl Cause {
             Self::Timeout => "timeout",
             Self::Interrupted => "interrupted",
             Self::ServiceNotFound => "service_not_found",
+            Self::ImageNotFound => "image_not_found",
+            Self::TagNotFound => "tag_not_found",
+            Self::ImagePrivateOrMissing => "image_private_or_missing",
+            Self::RegistryUnreachable => "registry_unreachable",
+            Self::RegistryRateLimited => "registry_rate_limited",
+            Self::PlatformMismatch => "platform_mismatch",
+            Self::DiskFull => "disk_full",
+            Self::NameTaken => "name_taken",
         }
     }
 
@@ -427,6 +459,14 @@ impl Cause {
             Self::Timeout => OperationCause::Timeout,
             Self::Interrupted => OperationCause::Interrupted,
             Self::ServiceNotFound => OperationCause::ServiceNotFound,
+            Self::ImageNotFound => OperationCause::ImageNotFound,
+            Self::TagNotFound => OperationCause::TagNotFound,
+            Self::ImagePrivateOrMissing => OperationCause::ImagePrivateOrMissing,
+            Self::RegistryUnreachable => OperationCause::RegistryUnreachable,
+            Self::RegistryRateLimited => OperationCause::RegistryRateLimited,
+            Self::PlatformMismatch => OperationCause::PlatformMismatch,
+            Self::DiskFull => OperationCause::DiskFull,
+            Self::NameTaken => OperationCause::NameTaken,
         }
     }
 }

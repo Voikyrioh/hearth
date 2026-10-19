@@ -86,13 +86,13 @@ pub enum StateRefusal {
 ///   boucle) ; arrêté ou en erreur : déjà dans l'état ;
 /// - redémarrer : un service en marche ou qui redémarre en boucle seulement. Redémarrer un service arrêté
 ///   n'est PAS converti en démarrage (BR-LIFE-014).
-/// - en pause, en arrêt, état non reconnu : jamais pilotable (BR-LIFE-003).
+/// - en pause, en arrêt, en déploiement, état non reconnu : jamais pilotable (BR-LIFE-003, BR-DEPLOY-024).
 pub fn check_state(gesture: Gesture, state: ServiceStateKind) -> Result<(), StateRefusal> {
     use ServiceStateKind::{
-        Error, Paused, RestartLoop, Running, Starting, Stopped, Stopping, Unknown,
+        Deploying, Error, Paused, RestartLoop, Running, Starting, Stopped, Stopping, Unknown,
     };
     match (gesture, state) {
-        (_, Paused | Stopping | Unknown) => Err(StateRefusal::NotDrivable(state)),
+        (_, Paused | Stopping | Deploying | Unknown) => Err(StateRefusal::NotDrivable(state)),
         (Gesture::Start, Stopped | Error) => Ok(()),
         (Gesture::Start, Running | Starting | RestartLoop) => {
             Err(StateRefusal::AlreadyInState(state))
@@ -229,12 +229,12 @@ pub const fn cause_after(watch: Watch, seen: Sighting) -> Option<Cause> {
 #[cfg(test)]
 mod tests {
     use ServiceStateKind::{
-        Error, Paused, RestartLoop, Running, Starting, Stopped, Stopping, Unknown,
+        Deploying, Error, Paused, RestartLoop, Running, Starting, Stopped, Stopping, Unknown,
     };
 
     use super::*;
 
-    const EVERY_STATE: [ServiceStateKind; 8] = [
+    const EVERY_STATE: [ServiceStateKind; 9] = [
         Running,
         Starting,
         Stopped,
@@ -242,6 +242,7 @@ mod tests {
         RestartLoop,
         Paused,
         Stopping,
+        Deploying,
         Unknown,
     ];
 
@@ -280,7 +281,7 @@ mod tests {
                     assert_eq!(stop, Ok(()));
                     assert_eq!(restart, Err(StateRefusal::NotDrivable(state)));
                 }
-                Paused | Stopping | Unknown => {
+                Paused | Stopping | Deploying | Unknown => {
                     for result in [start, stop, restart] {
                         assert_eq!(result, Err(StateRefusal::NotDrivable(state)), "{state:?}");
                     }

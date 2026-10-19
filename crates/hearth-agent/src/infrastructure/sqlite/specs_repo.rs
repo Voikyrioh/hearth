@@ -169,7 +169,11 @@ impl ServiceSpecRepo for SqliteSpecRepo {
         let created_at = format_date(RESOURCE, new.at)?;
         let name_folded = fold_name(&body.name);
 
-        let mut tx = self.pool.begin().await.map_err(storage(RESOURCE))?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(storage(RESOURCE))?;
         let current: Option<i64> = sqlx::query_scalar!(
             "SELECT rev FROM service_specs WHERE service_key = ? AND current = 1",
             key
@@ -312,7 +316,11 @@ impl ServiceSpecRepo for SqliteSpecRepo {
     async fn discard_before(&self, key: &ServiceKey, rev: u32) -> Result<u64, StoreError> {
         let key = key.as_str();
         let rev = i64::from(rev);
-        let mut tx = self.pool.begin().await.map_err(storage(RESOURCE))?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(storage(RESOURCE))?;
         sqlx::query!(
             "DELETE FROM service_spec_secrets
              WHERE service_key = ? AND rev < ?
@@ -338,7 +346,11 @@ impl ServiceSpecRepo for SqliteSpecRepo {
 
     async fn forget(&self, key: &ServiceKey) -> Result<u64, StoreError> {
         let key = key.as_str();
-        let mut tx = self.pool.begin().await.map_err(storage(RESOURCE))?;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(storage(RESOURCE))?;
         sqlx::query!(
             "DELETE FROM service_spec_secrets WHERE service_key = ?",
             key

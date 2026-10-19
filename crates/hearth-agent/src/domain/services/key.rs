@@ -32,6 +32,11 @@ impl ServiceKey {
         Self::parse(&format!("c_{container_id}"))
     }
 
+    /// La clé d'un service créé par Hearth : `h_<ULID>` (HRT-68). `None` si l'identifiant n'est pas un ULID.
+    pub fn for_hearth(ulid: &str) -> Option<Self> {
+        Self::parse(&format!("h_{ulid}"))
+    }
+
     /// La clé d'un service supervisé : `u_<unité>`. Le nom d'unité est déjà validé ; la clé ne dépend
     /// pas du conteneur, que le système recrée à chaque démarrage (BR-SVC-016).
     pub fn for_unit(unit: &UnitName) -> Self {

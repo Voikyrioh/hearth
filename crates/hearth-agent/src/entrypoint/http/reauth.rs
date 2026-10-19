@@ -27,6 +27,7 @@ use hearth_proto::admin_act::{ActKind, AdminAct, RouteAct, decode_segment};
 use hearth_proto::api::accounts::{
     ChangeOwnPasswordRequest, ChangeRoleRequest, CreateAccountRequest, RoleName,
 };
+use hearth_proto::api::deploy::DeploySpec;
 use hearth_proto::api::reauth::{
     Reauth, ReauthMode, SetReauthRequest, lenient_reauth, reauth_refusal,
 };
@@ -76,8 +77,21 @@ enum Parsed {
     Adopt(AdoptRequest),
     /// Décider d'une opération (HRT-144) : le choix du corps est signé avec l'identifiant du chemin.
     Decide(OperationDecision),
+    /// Déployer (HRT-68) : l'acte est construit UNE fois depuis le corps (`AdminAct::service_deploy`, la même
+    /// fonction que la liaison cliente) : le nom, `dépôt:version`, l'empreinte de la partie non secrète, le
+    /// nombre de variables, la présence d'une commande. Le corps ne reste pas en mémoire ici.
+    Deploy(Box<DeployAct>),
     /// Acte dont la cible est dans le chemin et dont aucun paramètre ne vient du corps.
     TargetOnly,
+}
+
+/// L'acte d'un déploiement, rendu possédé : ni valeur, ni nom de variable, ni commande n'y sont gardés.
+struct DeployAct {
+    name: String,
+    image: String,
+    digest: [u8; hearth_proto::admin_act::FINGERPRINT_LEN],
+    env_count: u32,
+    command: bool,
 }
 
 impl Parsed {
@@ -118,9 +132,28 @@ impl Parsed {
             | ActKind::ServiceStop
             | ActKind::ServiceRestart
             | ActKind::OperationCancel => Some(Self::TargetOnly),
+            ActKind::ServiceDeploy => {
+                serde_json::from_slice::<DeploySpec>(bytes)
+                    .ok()
+                    .and_then(|spec| match AdminAct::service_deploy(&spec) {
+                        AdminAct::ServiceDeploy {
+                            name,
+                            image,
+                            digest,
+                            env_count,
+                            command,
+                        } => Some(Self::Deploy(Box::new(DeployAct {
+                            name: name.into_owned(),
+                            image: image.into_owned(),
+                            digest,
+                            env_count,
+                            command,
+                        }))),
+                        _ => None,
+                    })
+            }
             // Déclarés pour les tranches suivantes : aucune route ne les porte, donc aucun corps à lire.
-            ActKind::ServiceDeploy
-            | ActKind::ServiceDelete
+            ActKind::ServiceDelete
             | ActKind::BackupCreate
             | ActKind::BackupDelete
             | ActKind::GameSettingsSave => None,
@@ -167,6 +200,13 @@ impl Parsed {
             (Self::TargetOnly, ActKind::OperationCancel) => {
                 AdminAct::OperationCancel { target: id }
             }
+            (Self::Deploy(deploy), _) => AdminAct::ServiceDeploy {
+                name: deploy.name.as_str().into(),
+                image: deploy.image.as_str().into(),
+                digest: deploy.digest,
+                env_count: deploy.env_count,
+                command: deploy.command,
+            },
             (Self::Decide(request), _) => AdminAct::OperationDecide {
                 target: id,
                 choice: request.choice,

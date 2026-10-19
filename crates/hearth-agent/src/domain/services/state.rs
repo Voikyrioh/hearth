@@ -116,6 +116,10 @@ pub struct Observation {
     pub command: Option<Vec<Hidden>>,
     /// `Config.StopTimeout` du conteneur, en secondes, s'il en déclare un.
     pub stop_timeout_s: Option<u32>,
+    /// La limite de mémoire posée au conteneur, en octets (`HostConfig.Memory`), `None` : aucune (HRT-68).
+    pub memory_limit_bytes: Option<u64>,
+    /// La limite de processeur, en millicœurs (`HostConfig.NanoCpus`), `None` : aucune (HRT-68).
+    pub cpu_millis: Option<u32>,
     /// Lancé avec un terminal (`Config.Tty`) : une seule sortie, flux brut (journaux, BR-SLOG-012).
     pub tty: bool,
     /// Le pilote de journaux (`HostConfig.LogConfig.Type`) : `none` ne se relit pas (BR-SLOG-017).
@@ -166,6 +170,8 @@ impl Observation {
             env_omitted: 0,
             command: None,
             stop_timeout_s: None,
+            memory_limit_bytes: None,
+            cpu_millis: None,
             tty: false,
             log_driver: None,
             hearth_key: None,
@@ -184,6 +190,8 @@ pub enum ServiceStateKind {
     RestartLoop,
     Paused,
     Stopping,
+    /// Le service est en cours de déploiement : son conteneur n'existe pas encore (HRT-68, BR-DEPLOY-024).
+    Deploying,
     Unknown,
 }
 
@@ -528,6 +536,8 @@ mod tests {
             env_omitted: 0,
             command: None,
             stop_timeout_s: None,
+            memory_limit_bytes: None,
+            cpu_millis: None,
             tty: false,
             log_driver: None,
             hearth_key: None,

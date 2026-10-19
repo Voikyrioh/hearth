@@ -204,13 +204,21 @@ jobs:
           exit 1
       # La suite de contrat (liste, inspection, événements, journaux : fin, dernières lignes, reprise, suivi,
       # terminal, ligne géante, pilote `none` ; HRT-64 : démarrer, arrêter dans le délai et de force avec le
-      # code 137, redémarrer, un port pris, un conteneur inconnu, l'arrêt d'un conteneur `--rm`) et le débit
+      # code 137, redémarrer, un port pris, un conteneur inconnu, l'arrêt d'un conteneur `--rm` ; HRT-68 :
+      # récupérer une image avec sa progression, l'abandonner, les échecs d'image typés, créer depuis le plan fermé
+      # avec ses étiquettes, ses limites et `unless-stopped`, le nom pris, le port pris, supprimer) et le débit
       # soutenu des journaux : 60 s à environ 1 000 lignes
       # par seconde, sans perte ni doublon, mémoire du lecteur stable (HRT-66).
       - name: Suite de contrat de l'adaptateur contre un vrai moteur
         env:
           HEARTH_LOG_RATE_SECONDS: "60"
         run: cargo test -p hearth-agent --test engine_real -- --ignored --test-threads=1 --nocapture
+      # HRT-68 (BR-DEPLOY-021) : un service créé par Hearth (`unless-stopped`) revient quand le démon du runner
+      # redémarre (`sudo systemctl restart docker`), sauf celui qu'on a arrêté à la main.
+      - name: Un service créé par Hearth revient après le redémarrage du démon
+        env:
+          HEARTH_TEST_DAEMON_RESTART: "1"
+        run: cargo test -p hearth-agent --test engine_real an_unless_stopped_service_comes_back -- --ignored --test-threads=1 --nocapture
       # Rien ne doit rester : les conteneurs de test sont supprimés avant et après la suite.
       - name: Conteneurs laissés par la suite
         if: always()

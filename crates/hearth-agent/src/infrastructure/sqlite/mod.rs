@@ -9,6 +9,7 @@ mod account_repo;
 mod adoption_repo;
 mod attack_mode_repo;
 mod audit_repo;
+mod containers_repo;
 mod convert;
 mod device_repo;
 mod intents_repo;
