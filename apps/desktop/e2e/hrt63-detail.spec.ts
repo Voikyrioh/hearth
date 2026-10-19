@@ -145,7 +145,7 @@ test("états : sans le droit, détail réservé d'un service adopté, moteur mue
     "true",
   );
   await expect(page.locator("[data-env-reason]")).toContainText(
-    "Ton compte ne peut pas gérer les services de ce serveur.",
+    "Votre compte ne peut pas gérer les services de ce serveur.",
   );
   await sim(page, (s) => {
     s.setServiceRightOnServer("forge", "marie", true);

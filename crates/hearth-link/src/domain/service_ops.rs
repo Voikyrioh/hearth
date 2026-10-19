@@ -8,6 +8,18 @@ use hearth_proto::api::service_ops::OperationStatus;
 use hearth_proto::error::{ErrorBody, ErrorCode};
 use serde_json::Value;
 
+/// Un identifiant d'opération de l'agent : un ULID, lettres et chiffres. Même borne que l'agent côté acte.
+const OPERATION_ID_MAX_LEN: usize = 64;
+
+/// Le chemin d'une opération (`/operations/services/{id}`), ou `None` si l'identifiant n'en est pas un : il ne
+/// devient jamais un autre chemin. Source unique de la liaison et de la coquille (HRT-144, HRT-84).
+pub fn operation_path(op_id: &str) -> Option<String> {
+    let valid = !op_id.is_empty()
+        && op_id.len() <= OPERATION_ID_MAX_LEN
+        && op_id.bytes().all(|b| b.is_ascii_alphanumeric());
+    valid.then(|| format!("/operations/services/{op_id}"))
+}
+
 /// Pourquoi l'agent refuse une décision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DecisionReason {

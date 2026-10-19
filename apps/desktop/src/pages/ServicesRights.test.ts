@@ -22,9 +22,9 @@ afterEach(() => {
   useServiceRightsStore().reset();
 });
 
-const REASON = "Ton compte ne peut pas gérer les services de ce serveur.";
-const ADMIN_INTRO = "Le droit se donne depuis le serveur. Lance cette commande sur le serveur :";
-const ASK = "Demande à la personne qui administre ce serveur.";
+const REASON = "Votre compte ne peut pas gérer les services de ce serveur.";
+const ADMIN_INTRO = "Le droit se donne depuis le serveur. Lancez cette commande sur le serveur :";
+const ASK = "Demandez à la personne qui administre ce serveur.";
 const OLD = "Ce serveur doit être mis à jour pour gérer les droits sur les services.";
 
 async function open(
@@ -107,7 +107,7 @@ describe("états du droit", () => {
       sim.failRightsReads = true;
     }, "forge");
     expect(notice(wrapper).get("[data-rights-sentence]").text()).toBe(
-      "Impossible de lire ton droit sur les services. Réessaie.",
+      "Impossible de lire votre droit sur les services. Réessayez.",
     );
     bridge.failRightsReads = false;
     await notice(wrapper).get("[data-rights-retry]").trigger("click");

@@ -244,7 +244,7 @@ describe("ligne du droit (HRT-135)", () => {
     const own = mount(ServicesRightRow, {
       props: { username: "marie", manages: true, known: true, own: true },
     });
-    expect(own.get("[data-rights-own-warning]").text()).toContain("C'est ton propre compte");
+    expect(own.get("[data-rights-own-warning]").text()).toContain("C'est votre propre compte");
     expect(own.get("pre").text()).toBe("sudo hearth-agent account services marie --revoke");
     const other = mount(ServicesRightRow, {
       props: { username: "paul", manages: true, known: true, own: false },

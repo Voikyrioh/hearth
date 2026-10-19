@@ -31,6 +31,8 @@ mod test_support;
 #[cfg(test)]
 mod tests_fiches;
 #[cfg(test)]
+mod tests_memory;
+#[cfg(test)]
 mod tests_state;
 #[cfg(test)]
 mod tests_translate;

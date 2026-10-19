@@ -218,6 +218,19 @@ export const commands = {
 	 *  la constante [`ENGINE_DOCS_URL`].
 	 */
 	openEngineDocs: () => typedError<null, LinkFailure>(__TAURI_INVOKE("open_engine_docs")),
+	/**
+	 *  Les opérations en cours de chaque serveur et les issues pas encore annoncées, sans lecture réseau : une
+	 *  par événement, que l'interface rejoue à son abonnement (ADR-0013 point 3).
+	 */
+	listServiceOperations: () => typedError<ServiceOperationEvent[], LinkFailure>(__TAURI_INVOKE("list_service_operations")),
+	/**  L'interface a annoncé l'issue de ces opérations : elles ne sont plus rejouées (BR-RESIL-010). */
+	ackServiceOperations: (serverId: string, opIds: string[]) => typedError<null, LinkFailure>(__TAURI_INVOKE("ack_service_operations", { serverId, opIds })),
+	/**
+	 *  Décide d'une opération qui attend le compte (`BR-SVC-029`, `BR-EDIT-031`) : un acte d'administration,
+	 *  mot de passe redemandé à chaque réponse. Jamais rejoué : un résultat inconnu se lit sur le flux. Sans le
+	 *  droit « gérer les services » : `MissingServicesRight`.
+	 */
+	decideServiceOperation: (serverId: string, opId: string, choice: OperationChoiceDto, adminPassword: string | null) => typedError<DecisionOutcome, LinkFailure>(__TAURI_INVOKE("decide_service_operation", { serverId, opId, choice, adminPassword })),
 };
 
 /* Types */
@@ -332,7 +345,9 @@ export type AddServerInput = {
 };
 
 /**  Le genre d'un acte d'administration, tel que la fenêtre le connaît (sans cible ni secret). */
-export type AdminActKindDto = "account_create" | "account_role" | "account_password" | "account_delete" | "sessions_revoke" | "agent_update" | "attack_mode_enable" | "attack_mode_disable" | "account_password_own" | "reauth_setting";
+export type AdminActKindDto = "account_create" | "account_role" | "account_password" | "account_delete" | "sessions_revoke" | "agent_update" | "attack_mode_enable" | "attack_mode_disable" | "account_password_own" | "reauth_setting" | 
+/**  Décider d'une opération de service (HRT-84) : jamais couvert par l'élévation. */
+"operation_decide";
 
 /**  Qui a adopté un service, et quand (HRT-79). */
 export type AdoptionDto = {
@@ -600,6 +615,16 @@ export type AvailableDto = {
 
 export type BlockedDto = "fingerprint_changed" | "incompatible_agent" | "incompatible_client";
 
+/**
+ *  L'action qui tient le service (`BR-SVC-031`, `BR-OPS-005`) : son genre (code), qui l'a lancée, depuis quand.
+ *  Absente tant que rien ne tient le service, et pour un compte qui ne peut pas lire ses opérations.
+ */
+export type BusyDto = {
+	kind: string,
+	by: string,
+	since: string,
+};
+
 export type CapabilitiesDto = {
 	gpu: boolean,
 	temps: boolean,
@@ -611,6 +636,49 @@ export type CpuInfoDto = {
 	logicalCores: number,
 	frequencyMhz: number | null,
 };
+
+export type DecisionDto = {
+	choices: OperationChoiceDto[],
+	/**
+	 *  Quand la décision expire (ms depuis l'époque, heure de l'agent) ; absent pour une opération à
+	 *  vérifier, qui attend sans limite.
+	 */
+	expiresAt: number | null,
+};
+
+/**  L'issue d'une décision. */
+export type DecisionOutcome = 
+/**  L'agent a pris la décision : l'opération telle qu'elle est maintenant. */
+{ kind: "done"; operation: OperationDto } | { kind: "refused"; refusal: DecisionRefusal } | 
+/**  Le lien est tombé avant la réponse : on ne sait pas. Jamais rejouée ; l'état arrive par le flux. */
+{ kind: "unknown"; opId: string };
+
+/**  Pourquoi l'agent a refusé une décision. Sans texte : l'interface choisit le message d'après `kind`. */
+export type DecisionRefusal = 
+/**  L'opération est introuvable (purgée, ou service que le compte ne voit pas). */
+{ kind: "not_found" } | 
+/**  Rien n'est attendu de ce compte (déjà décidée, ou pas encore). */
+{ kind: "not_waiting" } | 
+/**  Ce choix n'est pas parmi ceux offerts. */
+{ kind: "not_offered" } | 
+/**  Ce choix ne s'applique pas à l'état de l'opération. */
+{ kind: "not_applicable" } | 
+/**  La décision attendait depuis trop longtemps. */
+{ kind: "expired" } | 
+/**  L'annulation n'est plus possible : le point de non-retour est passé. */
+{ kind: "too_late" } | 
+/**  L'opération a changé pendant la demande : relire. */
+{ kind: "changed" } | 
+/**  Le mot de passe de confirmation est incorrect. */
+{ kind: "wrong_password" } | 
+/**  L'élévation s'est fermée côté agent : la fenêtre redemande le mot de passe. */
+{ kind: "password_required" } | 
+/**  Trop d'essais de mot de passe. */
+{ kind: "too_many_attempts"; retry_after_s: number } | 
+/**  L'agent est saturé : réessayer dans un instant. */
+{ kind: "busy" } | 
+/**  Tout autre refus. */
+{ kind: "other" };
 
 /**  Issue d'un retrait de poste. */
 export type DeviceRemovalOutcome = 
@@ -952,11 +1020,46 @@ export type NoticeKind =
 /**  L'écoute a pris du retard : des changements ont pu être manqués (états relus). */
 "lagged";
 
+export type OperationCauseDto = "not_executed" | "runs_with_previous" | "runs_with_new" | "intent_without_done" | "step_failed" | "two_states" | "state_unknown" | "decision_expired" | "cancelled_by_account" | "decided_by_account" | "forced_stop" | "port_in_use" | "stopped_right_after_start" | "engine_unavailable" | "engine_refused" | "restarted_by_host" | "timeout" | "interrupted" | "service_not_found" | "image_not_found" | "tag_not_found" | "image_private_or_missing" | "registry_unreachable" | "registry_rate_limited" | "platform_mismatch" | "disk_full" | "name_taken" | "unknown";
+
+/**  Ce qui a changé pour une opération. */
+export type OperationChangeDto = 
+/**  L'opération a un nouvel état (en cours ou terminée : l'interface le lit dans `status`). */
+{ kind: "upsert"; operation: OperationDto } | 
+/**  L'agent ne la connaît plus : elle n'est plus suivie, sans issue à annoncer. */
+{ kind: "gone"; id: string };
+
+/**  Un choix de décision. Sert aussi d'ENTRÉE à `decide_service_operation` : `Unknown` n'est jamais envoyé. */
+export type OperationChoiceDto = "continue" | "cancel" | "revert" | "keep" | "verified" | "unknown";
+
+/**  Une opération telle que l'interface la suit. */
+export type OperationDto = {
+	id: string,
+	/**  La clé du service touché (`h_`, `u_`, `c_`). */
+	key: string,
+	kind: OperationKindDto,
+	status: OperationStatusDto,
+	step: string | null,
+	steps: StepDto[],
+	percent: number | null,
+	itemsDone: number | null,
+	bytesDone: number | null,
+	bytesTotal: number | null,
+	etaS: number | null,
+	cancellable: boolean,
+	decision: DecisionDto | null,
+	cause: OperationCauseDto | null,
+};
+
 export type OperationEventDto = {
 	opId: string,
 	serverId: string,
 	outcome: OutcomeDto,
 };
+
+export type OperationKindDto = "start" | "stop" | "restart" | "deploy" | "update" | "delete" | "resources" | "backup" | "restore" | "world_import" | "unknown";
+
+export type OperationStatusDto = "accepted" | "running" | "awaiting_decision" | "cancelling" | "cancelled" | "rolling_back" | "rolled_back" | "succeeded" | "failed" | "interrupted" | "needs_attention" | "unknown";
 
 export type OriginDto = "hearth" | "external" | "unknown";
 
@@ -1135,6 +1238,8 @@ export type ServiceDto = {
 	adopted: AdoptionDto | null,
 	/**  Service adopté dont la commande et les noms de variables sont réservés à ce compte. */
 	detailsReserved: boolean,
+	/**  L'action qui tient le service (`BR-SVC-031`) ; absente si rien ne le tient ou si le compte ne lit pas ses opérations. */
+	busy: BusyDto | null,
 };
 
 export type ServiceLogBody = { kind: "status"; state: LogStateDto; container: string | null; mixed: boolean; exitCode: number | null; endedAt: number | null; notKept: boolean } | { kind: "lines"; seq: number; items: LogLineDto[] } | { kind: "gap"; count: number | null; reason: GapReasonDto } | { kind: "marker"; marker: MarkerKindDto; at: number | null } | 
@@ -1149,6 +1254,13 @@ export type ServiceLogEvent = {
 	body: ServiceLogBody,
 };
 
+/**  Un changement, avec le serveur et un numéro qui croît strictement (rejeu écarté par l'interface). */
+export type ServiceOperationEvent = {
+	serverId: string,
+	seq: number,
+	change: OperationChangeDto,
+};
+
 /**
  *  Le droit « gérer les services » du compte connecté (HRT-78, ADR-0041, BR-GRANT-011), en lecture seule.
  *  `known` faux : l'agent n'annonce pas `service-rights` (BR-GRANT-016), `granted` est alors toujours faux.
@@ -1160,7 +1272,7 @@ export type ServiceRightsDto = {
 	account: string,
 };
 
-export type ServiceStateDto = "running" | "stopped" | "starting" | "stopping" | "error" | "restart_loop" | "paused" | "deploying" | "unknown";
+export type ServiceStateDto = "running" | "stopped" | "starting" | "stopping" | "error" | "restart_loop" | "paused" | "deploying" | "updating" | "unknown";
 
 export type ServicesEvent = {
 	serverId: string,
@@ -1214,6 +1326,13 @@ export type SnapshotEvent = {
 	history: SampleDto[],
 	levels: LevelsDto | null,
 };
+
+export type StepDto = {
+	step: string,
+	state: StepStateDto,
+};
+
+export type StepStateDto = "intent" | "done" | "failed" | "undone" | "unknown";
 
 export type TempDto = {
 	label: string,

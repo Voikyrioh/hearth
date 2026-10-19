@@ -39,15 +39,15 @@ export interface RunOptions {
  * `serverId` : le serveur visé par les actions de ce composable. Il est OBLIGATOIRE (C2 de la review) : c'est lui
  * dont on relit le droit « gérer les services » quand le serveur refuse un acte faute de ce droit
  * (`missing_services_right`, BR-GRANT-011). `null` : aucune relecture possible (outil de développement). Le texte
- * du refus est toujours « Tu n'as plus le droit… » : un refus qui atteint ici veut dire que le droit affiché était
- * périmé ; « Tu n'as pas le droit… » (`rights.refused`) ne sort que par `failureMessage`, hors de ce chemin.
+ * du refus est toujours « Vous n'avez plus le droit… » : un refus qui atteint ici veut dire que le droit affiché était
+ * périmé ; « Vous n'avez pas le droit… » (`rights.refused`) ne sort que par `failureMessage`, hors de ce chemin.
  */
 export function useServerAction(serverId: () => string | null) {
   const toasts = useToastsStore();
   const busy = ref(false);
   /**
    * La dernière action a été refusée faute du droit de gérer les services (retiré depuis qu'on l'a lu, BR-GRANT-010) :
-   * le texte « Tu n'as plus le droit… » est notifié et le droit relu ; une fenêtre ouverte se ferme
+   * le texte « Vous n'avez plus le droit… » est notifié et le droit relu ; une fenêtre ouverte se ferme
    * (`ActReport` `right_lost`).
    */
   const rightLost = ref(false);

@@ -79,19 +79,19 @@ test("retrait : confirmation avec le mot de passe, refus d'un mauvais, puis succ
     "true",
   );
   await shoot(page, "securite-retrait");
-  // Le retrait d'un poste garde son texte d'exemple (celui des sept autres fenêtres est « Le tien, pour confirmer »).
-  await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveAttribute(
+  // Le retrait d'un poste garde son texte d'exemple (celui des sept autres fenêtres est « Le vôtre, pour confirmer »).
+  await expect(dialog(page).getByLabel("Votre mot de passe")).toHaveAttribute(
     "placeholder",
     "Mot de passe",
   );
 
-  await dialog(page).getByLabel("Ton mot de passe").fill("Faux-Mot-De-Passe-1");
+  await dialog(page).getByLabel("Votre mot de passe").fill("Faux-Mot-De-Passe-1");
   await dialog(page).getByRole("button", { name: "Retirer" }).click();
   await expect(dialog(page)).toContainText("Mot de passe incorrect.");
-  await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveValue("");
+  await expect(dialog(page).getByLabel("Votre mot de passe")).toHaveValue("");
   await expect(row(page, "bureau/0.1.0")).toHaveCount(1);
 
-  await dialog(page).getByLabel("Ton mot de passe").fill(GOOD);
+  await dialog(page).getByLabel("Votre mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Retirer" }).click();
   await expect(dialog(page)).toHaveCount(0);
   await expect(

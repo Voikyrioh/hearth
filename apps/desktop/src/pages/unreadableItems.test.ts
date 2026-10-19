@@ -14,9 +14,9 @@ afterEach(() => {
 });
 
 const MANY =
-  "3 éléments ne sont pas lisibles par cette version de Hearth. Mets Hearth à jour sur ce PC.";
+  "3 éléments ne sont pas lisibles par cette version de Hearth. Mettez Hearth à jour sur ce PC.";
 const ONE =
-  "1 élément n'est pas lisible par cette version de Hearth. Mets Hearth à jour sur ce PC.";
+  "1 élément n'est pas lisible par cette version de Hearth. Mettez Hearth à jour sur ce PC.";
 
 const forge = SAMPLE_SERVERS.find((server) => server.id === "forge");
 if (!forge) throw new Error("serveur d'exemple absent : forge");

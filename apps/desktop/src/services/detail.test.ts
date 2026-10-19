@@ -58,7 +58,7 @@ describe("textes du détail", () => {
   });
 
   it("redémarrage : les quatre phrases de la spec, une façon inconnue est dite sans être devinée", () => {
-    expect(restartText("unless_stopped")).toBe("Redémarre tout seul sauf si tu l'arrêtes");
+    expect(restartText("unless_stopped")).toBe("Redémarre tout seul sauf si vous l'arrêtez");
     expect(restartText("always")).toBe("Redémarre toujours");
     expect(restartText("none")).toBe("Ne redémarre pas tout seul");
     expect(restartText("supervisor")).toBe("Relancé par le système du serveur");

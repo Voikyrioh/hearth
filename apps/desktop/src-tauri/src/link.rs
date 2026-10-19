@@ -23,6 +23,7 @@ use hearth_link::ports::{EventSink, Vault};
 use hearth_link::{EventStream, LinkConfig, LinkError, LinkManager, NewServer, ServerUpdate};
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::security::{AttackModeEnd, AttackModeState, SecurityResponse, SecurityView};
+use hearth_proto::api::service_ops::OperationView;
 use hearth_proto::fingerprint::Fingerprint;
 use hearth_proto::product::DEFAULT_PORT;
 use serde::Serialize;
@@ -36,6 +37,8 @@ use crate::link_dto::{
 use crate::presence::{ModeKind, SecurityNotice, SecurityWording};
 use crate::security::book::SecurityBook;
 use crate::security::dto::SecurityEvent;
+use crate::service_ops::book::OpsBook;
+use crate::service_ops::dto::ServiceOperationEvent;
 use crate::services::book::ServicesBook;
 use crate::services::dto::ServicesEvent;
 
@@ -84,9 +87,22 @@ struct Pending {
 /// lecture ne détruit rien (un abonnement qui échoue puis recommence retrouve tout), et
 /// l'interface écarte les doublons par ces identifiants (un signal en direct et la lecture d'état
 /// peuvent porter le même avis).
-#[derive(Default)]
 pub struct PendingBook {
     inner: Mutex<Pending>,
+    /// Les opérations de service suivies (HRT-84) : ce que la liaison annonce, rangé et rejoué à l'abonnement.
+    ops: Mutex<OpsBook>,
+    /// Chaque changement d'opération, pour le relais vers la fenêtre (`LinkRuntime::forward`).
+    ops_changes: tokio::sync::broadcast::Sender<ServiceOperationEvent>,
+}
+
+impl Default for PendingBook {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::default(),
+            ops: Mutex::default(),
+            ops_changes: tokio::sync::broadcast::channel(256).0,
+        }
+    }
 }
 
 impl PendingBook {
@@ -141,8 +157,13 @@ impl PendingBook {
             .retain(|operation| !op_ids.contains(&operation.op_id));
     }
 
+    fn ops_lock(&self) -> std::sync::MutexGuard<'_, OpsBook> {
+        self.ops.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Le serveur est retiré : plus rien ne le concerne.
     pub fn forget(&self, server: &ServerId) {
+        self.ops_lock().forget(server.as_str());
         let mut pending = self.lock();
         pending.alerts.remove(server.as_str());
         pending
@@ -155,6 +176,18 @@ impl PendingBook {
 }
 
 impl EventSink for PendingBook {
+    /// Le suivi d'une opération de service (HRT-84) : rangé, puis annoncé à la fenêtre par le relais.
+    fn service_operation(&self, server: &ServerId, operation: Arc<OperationView>) {
+        let event = self.ops_lock().on_view(server.as_str(), &operation);
+        // Aucun abonné : le changement reste dans le livre, rejoué à l'abonnement.
+        let _ = self.ops_changes.send(event);
+    }
+
+    fn service_operation_gone(&self, server: &ServerId, operation_id: &str) {
+        let event = self.ops_lock().on_gone(server.as_str(), operation_id);
+        let _ = self.ops_changes.send(event);
+    }
+
     fn emit(&self, event: Event) {
         match event {
             Event::FingerprintChanged {
@@ -749,14 +782,41 @@ impl LinkRuntime {
     /// bibliothèque. Les mesures et le journal d'activité ne sont pas relayés ici (tickets
     /// suivants).
     pub async fn forward(&self, mut stream: EventStream, sink: &dyn UiSink) {
-        while let Some(event) = stream.recv().await {
-            let lagged = matches!(event, Event::Lagged { .. });
-            self.relay(event, sink);
-            if lagged {
-                self.resync_dashboards(sink).await;
-                self.resync_services(sink).await;
+        let mut ops = self.pending.ops_changes.subscribe();
+        loop {
+            tokio::select! {
+                event = stream.recv() => {
+                    let Some(event) = event else { break };
+                    let lagged = matches!(event, Event::Lagged { .. });
+                    self.relay(event, sink);
+                    if lagged {
+                        self.resync_dashboards(sink).await;
+                        self.resync_services(sink).await;
+                    }
+                }
+                change = ops.recv() => match change {
+                    Ok(change) => send(sink, crate::service_ops::dto::EVENT, &change),
+                    // Des changements perdus : l'état tenu est réannoncé en entier (l'interface écarte
+                    // ce qu'elle connaît par le numéro).
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        for change in self.pending.ops_lock().snapshot() {
+                            send(sink, crate::service_ops::dto::EVENT, &change);
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {}
+                },
             }
         }
+    }
+
+    /// Les opérations de service suivies : en cours, et issues pas encore annoncées (rejeu à l'abonnement).
+    pub fn service_operations(&self) -> Vec<ServiceOperationEvent> {
+        self.pending.ops_lock().snapshot()
+    }
+
+    /// L'interface a annoncé l'issue de ces opérations.
+    pub fn ack_service_operations(&self, server: &str, op_ids: &[String]) {
+        self.pending.ops_lock().ack(server, op_ids);
     }
 
     /// Après un retard d'écoute, des instantanés ont pu être perdus : la dernière vue connue de

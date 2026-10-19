@@ -18,10 +18,11 @@ use std::collections::BTreeSet;
 use super::error::{FicheRefusee, Fichier, Motif};
 use super::limits::*;
 use super::loader::{check_text, check_variant_refs};
+use super::memory::{TierId, TierListError, declared_ids, hidden_ids, recommended_gap};
 use super::model::{Fiche, Setting, ValueSpec};
 use super::schema::fiche::{
-    Channel, ChannelKind, Derive, Evidence, FicheFile, FolderRole, PortRole, Proof, Publish,
-    Status, Step, StepKind, WorldSaved,
+    Channel, ChannelKind, Derive, Evidence, FicheFile, FolderRole, MemoryTier, PlainEvidence,
+    PortRole, Proof, Publish, Status, Step, StepKind, WorldSaved,
 };
 use super::schema::settings::{ArgForm, SettingsFile};
 use super::value::{
@@ -1284,7 +1285,95 @@ fn check_resources(file: &FicheFile) -> Result<(), FicheRefusee> {
             },
         ));
     }
+    check_memory_tiers(file)?;
+    if file.status == Status::Published
+        && let Some(gap) = recommended_gap(file)
+    {
+        return Err(refuse(
+            f,
+            "resources.memory",
+            Motif::PublieeSansMemoireRecommandee {
+                raison: gap.explication(),
+            },
+        ));
+    }
     Ok(())
+}
+
+/// HRT-122 : les crans déclarés (BR-RES-032, BR-RES-033) et la liste des crans cachés.
+fn check_memory_tiers(file: &FicheFile) -> Result<(), FicheRefusee> {
+    let f = Fichier::Fiche;
+    let r = &file.resources;
+    hidden_ids(file)
+        .map_err(|e| tier_list_refused(|i| format!("resources.tiers.hidden[{i}]"), e))?;
+    let ids = declared_ids(file)
+        .map_err(|e| tier_list_refused(|i| format!("resources.memory_tier[{i}]"), e))?;
+    let mut declared: Vec<(TierId, usize, &MemoryTier)> = Vec::new();
+    for (i, (id, tier)) in ids.into_iter().zip(&r.memory_tier).enumerate() {
+        if !id.is_declarable() {
+            return Err(refuse(
+                f,
+                format!("resources.memory_tier[{i}]"),
+                Motif::CranNonDeclarable {
+                    id: tier.id.clone(),
+                },
+            ));
+        }
+        declared.push((id, i, tier));
+    }
+    // Strictement croissants dans l'ordre des crans, et tous au-dessus de la mémoire recommandée.
+    let mut floor = r.memory.recommended_bytes;
+    declared.sort_by_key(|(id, _, _)| *id);
+    for (_, i, tier) in declared {
+        let at = format!("resources.memory_tier[{i}]");
+        match &tier.evidence {
+            Evidence::Plain(PlainEvidence::Measured) => {}
+            Evidence::Plain(_) => {
+                return Err(refuse(
+                    f,
+                    at,
+                    Motif::CranPreuveInterdite {
+                        id: tier.id.clone(),
+                    },
+                ));
+            }
+            Evidence::Publisher(p) => check_url(f, &at, &p.publisher)?,
+        }
+        let Some(below) = floor else {
+            return Err(refuse(
+                f,
+                at,
+                Motif::CranBorneInvalide {
+                    id: tier.id.clone(),
+                    raison: "la fiche n'a pas de mémoire recommandée sous laquelle placer ce cran",
+                },
+            ));
+        };
+        if tier.from_bytes <= below {
+            return Err(refuse(
+                f,
+                at,
+                Motif::CranBorneInvalide {
+                    id: tier.id.clone(),
+                    raison: "`from_bytes` doit être au-dessus de la mémoire recommandée et des crans précédents",
+                },
+            ));
+        }
+        floor = Some(tier.from_bytes);
+    }
+    Ok(())
+}
+
+/// Refus typé d'une liste d'identifiants de crans ; `at` situe l'élément fautif par son indice.
+fn tier_list_refused(at: impl Fn(usize) -> String, e: TierListError) -> FicheRefusee {
+    match e {
+        TierListError::Unknown { index, id } => {
+            refuse(Fichier::Fiche, at(index), Motif::CranInconnu { id })
+        }
+        TierListError::Twice { index, id } => {
+            refuse(Fichier::Fiche, at(index), Motif::CranEnDouble { id })
+        }
+    }
 }
 
 fn check_worlds_shape(file: &FicheFile) -> Result<(), FicheRefusee> {

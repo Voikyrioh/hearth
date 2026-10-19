@@ -125,6 +125,7 @@ export class SimulatedServices {
       graceS: 10,
       adopted: null,
       detailsReserved: false,
+      busy: null,
       ...patch,
       image: { ref: "nginx", tag: "1.27", shortId: "0123456789ab", ...patch.image },
     };
@@ -197,6 +198,19 @@ export class SimulatedServices {
         ? book.view.services.find((item) => item.key === key)
         : undefined;
     return found?.name ?? key;
+  }
+
+  /** Pose ou retire l'action qui tient un service (`busy`, BR-OPS-005) ; sans effet sur un service inconnu. */
+  setBusy(
+    serverId: string,
+    key: string,
+    busy: { kind: string; by: string; since: string } | null,
+  ): void {
+    const book = this.books.get(serverId);
+    if (book?.view.kind !== "supported") return;
+    const found = book.view.services.find((item) => item.key === key);
+    if (!found) return;
+    this.upsert(serverId, { key, name: found.name, busy });
   }
 
   /** Change le moteur (état, nom, version…), la liste reste. */

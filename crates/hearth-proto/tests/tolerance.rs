@@ -609,6 +609,10 @@ const LOCAL_ENUMS: &[(&str, &str)] = &[
     ),
     ("reauth/dto.rs::AdminActKindDto", "commande de la WebView"),
     (
+        "service_ops/dto.rs::OperationChoiceDto",
+        "commande de la WebView (choix de la décision) ; lu de l'agent par `hearth_proto::OperationChoice`",
+    ),
+    (
         "update/dto.rs::UpdatePhase",
         "fichier local du client (update.json)",
     ),

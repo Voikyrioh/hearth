@@ -124,6 +124,7 @@ export const STATE_KEYS = {
   restart_loop: "services.state.restartLoop",
   paused: "services.state.paused",
   deploying: "services.state.deploying",
+  updating: "services.state.updating",
   unknown: "services.state.unknown",
 } as const;
 

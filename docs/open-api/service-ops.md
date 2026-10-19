@@ -66,6 +66,10 @@ Le journal des opérations de service (`service_ops`, `service_op_steps`) rendu 
 
 Projections du journal (BR-OPS-005), dans `GET /services` et le sujet `services` : `busy { kind, by, since }` (l'opération non terminée qui tient le service, visible de tous) et `last_action { id, kind, by, status, cause?, forced, finished_at? }` (la dernière terminée). Absents tant que le service n'a aucune opération, **et absents pour un compte qui ne peut pas lire les opérations du service** (un service adopté sans le droit « gérer les services » : BR-OPS-001, revue de la PR 94). Pour un service créé par Hearth, visibles de tous.
 
+## Côté client (HRT-84)
+
+`hearth-link` suit ces messages par `OpTracker` (`domain/service_op_tracker.rs`) : un état identique n'est pas annoncé deux fois, l'issue d'une opération terminée l'est une seule fois, et après le retour du lien les opérations que l'agent n'a pas redites à l'abonnement sont relues par `GET` (délai `ops_resync_delay`, 2 s) puis annoncées ou oubliées (`404`). La coquille les range (`service_ops/book.rs`), les rejoue à l'abonnement de la fenêtre et retient chaque issue jusqu'à son acquittement. Commandes : `list_service_operations`, `ack_service_operations`, `decide_service_operation` (acte `0x1D`).
+
 ## Bornes
 
 500 opérations terminées gardées au plus et 24 heures (BR-OPS-007) ; 500 opérations en cours rendues à un abonné ; 256 opérations suivies par la cadence d'une connexion ; canal de diffusion de 256 changements.

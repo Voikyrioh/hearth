@@ -181,6 +181,8 @@
      les noms coupés à « a..cien-service » quand le repère « Créé hors de Hearth » occupe la ligne (design : 200 px). */
   --svc-columns: minmax(260px, 1.5fr) minmax(180px, 1fr) 200px 270px;
   --svc-columns-compact: minmax(180px, 1fr) 190px 220px;
+  /* Une ligne de la bande « Opérations en cours » : titre, jauge, chiffres, boutons (HRT-84). */
+  --op-columns: minmax(0, 2fr) minmax(80px, 1fr) auto auto;
   --svc-columns-narrow: minmax(0, 1fr) minmax(120px, 170px);
   --svc-puck: 3px;
   /* Détail d'un service (HRT-63) : liste compacte à côté du détail, détail borné. */

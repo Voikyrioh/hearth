@@ -76,4 +76,10 @@ impl EventSink for Fanout {
             extra.service_operation(server, operation);
         }
     }
+
+    fn service_operation_gone(&self, server: &crate::domain::server::ServerId, operation_id: &str) {
+        if let Some(extra) = &self.extra {
+            extra.service_operation_gone(server, operation_id);
+        }
+    }
 }

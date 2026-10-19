@@ -13,9 +13,9 @@ import CommandBlock from "./CommandBlock.vue";
 // description).
 //
 // - administrateur sans le droit : la raison, la phrase d'introduction et la commande à copier ;
-// - compte en lecture seule : la raison et « Demande à la personne qui administre ce serveur. » ;
+// - compte en lecture seule : la raison et « Demandez à la personne qui administre ce serveur. » ;
 // - agent ancien : « Ce serveur doit être mis à jour… », aucune action ;
-// - lecture en échec : « Impossible de lire ton droit… » et « Vérifier à nouveau » ;
+// - lecture en échec : « Impossible de lire votre droit… » et « Vérifier à nouveau » ;
 // - lecture en cours, droit accordé, pilotage désactivé (l'état du moteur parle) : rien.
 // Lecture seule : aucune case, aucun commutateur, rien qui laisse croire que le droit se donne d'ici (BR-GRANT-005).
 const props = defineProps<{

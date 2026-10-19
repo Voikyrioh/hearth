@@ -157,6 +157,28 @@ pub enum Motif {
     BorneInvalide {
         quoi: &'static str,
     },
+    // ---- Mémoire recommandée et crans (HRT-122) -------------------------------------------------
+    CranInconnu {
+        id: String,
+    },
+    CranEnDouble {
+        id: String,
+    },
+    /// « Instable », « Lent » et « Recommandé » se déduisent des bornes de la fiche : ils ne s'écrivent pas.
+    CranNonDeclarable {
+        id: String,
+    },
+    CranBorneInvalide {
+        id: String,
+        raison: &'static str,
+    },
+    /// Preuve « mesuré au repos » ou « non mesuré » sur un cran de joueurs.
+    CranPreuveInterdite {
+        id: String,
+    },
+    PublieeSansMemoireRecommandee {
+        raison: &'static str,
+    },
 }
 
 impl Motif {
@@ -203,7 +225,13 @@ impl Motif {
             | RessourceNonMesureeAvecNombre { .. }
             | RessourceSansPreuve { .. }
             | ReglageIncomplet { .. }
-            | BorneInvalide { .. } => "coherence",
+            | BorneInvalide { .. }
+            | CranInconnu { .. }
+            | CranEnDouble { .. }
+            | CranNonDeclarable { .. }
+            | CranBorneInvalide { .. }
+            | CranPreuveInterdite { .. }
+            | PublieeSansMemoireRecommandee { .. } => "coherence",
         }
     }
 
@@ -257,6 +285,12 @@ impl Motif {
             RessourceSansPreuve { ressource } => format!("la ressource `{ressource}` porte un nombre sans preuve"),
             ReglageIncomplet { reglage, champ } => format!("le réglage `{reglage}` n'a pas de `{champ}`"),
             BorneInvalide { quoi } => format!("borne invalide : {quoi}"),
+            CranInconnu { id } => format!("cran de mémoire `{id}` inconnu (unstable, slow, recommended, smooth, ultra, community)"),
+            CranEnDouble { id } => format!("cran de mémoire `{id}` déclaré deux fois"),
+            CranNonDeclarable { id } => format!("le cran `{id}` se déduit de `min_bytes` et `recommended_bytes` : seuls smooth, ultra et community se déclarent"),
+            CranBorneInvalide { id, raison } => format!("cran de mémoire `{id}` : {raison}"),
+            CranPreuveInterdite { id } => format!("cran de mémoire `{id}` : seule la preuve `measured` ou `{{ publisher = \"https://...\" }}` est permise (BR-RES-033)"),
+            PublieeSansMemoireRecommandee { raison } => format!("une fiche `published` exige une mémoire recommandée mesurée ou publiée par l'éditeur : {raison} (BR-RES-038)"),
         }
     }
 }

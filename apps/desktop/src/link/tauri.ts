@@ -5,6 +5,7 @@ import {
   type AgentUpdateEvent as BoundAgentUpdateEvent,
   type LinkFailure as BoundFailure,
   type AccountOutcome as BoundOutcome,
+  type ServiceOperationEvent as BoundServiceOperationEvent,
   type ServicesEvent as BoundServicesEvent,
   commands,
   type FingerprintEvent,
@@ -51,6 +52,13 @@ import {
   toSecurityRead,
   toSecurityState,
 } from "./security";
+import {
+  type DecisionOutcome,
+  type OperationChoice,
+  type ServiceOperationEvent,
+  toDecisionOutcome,
+  toServiceOperationEvent,
+} from "./serviceOps";
 import {
   type EngineInfo,
   type EnvVariable,
@@ -99,6 +107,7 @@ export const LINK_EVENTS = {
   security: "link://security",
   services: "link://services",
   serviceLogs: "link://service-logs",
+  serviceOperations: "link://service-operations",
 } as const;
 
 function toColor(value: number): ServerColor {
@@ -524,6 +533,41 @@ export class TauriLinkBridge implements LinkBridge {
       throw error;
     }
     return unlisten;
+  }
+
+  async onServiceOperations(
+    listener: (event: ServiceOperationEvent) => void,
+  ): Promise<Unsubscribe> {
+    // Écoute posée D'ABORD, état tenu lu ensuite : aucune fenêtre où un changement est perdu. Le rejeu et le
+    // signal peuvent se croiser : le récepteur écarte tout `seq` qui n'est pas plus grand.
+    const unlisten = await listen<BoundServiceOperationEvent>(
+      LINK_EVENTS.serviceOperations,
+      (event) => listener(toServiceOperationEvent(event.payload)),
+    );
+    try {
+      for (const change of unwrap(await commands.listServiceOperations())) {
+        listener(toServiceOperationEvent(change));
+      }
+    } catch (error) {
+      unlisten();
+      throw error;
+    }
+    return unlisten;
+  }
+
+  async ackServiceOperations(serverId: string, opIds: string[]): Promise<void> {
+    unwrap(await commands.ackServiceOperations(serverId, opIds));
+  }
+
+  async decideServiceOperation(
+    serverId: string,
+    opId: string,
+    choice: OperationChoice,
+    adminPassword: string | null,
+  ): Promise<DecisionOutcome> {
+    return toDecisionOutcome(
+      unwrap(await commands.decideServiceOperation(serverId, opId, choice, adminPassword)),
+    );
   }
 
   async recheckEngine(serverId: string): Promise<EngineInfo> {

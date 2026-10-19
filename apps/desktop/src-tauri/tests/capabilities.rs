@@ -355,6 +355,15 @@ const EXPECTED: &[(&str, &str)] = &[
     ("ackServiceLogs", "session: string, batches: number"),
     ("keepServiceLogs", "page: number"),
     ("openEngineDocs", ""),
+    // HRT-84 : le suivi des opérations de service. `listServiceOperations` rejoue l'état tenu côté Rust ;
+    // `ackServiceOperations` dit quelles issues l'interface a annoncées ; `decideServiceOperation` est le SEUL
+    // geste (un acte confirmé : la route est construite par la coquille, le choix est une liste fermée).
+    ("listServiceOperations", ""),
+    ("ackServiceOperations", "serverId: string, opIds: string[]"),
+    (
+        "decideServiceOperation",
+        "serverId: string, opId: string, choice: OperationChoiceDto, adminPassword: string | null",
+    ),
 ];
 
 /// Les commandes qui portent UN ACTE D'ADMINISTRATION, avec le paramètre qui porte le mot de passe de
@@ -373,6 +382,7 @@ const ADMIN_COMMANDS: &[(&str, &str)] = &[
     ("changeOwnPassword", "current"),
     ("setReauthSetting", "password"),
     ("removeTrustedDevice", "password"),
+    ("decideServiceOperation", "adminPassword"),
 ];
 
 /// Les commandes qui ne modifient RIEN chez l'agent : lectures, réglages locaux, abonnements.
@@ -428,6 +438,8 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "ackServiceLogs",
     "keepServiceLogs",
     "openEngineDocs",
+    "listServiceOperations",
+    "ackServiceOperations",
 ];
 
 /// Toute commande exposée est soit un acte d'administration de la liste fermée (avec son mot de passe de
