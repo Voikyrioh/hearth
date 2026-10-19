@@ -44,7 +44,7 @@ use crate::application::ports::{
     LogQuery, LogStream, PullStream, Unreadable,
 };
 use crate::domain::ops::wait_budget;
-use crate::domain::services::plan::ContainerPlan;
+use crate::domain::services::plan::{ContainerPlan, hardening};
 use crate::domain::services::pull::{LayerEvent, PullTracker};
 use crate::domain::services::spec::{SpecProtocol, SpecRestart};
 use crate::domain::services::{
@@ -745,6 +745,9 @@ fn create_body(plan: &ContainerPlan) -> ContainerCreateBody {
         memory: Some(memory),
         memory_swap: Some(memory),
         nano_cpus: Some(i64::from(plan.cpu_millis) * 1_000_000),
+        // Posés d'office, jamais réglables (ADR-0041 §5).
+        pids_limit: Some(hardening::PIDS_LIMIT),
+        security_opt: Some(vec![hardening::NO_NEW_PRIVILEGES.to_owned()]),
         ..HostConfig::default()
     };
     ContainerCreateBody {
@@ -820,6 +823,46 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn every_created_container_gets_no_new_privileges_and_a_process_limit() {
+        use crate::domain::services::spec::SpecPort;
+        let plan = ContainerPlan {
+            name: "web".into(),
+            image: "nginx:1.27".into(),
+            labels: std::collections::BTreeMap::new(),
+            env: vec![],
+            command: None,
+            ports: vec![SpecPort {
+                host_port: 8080,
+                container_port: 80,
+                protocol: SpecProtocol::Tcp,
+            }],
+            binds: vec![],
+            restart: SpecRestart::UnlessStopped,
+            cpu_millis: 500,
+            memory_bytes: 268_435_456,
+            stdin_open: false,
+            stop_grace_s: None,
+        };
+        let host = create_body(&plan).host_config.expect("HostConfig");
+        assert_eq!(
+            host.security_opt,
+            Some(vec!["no-new-privileges".to_owned()])
+        );
+        assert_eq!(host.pids_limit, Some(4096));
+        assert_eq!(
+            (host.memory, host.memory_swap, host.nano_cpus),
+            (Some(268_435_456), Some(268_435_456), Some(500_000_000))
+        );
+        // Rien de ce que le plan fermé interdit n'apparaît (ADR-0041 §5).
+        assert_eq!(host.privileged, None);
+        assert_eq!(host.cap_add, None);
+        assert_eq!(host.network_mode, None);
+        assert_eq!(host.pid_mode, None);
+        assert_eq!(host.binds, None);
+        assert_eq!(host.devices, None);
     }
 
     #[test]

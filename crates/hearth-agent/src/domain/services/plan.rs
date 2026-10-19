@@ -27,6 +27,17 @@ pub mod label {
     pub const SPEC_REV: &str = "io.hearth.spec-rev";
 }
 
+/// Ce que Hearth pose d'office sur tout conteneur qu'il crée, sans champ dans le plan ni dans le formulaire
+/// (ADR-0041 §5, BR-DEPLOY-035). Ni l'un ni l'autre ne se règle : c'est la borne, pas une option.
+pub mod hardening {
+    /// Un programme du service ne gagne jamais plus de droits que ceux avec lesquels il démarre (un binaire à
+    /// bit setuid n'élève plus rien).
+    pub const NO_NEW_PRIVILEGES: &str = "no-new-privileges";
+    /// Le nombre de processus et de fils d'exécution du service : une boucle de `fork` s'arrête là au lieu
+    /// d'épuiser la table des processus du serveur. Large pour un serveur de jeu (quelques centaines de fils).
+    pub const PIDS_LIMIT: i64 = 4096;
+}
+
 /// Un dossier du serveur monté dans le service. Aujourd'hui toujours un dossier GÉRÉ par Hearth :
 /// `<racine des services>/<clé>/<sous-dossier>`.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -525,6 +525,16 @@ async fn an_unless_stopped_service_comes_back_after_the_daemon_restarts_unless_i
         .create(&plan(&format!("{PREFIX}-restart-stopped")))
         .await
         .expect("créer");
+    // Le vrai moteur accepte et garde ce que Hearth pose d'office (ADR-0041 §5).
+    assert_eq!(
+        docker(&[
+            "inspect",
+            "-f",
+            "{{.HostConfig.SecurityOpt}} {{.HostConfig.PidsLimit}}",
+            &kept
+        ]),
+        "[no-new-privileges] 4096"
+    );
     engine.start(&kept).await.expect("démarrer");
     engine.start(&stopped).await.expect("démarrer");
     engine
