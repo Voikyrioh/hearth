@@ -7,7 +7,8 @@
 //!   change pas de clé sans `rename` d'un `[[migration]]`, n'est pas réutilisé après son retrait ;
 //! - `--release` (option, branchée sur aucune publication : la CI lance `catalog-check` sans elle) : refuse toute
 //!   fiche `preview`. Toute fiche est embarquée, `preview` comprise ; une fiche `preview` n'est jamais PROPOSÉE
-//!   (`domain::catalog::embedded::offered()`).
+//!   (`domain::catalog::embedded::offered()`). Il refuse aussi toute fiche dont la mémoire recommandée manque ou
+//!   n'a qu'une mesure au repos (HRT-122, BR-RES-038).
 //!
 //! Hors périmètre de ce ticket (HRT-114) : `golden.toml`, `probe.toml`, `evidence.toml`, le relevé sur l'image
 //! et le banc d'essai.
@@ -22,6 +23,7 @@ mod loading;
 
 use loading::ids_lock;
 use loading::loader::{Origin, load};
+use loading::memory;
 use loading::schema::fiche::Status;
 
 const CATALOG_DIR: &str = "crates/hearth-agent/catalog";
@@ -47,6 +49,14 @@ pub fn check_texts(
     }
     if release && loaded.file.status != Status::Published {
         problems.push(format!("fiche `{dir}` : elle est `preview` (catalog-check --release refuse toute fiche `preview`)"));
+    }
+    // BR-RES-038 : pas de publication sans mémoire recommandée mesurée ou publiée par l'éditeur. Une fiche
+    // `preview` reste en préparation ; ce reproche dit ce qui lui manque pour en sortir.
+    if release && let Some(gap) = memory::recommended_gap(&loaded.file) {
+        problems.push(format!(
+            "fiche `{dir}` : {} (BR-RES-038 : mesure sur un vrai serveur, ou chiffre de l'éditeur avec son adresse)",
+            gap.explication()
+        ));
     }
     match lock {
         None => problems.push(format!("fiche `{dir}` : ids.lock manquant (le registre des identifiants de réglage est obligatoire)")),
@@ -253,8 +263,21 @@ mod tests {
     #[test]
     fn the_release_profile_refuses_a_preview_fiche() {
         let problems = check(SETTINGS, LOCK, true);
-        assert_eq!(problems.len(), 1);
         assert!(problems[0].contains("preview"), "{problems:?}");
+    }
+
+    #[test]
+    fn the_release_profile_names_the_missing_recommended_memory() {
+        // Terraria n'a pas encore de mémoire mesurée (HRT-149) : elle reste en préparation, et le dit.
+        let problems = check(SETTINGS, LOCK, true);
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(
+            problems[1].contains("mémoire recommandée manque"),
+            "{problems:?}"
+        );
+        assert!(problems[1].contains("BR-RES-038"), "{problems:?}");
+        // Hors `--release`, rien de ce genre n'est reproché.
+        assert!(check(SETTINGS, LOCK, false).is_empty());
     }
 
     #[test]
