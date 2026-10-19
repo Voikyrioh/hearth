@@ -11,7 +11,7 @@ use hearth_link::domain::service_lifecycle::{Gesture, Refusal, refusal_of};
 use hearth_link::{ActionOutcome, LinkManager};
 use hearth_proto::api::services::ActionAccepted;
 use hearth_proto::error::{ErrorBody, ErrorCode};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
 use specta::Type;
 
@@ -21,7 +21,7 @@ use crate::reauth::wire::{Confirmation, confirmation_of};
 use crate::services::dto::{EngineStateDto, ServiceStateDto};
 
 /// Le geste demandé par l'interface.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum GestureDto {
     Start,
