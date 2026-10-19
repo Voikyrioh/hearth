@@ -9,7 +9,7 @@ import { useNow } from "@/composables/useNow";
 import { type MessageKey, t } from "@/i18n";
 import type { EngineInfo, EngineState } from "@/link";
 import { type CountKey, type Counts, shownCounts } from "@/services/counts";
-import { shortAge } from "@/services/format";
+import { ENGINE_STATE_KEYS, shortAge } from "@/services/format";
 import { deniedSentence, familyOf, helpFor } from "@/services/help";
 import Callout from "../molecules/Callout.vue";
 import CommandBlock from "../molecules/CommandBlock.vue";
@@ -39,19 +39,19 @@ type Tone = "ok" | "warn" | "cool" | "plain";
 interface Look {
   tone: Tone;
   icon: IconName;
-  title: MessageKey;
 }
 
+/** Le ton et l'icône de chaque état ; son nom est `ENGINE_STATE_KEYS` (partagé avec les refus d'une action). */
 const LOOKS: Record<Exclude<EngineState, "checking">, Look> = {
-  ready: { tone: "ok", icon: "check", title: "engine.state.ready" },
-  stopped: { tone: "warn", icon: "stop", title: "engine.state.stopped" },
-  access_denied: { tone: "warn", icon: "lock", title: "engine.state.accessDenied" },
-  unresponsive: { tone: "warn", icon: "clock", title: "engine.state.unresponsive" },
-  absent: { tone: "cool", icon: "box", title: "engine.state.absent" },
-  unsupported_engine: { tone: "warn", icon: "alert", title: "engine.state.unsupportedEngine" },
-  unsupported_version: { tone: "warn", icon: "alert", title: "engine.state.unsupportedVersion" },
-  disabled: { tone: "plain", icon: "pause", title: "engine.state.disabled" },
-  unknown: { tone: "plain", icon: "question", title: "engine.state.unknown" },
+  ready: { tone: "ok", icon: "check" },
+  stopped: { tone: "warn", icon: "stop" },
+  access_denied: { tone: "warn", icon: "lock" },
+  unresponsive: { tone: "warn", icon: "clock" },
+  absent: { tone: "cool", icon: "box" },
+  unsupported_engine: { tone: "warn", icon: "alert" },
+  unsupported_version: { tone: "warn", icon: "alert" },
+  disabled: { tone: "plain", icon: "pause" },
+  unknown: { tone: "plain", icon: "question" },
 };
 
 const COUNT_ICONS: Record<CountKey, IconName> = {
@@ -80,7 +80,11 @@ const look = computed(() =>
   props.engine && props.engine.state !== "checking" ? LOOKS[props.engine.state] : null,
 );
 const ready = computed(() => props.engine?.state === "ready");
-const stateText = computed(() => (look.value ? t(look.value.title) : t("engine.checking")));
+const stateText = computed(() =>
+  props.engine && props.engine.state !== "checking"
+    ? t(ENGINE_STATE_KEYS[props.engine.state])
+    : t("engine.checking"),
+);
 const counters = computed(() => (props.counts ? shownCounts(props.counts) : []));
 
 /** L'aide existe seulement pour ces états, et l'explication demande à l'administrateur du serveur de régler. */
@@ -117,7 +121,7 @@ const denied = computed(() =>
 const previousText = computed(() => {
   const before = props.previous;
   if (!before || before.state === "checking") return "";
-  const label = LOOKS[before.state].title;
+  const label = ENGINE_STATE_KEYS[before.state];
   return t("engine.lastKnown", { state: t(label), age: shortAge(now.value - before.at) });
 });
 const announce = computed(() => t("engine.announce", { state: stateText.value }));

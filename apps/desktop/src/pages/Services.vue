@@ -12,10 +12,12 @@ import EnginePanel from "@/components/organisms/EnginePanel.vue";
 import OperationDecisionDialog from "@/components/organisms/OperationDecisionDialog.vue";
 import OperationsStrip from "@/components/organisms/OperationsStrip.vue";
 import ServiceDetail from "@/components/organisms/ServiceDetail.vue";
+import ServiceLifecycleDialog from "@/components/organisms/ServiceLifecycleDialog.vue";
 import ServiceTable from "@/components/organisms/ServiceTable.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { useNow } from "@/composables/useNow";
 import { usePageData } from "@/composables/usePageData";
+import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
@@ -24,6 +26,8 @@ import { launchedBy } from "@/serviceOps/messages";
 import { countServices } from "@/services/counts";
 import { openedService } from "@/services/detail";
 import { shortAge } from "@/services/format";
+import { type Controls, controlsOf } from "@/services/lifecycle";
+import { pilotLock } from "@/services/pilot";
 import { show } from "@/services/view";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import { useServicesStore } from "@/stores/services";
@@ -192,7 +196,7 @@ const running = computed(() => (server.value ? operations.of(server.value.id) : 
 /** Qui a lancé l'opération : l'indication de la liste des services (`busy`), jamais deviné. */
 function launchedByOf(operation: TrackedOperation["operation"]): string | null {
   const service = entry.value?.services.find((item) => item.key === operation.key);
-  return launchedBy(service?.busy?.by);
+  return launchedBy(service?.busy?.by, server.value?.username);
 }
 /** « Voir » ouvre le détail du service touché, où se trouve la carte de l'opération. */
 function seeOperation(tracked: TrackedOperation) {
@@ -214,6 +218,45 @@ watch(deciding, (tracked) => {
 });
 function decide(tracked: TrackedOperation) {
   decidingId.value = tracked.operation.id;
+}
+
+/**
+ * Démarrer, arrêter, redémarrer (HRT-65) : la page tient la fenêtre de confirmation, les boutons du détail et le menu
+ * des lignes la demandent. Les gestes que l'état offre, bloqués ou non, se calculent à un seul endroit.
+ */
+const lifecycle = useServiceLifecycle(
+  () => server.value?.id ?? "",
+  () => listServices.value,
+);
+function controlsFor(service: ServiceInfo): Controls | null {
+  if (!server.value) return null;
+  const running = operations.forService(server.value.id, service.key) !== undefined;
+  return controlsOf({
+    service,
+    gate: rights.gate.value,
+    lock: pilotLock(service, running, server.value.username),
+    engineReady: engineReady.value,
+  });
+}
+/** Une action tient le service visé par la fenêtre ouverte (BR-LIFE-013, 022). */
+const lifecycleLocked = computed(() => {
+  const current = lifecycle.current.value;
+  return current !== null && server.value
+    ? pilotLock(
+        current,
+        operations.forService(server.value.id, current.key) !== undefined,
+        server.value.username,
+      ).locked
+    : false;
+});
+/** La fenêtre se ferme : le focus revient au bouton d'origine, sinon au titre du détail (le bouton a pu disparaître). */
+async function closeLifecycle() {
+  lifecycle.cancel();
+  await nextTick();
+  const active = document.activeElement;
+  if (active === null || active === document.body) {
+    document.querySelector<HTMLElement>("[data-detail-title]")?.focus();
+  }
 }
 
 function recheck() {
@@ -364,7 +407,9 @@ async function openDocs() {
                 ref="table"
                 :services="listServices"
                 :selected-key="selectedKey"
+                :controls-for="rights.canAct.value ? controlsFor : undefined"
                 @open="openDetail"
+                @gesture="lifecycle.request"
               />
               <EmptyState
                 v-else
@@ -391,6 +436,7 @@ async function openDocs() {
                 @open-other="openDetail"
                 @retry-rights="rights.retry()"
                 @decide="decide"
+                @gesture="lifecycle.request"
               />
             </div>
           </div>
@@ -407,6 +453,18 @@ async function openDocs() {
         <UnreadableNote :count="entry?.unreadable ?? 0" />
       </template>
     </template>
+
+    <ServiceLifecycleDialog
+      v-if="server && lifecycle.pending.value"
+      :open="lifecycle.open.value"
+      :server-id="server.id"
+      :gesture="lifecycle.pending.value.gesture"
+      :service="lifecycle.pending.value.service"
+      :current="lifecycle.current.value"
+      :locked="lifecycleLocked"
+      :perform="lifecycle.perform"
+      @close="closeLifecycle"
+    />
 
     <OperationDecisionDialog
       v-if="server"

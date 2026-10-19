@@ -59,7 +59,7 @@ describe("la bande « Opérations en cours »", () => {
     const deploy = rows(wrapper)[0];
     expect(deploy?.get("[data-operation-step]").text()).toBe("Récupération de l'image");
     expect(deploy?.get("[data-operation-progress]").text()).toBe("40 % · 381 Mo sur 954 Mo");
-    expect(deploy?.get("[data-operation-by]").text()).toBe("Lancée par marie.");
+    expect(deploy?.get("[data-operation-by]").text()).toBe("Lancée par vous.");
     expect(rows(wrapper)[1]?.get("[data-operation-by]").text()).toBe("Lancée par claire.");
     // Seule l'opération qui attend une décision porte le bouton, actif pour le droit.
     expect(wrapper.findAll("[data-operation-decide]")).toHaveLength(1);
@@ -225,8 +225,8 @@ describe("le verrou de pilotage (BR-SVC-031)", () => {
     await wrapper.get("[data-operation-see]").trigger("click");
     await flushPromises();
     const busy = wrapper.get("[data-detail-busy]");
-    expect(busy.text()).toContain("Une action est déjà en cours sur ce service.");
-    expect(busy.text()).toContain("Lancée par marie.");
+    expect(busy.text()).toContain("Une action est en cours sur ce service.");
+    expect(busy.text()).toContain("Lancée par vous.");
     // La carte de l'opération est dans le détail.
     expect(wrapper.get("[data-service-detail] [data-operation]").text()).toContain(
       "Déploiement de terraria",

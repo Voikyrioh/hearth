@@ -4,6 +4,11 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M5A5VG2H1ESNN212NNMT2PP0](./FIX-01M5A5VG2H1ESNN212NNMT2PP0.md) | Le client proposait Arrêter, Redémarrer et Démarrer sur un service créé hors de Hearth et non adopté, puis répondait « Ce service n'existe plus. » (HRT-65) | 2026-10-19 |
+| [FIX-01M5A5VH5GR2M9PF9Y1SB04D65](./FIX-01M5A5VH5GR2M9PF9Y1SB04D65.md) | L'action lancée par le compte connecté s'affichait « déjà en cours, lancée par marie » (HRT-65) | 2026-10-19 |
+| [FIX-01M5A5VJ8G6Q6FDJV9AX6ECF41](./FIX-01M5A5VJ8G6Q6FDJV9AX6ECF41.md) | Un cadre de focus blanc entourait le titre du détail après un clic ou une action (HRT-65) | 2026-10-19 |
+| [FIX-01M5A5VKBEZ7XCZ2P0CD2VXV9M](./FIX-01M5A5VKBEZ7XCZ2P0CD2VXV9M.md) | L'étiquette « toi » de l'écran Comptes tutoyait l'utilisateur (HRT-65) | 2026-10-19 |
+| [FIX-01M5A5VMDW33WJG3S1BWKE3N15](./FIX-01M5A5VMDW33WJG3S1BWKE3N15.md) | Avertissement Vue « attribut sans destinataire » à chaque ouverture d'une confirmation de pilotage (HRT-65) | 2026-10-19 |
 | [FIX-01M52VPMJ3KKEN1MP5G1C63QQN](./FIX-01M52VPMJ3KKEN1MP5G1C63QQN.md) | La preuve d'absence d'un objet refusait la ligne d'erreur préfixée `aws: [ERROR]: ` des AWS CLI récents (HRT-171) | 2026-10-16 |
 | [FIX-01M4VNGP6RMTHA7XNDDGV2FH1R](./FIX-01M4VNGP6RMTHA7XNDDGV2FH1R.md) | L'état « à confirmer » d'une adoption ne survivait pas au redémarrage, et le passage de relecture jugeait « non relue » une adoption faite pendant ses lectures (HRT-80, PR 89) | 2026-10-14 |
 | [FIX-01M4VNGP6R446RGM9FB3JEJG7P](./FIX-01M4VNGP6R446RGM9FB3JEJG7P.md) | Après un échec d'écriture, la lecture des candidats du même compte était servie sans entrée au journal (HRT-80, PR 89) | 2026-10-14 |

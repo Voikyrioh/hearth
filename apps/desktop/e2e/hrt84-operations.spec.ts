@@ -63,7 +63,7 @@ test("A, administrateur avec le droit : trois opérations, qui les a lancées, l
   await expect(rows(page).nth(0).locator("[data-operation-title]")).toHaveText(
     "Déploiement de terraria",
   );
-  await expect(rows(page).nth(0).locator("[data-operation-by]")).toHaveText("Lancée par marie.");
+  await expect(rows(page).nth(0).locator("[data-operation-by]")).toHaveText("Lancée par vous.");
   await expect(rows(page).nth(1).locator("[data-operation-by]")).toHaveText("Lancée par claire.");
   await expect(rows(page).nth(0).locator("[data-operation-progress]")).toContainText("40 %");
   // « Modification en cours » est compté « en transition ».
@@ -181,9 +181,10 @@ test("le détail d'un service tenu par une action dit qui l'a lancée et porte l
   await rows(page).nth(0).locator("[data-operation-see]").click();
   const detail = page.locator("[data-service-detail]");
   await expect(detail.locator("[data-detail-busy]")).toContainText(
-    "Une action est déjà en cours sur ce service.",
+    "Une action est en cours sur ce service.",
   );
-  await expect(detail.locator("[data-detail-busy]")).toContainText("Lancée par marie.");
+  // marie est le compte connecté : sa propre action se dit « par vous » (FIX:01M5A5VH5GR2M9PF9Y1SB04D65).
+  await expect(detail.locator("[data-detail-busy]")).toContainText("Lancée par vous.");
   await expect(detail.locator("[data-operation]")).toContainText("Déploiement de terraria");
   await shoot(page, page, "hrt84-A-detail");
 });

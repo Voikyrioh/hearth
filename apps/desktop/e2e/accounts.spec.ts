@@ -65,7 +65,7 @@ async function fillCreate(page: Page, username: string, password: string, confir
   await dialog(page).getByLabel("Confirme le mot de passe").fill(confirm);
 }
 
-test("la page Comptes : tableau, colonnes, étiquette « toi », actions de la ligne", async ({
+test("la page Comptes : tableau, colonnes, étiquette « vous », actions de la ligne", async ({
   page,
 }) => {
   // Large : la colonne « Créé le » est masquée sous 1100 px de tableau (HRT-36, C21).
@@ -81,7 +81,7 @@ test("la page Comptes : tableau, colonnes, étiquette « toi », actions de la l
     "Sessions ouvertes",
     "Actions",
   ]);
-  await expect(row(page, "marie")).toContainText("toi");
+  await expect(row(page, "marie")).toContainText("vous");
   await expect(row(page, "marie").locator("td").getByRole("button")).toHaveText([
     "Peut gérer les services",
     "Changer mon mot de passe",

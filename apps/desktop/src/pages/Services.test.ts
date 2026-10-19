@@ -89,18 +89,24 @@ describe("ouverture de la section (BR-ENGINE-001, 019)", () => {
     wrapper.unmount();
   });
 
-  it("lecture seule : exactement les mêmes services, aucun bouton d'action sur un service", async () => {
+  it("lecture seule : exactement les mêmes services, aucune action pour un compte sans le droit (HRT-65)", async () => {
     const services = [
       { key: "c_1", name: "web" },
       { key: "c_2", name: "base", state: "stopped" as const },
     ];
     const admin = await open((bridge) => bridge.services.seed("forge", services));
-    const reader = await open((bridge) => bridge.services.seed("salon", services), "salon");
+    const reader = await open((bridge) => {
+      bridge.services.seed("salon", services);
+      bridge.setServiceRightOnServer("salon", "paul", false);
+    }, "salon");
     expect(reader.wrapper.findAll("[data-row]").map((row) => row.text())).toEqual(
       admin.wrapper.findAll("[data-row]").map((row) => row.text()),
     );
+    // Le compte en lecture seule ne voit ni colonne d'actions ni menu ; le menu d'un administrateur qui a le droit
+    // ne s'ouvre que par un geste, et ses entrées ne sont pas dans la page.
+    expect(reader.wrapper.find("[data-row] button").exists()).toBe(false);
+    expect(reader.wrapper.find("[data-row-menu]").exists()).toBe(false);
     for (const wrapper of [admin.wrapper, reader.wrapper]) {
-      expect(wrapper.find("[data-row] button").exists()).toBe(false);
       expect(wrapper.find("[role='menu']").exists()).toBe(false);
       expect(wrapper.text()).not.toMatch(/Démarrer|Arrêter|Redémarrer|Déployer|Ports exposés/);
     }

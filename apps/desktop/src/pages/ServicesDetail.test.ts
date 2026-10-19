@@ -266,16 +266,14 @@ describe("ce que dit le détail (BR-SVC-007)", () => {
     wrapper.unmount();
   });
 
-  it("Démarrer, arrêter, redémarrer : dits « prochaine version », aucun bouton ; l'onglet Journaux est actif (HRT-67)", async () => {
+  it("les boutons de pilotage sont ceux de l'état (HRT-65) ; l'onglet Journaux est actif (HRT-67)", async () => {
     const { wrapper, router } = await open(seedWeb);
     await openWeb(wrapper);
-    expect(wrapper.get("[data-detail-actions-soon]").text()).toContain(
-      "arrivent dans une prochaine version",
-    );
+    expect(wrapper.find("[data-detail-actions-soon]").exists()).toBe(false);
     const buttons = detail(wrapper)
-      .findAll("button")
+      .findAll("[data-lifecycle-action]")
       .map((button) => button.text());
-    expect(buttons.join("|")).not.toMatch(/Démarrer|Arrêter|Redémarrer/);
+    expect(buttons.join("|")).toBe("Arrêter|Redémarrer");
     const logs = wrapper.get("[data-tab='logs']");
     expect(logs.attributes("aria-disabled")).toBeUndefined();
     expect(wrapper.find("[data-detail-logs-soon]").exists()).toBe(false);

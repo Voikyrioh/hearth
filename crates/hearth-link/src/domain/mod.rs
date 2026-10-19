@@ -12,6 +12,7 @@ pub mod pending_ops;
 pub mod pinning;
 pub mod secret;
 pub mod server;
+pub mod service_lifecycle;
 pub mod service_op_tracker;
 pub mod service_ops;
 pub mod services;

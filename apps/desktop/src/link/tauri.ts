@@ -53,6 +53,11 @@ import {
   toSecurityState,
 } from "./security";
 import {
+  type LifecycleGesture,
+  type LifecycleOutcome,
+  toLifecycleOutcome,
+} from "./serviceLifecycle";
+import {
   type DecisionOutcome,
   type OperationChoice,
   type ServiceOperationEvent,
@@ -568,6 +573,20 @@ export class TauriLinkBridge implements LinkBridge {
     return toDecisionOutcome(
       unwrap(await commands.decideServiceOperation(serverId, opId, choice, adminPassword)),
     );
+  }
+
+  async pilotService(
+    serverId: string,
+    key: string,
+    gesture: LifecycleGesture,
+    adminPassword: string | null,
+  ): Promise<LifecycleOutcome> {
+    const run = {
+      start: commands.serviceStart,
+      stop: commands.serviceStop,
+      restart: commands.serviceRestart,
+    }[gesture];
+    return toLifecycleOutcome(unwrap(await run(serverId, key, adminPassword)));
   }
 
   async recheckEngine(serverId: string): Promise<EngineInfo> {

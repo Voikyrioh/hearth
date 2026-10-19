@@ -97,6 +97,15 @@ button {
   outline-offset: var(--focus-offset);
 }
 
+/*
+ * FIX:01M5A5VJ8G6Q6FDJV9AX6ECF41 : un élément que l'écran ne fait que POSER sous le focus (le titre du détail après une
+ * ouverture ou une fermeture de fenêtre, `tabindex="-1"`) ne s'encadre pas quand le dernier geste est à la souris ;
+ * le repère reste pour le clavier. `data-input` est posé par `installInputModality`.
+ */
+:root[data-input="pointer"] [tabindex="-1"]:focus-visible {
+  outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

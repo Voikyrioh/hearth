@@ -44,21 +44,32 @@ describe("« Modification en cours »", () => {
 describe("le verrou de pilotage", () => {
   it("un service tenu par une action est verrouillé, avec qui l'a lancée", () => {
     const busy = { kind: "update", by: "marie", since: 1 };
-    expect(pilotLock({ busy })).toEqual({ locked: true, by: "Lancée par marie." });
+    expect(pilotLock({ busy })).toEqual({
+      locked: true,
+      by: "Lancée par marie.",
+      own: false,
+    });
+    // FIX:01M5A5VH5GR2M9PF9Y1SB04D65 : la sienne se dit « par vous ».
+    expect(pilotLock({ busy }, false, "marie")).toEqual({
+      locked: true,
+      by: "Lancée par vous.",
+      own: true,
+    });
   });
 
   it("sans indication de l'agent, le service est verrouillé sans nom", () => {
-    expect(pilotLock({ busy: null }, true)).toEqual({ locked: true, by: null });
+    expect(pilotLock({ busy: null }, true)).toEqual({ locked: true, by: null, own: false });
   });
 
   it("un service libre n'est pas verrouillé", () => {
-    expect(pilotLock({ busy: null })).toEqual({ locked: false, by: null });
+    expect(pilotLock({ busy: null })).toEqual({ locked: false, by: null, own: false });
   });
 
   it("un compte dont l'identifiant est illisible n'est pas nommé", () => {
     expect(pilotLock({ busy: { kind: "update", by: "<img>", since: null } })).toEqual({
       locked: true,
       by: null,
+      own: false,
     });
   });
 });

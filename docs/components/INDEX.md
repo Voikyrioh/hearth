@@ -93,6 +93,9 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`AgentUpdateCard`](./AgentUpdateCard.md) — « État du serveur : {nom} » : versions, mise à jour de l'agent, étapes, résultat.
 - [`OperationCard`](./OperationCard.md) — La carte d'une opération de service : étape, progression, qui l'a lancée, bouton de la décision.
 - [`OperationsStrip`](./OperationsStrip.md) — La bande « Opérations en cours » de la section Services.
+- [`LifecycleButtons`](./LifecycleButtons.md) — Démarrer, arrêter, redémarrer : les gestes de l'état, la raison écrite dessous.
+- [`ServiceLifecycleDialog`](./ServiceLifecycleDialog.md) — La fenêtre de confirmation (effet, avertissements, socle) des trois gestes.
+- [`ServiceRowMenu`](./ServiceRowMenu.md) — Le menu d'actions d'une ligne de la liste des services.
 - [`OperationDecisionDialog`](./OperationDecisionDialog.md) — La fenêtre de décision d'une opération (acte confirmé, mot de passe à chaque réponse).
 - [`AgentUpdateSteps`](./AgentUpdateSteps.md) — Les étapes d'une mise à jour de l'agent (téléchargement, vérification, installation, redémarrage, contrôle).
 - [`MachineCard`](./MachineCard.md) — Sections Machine et Durée de fonctionnement.

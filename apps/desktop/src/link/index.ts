@@ -12,6 +12,7 @@ export * from "./machine";
 export * from "./messages";
 export * from "./reauth";
 export * from "./security";
+export * from "./serviceLifecycle";
 export * from "./serviceOps";
 export * from "./services";
 export {

@@ -59,6 +59,9 @@ pub fn covers(kind: AdminActKindDto, role: Option<RoleDto>) -> bool {
             target: "",
             choice: hearth_proto::api::service_ops::OperationChoice::Continue,
         },
+        AdminActKindDto::ServiceStart => AdminAct::ServiceStart { target: "".into() },
+        AdminActKindDto::ServiceStop => AdminAct::ServiceStop { target: "".into() },
+        AdminActKindDto::ServiceRestart => AdminAct::ServiceRestart { target: "".into() },
     };
     covered_by_elevation(&act)
 }
@@ -149,6 +152,9 @@ mod tests {
             (Kind::AccountPasswordOwn, None, false),
             (Kind::ReauthSetting, None, false),
             (Kind::OperationDecide, None, false),
+            (Kind::ServiceStart, None, true),
+            (Kind::ServiceStop, None, true),
+            (Kind::ServiceRestart, None, true),
         ] {
             assert_eq!(covers(kind, role), covered, "{kind:?} {role:?}");
         }

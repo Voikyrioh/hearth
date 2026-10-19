@@ -19,6 +19,7 @@ Toute opération (démarrer, arrêter, redémarrer, déployer, modifier, supprim
 - `crates/hearth-agent/src/application/service_ops.rs::ServiceOps::accept`
 - `crates/hearth-agent/migrations/0012_service_specs_and_ops.sql (index service_ops_open)`
 - `crates/hearth-agent/src/application/service_lifecycle.rs::ServiceLifecycle::request` (HRT-64)
+- `apps/desktop/src/services/lifecycle.ts::controlsOf` et `services/pilot.ts::pilotLock` (client, HRT-65 : boutons désactivés avec la raison et « Lancée par {compte} »)
 
 ## Vérification
 - `crates/hearth-agent/src/domain/ops/locks.rs::tests`

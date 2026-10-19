@@ -56,6 +56,10 @@ pub enum AdminActKindDto {
     ReauthSetting,
     /// Décider d'une opération de service (HRT-84) : jamais couvert par l'élévation.
     OperationDecide,
+    /// Démarrer, arrêter, redémarrer un service (HRT-65) : couverts par l'élévation de cinq minutes.
+    ServiceStart,
+    ServiceStop,
+    ServiceRestart,
 }
 
 /// L'état de la confirmation des actes pour un serveur : lu de l'agent à l'ouverture d'une fenêtre

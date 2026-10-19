@@ -189,6 +189,12 @@
   --op-columns: minmax(0, 2fr) minmax(80px, 1fr) auto auto;
   --svc-columns-narrow: minmax(0, 1fr) minmax(120px, 170px);
   --svc-puck: 3px;
+  /* Colonne des actions de la ligne (HRT-65) : un bouton « Actions », et le menu qu'il ouvre. */
+  --svc-actions: 48px;
+  /* Avec la colonne des actions, c'est l'Image qui cède sa place, jamais le Nom : à 1366 la colonne Nom retombait à
+     260 px et « ancien-service » chevauchait ses repères « Créé hors de Hearth » et « Adopté ». */
+  --svc-columns-with-actions: minmax(300px, 1.5fr) minmax(140px, 1fr) 200px 270px;
+  --menu-width: 200px;
   /* Détail d'un service (HRT-63) : liste compacte à côté du détail, détail borné. */
   --list-compact-width: 418px;
   --detail-max: 960px;
@@ -225,6 +231,7 @@
 
   /* Couches */
   --z-raised: 1;
+  --z-menu: 20;
   --z-tooltip: 30;
   --z-toast: 40;
   --z-dev: 60;

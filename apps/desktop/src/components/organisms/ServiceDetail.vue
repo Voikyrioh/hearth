@@ -23,11 +23,14 @@ import {
   restartText,
 } from "@/services/detail";
 import { imageLabel, loopBand, portLabel, stateLine } from "@/services/format";
-import { pilotLock } from "@/services/pilot";
+import { type Controls, controlsOf, type Gesture } from "@/services/lifecycle";
+import { busyText, pilotLock } from "@/services/pilot";
 import { canAct, type RightsGate } from "@/services/rights";
+import { useServersStore } from "@/stores/servers";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import Callout from "../molecules/Callout.vue";
 import DashCard from "../molecules/DashCard.vue";
+import LifecycleButtons from "../molecules/LifecycleButtons.vue";
 import OperationCard from "../molecules/OperationCard.vue";
 import OriginTags from "../molecules/OriginTags.vue";
 import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
@@ -39,8 +42,8 @@ import LogViewer from "./LogViewer.vue";
 // (`EnvVarsSection`). Le détail suit la CLÉ STABLE du service ouvert, jamais son nom : si le service disparaît il
 // reste lisible, grisé, avec « Ce service n'existe plus. », et un homonyme créé ensuite est PROPOSÉ, jamais ouvert
 // d'office. Tout texte vient de l'agent et est interpolé (jamais du HTML) ; une valeur que ce client ne connaît pas
-// s'affiche de façon neutre. Rien n'est inventé pour ce que l'agent ne sait pas encore faire : démarrer, arrêter,
-// redémarrer sont dits « prochaine version », sans bouton. L'onglet Journaux (HRT-67) lit les journaux du service ouvert.
+// s'affiche de façon neutre. Démarrer, arrêter, redémarrer sont les boutons de `LifecycleButtons` (HRT-65) : la page
+// tient la fenêtre de confirmation. L'onglet Journaux (HRT-67) lit les journaux du service ouvert.
 const props = defineProps<{
   serverId: string;
   opened: OpenedService;
@@ -61,6 +64,7 @@ const emit = defineEmits<{
   retryRights: [];
   "update:tab": [tab: "detail" | "logs"];
   decide: [operation: TrackedOperation];
+  gesture: [service: ServiceInfo, gesture: Gesture];
 }>();
 
 const now = useNow();
@@ -82,12 +86,24 @@ const operations = useServiceOpsStore();
 const ongoing = computed(() =>
   service.value ? operations.forService(props.serverId, service.value.key) : undefined,
 );
+const servers = useServersStore();
 const lock = computed(() =>
   service.value
-    ? pilotLock(service.value, ongoing.value !== undefined)
-    : { locked: false, by: null },
+    ? pilotLock(service.value, ongoing.value !== undefined, servers.byId(props.serverId)?.username)
+    : { locked: false, by: null, own: false },
 );
 const allowed = computed(() => canAct(props.gate));
+/** Ce que le pilotage montre : les gestes de l'état, bloqués ou non (HRT-65, BR-LIFE-003, 013). */
+const controls = computed<Controls | null>(() =>
+  service.value
+    ? controlsOf({
+        service: service.value,
+        gate: props.gate,
+        lock: lock.value,
+        engineReady: props.engineReady,
+      })
+    : null,
+);
 const sameName = computed(() => (props.opened.kind === "gone" ? props.opened.sameName : null));
 
 const tabs = computed(() => [
@@ -193,7 +209,7 @@ const commandNote = computed(() => {
     <header v-if="service" class="detail__head">
       <!-- Une action tient le service : les boutons de pilotage sont désactivés, quel que soit l'état réel (BR-SVC-031) -->
       <Callout v-if="!gone && lock.locked" tone="info" data-detail-busy>
-        {{ t("serviceOps.busy") }}
+        {{ busyText(lock) }}
         <template v-if="lock.by"> {{ lock.by }}</template>
       </Callout>
       <OperationCard
@@ -205,11 +221,12 @@ const commandNote = computed(() => {
         :can-decide="allowed"
         @decide="emit('decide', ongoing)"
       />
-      <!-- Démarrer, arrêter, redémarrer : pas encore branchés (l'agent ne sait pas encore les faire) -->
-      <p v-if="!gone && tab === 'detail'" class="detail__soon" data-detail-actions-soon>
-        <HIcon name="info" size="sm" />
-        {{ t("serviceDetail.actionsSoon") }}
-      </p>
+      <!-- Démarrer, arrêter, redémarrer (HRT-65) : les gestes que l'état offre, la raison écrite dessous si un geste est bloqué -->
+      <LifecycleButtons
+        v-if="!gone && tab === 'detail' && controls"
+        :controls="controls"
+        @gesture="emit('gesture', service, $event)"
+      />
 
       <HTabs
         :model-value="tab"
@@ -481,15 +498,6 @@ const commandNote = computed(() => {
 
 .detail__adopted {
   margin: 0;
-}
-
-.detail__soon {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  margin: 0;
-  color: var(--tx-secondary);
-  font-size: var(--fs-small);
 }
 
 .detail__body {

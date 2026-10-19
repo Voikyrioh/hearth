@@ -1,7 +1,7 @@
 import { safeText } from "@/audit/text";
 import { formatUptime } from "@/dashboard/format";
-import { t } from "@/i18n";
-import type { ServiceInfo, ServicePort } from "@/link";
+import { type MessageKey, t } from "@/i18n";
+import type { EngineState, ServiceInfo, ServicePort } from "@/link";
 
 /**
  * Les textes d'une ligne de service (BR-SVC-002, 004, 006, 022), calculés depuis les données et l'heure
@@ -127,6 +127,19 @@ export const STATE_KEYS = {
   updating: "services.state.updating",
   unknown: "services.state.unknown",
 } as const;
+
+/** Le nom de chaque état du moteur de conteneurs (panneau du moteur, refus d'une action, HRT-65). */
+export const ENGINE_STATE_KEYS: Record<Exclude<EngineState, "checking">, MessageKey> = {
+  ready: "engine.state.ready",
+  stopped: "engine.state.stopped",
+  access_denied: "engine.state.accessDenied",
+  unresponsive: "engine.state.unresponsive",
+  absent: "engine.state.absent",
+  unsupported_engine: "engine.state.unsupportedEngine",
+  unsupported_version: "engine.state.unsupportedVersion",
+  disabled: "engine.state.disabled",
+  unknown: "engine.state.unknown",
+};
 
 /**
  * Tous les ports d'un service, dans un texte (nom accessible, fenêtre des ports, infobulle de souris) : la ligne
