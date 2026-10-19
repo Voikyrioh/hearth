@@ -72,25 +72,44 @@ fn state_over(
     engine: Arc<FakeEngine>,
     engine_enabled: bool,
 ) -> AppState {
-    let services = ServicesRegistry::new(
+    // Avec la VRAIE base des adoptions et des arrêts voulus : `reload_adopted` lit ce que `Env::adopt` écrit, et
+    // piloter un service (HRT-64) demande un service publié.
+    let services = ServicesRegistry::with_supervision(
         engine.clone(),
+        Arc::new(hearth_agent::infrastructure::supervisor::NoSupervisor),
+        Arc::new(
+            hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(env.db.pool().clone()),
+        ),
         &super::engine::TestHost,
         env.clock.clone(),
         Arc::new(SystemMonotonic::new()),
         engine_enabled,
         EngineTimings::production(),
     );
+    let ops = Arc::new(hearth_agent::application::service_ops::ServiceOps::new(
+        Arc::new(hearth_agent::infrastructure::sqlite::SqliteOpJournal::new(
+            env.db.pool().clone(),
+        )),
+        Arc::new(hearth_agent::application::service_ops::OpLocks::new()),
+        env.clock.clone(),
+        Arc::new(hearth_agent::infrastructure::ids::UlidGen),
+        Arc::new(hearth_agent::infrastructure::created_objects::FsCreatedObjects::new([])),
+    ));
+    let service_lifecycle = hearth_agent::application::service_lifecycle::ServiceLifecycle::new(
+        services.clone(),
+        ops.clone(),
+        engine.clone(),
+        Arc::new(hearth_agent::infrastructure::supervisor::NoSupervisor),
+        Arc::new(
+            hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(env.db.pool().clone()),
+        ),
+        env.audit_sink.clone(),
+        env.clock.clone(),
+        super::engine::fast_lifecycle(),
+    );
     let service_ops = Arc::new(
         hearth_agent::application::service_op_access::ServiceOpAccess::new(
-            Arc::new(hearth_agent::application::service_ops::ServiceOps::new(
-                Arc::new(hearth_agent::infrastructure::sqlite::SqliteOpJournal::new(
-                    env.db.pool().clone(),
-                )),
-                Arc::new(hearth_agent::application::service_ops::OpLocks::new()),
-                env.clock.clone(),
-                Arc::new(hearth_agent::infrastructure::ids::UlidGen),
-                Arc::new(hearth_agent::infrastructure::created_objects::FsCreatedObjects::new([])),
-            )),
+            ops,
             services.clone(),
             Arc::new(hearth_agent::infrastructure::sqlite::SqliteStore::new(
                 env.db.pool().clone(),
@@ -101,6 +120,7 @@ fn state_over(
     );
     AppState {
         service_ops,
+        service_lifecycle,
         hello: Arc::new(HelloService::new(
             InstallId::from_bytes([3; 16]),
             false,

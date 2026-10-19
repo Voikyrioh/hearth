@@ -305,6 +305,23 @@ pub fn act_of<'a>(
                 .unwrap_or_else(|| (*key).to_owned())
                 .into(),
         },
+        // Démarrer, arrêter, redémarrer (HRT-64) : la clé du service est la cible signée, décodée comme le fait
+        // l'agent.
+        ("POST", ["services", key, "start"]) => AdminAct::ServiceStart {
+            target: hearth_proto::admin_act::decode_segment(key)
+                .unwrap_or_else(|| (*key).to_owned())
+                .into(),
+        },
+        ("POST", ["services", key, "stop"]) => AdminAct::ServiceStop {
+            target: hearth_proto::admin_act::decode_segment(key)
+                .unwrap_or_else(|| (*key).to_owned())
+                .into(),
+        },
+        ("POST", ["services", key, "restart"]) => AdminAct::ServiceRestart {
+            target: hearth_proto::admin_act::decode_segment(key)
+                .unwrap_or_else(|| (*key).to_owned())
+                .into(),
+        },
         // Annuler et décider une opération de service (HRT-144) : l'identifiant du chemin, le choix du corps.
         ("DELETE", ["operations", "services", id]) => AdminAct::OperationCancel { target: id },
         ("POST", ["operations", "services", id, "decision"]) => AdminAct::OperationDecide {

@@ -66,6 +66,9 @@
     "allow-ack-service-logs",
     "allow-keep-service-logs",
     "allow-open-engine-docs",
+    "allow-list-service-operations",
+    "allow-ack-service-operations",
+    "allow-decide-service-operation",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

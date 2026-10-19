@@ -14,9 +14,14 @@ ce que fait la liaison cliente, avec `openssl` pour Ed25519 :
     admin_act.py confirm-release HOST PORT TOKEN USER PASSWORD KEYFILE KEY
                                                                lit un corps JSON (`{}`) et le rend + `reauth` pour
                                                                `POST /services/KEY/release` (code d'acte 0x12)
+    admin_act.py confirm-service VERB HOST PORT TOKEN USER PASSWORD KEYFILE KEY
+                                                               lit un corps JSON (`{}`) et le rend + `reauth` pour
+                                                               `POST /services/KEY/VERB`, VERB étant `start`, `stop`
+                                                               ou `restart` (codes d'acte 0x0C, 0x0D, 0x0E, HRT-64)
 
-Les actes pris en charge sont la mise à jour de l'agent (code 0x06) et les deux actes d'adoption de services
-(0x11, 0x12) : ce sont les seuls que les scénarios envoient. La disposition du message signé est celle de
+Les actes pris en charge sont la mise à jour de l'agent (code 0x06), les deux actes d'adoption de services
+(0x11, 0x12) et les trois actes de cycle de vie d'un service (0x0C, 0x0D, 0x0E) : ce sont les seuls que les
+scénarios envoient. La disposition du message signé est celle de
 `hearth_proto::device_proof::signing_bytes` ; la cible signée d'une adoption est le nombre et l'empreinte
 des clés triées (`hearth_proto::admin_act::AdminAct::services_adopt`).
 Aucun secret n'est écrit sur la sortie d'erreur.
@@ -36,8 +41,9 @@ DOMAIN = b"hearth-device-proof/1"
 USAGE_LOGIN = 0x01
 USAGE_ADMIN_ACT = 0x05
 ACT_AGENT_UPDATE = 0x06
-# Déclarés d'un coup par HRT-144 (`hearth_proto::admin_act::ActKind`) : les scénarios n'en envoient pour l'instant
-# aucun, mais la table des codes est ici pour qui en ajoutera un (une route à venir par lot).
+# Déclarés d'un coup par HRT-144 (`hearth_proto::admin_act::ActKind`). Démarrer, arrêter et redémarrer un service
+# ont leur route depuis HRT-64 (`confirm_service`) ; les autres n'ont pas encore de route, mais la table des codes
+# est ici pour qui en ajoutera un (une route à venir par lot).
 ACT_SERVICE_START = 0x0C
 ACT_SERVICE_STOP = 0x0D
 ACT_SERVICE_RESTART = 0x0E
@@ -192,6 +198,23 @@ def confirm_release(host, port, token, user, password, keyfile, key):
     print(json.dumps(request))
 
 
+SERVICE_ACTS = {
+    "start": ACT_SERVICE_START,
+    "stop": ACT_SERVICE_STOP,
+    "restart": ACT_SERVICE_RESTART,
+}
+
+
+def confirm_service(verb, host, port, token, user, password, keyfile, key):
+    """Démarrer, arrêter, redémarrer un service (HRT-64) : la cible signée est la clé du service, sans paramètre."""
+    if verb not in SERVICE_ACTS:
+        sys.exit("geste inconnu : start, stop ou restart")
+    request = json.load(sys.stdin)
+    tail = act_tail(SERVICE_ACTS[verb], key.encode(), [])
+    (request["reauth"],) = signed_member(host, port, token, user, password, keyfile, tail)
+    print(json.dumps(request))
+
+
 def main():
     command, args = sys.argv[1], sys.argv[2:]
     if command == "enroll":
@@ -202,6 +225,8 @@ def main():
         confirm_adopt(*args)
     elif command == "confirm-release":
         confirm_release(*args)
+    elif command == "confirm-service":
+        confirm_service(*args)
     else:
         sys.exit("commande inconnue")
 

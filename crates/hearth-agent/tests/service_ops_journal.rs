@@ -1203,6 +1203,66 @@ async fn an_unreadable_operation_column_isolates_the_row_and_the_agent_still_sta
     }
 }
 
+/// Démarrer, arrêter, redémarrer (HRT-64) : « forcé » se note tant que l'action court ; une cause posée après
+/// coup ne s'ajoute qu'à une réussite qui n'en a pas, une seule fois (BR-LIFE-005, BR-LIFE-009, BR-LIFE-011).
+#[tokio::test]
+async fn forced_is_noted_while_running_and_a_cause_is_added_once_to_a_success_only() {
+    let env = Env::new().await;
+    let id = running(&env, 1, OpKind::Stop).await;
+    env.ops.mark_forced(&id).await.unwrap();
+    assert!(status(&env, &id).await.forced);
+    // Une opération qui court n'est pas une réussite : aucune cause après coup.
+    assert!(!env.ops.annotate(&id, Cause::RestartedByHost).await.unwrap());
+    env.ops
+        .finish(&id, OpStatus::Succeeded, Some(Cause::ForcedStop))
+        .await
+        .unwrap();
+    // Une réussite qui a déjà sa cause (arrêt forcé) garde la sienne.
+    assert!(!env.ops.annotate(&id, Cause::RestartedByHost).await.unwrap());
+    assert_eq!(status(&env, &id).await.cause, Some(Cause::ForcedStop));
+    // Terminée, elle ne se marque plus « forcée ».
+    assert!(env.ops.mark_forced(&id).await.is_err());
+
+    let plain = running(&env, 2, OpKind::Stop).await;
+    env.ops
+        .finish(&plain, OpStatus::Succeeded, None)
+        .await
+        .unwrap();
+    assert!(
+        env.ops
+            .annotate(&plain, Cause::RestartedByHost)
+            .await
+            .unwrap()
+    );
+    let noted = status(&env, &plain).await;
+    assert_eq!(noted.cause, Some(Cause::RestartedByHost));
+    assert_eq!(noted.status, OpStatus::Succeeded, "le statut ne bouge pas");
+    // Une cause n'en remplace jamais une autre.
+    assert!(
+        !env.ops
+            .annotate(&plain, Cause::StoppedRightAfterStart)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        status(&env, &plain).await.cause,
+        Some(Cause::RestartedByHost)
+    );
+
+    // Un échec ne reçoit jamais de cause après coup.
+    let failed = running(&env, 3, OpKind::Start).await;
+    env.ops
+        .finish(&failed, OpStatus::Failed, Some(Cause::EngineRefused))
+        .await
+        .unwrap();
+    assert!(
+        !env.ops
+            .annotate(&failed, Cause::RestartedByHost)
+            .await
+            .unwrap()
+    );
+}
+
 /// Même un journal entièrement inutilisable (table absente) ne bloque pas le démarrage de l'agent : la
 /// racine de composition le dit et continue.
 #[tokio::test]

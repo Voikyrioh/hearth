@@ -5,8 +5,10 @@ import { OUTCOME_KEYS, originOf } from "@/audit/format";
 import bindings from "@/bindings.ts?raw";
 import { type MessageKey, t } from "@/i18n";
 import type { AuditEntry } from "@/link";
+import { type OperationChoice, type OperationKind, toOperation } from "@/link/serviceOps";
 import { endNotice, gapKindOf, gapText, LOG_STATE_KEYS, sourceTag } from "@/logs/view";
 import { ATTACK_STATE_KEYS } from "@/security/messages";
+import { CHOICE_KEYS, LABEL_KEYS, outcomeText, statusText } from "@/serviceOps/messages";
 import { mountView, restartText } from "@/services/detail";
 import { STATE_KEYS } from "@/services/format";
 import { OPERATION_TEXTS } from "@/stores/link";
@@ -172,6 +174,52 @@ const SAYS: Record<string, (value: string) => void> = {
     if (value === "unknown") expect(said).toBe(t("serviceDetail.restartUnknown"));
     else expect(said).not.toBe(t("serviceDetail.restartUnknown"));
   },
+  // HRT-84 : une opération d'un genre ou d'un statut inconnu a une phrase neutre ; un choix inconnu n'est JAMAIS proposé.
+  OperationKindDto: (value) => {
+    text(LABEL_KEYS[value as OperationKind]);
+  },
+  OperationStatusDto: (value) => {
+    const operation = toOperation({
+      id: "01J",
+      key: "h_01J",
+      kind: "deploy",
+      status: value as "running",
+      step: null,
+      steps: [],
+      percent: null,
+      itemsDone: null,
+      bytesDone: null,
+      bytesTotal: null,
+      etaS: null,
+      cancellable: false,
+      decision: null,
+      cause: null,
+    });
+    const finished = ["cancelled", "rolled_back", "succeeded", "failed", "interrupted"];
+    // Un statut en cours a toujours son texte ; un statut définitif n'en a pas, son issue a une phrase.
+    expect(statusText(operation) === null).toBe(finished.includes(value));
+    expect(outcomeText(operation, "web") !== null).toBe(finished.includes(value));
+  },
+  OperationChoiceDto: (value) => {
+    const choices = toOperation({
+      id: "01J",
+      key: "h_01J",
+      kind: "update",
+      status: "awaiting_decision",
+      step: null,
+      steps: [],
+      percent: null,
+      itemsDone: null,
+      bytesDone: null,
+      bytesTotal: null,
+      etaS: null,
+      cancellable: false,
+      decision: { choices: [value as "continue"], expiresAt: null },
+      cause: null,
+    }).decision?.choices;
+    if (value === "unknown") expect(choices).toEqual([]);
+    else text(CHOICE_KEYS[value as OperationChoice]);
+  },
   ServiceStateDto: (value) => {
     text(STATE_KEYS[value as keyof typeof STATE_KEYS]);
   },
@@ -186,6 +234,10 @@ const NOT_SHOWN: Record<string, string> = {
   OriginDto: "sert au repère « externe » seulement ; sinon rien",
   MarkerKindDto:
     "seul « restarted » fait un repère ; un repère inconnu est ignoré (serviceLogs.test.ts), jamais affiché",
+  OperationCauseDto:
+    "la cause n'est pas mise en phrase : l'issue se dit par le statut de l'opération, la cause reste un code",
+  StepStateDto:
+    "l'état d'une étape n'est pas affiché : seule l'étape courante l'est, par son code connu",
   ProtocolDto: "dit par portLabel (testé dans services.test.ts)",
   ScopeDto: "dit par portLabel (testé dans services.test.ts)",
 };

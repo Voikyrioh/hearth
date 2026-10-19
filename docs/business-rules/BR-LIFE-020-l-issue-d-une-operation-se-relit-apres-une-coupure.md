@@ -23,12 +23,16 @@ Un client qui perd le lien pendant une opération de service n'a pas à deviner 
 - `crates/hearth-agent/tests/service_ops_https.rs::any_account_reads_an_operation_of_a_hearth_service_with_its_steps_and_progress`
 - `crates/hearth-agent/tests/service_ops_journal.rs` (purge à 24 heures, opération non terminée jamais purgée)
 - `crates/hearth-link/tests/service_ops.rs::an_operation_is_read_and_followed_live_by_the_link`
+- `crates/hearth-agent/tests/service_lifecycle_https.rs::an_action_cut_by_an_agent_restart_is_interrupted_frees_the_service_and_is_never_replayed`
+- `crates/hearth-agent/src/domain/ops/recover.rs::tests::a_lifecycle_action_cut_by_a_restart_is_interrupted_and_frees_the_service`
 
 ## Cas limites
 - La table de relecture côté client (HRT-84) arrive avec les écrans ; la liaison fournit la lecture typée.
+- Démarrer, arrêter, redémarrer (HRT-64) : au démarrage de l'agent, une action restée `running` devient `interrupted` (cause `interrupted`, « résultat inconnu »), son verrou n'existe plus, rien n'est rejoué, et l'interruption est consignée au journal d'activité (`record_interrupted`). Leurs plans n'ont aucune étape destructive : jamais « à vérifier ».
 
 ## Règles liées
 - BR-DEPLOY-028, BR-OPS-001, BR-OPS-004, BR-RESIL-009, BR-EDIT-031
 
 ## Historique
+- 2026-10-17 — les actions de cycle de vie interrompues par un redémarrage de l'agent (HRT-64).
 - 2026-10-14 — création (HRT-144 : le socle des opérations branché sur des routes et sur le flux).

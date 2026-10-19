@@ -40,7 +40,7 @@ describe("la ligne « Demander mon mot de passe »", () => {
     radio("À chaque action")?.click();
     await flushPromises();
     expect(document.querySelector("dialog")?.textContent).toContain(
-      "Ton mot de passe te sera demandé à chaque action d'administration.",
+      "Votre mot de passe vous sera demandé à chaque action d'administration.",
     );
     // Rien n'est parti avant la confirmation.
     expect(bridge.calls.some((call) => call.startsWith("reauth setting"))).toBe(false);

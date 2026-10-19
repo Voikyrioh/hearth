@@ -408,6 +408,48 @@ pub(crate) async fn lookup(deps: &Deps, shared: &Shared, id: &OperationId) -> Lo
     }
 }
 
+/// Ce que l'agent dit d'une opération de service qu'on lui redemande (HRT-84).
+pub(crate) enum OpRead {
+    View(Box<hearth_proto::api::service_ops::OperationView>),
+    /// L'agent ne la connaît plus (404) : purgée, ou sur un service que ce compte ne voit pas.
+    Gone,
+    /// Pas de réponse utilisable : on la relira au prochain retour du lien.
+    Unreachable,
+}
+
+/// `GET /operations/services/{id}` pour une opération suivie (BR-RESIL-010). L'identifiant vient de
+/// l'agent (messages du flux) ; il est contrôlé avant de devenir un chemin (`operation_path`).
+pub(crate) async fn read_operation(deps: &Deps, shared: &Shared, op_id: &str) -> OpRead {
+    let Some(path) = crate::domain::service_ops::operation_path(op_id) else {
+        return OpRead::Gone;
+    };
+    let token = match deps.vault.get(&shared.id(), SecretKind::Token) {
+        Ok(Some(token)) => token,
+        _ => return OpRead::Unreachable,
+    };
+    let request = crate::ports::transport::ApiRequest {
+        method: crate::ports::transport::Method::Get,
+        path,
+        body: None,
+        idempotency_key: None,
+    };
+    match timeout(
+        deps.config.request_timeout,
+        deps.transport.request(&shared.target(), &token, &request),
+    )
+    .await
+    {
+        Ok(Ok(response)) if (200..300).contains(&response.status) => {
+            match serde_json::from_value(response.body) {
+                Ok(view) => OpRead::View(Box::new(view)),
+                Err(_) => OpRead::Unreachable,
+            }
+        }
+        Ok(Ok(response)) if response.status == 404 => OpRead::Gone,
+        _ => OpRead::Unreachable,
+    }
+}
+
 /// Exécute une tâche en capturant une éventuelle panique : elle devient un échec de transport.
 pub(crate) async fn guarded<T>(
     future: impl Future<Output = Result<T, TransportError>>,

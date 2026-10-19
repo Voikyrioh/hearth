@@ -234,7 +234,7 @@ test("moteur arrêté : l'administrateur recopie la commande, la lecture seule l
   await expect(page.locator("pre")).toHaveCount(0);
   await expect(page.locator("[data-copy]")).toHaveCount(0);
   await expect(page.locator("[data-readonly-note]")).toHaveText(
-    "Demande à un administrateur de ce serveur de régler cela.",
+    "Demandez à un administrateur de ce serveur de régler cela.",
   );
 });
 

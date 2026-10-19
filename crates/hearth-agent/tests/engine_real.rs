@@ -95,7 +95,10 @@ impl Harness for RealHarness {
         args.push(IMAGE.into());
         args.extend(["sh".into(), "-c".into()]);
         args.push(match spec.run {
+            // Le processus 1 ignore l'ordre d'arrêt (aucun gestionnaire de signal) : tué à l'échéance, code 137.
             Run::Forever => "sleep 300".into(),
+            // Répond à l'ordre d'arrêt : sort de lui-même, code 0.
+            Run::Obedient => "trap 'exit 0' TERM; sleep 300 & wait".into(),
             Run::ExitsWith(code) => format!("exit {code}"),
         });
         let refs: Vec<&str> = args.iter().map(String::as_str).collect();

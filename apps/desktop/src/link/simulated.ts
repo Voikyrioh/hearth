@@ -6,6 +6,7 @@ import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
+import type { DecisionOutcome, OperationChoice, ServiceOperationEvent } from "./serviceOps";
 import type { EngineInfo, EnvVariable, ServiceRights, ServicesEvent } from "./services";
 import {
   type SimAccountResult,
@@ -19,6 +20,7 @@ import { SimulatedLogs } from "./simulated-logs";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
 import { SimulatedReauth, simulatedCovers } from "./simulated-reauth";
 import { SimulatedSecurity } from "./simulated-security";
+import { SimulatedServiceOps } from "./simulated-service-ops";
 import { SimulatedServices } from "./simulated-services";
 import {
   type AccountInputCheck,
@@ -190,6 +192,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly agentUpdates: SimulatedAgentUpdates;
   /** Le moteur de conteneurs et les services simulés (HRT-62) : pilotables par l'appelant (`services.seed`, `setEngine`, `upsert`…). */
   readonly services: SimulatedServices;
+  /** Les opérations de service simulées (HRT-84) : pilotables (`serviceOps.accept`, `update`, `askDecision`, `finish`, `gone`). */
+  readonly serviceOps: SimulatedServiceOps;
   /** Les journaux des services simulés (HRT-67) : pilotables (`logs.seed`, `push`, `flood`, `interrupt`, `end`…). */
   readonly logs = new SimulatedLogs();
 
@@ -212,6 +216,17 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.services = new SimulatedServices(
       this.now,
       (id) => this.events.get(id)?.state === "connected",
+    );
+    this.serviceOps = new SimulatedServiceOps(
+      (id) => this.events.get(id)?.state === "connected",
+      // BR-OPS-001 : tout service créé par Hearth se voit ; un autre, avec le droit « gérer les services » seulement.
+      (id, key) => {
+        if (key.startsWith("h_")) return true;
+        const server = this.servers.find((candidate) => candidate.id === id);
+        return server ? this.accounts.ownRights(server).granted : false;
+      },
+      (id, key, busy) => this.services.setBusy(id, key, busy),
+      this.now,
     );
     this.agentUpdates = new SimulatedAgentUpdates({
       now: this.now,
@@ -256,6 +271,64 @@ export class SimulatedLinkBridge implements LinkBridge {
 
   async onServices(listener: (event: ServicesEvent) => void): Promise<Unsubscribe> {
     return this.services.subscribe(listener);
+  }
+
+  async onServiceOperations(
+    listener: (event: ServiceOperationEvent) => void,
+  ): Promise<Unsubscribe> {
+    return this.serviceOps.subscribe(listener);
+  }
+
+  async ackServiceOperations(serverId: string, opIds: string[]): Promise<void> {
+    this.calls.push("service operations ack");
+    await this.serviceOps.ack(serverId, opIds);
+  }
+
+  async decideServiceOperation(
+    serverId: string,
+    opId: string,
+    choice: OperationChoice,
+    adminPassword: string | null,
+  ): Promise<DecisionOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("service operation decide");
+    // Le serveur est l'arbitre (BR-GRANT-004) : sans le droit, rien n'est décidé, quel que soit le client.
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    // La confirmation à chaque réponse : jamais couverte par l'élévation.
+    const confirmation = this.reauth.confirm(
+      serverId,
+      "operation_decide",
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    const outcome = this.serviceOps.decide(serverId, opId, choice);
+    // Un mot de passe saisi n'ouvre aucune élévation pour cet acte.
+    return outcome;
+  }
+
+  /**
+   * Trois opérations de démonstration (aucune opération réelle n'existe encore) sur trois services créés par
+   * Hearth : un déploiement qui télécharge, une modification lancée par un autre compte, et une modification qui
+   * attend une décision.
+   */
+  seedDemoOperations(serverId: string): void {
+    this.services.upsertMany(serverId, [
+      { key: "h_terraria", name: "terraria", origin: "hearth", state: "deploying" },
+      { key: "h_minecraft", name: "minecraft", origin: "hearth", state: "updating" },
+      { key: "h_robot", name: "robot-discord", origin: "hearth", state: "running" },
+    ]);
+    this.serviceOps.seedDemo(serverId, {
+      deploy: "h_terraria",
+      update: "h_minecraft",
+      wait: "h_robot",
+    });
   }
 
   async recheckEngine(serverId: string): Promise<EngineInfo> {
@@ -999,6 +1072,7 @@ export class SimulatedLinkBridge implements LinkBridge {
     if (state === "connected" && previous && previous.state !== "connected") {
       this.machine.resync(serverId);
       this.services.resync(serverId);
+      this.serviceOps.resync(serverId);
     }
   }
 

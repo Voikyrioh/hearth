@@ -3,6 +3,7 @@ import type { AuditEntry } from "./audit";
 import type { LinkBridge } from "./bridge";
 import type { MachineEvent } from "./machine";
 import type { SecurityState } from "./security";
+import type { ServiceOperationEvent } from "./serviceOps";
 import type { ServicesEvent } from "./services";
 import {
   type FingerprintChange,
@@ -134,6 +135,15 @@ export class NullLinkBridge implements LinkBridge {
   }
   async onServices(_listener: (event: ServicesEvent) => void): Promise<Unsubscribe> {
     return () => {};
+  }
+  async onServiceOperations(
+    _listener: (event: ServiceOperationEvent) => void,
+  ): Promise<Unsubscribe> {
+    return () => {};
+  }
+  async ackServiceOperations(): Promise<void> {}
+  async decideServiceOperation(): Promise<never> {
+    return this.unavailable();
   }
   async recheckEngine(): Promise<never> {
     return this.unavailable();

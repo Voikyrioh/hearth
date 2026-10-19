@@ -58,6 +58,10 @@ impl Harness for FakeHarness {
         self.engine.set_env(&id, &pairs);
         self.runs.lock().unwrap().insert(id.clone(), spec.run);
         self.engine.put_silently(observation);
+        // Un programme qui ignore l'ordre d'arrêt est tué à l'échéance du délai de grâce, code 137.
+        if spec.run == Run::Forever {
+            self.engine.make_stubborn(&id);
+        }
         self.engine.emit(&id, "create");
         id
     }
@@ -67,7 +71,7 @@ impl Harness for FakeHarness {
         self.engine.update(id, |observation| {
             observation.started_at = Some(at(10));
             match run {
-                Run::Forever => {
+                Run::Forever | Run::Obedient => {
                     observation.run_state = RunState::Running;
                     observation.exit_code = None;
                     observation.finished_at = None;

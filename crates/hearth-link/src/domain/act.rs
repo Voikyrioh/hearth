@@ -180,6 +180,11 @@ fn build<'a>(
         ActKind::ReauthSetting => AdminAct::ReauthSetting { mode: mode(body)? },
         ActKind::ServicesAdopt => AdminAct::services_adopt(keys(body)?),
         ActKind::ServiceRelease => AdminAct::ServiceRelease { target: id },
+        // Démarrer, arrêter, redémarrer (HRT-64, BR-LIFE-016) : la clé du service, lue du chemin, est la cible
+        // signée ; le corps ne porte que la confirmation.
+        ActKind::ServiceStart => AdminAct::ServiceStart { target: id },
+        ActKind::ServiceStop => AdminAct::ServiceStop { target: id },
+        ActKind::ServiceRestart => AdminAct::ServiceRestart { target: id },
         // Annuler et décider une opération de service (HRT-144, ADR-0045) : l'identifiant vient du chemin,
         // le choix du corps.
         ActKind::OperationCancel => AdminAct::OperationCancel { target: id_ref()? },
@@ -189,10 +194,7 @@ fn build<'a>(
         },
         // Déclarés pour les tranches suivantes, sans route dans `ROUTES` : aucune requête ne peut les viser
         // (`route_of` ne lit que `ROUTES`). Le lot qui ajoute leur route écrit ici comment les reconstruire.
-        ActKind::ServiceStart
-        | ActKind::ServiceStop
-        | ActKind::ServiceRestart
-        | ActKind::ServiceDeploy
+        ActKind::ServiceDeploy
         | ActKind::ServiceDelete
         | ActKind::BackupCreate
         | ActKind::BackupDelete
@@ -295,6 +297,47 @@ mod tests {
             panic!("acte attendu");
         };
         assert_eq!(act.params(), vec![b"0.3.0".to_vec(), b"ab".to_vec()]);
+    }
+
+    #[test]
+    fn the_lifecycle_acts_sign_the_key_of_the_path() {
+        let empty = json!({});
+        for (verb, expected) in [
+            (
+                "start",
+                AdminAct::ServiceStart {
+                    target: "u_docker-7dtd.service".into(),
+                },
+            ),
+            (
+                "stop",
+                AdminAct::ServiceStop {
+                    target: "u_docker-7dtd.service".into(),
+                },
+            ),
+            (
+                "restart",
+                AdminAct::ServiceRestart {
+                    target: "u_docker-7dtd.service".into(),
+                },
+            ),
+        ] {
+            let path = format!("/services/u_docker-7dtd.service/{verb}");
+            assert_eq!(
+                classify("POST", &path, Some(&empty)),
+                Ok(Route::Act(expected)),
+                "{verb}"
+            );
+        }
+        // Une clé qui n'en est pas une n'est jamais un acte : la requête part comme une route inconnue.
+        assert_eq!(
+            classify("POST", "/services/abc/stop", Some(&empty)),
+            Ok(Route::Free)
+        );
+        assert_eq!(
+            classify("POST", "/services/u_a%2fb.service/start", Some(&empty)),
+            Ok(Route::Free)
+        );
     }
 
     #[test]

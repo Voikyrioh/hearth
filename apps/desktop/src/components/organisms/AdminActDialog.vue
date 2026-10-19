@@ -12,7 +12,7 @@ import type { AdminActKind, Role } from "@/link";
 // LA fenêtre de confirmation d'un acte d'administration (HRT-30, BR-TRUST-036, 042, 043), réutilisée par
 // TOUS les actes : créer un compte, changer un rôle, le mot de passe d'un autre ou le sien, supprimer un
 // compte, fermer des sessions, mettre à jour l'agent, mode attaque, réglage de fréquence. Le slot reçoit
-// les champs propres à l'acte ; la fenêtre ajoute « Ton mot de passe » SELON CE QUE L'AGENT ANNONCE, lu à
+// les champs propres à l'acte ; la fenêtre ajoute « Votre mot de passe » SELON CE QUE L'AGENT ANNONCE, lu à
 // chaque ouverture (jamais deviné) :
 // - agent qui n'annonce pas la confirmation : la liaison n'envoie aucun acte, la fenêtre dit de mettre
 //   l'agent à jour et ne propose rien ;
@@ -90,7 +90,7 @@ watch(password, (value) => {
 
 // Où va le curseur une fois l'état lu (FIX:01M4D0RHZE7JFMV700JKA3DM1R, C17, C56) : dans le PREMIER champ à
 // remplir de la fenêtre (identifiant, nouveau mot de passe…), jamais dans la confirmation qui vient à la fin ;
-// une fenêtre sans champ d'acte (confirmation simple) met le curseur dans « Ton mot de passe ». Le curseur
+// une fenêtre sans champ d'acte (confirmation simple) met le curseur dans « Votre mot de passe ». Le curseur
 // n'est déplacé que s'il n'est dans aucun champ : ce que l'utilisateur a déjà commencé à taper ne bouge pas.
 watch(
   () => props.open && reauth.ready.value && !reauth.keyMissing.value && !reauth.agentTooOld.value,

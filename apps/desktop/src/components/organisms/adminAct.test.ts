@@ -49,10 +49,10 @@ async function open(kind: AdminActKind = "sessions_revoke") {
 const text = () => document.body.textContent ?? "";
 
 describe("AdminActDialog", () => {
-  it("asks « Ton mot de passe » when the agent announces the confirmation, and sends nothing without it", async () => {
+  it("asks « Votre mot de passe » when the agent announces the confirmation, and sends nothing without it", async () => {
     const { wrapper, sent } = await open();
     expect(reauthField()).not.toBeNull();
-    expect(text()).toContain("Ton mot de passe");
+    expect(text()).toContain("Votre mot de passe");
     expect(dialogButton("Fermer")?.getAttribute("aria-disabled")).toBe("true");
     dialogButton("Fermer")?.click();
     await flushPromises();
@@ -107,7 +107,7 @@ describe("AdminActDialog", () => {
       dialogButton("Fermer")?.click();
       await flushPromises();
     }
-    expect(text()).toContain("Trop d'essais. Attends 30 s avant de réessayer.");
+    expect(text()).toContain("Trop d'essais. Attendez 30 s avant de réessayer.");
     expect(wrapper.emitted("close")).toBeUndefined();
     wrapper.unmount();
   });
@@ -308,7 +308,7 @@ describe("AdminActDialog", () => {
     });
     await flushPromises();
     expect(document.querySelector("[data-reauth-failed]")).not.toBeNull();
-    expect(text()).toContain("Impossible de lire ce que le serveur attend de toi.");
+    expect(text()).toContain("Impossible de lire ce que le serveur attend de vous.");
     expect(
       document.querySelector("dialog button[type=submit]")?.getAttribute("aria-disabled"),
     ).toBe("true");
@@ -320,10 +320,10 @@ describe("AdminActDialog", () => {
     wrapper.unmount();
   });
 
-  it("writes the texts of the confirmation in the second person, without a long dash", () => {
+  it("writes the texts of the confirmation with « vous », without a long dash", () => {
     const texts = JSON.stringify(fr.reauth);
     expect(texts).not.toContain("—");
-    for (const word of [" votre ", " vos ", " vous "])
+    for (const word of [" tu ", " ton ", " ta ", " tes ", " te ", " toi", "-toi", "le tien"])
       expect(texts.toLowerCase()).not.toContain(word);
   });
 });

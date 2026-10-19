@@ -23,9 +23,12 @@ import {
   restartText,
 } from "@/services/detail";
 import { imageLabel, loopBand, portLabel, stateLine } from "@/services/format";
-import type { RightsGate } from "@/services/rights";
+import { pilotLock } from "@/services/pilot";
+import { canAct, type RightsGate } from "@/services/rights";
+import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import Callout from "../molecules/Callout.vue";
 import DashCard from "../molecules/DashCard.vue";
+import OperationCard from "../molecules/OperationCard.vue";
 import OriginTags from "../molecules/OriginTags.vue";
 import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
 import EnvVarsSection from "./EnvVarsSection.vue";
@@ -57,6 +60,7 @@ const emit = defineEmits<{
   openOther: [key: string];
   retryRights: [];
   "update:tab": [tab: "detail" | "logs"];
+  decide: [operation: TrackedOperation];
 }>();
 
 const now = useNow();
@@ -72,6 +76,18 @@ const service = computed<ServiceInfo | null>(() => {
   return null;
 });
 const gone = computed(() => props.opened.kind === "gone");
+
+// L'opération qui tient ce service (HRT-84) : sa carte, et le verrou des boutons de pilotage (BR-SVC-031).
+const operations = useServiceOpsStore();
+const ongoing = computed(() =>
+  service.value ? operations.forService(props.serverId, service.value.key) : undefined,
+);
+const lock = computed(() =>
+  service.value
+    ? pilotLock(service.value, ongoing.value !== undefined)
+    : { locked: false, by: null },
+);
+const allowed = computed(() => canAct(props.gate));
 const sameName = computed(() => (props.opened.kind === "gone" ? props.opened.sameName : null));
 
 const tabs = computed(() => [
@@ -175,6 +191,20 @@ const commandNote = computed(() => {
     </div>
 
     <header v-if="service" class="detail__head">
+      <!-- Une action tient le service : les boutons de pilotage sont désactivés, quel que soit l'état réel (BR-SVC-031) -->
+      <Callout v-if="!gone && lock.locked" tone="info" data-detail-busy>
+        {{ t("serviceOps.busy") }}
+        <template v-if="lock.by"> {{ lock.by }}</template>
+      </Callout>
+      <OperationCard
+        v-if="!gone && ongoing"
+        :operation="ongoing.operation"
+        :name="ongoing.name"
+        :detailed="allowed"
+        :by="lock.by"
+        :can-decide="allowed"
+        @decide="emit('decide', ongoing)"
+      />
       <!-- Démarrer, arrêter, redémarrer : pas encore branchés (l'agent ne sait pas encore les faire) -->
       <p v-if="!gone && tab === 'detail'" class="detail__soon" data-detail-actions-soon>
         <HIcon name="info" size="sm" />

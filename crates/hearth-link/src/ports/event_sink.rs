@@ -17,4 +17,8 @@ pub trait EventSink: Send + Sync {
     /// n'a rien à écrire (le défaut ignore), et ajouter une variante à [`Event`] casserait chaque
     /// `match` exhaustif du client. Ne bloque jamais, comme `emit`.
     fn service_operation(&self, _server: &ServerId, _operation: Arc<OperationView>) {}
+
+    /// L'agent ne connaît plus cette opération (purgée, ou service que le compte ne voit plus) : elle
+    /// n'est plus suivie. Ne bloque jamais (HRT-84).
+    fn service_operation_gone(&self, _server: &ServerId, _operation_id: &str) {}
 }

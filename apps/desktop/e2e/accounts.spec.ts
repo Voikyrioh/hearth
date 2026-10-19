@@ -46,7 +46,7 @@ const dialog = (page: Page) => page.locator("dialog[open]");
 
 /**
  * Confirme l'acte de la fenêtre ouverte : attend que la fenêtre ait lu ce que l'agent attend (le champ
- * « Ton mot de passe », ou le délai de 5 minutes déjà ouvert), saisit le mot de passe s'il est demandé,
+ * « Votre mot de passe », ou le délai de 5 minutes déjà ouvert), saisit le mot de passe s'il est demandé,
  * puis clique sur le bouton.
  */
 async function confirm(page: Page, label: string, password = OWN) {
@@ -54,7 +54,7 @@ async function confirm(page: Page, label: string, password = OWN) {
   await expect(
     open.locator("[data-reauth-field], [data-reauth-elevated], [data-reauth-no-key]"),
   ).toBeVisible();
-  const field = open.getByLabel("Ton mot de passe");
+  const field = open.getByLabel("Votre mot de passe");
   if ((await field.count()) > 0) await field.fill(password);
   await open.getByRole("button", { name: label, exact: true }).click();
 }
@@ -138,9 +138,9 @@ test("création : critères du mot de passe en direct (coche et croix), bouton i
   await expect(create).toHaveAttribute("aria-disabled", "true");
   await dialog(page).getByLabel("Confirme le mot de passe").fill(GOOD);
   // Tout est valide, mais l'acte demande aussi ton mot de passe : le bouton attend.
-  await expect(dialog(page).getByLabel("Ton mot de passe")).toBeVisible();
+  await expect(dialog(page).getByLabel("Votre mot de passe")).toBeVisible();
   await expect(create).toHaveAttribute("aria-disabled", "true");
-  await dialog(page).getByLabel("Ton mot de passe").fill(OWN);
+  await dialog(page).getByLabel("Votre mot de passe").fill(OWN);
   await expect(create).not.toHaveAttribute("aria-disabled", "true");
   await shoot(page, "comptes-creation");
 });
@@ -199,9 +199,9 @@ test("changer le rôle par la liste déroulante, et le dernier administrateur es
   // Passer en Lecture seule retire un accès : le délai de 5 minutes ouvert par le mot de passe de
   // l'instant d'avant le couvre, la fenêtre n'a pas de champ et le dit.
   await expect(dialog(page).locator("[data-reauth-elevated]")).toContainText(
-    "Il te sera redemandé dans",
+    "Il vous sera redemandé dans",
   );
-  await expect(dialog(page).getByLabel("Ton mot de passe")).toHaveCount(0);
+  await expect(dialog(page).getByLabel("Votre mot de passe")).toHaveCount(0);
   await confirm(page, "Changer le rôle");
   await expect(row(page, "paul").locator("td").nth(0)).toHaveText("Lecture seule");
 });

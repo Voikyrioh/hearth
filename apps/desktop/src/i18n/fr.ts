@@ -129,7 +129,7 @@ export const fr = {
     removeAdviceTitle: "Si ce poste n'est plus à toi",
     removeAdvice:
       "Change aussi ton mot de passe si ce poste n'est plus à toi : un poste retiré depuis un autre PC peut se reconnaître à sa prochaine connexion par mot de passe.",
-    password: "Ton mot de passe",
+    password: "Votre mot de passe",
     passwordPlaceholder: "Mot de passe",
     removed: "Ce poste a été retiré de ta liste de postes de confiance.",
     wrongPassword: "Mot de passe incorrect.",
@@ -212,7 +212,7 @@ export const fr = {
       "Les postes non reconnus pourront de nouveau essayer de se connecter. Si l'attaque continue, tu pourras le réactiver.",
     passwordHelp:
       "Pour changer le mode attaque, confirme ton mot de passe. La clé de ce poste est vérifiée en même temps.",
-    password: "Ton mot de passe",
+    password: "Votre mot de passe",
     passwordPlaceholder: "Mot de passe",
     enabled: "Mode attaque activé. Seuls les postes reconnus peuvent se connecter.",
     disabled: "Mode attaque désactivé.",
@@ -239,42 +239,42 @@ export const fr = {
     tagAlert: "Alerte de sécurité",
   },
   reauth: {
-    password: "Ton mot de passe",
-    passwordPlaceholder: "Le tien, pour confirmer",
-    currentPassword: "Ton mot de passe actuel",
-    help: "Pour confirmer, redonne ton mot de passe. La clé de ce poste est vérifiée en même temps.",
-    elevated: "Mot de passe déjà confirmé. Il te sera redemandé dans {time}.",
+    password: "Votre mot de passe",
+    passwordPlaceholder: "Le vôtre, pour confirmer",
+    currentPassword: "Votre mot de passe actuel",
+    help: "Pour confirmer, saisissez de nouveau votre mot de passe. La clé de ce poste est vérifiée en même temps.",
+    elevated: "Mot de passe déjà confirmé. Il vous sera redemandé dans {time}.",
     elapsed:
-      "Le délai est terminé. Redonne ton mot de passe pour continuer, ce que tu as saisi est gardé.",
+      "Le délai est terminé. Saisissez de nouveau votre mot de passe pour continuer : ce que vous avez saisi est gardé.",
     wrongPassword: "Mot de passe actuel incorrect.",
-    waiting: "Trop d'essais. Attends {n} s avant de réessayer.",
-    busy: "Le serveur est occupé. Réessaie dans un instant.",
-    loading: "Lecture de ce que le serveur attend de toi…",
-    stateFailed: "Impossible de lire ce que le serveur attend de toi.",
+    waiting: "Trop d'essais. Attendez {n} s avant de réessayer.",
+    busy: "Le serveur est occupé. Réessayez dans un instant.",
+    loading: "Lecture de ce que le serveur attend de vous…",
+    stateFailed: "Impossible de lire ce que le serveur attend de vous.",
     agentOldTitle: "Mise à jour requise",
     goSettings: "Aller aux réglages",
     noKeyTitle: "Poste non enregistré",
     noKey:
-      "Pour faire cette action, ce poste doit être enregistré. Reconnecte-toi avec ton mot de passe pour l'enregistrer, puis recommence.",
+      "Pour faire cette action, ce poste doit être enregistré. Reconnectez-vous avec votre mot de passe pour l'enregistrer, puis recommencez.",
     reconnect: "Me reconnecter pour enregistrer ce poste",
     notEnrolled:
-      "Le serveur ne reconnaît pas la clé de ce poste : il n'est pas enregistré. Reconnecte-toi avec ton mot de passe pour l'enregistrer. Si ton compte a déjà 8 postes, retires-en un depuis un autre poste, ou demande à l'administrateur du serveur la commande « hearth-agent account revoke » (voir le guide « Récupérer l'accès administrateur »).",
-    passwordMissing: "Cette action demande ton mot de passe.",
+      "Le serveur ne reconnaît pas la clé de ce poste : il n'est pas enregistré. Reconnectez-vous avec votre mot de passe pour l'enregistrer. Si votre compte a déjà 8 postes, retirez-en un depuis un autre poste, ou demandez à l'administrateur du serveur la commande « hearth-agent account revoke » (voir le guide « Récupérer l'accès administrateur »).",
+    passwordMissing: "Cette action demande votre mot de passe.",
     settingLabel: "Demander mon mot de passe",
     settingHelp:
-      "Une saisie de ton mot de passe peut valoir 5 minutes pour les actions courantes. Les actions sensibles le redemandent toujours, et la clé de ce poste est vérifiée à chaque action.",
+      "Une saisie de votre mot de passe peut valoir 5 minutes pour les actions courantes. Les actions sensibles le redemandent toujours, et la clé de ce poste est vérifiée à chaque action.",
     settingEach: "À chaque action",
     settingUnknown:
-      "Ce client ne sait pas lire ce réglage sur ce serveur. Mets Hearth à jour sur ce PC.",
+      "Ce client ne sait pas lire ce réglage sur ce serveur. Mettez Hearth à jour sur ce PC.",
     settingWindow: "Toutes les 5 minutes",
     settingTitle: "Changer la fréquence du mot de passe",
-    settingMessageEach: "Ton mot de passe te sera demandé à chaque action d'administration.",
+    settingMessageEach: "Votre mot de passe vous sera demandé à chaque action d'administration.",
     settingMessageWindow:
-      "Une saisie de ton mot de passe vaudra 5 minutes pour les actions courantes. Les actions sensibles le redemanderont toujours.",
+      "Une saisie de votre mot de passe vaudra 5 minutes pour les actions courantes. Les actions sensibles le redemanderont toujours.",
     settingApply: "Changer",
-    settingChangedEach: "Ton mot de passe te sera demandé à chaque action.",
-    settingChangedWindow: "Ton mot de passe te sera demandé toutes les 5 minutes.",
-    settingUnsupported: "Ce serveur ne propose pas encore ce réglage. Mets l'agent à jour.",
+    settingChangedEach: "Votre mot de passe vous sera demandé à chaque action.",
+    settingChangedWindow: "Votre mot de passe vous sera demandé toutes les 5 minutes.",
+    settingUnsupported: "Ce serveur ne propose pas encore ce réglage. Mettez l'agent à jour.",
     roleTitle: "Changer le rôle de {username} ?",
     roleMessage: "{username} deviendra {role}.",
     roleApply: "Changer le rôle",
@@ -296,9 +296,9 @@ export const fr = {
     retry: "Réessayer",
     loading: "Chargement",
     unreadableOne:
-      "1 élément n'est pas lisible par cette version de Hearth. Mets Hearth à jour sur ce PC.",
+      "1 élément n'est pas lisible par cette version de Hearth. Mettez Hearth à jour sur ce PC.",
     unreadableMany:
-      "{n} éléments ne sont pas lisibles par cette version de Hearth. Mets Hearth à jour sur ce PC.",
+      "{n} éléments ne sont pas lisibles par cette version de Hearth. Mettez Hearth à jour sur ce PC.",
   },
   rail: {
     skipToContent: "Aller au contenu",
@@ -849,29 +849,29 @@ export const fr = {
       unknown: "État non reconnu",
     },
     stoppedText:
-      "Le moteur de conteneurs est installé mais arrêté. S'il vient de démarrer, attends quelques secondes.",
+      "Le moteur de conteneurs est installé mais arrêté. S'il vient de démarrer, attendez quelques secondes.",
     deniedText:
       "Le moteur tourne, mais l'agent Hearth n'a pas le droit de l'utiliser. L'agent tourne sous le compte « {account} » : ce compte doit être autorisé à se servir du moteur.",
     // Hors spec (HRT-74 S7) : le nom annoncé par l'agent n'est pas un nom de compte valide, il n'est jamais affiché.
     deniedTextUnnamed:
       "Le moteur tourne, mais l'agent Hearth n'a pas le droit de l'utiliser. L'agent tourne sous un compte que Hearth ne peut pas nommer : ce compte doit être autorisé à se servir du moteur.",
     deniedAdminTextUnnamed:
-      "Le moteur tourne, mais l'agent Hearth n'a pas le droit de l'utiliser. L'agent tourne sous un compte qui a déjà tous les droits du serveur : ce refus vient d'un réglage de sécurité du serveur ou du moteur, que Hearth ne peut pas corriger. Vérifie la configuration de sécurité du moteur sur le serveur.",
+      "Le moteur tourne, mais l'agent Hearth n'a pas le droit de l'utiliser. L'agent tourne sous un compte qui a déjà tous les droits du serveur : ce refus vient d'un réglage de sécurité du serveur ou du moteur, que Hearth ne peut pas corriger. Vérifiez la configuration de sécurité du moteur sur le serveur.",
     deniedWarning:
       "Autoriser ce compte à se servir du moteur lui donne, en pratique, les mêmes pouvoirs que l'administrateur du serveur.",
     deniedAdminText:
-      "Le moteur tourne, mais l'agent Hearth n'a pas le droit de l'utiliser. L'agent tourne sous le compte « {account} », qui a déjà tous les droits du serveur : ce refus vient d'un réglage de sécurité du serveur ou du moteur, que Hearth ne peut pas corriger. Vérifie la configuration de sécurité du moteur sur le serveur.",
+      "Le moteur tourne, mais l'agent Hearth n'a pas le droit de l'utiliser. L'agent tourne sous le compte « {account} », qui a déjà tous les droits du serveur : ce refus vient d'un réglage de sécurité du serveur ou du moteur, que Hearth ne peut pas corriger. Vérifiez la configuration de sécurité du moteur sur le serveur.",
     unknownText:
-      "Hearth ne reconnaît pas l'état du moteur annoncé par ce serveur. Vérifie à nouveau ; si cela dure, l'agent du serveur est peut-être plus récent que Hearth sur ton poste.",
+      "Hearth ne reconnaît pas l'état du moteur annoncé par ce serveur. Vérifiez à nouveau. Si cela dure, l'agent du serveur est peut-être plus récent que Hearth sur votre poste.",
     unresponsiveText: "Le moteur de conteneurs ne répond pas.",
     lastKnown: "Dernier état connu : {state}, vu il y a {age}.",
     absentText:
       "Aucun moteur de conteneurs détecté. Ce serveur ne peut pas encore faire tourner de services.",
     distribution: "Distribution détectée : {distribution}",
     unknownDistribution:
-      "Hearth ne reconnaît pas la distribution de ce serveur. Suis la documentation officielle de Docker pour ton système.",
+      "Hearth ne reconnaît pas la distribution de ce serveur. Suivez la documentation officielle de Docker pour votre système.",
     declarative:
-      "Ce serveur est configuré de façon déclarative : le moteur s'ajoute dans sa configuration, pas avec une commande. Ajoute le texte ci-dessous à la configuration du serveur, puis applique-la.",
+      "Ce serveur est configuré de façon déclarative : le moteur s'ajoute dans sa configuration, pas avec une commande. Ajoutez le texte ci-dessous à la configuration du serveur, puis appliquez-la.",
     unsupportedEngineText:
       "Moteur non pris en charge pour l'instant : {engine}. Hearth fonctionne avec Docker.",
     unsupportedVersionText:
@@ -880,13 +880,13 @@ export const fr = {
       "Le pilotage des services est désactivé sur ce serveur. Un administrateur du serveur peut le réactiver dans la configuration de l'agent Hearth.",
     oldAgent: "Ce serveur doit être mis à jour pour gérer les services (agent {version}).",
     oldAgentLink: "Voir la mise à jour de l'agent",
-    readOnlyNote: "Demande à un administrateur de ce serveur de régler cela.",
+    readOnlyNote: "Demandez à un administrateur de ce serveur de régler cela.",
     docsLink: "Documentation officielle de Docker",
     recheck: "Vérifier à nouveau",
     rechecking: "Vérification du moteur…",
-    helpInstall: "Installer le moteur sur ton serveur",
-    helpStart: "Démarrer le moteur sur ton serveur",
-    helpConfig: "Ajouter le moteur à la configuration de ton serveur",
+    helpInstall: "Installer le moteur sur votre serveur",
+    helpStart: "Démarrer le moteur sur votre serveur",
+    helpConfig: "Ajouter le moteur à la configuration de votre serveur",
     helpAccess: "Autoriser l'agent à utiliser le moteur",
     runHere: "À lancer sur le serveur, pas dans Hearth",
     addHere: "À ajouter sur le serveur, pas dans Hearth",
@@ -895,8 +895,8 @@ export const fr = {
     copyCommand: "Copier la commande",
     copyText: "Copier le texte",
     copied: "Copié",
-    copyFailedCommand: "Impossible de copier. Sélectionne la commande et copie-la à la main.",
-    copyFailedText: "Impossible de copier. Sélectionne le texte et copie-le à la main.",
+    copyFailedCommand: "Impossible de copier. Sélectionnez la commande et copiez-la à la main.",
+    copyFailedText: "Impossible de copier. Sélectionnez le texte et copiez-le à la main.",
     // Aide par famille de distribution, choisie d'après `host.os_id` et `host.os_like` (conception technique,
     // section 8). `{account}` : le compte sous lequel l'agent tourne.
     help: {
@@ -940,6 +940,7 @@ export const fr = {
       restartLoop: "Redémarre en boucle",
       paused: "En pause",
       deploying: "Déploiement en cours",
+      updating: "Modification en cours",
       unknown: "État non reconnu",
     },
     sinceRunning: "depuis {duration}",
@@ -973,11 +974,131 @@ export const fr = {
     externalHelp: "Lancé en dehors de Hearth. Hearth le suit mais ne l'a pas créé.",
     otherHelp: "Services en pause, ou dans un état que Hearth ne sait pas nommer.",
     emptyText:
-      "Hearth affiche ici les services qu'il a créés ou que tu lui as confiés. Installer un service depuis Hearth arrive bientôt.",
+      "Hearth affiche ici les services qu'il a créés ou que vous lui avez confiés. Installer un service depuis Hearth arrive bientôt.",
     openRow: "Ouvrir le détail de {name}",
   },
   // Le détail d'un service (HRT-63, BR-SVC-007 à 009, 016, 023, 027, 028). Textes de la spec `voir-les-services` et du
   // design du lot 1, mot pour mot ; les autres sont marqués « hors spec ».
+  serviceOps: {
+    // La bande « Opérations en cours » (BR-SVC-029) et la carte d'une opération (HRT-84).
+    stripTitle: "Opérations en cours",
+    stripRegion: "Opérations en cours",
+    count: "{n} opérations en cours.",
+    countOne: "1 opération en cours.",
+    more: "+{n} autres",
+    moreLabel: "Afficher les {n} autres opérations",
+    less: "Réduire la liste",
+    see: "Voir",
+    seeLabel: "Voir {label}",
+    by: "Lancée par {account}.",
+    progress: "Progression de {label}",
+    percent: "{n} %",
+    bytes: "{done} sur {total}",
+    items: "{n} éléments traités",
+    itemsErased: "{n} éléments effacés",
+    eta: "{time} restantes",
+    // Le titre d'une opération, avec le nom du service.
+    label: {
+      start: "Démarrage de {name}",
+      stop: "Arrêt de {name}",
+      restart: "Redémarrage de {name}",
+      deploy: "Déploiement de {name}",
+      update: "Modification de {name}",
+      delete: "Suppression de {name}",
+      resources: "Réglage des ressources de {name}",
+      backup: "Sauvegarde de {name}",
+      restore: "Restauration de {name}",
+      worldImport: "Reprise d'un monde dans {name}",
+      unknown: "Opération sur {name}",
+    },
+    // Le sujet d'une phrase d'issue, avec le nom du service (genre neutre : « a réussi », « a échoué »).
+    subject: {
+      start: "Le démarrage de {name}",
+      stop: "L'arrêt de {name}",
+      restart: "Le redémarrage de {name}",
+      deploy: "Le déploiement de {name}",
+      update: "La modification de {name}",
+      delete: "La suppression de {name}",
+      resources: "Le réglage des ressources de {name}",
+      backup: "La sauvegarde de {name}",
+      restore: "La restauration de {name}",
+      worldImport: "La reprise du monde de {name}",
+      unknown: "L'opération sur {name}",
+    },
+    // L'effacement des données d'un service : sans le droit de gérer les services, aucun chemin ni progression.
+    eraseWithRight: "Effacement des données de {name}",
+    eraseNoRight: "Effacement des données de {name} en cours.",
+    // Le nom d'un service que ce poste ne connaît pas (supprimé, ou non listé).
+    unknownService: "ce service",
+    steps: {
+      check: "Vérification",
+      pull: "Récupération de l'image",
+      stop: "Arrêt du service",
+      stopOld: "Arrêt de l'ancien service",
+      recreate: "Recréation",
+      createNew: "Création du nouveau service",
+      start: "Démarrage",
+      verify: "Vérification du démarrage",
+      rollback: "Retour à l'état d'avant",
+      copy: "Copie",
+      erase: "Effacement",
+    },
+    status: {
+      accepted: "L'opération attend son départ.",
+      running: "L'opération est en cours.",
+      awaitingDecision: "Votre réponse est attendue.",
+      needsAttention: "L'état de ce service est à vérifier.",
+      cancelling: "L'annulation de l'opération est en cours.",
+      rollingBack: "Le retour à l'état d'avant est en cours.",
+      unknown: "L'état de cette opération est inconnu.",
+    },
+    // L'issue, annoncée une seule fois, même après une coupure (BR-RESIL-010).
+    outcome: {
+      succeeded: "{subject} a réussi.",
+      failed: "{subject} a échoué.",
+      cancelled: "{subject} : l'opération a été annulée.",
+      rolledBack: "{subject} : le service a été remis comme avant.",
+      interrupted: "{subject} : l'opération a été interrompue.",
+    },
+    // Répondre à une opération qui attend (BR-SVC-029).
+    decide: "Répondre",
+    verify: "Vérifier",
+    decideLabel: "Répondre pour {label}",
+    verifyLabel: "Vérifier l'état pour {label}",
+    needsRight: "Il faut le droit de gérer les services pour répondre.",
+    dialogTitle: "Répondre pour {name}",
+    dialogAwaiting: "Cette opération attend votre réponse.",
+    dialogAttention:
+      "L'état de ce service est ambigu. Vérifiez-le sur le serveur, puis dites ce que vous voulez en faire.",
+    deadline: "Sans réponse avant {time}, l'opération sera annulée.",
+    noDeadline: "Cette opération attend votre réponse aussi longtemps qu'il le faut.",
+    choicesLegend: "Votre réponse",
+    submit: "Valider la réponse",
+    cancel: "Annuler",
+    choice: {
+      continue: "Poursuivre l'opération",
+      cancel: "Annuler l'opération",
+      revert: "Revenir à l'état d'avant",
+      keep: "Garder l'état actuel",
+      verified: "J'ai vérifié l'état",
+    },
+    refused: {
+      notFound: "Cette opération n'existe plus.",
+      notWaiting: "Cette opération n'attend plus de réponse.",
+      notOffered: "Ce choix n'est plus proposé pour cette opération.",
+      notApplicable: "Ce choix ne s'applique plus à l'état de cette opération.",
+      expired: "Le délai de réponse est dépassé : l'opération a été annulée.",
+      tooLate: "Il est trop tard pour annuler : l'opération a passé le point de non-retour.",
+      changed: "L'opération a changé pendant votre demande. Relisez son état, puis réessayez.",
+      other: "Votre réponse n'a pas pu être prise en compte.",
+    },
+    unknownResult:
+      "Le résultat de votre réponse n'est pas connu. L'état de l'opération se mettra à jour dès que le lien reviendra.",
+    forbidden: "Votre réponse a été refusée par le serveur.",
+    // Le verrou d'un service tenu par une action (BR-SVC-031).
+    busy: "Une action est déjà en cours sur ce service.",
+    busyBy: "Lancée par {account}.",
+  },
   serviceDetail: {
     back: "Retour à la liste",
     region: "Détail du service {name}",
@@ -1019,7 +1140,7 @@ export const fr = {
     // Hors spec : la commande peut porter un secret ; réservée, par prudence, aux comptes qui peuvent gérer les
     // services (décision du propriétaire attendue), et pas lue tant que la liste vient du disque.
     rightUnknown:
-      "Visible seulement pour les comptes qui peuvent gérer les services. Ton droit n'est pas connu pour l'instant.",
+      "Visible seulement pour les comptes qui peuvent gérer les services. Votre droit n'est pas connu pour l'instant.",
     commandNotRead: "Pas encore lue : elle se lira quand le lien avec le serveur sera revenu.",
     adoptedNote:
       "Ce service a été créé hors de Hearth : sa configuration reste celle de son créateur.",
@@ -1042,7 +1163,7 @@ export const fr = {
     readWrite: "Lecture et écriture",
     readOnly: "Lecture seule",
     restart: "Redémarrage",
-    restartUnlessStopped: "Redémarre tout seul sauf si tu l'arrêtes",
+    restartUnlessStopped: "Redémarre tout seul sauf si vous l'arrêtez",
     restartAlways: "Redémarre toujours",
     restartNone: "Ne redémarre pas tout seul",
     restartSupervisor: "Relancé par le système du serveur",
@@ -1060,7 +1181,7 @@ export const fr = {
       none: "Aucune variable",
       empty: "(valeur vide)",
       maskedValue: "valeur masquée",
-      failed: "Impossible de lire les valeurs. Réessaie.",
+      failed: "Impossible de lire les valeurs. Réessayez.",
       // Hors spec : la section est indisponible tant que le moteur n'est pas prêt.
       engineNotReady: "Indisponible tant que le moteur de conteneurs n'est pas prêt.",
       // Texte du design du lot 1 : près du bouton quand le lien est coupé.
@@ -1226,7 +1347,7 @@ export const fr = {
     permits:
       "Ce droit permet de démarrer, arrêter, redémarrer et déployer des services sur ce serveur.",
     revokeOwnWarning:
-      "C'est ton propre compte. Si tu lances cette commande, tu ne pourras plus démarrer, arrêter, redémarrer ni déployer de services sur ce serveur.",
+      "C'est votre propre compte. Si vous lancez cette commande, vous ne pourrez plus démarrer, arrêter, redémarrer ni déployer de services sur ce serveur.",
     removalBlocked:
       "Ce compte peut gérer les services : seul un compte qui le peut aussi, ou la commande sur le serveur, peut le supprimer.",
     rowLabel: "Gestion des services",
@@ -1236,14 +1357,14 @@ export const fr = {
     commandLabel: "Commande à lancer sur le serveur",
     copyCommand: "Copier la commande",
     copied: "Copiée",
-    copyFailed: "La copie a échoué. Sélectionne le texte et copie-le toi-même.",
-    reason: "Ton compte ne peut pas gérer les services de ce serveur.",
-    adminIntro: "Le droit se donne depuis le serveur. Lance cette commande sur le serveur :",
-    readonlyAsk: "Demande à la personne qui administre ce serveur.",
+    copyFailed: "La copie a échoué. Sélectionnez le texte et copiez-le vous-même.",
+    reason: "Votre compte ne peut pas gérer les services de ce serveur.",
+    adminIntro: "Le droit se donne depuis le serveur. Lancez cette commande sur le serveur :",
+    readonlyAsk: "Demandez à la personne qui administre ce serveur.",
     oldAgent: "Ce serveur doit être mis à jour pour gérer les droits sur les services.",
-    refused: "Tu n'as pas le droit de gérer les services de ce serveur.",
-    lost: "Tu n'as plus le droit de gérer les services de ce serveur.",
-    readFailed: "Impossible de lire ton droit sur les services. Réessaie.",
+    refused: "Vous n'avez pas le droit de gérer les services de ce serveur.",
+    lost: "Vous n'avez plus le droit de gérer les services de ce serveur.",
+    readFailed: "Impossible de lire votre droit sur les services. Réessayez.",
     // Hors spec : le nom du bouton qui ouvre le détail d'un compte, et le titre de ce détail.
     detailOf: "Détail du compte {username}",
   },

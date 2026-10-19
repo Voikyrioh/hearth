@@ -33,9 +33,12 @@ use crate::application::ports::{
 use crate::application::secret_vault::{KeyStatus, SecretVault};
 use crate::application::security::SecurityService;
 use crate::application::service_adoption::ServiceAdoption;
+use crate::application::service_lifecycle::{
+    LifecycleTimings, ServiceLifecycle, record_interrupted,
+};
 use crate::application::service_logs::{LogSettings, ServiceLogs};
 use crate::application::service_op_access::ServiceOpAccess;
-use crate::application::service_ops::{OpLocks, RecoverySummary, ServiceOps};
+use crate::application::service_ops::{InterruptedAction, OpLocks, RecoverySummary, ServiceOps};
 use crate::application::service_specs::ServiceSpecs;
 use crate::application::services::{EngineTimings, ServicesRegistry};
 use crate::application::services_right::ServicesRightService;
@@ -189,6 +192,8 @@ pub struct EngineParts {
     /// Plafond de lectures de journaux et frein d'ouvertures par compte (HRT-107, BR-SLOG-026 et 027).
     /// Les tests qui ne portent pas sur eux le détendent (`BrakeSettings::relaxed`).
     pub log_brake: BrakeSettings,
+    /// La surveillance qui suit une action de cycle de vie (HRT-64) ; les tests la raccourcissent.
+    pub lifecycle: LifecycleTimings,
 }
 
 impl EngineParts {
@@ -207,6 +212,7 @@ impl EngineParts {
             host: Arc::new(SystemHostEnvironment),
             timings: EngineTimings::production(),
             log_brake: BrakeSettings::production(),
+            lifecycle: LifecycleTimings::production(),
         }
     }
 }
@@ -312,6 +318,9 @@ pub struct ServiceFoundations {
     pub specs: Arc<ServiceSpecs>,
     pub vault: Arc<SecretVault>,
     pub ops: Arc<ServiceOps>,
+    /// Les actions de cycle de vie que l'arrêt précédent a interrompues (HRT-64) : le démarrage de l'agent les
+    /// consigne au journal d'activité.
+    pub interrupted_actions: Vec<InterruptedAction>,
 }
 
 /// Le socle SANS moteur : les opérations restées en plein geste sont classées avec l'observateur « illisible »
@@ -402,7 +411,12 @@ pub async fn service_foundations_observed(
             "opérations de service restées en plein geste : classées, rien n'est rejoué"
         );
     }
-    Ok(ServiceFoundations { specs, vault, ops })
+    Ok(ServiceFoundations {
+        specs,
+        vault,
+        ops,
+        interrupted_actions: summary.interrupted_actions,
+    })
 }
 
 /// Fusionne fichier, variables d'environnement et options de la ligne de commande.
@@ -773,10 +787,13 @@ pub async fn start_engined(
     )?;
     let sessions = services.sessions.clone();
     let container_engine = engine.engine.clone();
+    let supervisor = engine.supervisor.clone();
+    // Un seul dépôt pour les services supervisés, les adoptions et les arrêts voulus (HRT-64).
+    let service_repo = Arc::new(SqliteServiceRepo::new(database.database().pool().clone()));
     let registry = ServicesRegistry::with_supervision(
         engine.engine,
         engine.supervisor,
-        Arc::new(SqliteServiceRepo::new(database.database().pool().clone())),
+        service_repo.clone(),
         engine.host.as_ref(),
         adapters.clock.clone(),
         metering.monotonic.clone(),
@@ -785,6 +802,25 @@ pub async fn start_engined(
     );
     // Le passage « à confirmer » et la chute d'une adoption sont consignés (auteur : le système).
     registry.set_audit(services.audit_sink.clone());
+    // Les arrêts voulus depuis Hearth survivent à un redémarrage de l'agent (HRT-64, BR-LIFE-010).
+    registry.set_intents(service_repo.clone());
+    let service_lifecycle = ServiceLifecycle::new(
+        registry.clone(),
+        foundations.ops.clone(),
+        container_engine.clone(),
+        supervisor,
+        service_repo,
+        services.audit_sink.clone(),
+        adapters.clock.clone(),
+        engine.lifecycle,
+    );
+    // Les actions que l'arrêt précédent a interrompues sont consignées avant d'accepter la moindre requête :
+    // le résultat en est inconnu, rien n'est rejoué (BR-LIFE-020).
+    record_interrupted(
+        services.audit_sink.as_ref(),
+        &foundations.interrupted_actions,
+    )
+    .await;
     let service_logs = Arc::new(ServiceLogs::new(
         registry.clone(),
         container_engine,
@@ -822,6 +858,7 @@ pub async fn start_engined(
         service_logs,
         service_adoption,
         service_ops,
+        service_lifecycle,
         stream,
         erasure_pending: database.erasure_pending(),
     });
