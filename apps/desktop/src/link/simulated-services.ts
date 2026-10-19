@@ -200,6 +200,20 @@ export class SimulatedServices {
     return found?.name ?? key;
   }
 
+  /** Un service de la liste d'un serveur (de quoi vérifier), `undefined` s'il n'y est pas. */
+  find(serverId: string, key: string): ServiceDto | undefined {
+    const book = this.books.get(serverId);
+    return book?.view.kind === "supported"
+      ? book.view.services.find((item) => item.key === key)
+      : undefined;
+  }
+
+  /** L'état du moteur d'un serveur, `null` tant qu'il n'est pas connu. */
+  engineState(serverId: string): EngineDto["state"] | null {
+    const book = this.books.get(serverId);
+    return book?.view.kind === "supported" ? book.view.engine.state : null;
+  }
+
   /** Pose ou retire l'action qui tient un service (`busy`, BR-OPS-005) ; sans effet sur un service inconnu. */
   setBusy(
     serverId: string,

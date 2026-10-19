@@ -42,6 +42,7 @@ const ICONS = {
     "M12 17h.01",
   ],
   copy: ["M9 9h11v11H9z", "M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"],
+  more: ["M5 12h.01", "M12 12h.01", "M19 12h.01"],
   "arrow-left": ["M19 12H5", "m12 19-7-7 7-7"],
   // Journaux (HRT-67) : retour au direct, recherche.
   "arrow-down": ["M12 5v14", "m19 12-7 7-7-7"],

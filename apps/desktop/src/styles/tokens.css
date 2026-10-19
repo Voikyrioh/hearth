@@ -185,6 +185,9 @@
   --op-columns: minmax(0, 2fr) minmax(80px, 1fr) auto auto;
   --svc-columns-narrow: minmax(0, 1fr) minmax(120px, 170px);
   --svc-puck: 3px;
+  /* Colonne des actions de la ligne (HRT-65) : un bouton « Actions », et le menu qu'il ouvre. */
+  --svc-actions: 48px;
+  --menu-width: 200px;
   /* Détail d'un service (HRT-63) : liste compacte à côté du détail, détail borné. */
   --list-compact-width: 418px;
   --detail-max: 960px;
@@ -221,6 +224,7 @@
 
   /* Couches */
   --z-raised: 1;
+  --z-menu: 20;
   --z-tooltip: 30;
   --z-toast: 40;
   --z-dev: 60;

@@ -9,10 +9,10 @@ import {
   type ServiceOperationEvent,
   type Unsubscribe,
 } from "@/link";
-import { outcomeText } from "@/serviceOps/messages";
+import { outcomeOf } from "@/serviceOps/messages";
 import { useServersStore } from "./servers";
 import { useServicesStore } from "./services";
-import { type ToastKind, useToastsStore } from "./toasts";
+import { useToastsStore } from "./toasts";
 
 /** Nouvelle tentative d'abonnement aux opérations : espacement fixe, tant que l'écran est suivi. */
 export const SERVICE_OPS_RETRY_MS = 5000;
@@ -28,14 +28,6 @@ export interface TrackedOperation {
   /** Le nom du service au moment où l'opération a été vue (le service peut disparaître avec elle). */
   name: string;
 }
-
-const OUTCOME_KINDS: Record<string, ToastKind> = {
-  succeeded: "success",
-  failed: "error",
-  cancelled: "warn",
-  rolled_back: "warn",
-  interrupted: "warn",
-};
 
 /**
  * Les opérations de service de chaque serveur (HRT-84, ADR-0045), alimentées par le pont (`onServiceOperations`). La
@@ -140,10 +132,8 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
 
   /** L'issue, dite une fois, puis acquittée : la coquille ne la rejoue plus (BR-RESIL-010). */
   function announce(serverId: string, operation: ServiceOperation, name: string): void {
-    const message = outcomeText(operation, name);
-    if (message) {
-      useToastsStore().push({ kind: OUTCOME_KINDS[operation.status] ?? "info", message });
-    }
+    const outcome = outcomeOf(operation, name);
+    if (outcome) useToastsStore().push({ kind: outcome.tone, message: outcome.message });
     acknowledge(serverId, operation.id);
   }
 

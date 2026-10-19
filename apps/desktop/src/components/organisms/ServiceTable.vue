@@ -8,10 +8,12 @@ import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
 import { imageLabel, loopBand, PORTS_WIDTH, rowLabel, stateLine } from "@/services/format";
 import { anchoredScroll, indexAt, offsetsOf, type RowHeights, windowOf } from "@/services/layout";
+import type { Controls, Gesture } from "@/services/lifecycle";
 import OriginTags from "../molecules/OriginTags.vue";
 import PortChips from "../molecules/PortChips.vue";
 import PortsDialog from "../molecules/PortsDialog.vue";
 import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
+import ServiceRowMenu from "./ServiceRowMenu.vue";
 
 // La liste des services (BR-SVC-001, 002, 012, 015, 019, 021) : une grille ARIA (en-têtes de colonnes,
 // `aria-rowcount`), triée par nom par la liaison (l'ordre ne dépend jamais de l'état), VIRTUALISÉE (seules les
@@ -29,8 +31,16 @@ const props = defineProps<{
   services: readonly ServiceInfo[];
   /** La clé du service dont le détail est ouvert (`aria-selected`), `null` : aucun. */
   selectedKey?: string | null;
+  /**
+   * Ce que le pilotage montre pour une ligne (HRT-65, BR-LIFE-003) ; absent : pas de colonne d'actions (compte sans le
+   * droit de gérer les services). Un état qui n'offre aucun geste n'a pas de menu.
+   */
+  controlsFor?: (service: ServiceInfo) => Controls | null;
 }>();
-const emit = defineEmits<{ open: [key: string] }>();
+const emit = defineEmits<{
+  open: [key: string];
+  gesture: [service: ServiceInfo, gesture: Gesture];
+}>();
 
 /** Lignes dessinées au-delà de la zone visible, de chaque côté. */
 const OVERSCAN = 8;
@@ -79,8 +89,17 @@ const tabStop = computed(() => {
   return Math.max(start, Math.min(end - 1, firstVisible.value));
 });
 const portsWidth = computed(() => (compact.value ? PORTS_WIDTH.compact : PORTS_WIDTH.wide));
-const columnCount = computed(() =>
-  narrow.value ? COLUMNS.length - 2 : compact.value ? COLUMNS.length - 1 : COLUMNS.length,
+const withActions = computed(() => props.controlsFor !== undefined);
+
+/** Les gestes de la ligne ; un état qui n'en offre aucun n'a pas de menu. */
+function rowControls(service: ServiceInfo): Controls | null {
+  const controls = props.controlsFor?.(service) ?? null;
+  return controls !== null && controls.gestures.length > 0 ? controls : null;
+}
+const columnCount = computed(
+  () =>
+    (narrow.value ? COLUMNS.length - 2 : compact.value ? COLUMNS.length - 1 : COLUMNS.length) +
+    (withActions.value ? 1 : 0),
 );
 
 function readHeights() {
@@ -235,7 +254,7 @@ defineExpose({ visible, focusKey });
 </script>
 
 <template>
-  <div ref="root" class="table">
+  <div ref="root" :class="['table', { 'table--actions': withActions }]">
     <div
       class="table__grid"
       role="grid"
@@ -254,6 +273,9 @@ defineExpose({ visible, focusKey });
           role="columnheader"
         >
           {{ t(key) }}
+        </div>
+        <div v-if="withActions" class="table__th table__th--actions" role="columnheader">
+          <span class="sr-only">{{ t("lifecycle.menu") }}</span>
         </div>
       </div>
       <div ref="scroller" class="table__scroll" @scroll.passive="onScroll">
@@ -313,6 +335,14 @@ defineExpose({ visible, focusKey });
                   :host-network="service.hostNetwork"
                   :width="portsWidth"
                   @more="portsOf = service"
+                />
+              </div>
+              <div v-if="withActions" class="cell cell--actions" role="gridcell">
+                <ServiceRowMenu
+                  v-if="rowControls(service)"
+                  :controls="rowControls(service)!"
+                  :name="safeText(service.name)"
+                  @pick="emit('gesture', service, $event)"
                 />
               </div>
               <div
@@ -494,6 +524,17 @@ defineExpose({ visible, focusKey });
   overflow: hidden;
 }
 
+.cell--actions {
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* La colonne des actions s'ajoute à celles du mode (large, compact, volet). */
+.table--actions .table__head,
+.table--actions .row {
+  grid-template-columns: var(--svc-columns) var(--svc-actions);
+}
+
 .band {
   display: flex;
   align-items: center;
@@ -512,6 +553,11 @@ defineExpose({ visible, focusKey });
     grid-template-columns: var(--svc-columns-compact);
   }
 
+  .table--actions .table__head,
+  .table--actions .row {
+    grid-template-columns: var(--svc-columns-compact) var(--svc-actions);
+  }
+
   .table__th--image,
   .cell--image {
     display: none;
@@ -526,6 +572,11 @@ defineExpose({ visible, focusKey });
   .table__head,
   .row {
     grid-template-columns: var(--svc-columns-narrow);
+  }
+
+  .table--actions .table__head,
+  .table--actions .row {
+    grid-template-columns: var(--svc-columns-narrow) var(--svc-actions);
   }
 
   .table__th--ports,

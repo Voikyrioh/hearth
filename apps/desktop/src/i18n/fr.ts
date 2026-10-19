@@ -1099,15 +1099,87 @@ export const fr = {
     busy: "Une action est déjà en cours sur ce service.",
     busyBy: "Lancée par {account}.",
   },
+  // Démarrer, arrêter, redémarrer un service (HRT-65, BR-LIFE-003 à 022).
+  lifecycle: {
+    start: "Démarrer",
+    stop: "Arrêter",
+    restart: "Redémarrer",
+    groupLabel: "Actions sur le service",
+    // Aucun geste dans cet état (BR-LIFE-003).
+    notDrivable: "Hearth ne pilote pas ce service dans son état actuel.",
+    // Hors spec : le moteur ne peut pas recevoir l'ordre (BR-ENGINE-014).
+    engineNotReady: "Indisponible tant que le moteur de conteneurs n'est pas prêt.",
+    // Le menu de la ligne (design, écran A2).
+    menuLabel: "Actions de {name}",
+    menu: "Actions",
+    // La fenêtre : titres et boutons de confirmation.
+    titleStart: "Démarrer {name}",
+    titleStop: "Arrêter {name} ?",
+    titleRestart: "Redémarrer {name} ?",
+    submitStart: "Démarrer",
+    submitStop: "Arrêter le service",
+    submitRestart: "Redémarrer le service",
+    // L'effet, avec le délai d'arrêt réel du service (BR-LIFE-007, 009).
+    effectStop:
+      "Le service va recevoir l'ordre de s'arrêter proprement. S'il ne s'est pas arrêté au bout de {delay}, il sera coupé de force. Un programme coupé de force peut perdre ce qu'il n'a pas eu le temps d'enregistrer. Hearth ne peut pas encore envoyer d'ordre de sauvegarde au service.",
+    effectStopNoDelay:
+      "Le service va recevoir l'ordre de s'arrêter proprement. S'il ne s'arrête pas dans son délai d'arrêt, il sera coupé de force. Un programme coupé de force peut perdre ce qu'il n'a pas eu le temps d'enregistrer. Hearth ne peut pas encore envoyer d'ordre de sauvegarde au service.",
+    effectRestart:
+      "Le service va être arrêté (ordre propre, puis coupure forcée après {delay}), puis redémarré. Il sera indisponible pendant ce temps.",
+    effectRestartNoDelay:
+      "Le service va être arrêté (ordre propre, puis coupure forcée s'il ne s'arrête pas dans son délai d'arrêt), puis redémarré. Il sera indisponible pendant ce temps.",
+    // Les avertissements propres au service (BR-LIFE-008).
+    warnAdopted:
+      "Ce service a été créé hors de Hearth : Hearth ne sait pas si ce programme enregistre ses données quand il s'arrête. S'il ne le fait pas, ce qu'il n'a pas enregistré sera perdu. En cas de doute, sauvegardez depuis le serveur avant d'arrêter.",
+    warnAlways:
+      "Ce service redémarre toujours tout seul : il peut repartir au prochain redémarrage du serveur.",
+    warnUnit:
+      "Ce service est géré par le système du serveur (unité {unit}) : il repartira au prochain redémarrage du serveur ou à la prochaine application de sa configuration.",
+    warnUnitNoName:
+      "Ce service est géré par le système du serveur : il repartira au prochain redémarrage du serveur ou à la prochaine application de sa configuration.",
+    // Le service a changé sous la fenêtre (BR-LIFE-022).
+    stateChanged: "Ce service vient de passer à l'état « {state} ».",
+    // Les refus de l'agent (BR-LIFE-013 à 019).
+    refusedEngine:
+      "Le moteur de conteneurs n'est pas accessible ({state}). Le service n'a pas été modifié.",
+    refusedEngineNoState:
+      "Le moteur de conteneurs n'est pas accessible. Le service n'a pas été modifié.",
+    refusedOther: "Le serveur a refusé l'action. Le service n'a pas été modifié.",
+    alreadyRunning: "Le service {name} est déjà en marche.",
+    alreadyStopped: "Le service {name} est déjà arrêté.",
+    // Le droit retiré, le résultat inconnu (BR-LIFE-020, BR-RESIL-009).
+    unknownResult: "Le résultat de cette action n'est pas connu.",
+    forbidden: "Le serveur a refusé cette action.",
+    // L'issue d'une action, annoncée une fois (BR-LIFE-004, 005, 009, 011, 012, 019, 021).
+    outcome: {
+      started: "Le service {name} est en marche.",
+      stopped: "Le service {name} est arrêté.",
+      restarted: "Le service {name} a redémarré.",
+      forcedStop: "Le service {name} ne s'est pas arrêté à temps : il a été coupé de force.",
+      restartedByHost:
+        "Le service {name} est reparti tout seul après son arrêt : une règle de redémarrage du serveur le relance.",
+      portInUse:
+        "Le service {name} n'a pas pu démarrer : un port qu'il demande est déjà utilisé sur le serveur.",
+      stoppedRightAfterStart:
+        "Le service {name} s'est arrêté juste après son démarrage. Consultez ses journaux pour en savoir plus.",
+      restartFailed: "Le service {name} a été arrêté mais n'a pas pu redémarrer.",
+      engineRefused: "Le moteur a refusé l'action. Le service n'a pas été modifié.",
+      engineUnavailable:
+        "Le moteur de conteneurs n'est pas accessible. Le service n'a pas été modifié.",
+      serviceNotFound: "Ce service n'existe plus.",
+      timeout:
+        "Le moteur n'a pas répondu à temps. Le résultat de l'action sur {name} n'est pas connu.",
+      engineLost:
+        "Le moteur a cessé de répondre. Le résultat de l'action sur {name} n'est pas connu.",
+      agentRestarted: "L'action sur {name} a été interrompue par un redémarrage de l'agent.",
+    },
+  },
   serviceDetail: {
     back: "Retour à la liste",
     region: "Détail du service {name}",
     sections: "Sections du service",
     tabDetail: "Détail",
     tabLogs: "Journaux",
-    // Hors spec : démarrer, arrêter et redémarrer ne sont pas encore branchés.
-    actionsSoon:
-      "Démarrer, arrêter et redémarrer un service arrivent dans une prochaine version de Hearth.",
     loading: "Lecture du service…",
     gone: "Ce service n'existe plus.",
     goneBack: "Retour à la liste",

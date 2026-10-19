@@ -34,6 +34,10 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
       return role === "readonly";
     case "account_delete":
     case "sessions_revoke":
+    // Démarrer, arrêter, redémarrer : couverts par l'élévation de cinq minutes (BR-LIFE-016).
+    case "service_start":
+    case "service_stop":
+    case "service_restart":
       return true;
     case "account_password":
     case "agent_update":

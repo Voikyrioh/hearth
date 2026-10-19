@@ -5,6 +5,7 @@ import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
+import type { LifecycleGesture, LifecycleOutcome } from "./serviceLifecycle";
 import type { DecisionOutcome, OperationChoice, ServiceOperationEvent } from "./serviceOps";
 import type { EngineInfo, EnvVariable, ServiceRights, ServicesEvent } from "./services";
 import type {
@@ -305,6 +306,19 @@ export interface LinkBridge {
     choice: OperationChoice,
     adminPassword: string | null,
   ): Promise<DecisionOutcome>;
+  /**
+   * Démarre, arrête ou redémarre un service (HRT-65, BR-LIFE-016) : un acte d'administration confirmé, couvert par
+   * l'élévation de cinq minutes (`adminPassword` : `null` sous l'élévation, jamais gardé). L'agent répond « accepté »
+   * (`202`) : l'issue ne se lit jamais ici, elle arrive par le suivi des opérations (`onServiceOperations`).
+   * Sans le droit « gérer les services » : échec `missing_services_right`. Jamais rejoué : un résultat inconnu
+   * (lien coupé avant la réponse) se lit sur le flux (BR-LIFE-020).
+   */
+  pilotService(
+    serverId: string,
+    key: string,
+    gesture: LifecycleGesture,
+    adminPassword: string | null,
+  ): Promise<LifecycleOutcome>;
 
   /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
   setDisplayedServer(serverId: string | null): Promise<void>;

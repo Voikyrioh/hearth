@@ -1,3 +1,4 @@
+import type { OperationDto } from "@/bindings";
 import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
@@ -6,7 +7,13 @@ import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
 import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
-import type { DecisionOutcome, OperationChoice, ServiceOperationEvent } from "./serviceOps";
+import type { LifecycleGesture, LifecycleOutcome } from "./serviceLifecycle";
+import type {
+  DecisionOutcome,
+  OperationChoice,
+  OperationKind,
+  ServiceOperationEvent,
+} from "./serviceOps";
 import type { EngineInfo, EnvVariable, ServiceRights, ServicesEvent } from "./services";
 import {
   type SimAccountResult,
@@ -311,6 +318,144 @@ export class SimulatedLinkBridge implements LinkBridge {
     const outcome = this.serviceOps.decide(serverId, opId, choice);
     // Un mot de passe saisi n'ouvre aucune élévation pour cet acte.
     return outcome;
+  }
+
+  /** Les gestes de pilotage reçus, dans l'ordre (observable dans les tests) : jamais de mot de passe. */
+  readonly gestures: { serverId: string; key: string; gesture: LifecycleGesture }[] = [];
+  /**
+   * Quand l'agent simulé termine l'action qu'il vient d'accepter : en millisecondes, ou `null` (par défaut) pour
+   * que l'appelant la termine lui-même (`finishGesture`), à l'instant qu'il choisit.
+   */
+  gestureCompletesAfterMs: number | null = null;
+
+  async pilotService(
+    serverId: string,
+    key: string,
+    gesture: LifecycleGesture,
+    adminPassword: string | null,
+  ): Promise<LifecycleOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("service " + gesture);
+    // Les contrôles dans l'ordre de l'agent : droit, confirmation, moteur, service, action en cours, état.
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    const confirmation = this.reauth.confirm(
+      serverId,
+      gesture === "start"
+        ? "service_start"
+        : gesture === "stop"
+          ? "service_stop"
+          : "service_restart",
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    const engine = this.services.engineState(serverId);
+    if (engine !== "ready") {
+      return { kind: "refused", refusal: { kind: "engine_unavailable", engine } };
+    }
+    const found = this.services.find(serverId, key);
+    // Un conteneur ni créé par Hearth ni adopté n'est pas pilotable : même réponse qu'une clé inconnue (BR-LIFE-024).
+    if (!found || (found.origin !== "hearth" && !found.adopted)) {
+      return { kind: "refused", refusal: { kind: "service_not_found" } };
+    }
+    if (found.busy) {
+      return {
+        kind: "refused",
+        refusal: {
+          kind: "service_busy",
+          by: found.busy.by,
+          action: found.busy.kind as OperationKind,
+        },
+      };
+    }
+    if (
+      (gesture === "start" && found.state === "running") ||
+      (gesture === "stop" && found.state === "stopped")
+    ) {
+      return { kind: "refused", refusal: { kind: "already_in_state", state: found.state } };
+    }
+    const offered =
+      gesture === "start"
+        ? found.state === "stopped" || found.state === "error"
+        : found.state === "running" || found.state === "restart_loop";
+    if (!offered) {
+      return { kind: "refused", refusal: { kind: "not_drivable", state: found.state } };
+    }
+    const accept = () => {
+      this.gestures.push({ serverId, key, gesture });
+      return this.acceptGesture(serverId, key, gesture, found.graceS ?? 10);
+    };
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) accept();
+      this.publish(serverId, "reconnecting");
+      const opId = "sim-op-" + this.nextOperation++;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return accept();
+  }
+
+  /** L'agent simulé accepte le geste : l'action tient le service, l'état passe en transition. */
+  private acceptGesture(
+    serverId: string,
+    key: string,
+    gesture: LifecycleGesture,
+    graceS: number,
+  ): LifecycleOutcome {
+    const by = this.servers.find((candidate) => candidate.id === serverId)?.username ?? "marie";
+    const operation = this.serviceOps.accept(
+      serverId,
+      { key, kind: gesture, cancellable: false },
+      by,
+    );
+    this.services.upsert(serverId, {
+      key,
+      name: this.services.find(serverId, key)?.name ?? key,
+      state: gesture === "stop" ? "stopping" : "starting",
+      since: new Date(this.now()).toISOString(),
+    });
+    if (this.gestureCompletesAfterMs !== null) {
+      setTimeout(() => this.finishGesture(serverId, key), this.gestureCompletesAfterMs);
+    }
+    return { kind: "accepted", actionId: operation.id, graceS };
+  }
+
+  /**
+   * Termine l'action qui tient ce service (pilotage de test ou de développement) : le service prend son état final,
+   * l'opération se termine et son issue est annoncée une fois (BR-RESIL-010). `status` et `cause` choisissent une
+   * issue autre que la réussite ; un échec laisse le service dans son état d'avant.
+   */
+  finishGesture(
+    serverId: string,
+    key: string,
+    status: "succeeded" | "failed" | "interrupted" = "succeeded",
+    cause: OperationDto["cause"] = null,
+  ): void {
+    const operation = this.serviceOps.of(serverId).find((item) => item.key === key);
+    if (!operation) return;
+    const kind = operation.kind;
+    const final =
+      status === "succeeded"
+        ? kind === "stop"
+          ? "stopped"
+          : "running"
+        : kind === "stop"
+          ? "running"
+          : "stopped";
+    this.services.upsert(serverId, {
+      key,
+      name: this.services.find(serverId, key)?.name ?? key,
+      state: final,
+      since: new Date(this.now()).toISOString(),
+    });
+    this.serviceOps.finish(serverId, operation.id, status, cause);
   }
 
   /**
