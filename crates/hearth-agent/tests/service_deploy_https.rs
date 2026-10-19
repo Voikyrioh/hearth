@@ -1389,6 +1389,33 @@ async fn a_right_withdrawn_while_the_deployment_runs_does_not_stop_it_but_the_ne
 }
 
 #[tokio::test]
+async fn a_deadline_that_cuts_the_creation_order_leaves_an_unknown_result_and_removes_nothing() {
+    // Le moteur crée le conteneur mais ne répond qu'après le délai : l'agent ne sait pas s'il existe.
+    let b = bench_with(|parts| parts.deploy.deadline = Duration::from_millis(400)).await;
+    b.engine.have_image("nginx:latest");
+    b.engine.delay_create_reply(Duration::from_secs(5));
+    let accepted = b.accepted(spec("web")).await;
+    let operation = b.finished(&accepted.operation_id).await;
+    assert_eq!(
+        operation.status,
+        OperationStatus::Interrupted,
+        "{operation:?}"
+    );
+    assert_eq!(operation.cause, Some(OperationCause::Timeout));
+    assert_eq!(b.engine.created().len(), 1);
+    assert!(
+        b.engine.removed().is_empty(),
+        "rien n'est retiré sous un résultat inconnu"
+    );
+    assert_eq!(
+        b.specs_count().await,
+        1,
+        "la description reste : le compte relit l'état réel"
+    );
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_deployment_that_lasts_past_its_deadline_is_stopped_and_leaves_nothing() {
     // Les 30 minutes deviennent 400 ms ; la récupération en met plus.
     let b = bench_with(|parts| parts.deploy.deadline = Duration::from_millis(400)).await;

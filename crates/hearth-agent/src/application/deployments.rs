@@ -26,7 +26,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -171,6 +171,10 @@ struct Job {
     env_count: u32,
     custom_command: bool,
     mounts: Vec<String>,
+    /// L'ordre de création est parti (ou va partir) : passé ce point, un délai dépassé laisse un résultat
+    /// INCONNU, même si le conteneur n'est pas encore consigné (le moteur peut l'avoir créé sans que l'agent
+    /// ait lu sa réponse).
+    create_sent: AtomicBool,
 }
 
 /// Ce que l'exécution a décidé de son issue.
@@ -674,6 +678,7 @@ impl Deployments {
             env_count: u32::try_from(valid.env_count()).unwrap_or(u32::MAX),
             custom_command: valid.has_command(),
             mounts: valid.body.mounts.iter().map(|m| m.source.clone()).collect(),
+            create_sent: AtomicBool::new(false),
         };
         let shown = Shown {
             registry: Arc::clone(&self.registry),
@@ -762,8 +767,10 @@ impl Deployments {
         let finish = match tokio::time::timeout_at(deadline, self.run(&job, deadline)).await {
             Ok(finish) => finish,
             // Trente minutes (BR-DEPLOY-034) : ce qui n'a pas été créé n'existe pas ; sinon le résultat est inconnu.
+            // L'ordre de création parti suffit : le délai peut couper l'attente de sa réponse, le conteneur existe
+            // peut-être sans être consigné, et rien ne doit être retiré sous lui (BR-DEPLOY-028).
             Err(_) => {
-                if self.created(&job.key).await {
+                if job.create_sent.load(Ordering::SeqCst) || self.created(&job.key).await {
                     Finish::unknown(Cause::Timeout)
                 } else {
                     Finish::failed(Cause::Timeout)
@@ -843,6 +850,7 @@ impl Deployments {
         if let Err(finish) = self.begin(job, step::CREATE).await {
             return finish;
         }
+        job.create_sent.store(true, Ordering::SeqCst);
         let container = match self.engine.create(&plan).await {
             Ok(id) => id,
             Err(error) => {

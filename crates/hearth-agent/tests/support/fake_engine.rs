@@ -133,6 +133,8 @@ struct DeployScript {
     created: Vec<CreatedPlan>,
     removed: Vec<String>,
     create_error: Option<EngineError>,
+    /// Le moteur crée le conteneur, puis met ce temps à répondre (la réponse peut ne jamais être lue).
+    create_reply_delay: Duration,
     info: Option<EngineInfo>,
     info_error: Option<EngineError>,
     next_id: u64,
@@ -483,6 +485,11 @@ impl FakeEngine {
     /// `create` échoue avec cette erreur (None : rétablit).
     pub fn fail_create(&self, error: Option<EngineError>) {
         self.lock().deploy.create_error = error;
+    }
+
+    /// `create` crée le conteneur aussitôt mais ne répond qu'après ce délai.
+    pub fn delay_create_reply(&self, delay: Duration) {
+        self.lock().deploy.create_reply_delay = delay;
     }
 
     /// Les bornes de la machine que `info` rend.
@@ -951,7 +958,7 @@ impl ContainerEngine for FakeEngine {
     }
 
     async fn create(&self, plan: &ContainerPlan) -> Result<String, EngineError> {
-        let id = {
+        let (id, reply_delay) = {
             let mut state = self.lock();
             if let Some(error) = state.list_error.or(state.deploy.create_error) {
                 return Err(error);
@@ -1047,10 +1054,13 @@ impl ContainerEngine for FakeEngine {
                 memory_bytes: plan.memory_bytes,
             });
             state.containers.insert(id.clone(), observation);
-            id
+            (id, state.deploy.create_reply_delay)
         };
         self.wake_logs();
         self.emit(&id, "create");
+        if !reply_delay.is_zero() {
+            tokio::time::sleep(reply_delay).await;
+        }
         Ok(id)
     }
 
