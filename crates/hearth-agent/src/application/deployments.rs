@@ -269,14 +269,14 @@ pub struct Deployments {
 
 /// Les ports du serveur tels que le domaine les juge (`PortWorld`) : le moteur, les sockets en écoute, le port de
 /// l'agent.
-struct World<'a> {
-    registry: &'a ServicesRegistry,
+struct World {
+    registry: Arc<ServicesRegistry>,
     listeners: Vec<Listener>,
-    host: &'a dyn HostPorts,
+    host: Arc<dyn HostPorts>,
     agent_port: u16,
 }
 
-impl PortWorld for World<'_> {
+impl PortWorld for World {
     fn claim(
         &self,
         port: u16,
@@ -418,7 +418,7 @@ impl Deployments {
                 None
             }
         };
-        let ports = self.check_ports(request).await;
+        let ports = self.judge_ports(request.ports.clone()).await?;
         let mounts = self.check_mounts(request, &mut invalid_fields);
         let (_, info) = self.machine().await;
         let disk = self.disk(info.as_ref()).await;
@@ -471,30 +471,31 @@ impl Deployments {
             .map_err(|error| error.to_string())
     }
 
-    async fn world(&self) -> World<'_> {
-        let host = self.host_ports.clone();
-        let listeners = tokio::task::spawn_blocking(move || host.listening())
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-        World {
-            registry: &self.registry,
-            listeners,
-            host: self.host_ports.as_ref(),
-            agent_port: self.context.agent_port,
-        }
+    /// Le constat de chaque port du formulaire, jugé HORS de la tâche asynchrone : la lecture des sockets en écoute
+    /// et la recherche du nom d'un programme parcourent `/proc` (tous les processus, pour chaque port en conflit).
+    /// `Err` : le jugement n'a pas abouti, jamais lu comme « libre ».
+    async fn judge_ports(
+        &self,
+        ports: Vec<hearth_proto::api::deploy::DeployPort>,
+    ) -> Result<Vec<PortCheck>, DeployError> {
+        let registry = Arc::clone(&self.registry);
+        let host = Arc::clone(&self.host_ports);
+        let agent_port = self.context.agent_port;
+        tokio::task::spawn_blocking(move || {
+            let world = World {
+                registry,
+                listeners: host.listening().unwrap_or_default(),
+                host,
+                agent_port,
+            };
+            Self::judge_ports_sync(&world, &ports)
+        })
+        .await
+        .map_err(|_| DeployError::Internal("jugement des ports interrompu".into()))
     }
 
-    async fn check_ports(&self, request: &DeployCheckRequest) -> Vec<PortCheck> {
-        let world = self.world().await;
-        Self::judge_ports_sync(&world, &request.ports)
-    }
-
-    /// Le constat de chaque port du formulaire. Le nom d'un programme se cherche par `/proc` : hors de la tâche
-    /// asynchrone.
     fn judge_ports_sync(
-        world: &World<'_>,
+        world: &World,
         ports: &[hearth_proto::api::deploy::DeployPort],
     ) -> Vec<PortCheck> {
         let dups = duplicates(ports);
@@ -737,8 +738,7 @@ impl Deployments {
         if valid.ports.is_empty() {
             return Ok(());
         }
-        let world = self.world().await;
-        for check in Self::judge_ports_sync(&world, &valid.ports) {
+        for check in self.judge_ports(valid.ports.clone()).await? {
             let blocks = match check.status {
                 PortStatus::Free => false,
                 PortStatus::ReservedByStopped => !valid.accept.reserved_ports,

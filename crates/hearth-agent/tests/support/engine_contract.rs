@@ -789,12 +789,24 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
     assert!(engine.image_present(&image).await.expect("présence"));
 
     // Les échecs sont typés, jamais le texte du moteur.
-    let mut missing = engine.pull(&harness.missing_image());
-    let failure = missing
-        .next()
-        .await
-        .expect("un résultat")
-        .expect_err("image inconnue");
+    // Un registre public peut limiter le débit (ce n'est pas un défaut testé) : on réessaie un peu plus tard.
+    let first_failure = |reference: String, what: &'static str| {
+        let engine = engine.clone();
+        async move {
+            let mut failure = None;
+            for attempt in 0..6 {
+                let mut pull = engine.pull(&reference);
+                let found = pull.next().await.expect("un résultat").expect_err(what);
+                if found != EngineError::RegistryRateLimited || attempt == 5 {
+                    failure = Some(found);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_secs(20)).await;
+            }
+            failure.expect("un échec")
+        }
+    };
+    let failure = first_failure(harness.missing_image(), "image inconnue").await;
     assert!(
         matches!(
             failure,
@@ -805,12 +817,7 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
         "image inconnue : {failure:?}"
     );
     assert!(!format!("{failure} {failure:?}").contains(&harness.missing_image()));
-    let mut bad_tag = engine.pull(&harness.missing_tag());
-    let failure = bad_tag
-        .next()
-        .await
-        .expect("un résultat")
-        .expect_err("version inconnue");
+    let failure = first_failure(harness.missing_tag(), "version inconnue").await;
     assert!(
         matches!(
             failure,
