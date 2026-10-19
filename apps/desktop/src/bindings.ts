@@ -231,6 +231,12 @@ export const commands = {
 	 *  droit « gérer les services » : `MissingServicesRight`.
 	 */
 	decideServiceOperation: (serverId: string, opId: string, choice: OperationChoiceDto, adminPassword: string | null) => typedError<DecisionOutcome, LinkFailure>(__TAURI_INVOKE("decide_service_operation", { serverId, opId, choice, adminPassword })),
+	/**  Démarre un service (`POST /services/{key}/start`). */
+	serviceStart: (serverId: string, key: string, adminPassword: string | null) => typedError<LifecycleOutcome, LinkFailure>(__TAURI_INVOKE("service_start", { serverId, key, adminPassword })),
+	/**  Arrête un service (`POST /services/{key}/stop`). */
+	serviceStop: (serverId: string, key: string, adminPassword: string | null) => typedError<LifecycleOutcome, LinkFailure>(__TAURI_INVOKE("service_stop", { serverId, key, adminPassword })),
+	/**  Redémarre un service (`POST /services/{key}/restart`). */
+	serviceRestart: (serverId: string, key: string, adminPassword: string | null) => typedError<LifecycleOutcome, LinkFailure>(__TAURI_INVOKE("service_restart", { serverId, key, adminPassword })),
 };
 
 /* Types */
@@ -347,7 +353,9 @@ export type AddServerInput = {
 /**  Le genre d'un acte d'administration, tel que la fenêtre le connaît (sans cible ni secret). */
 export type AdminActKindDto = "account_create" | "account_role" | "account_password" | "account_delete" | "sessions_revoke" | "agent_update" | "attack_mode_enable" | "attack_mode_disable" | "account_password_own" | "reauth_setting" | 
 /**  Décider d'une opération de service (HRT-84) : jamais couvert par l'élévation. */
-"operation_decide";
+"operation_decide" | 
+/**  Démarrer, arrêter, redémarrer un service (HRT-65) : couverts par l'élévation de cinq minutes. */
+"service_start" | "service_stop" | "service_restart";
 
 /**  Qui a adopté un service, et quand (HRT-79). */
 export type AdoptionDto = {
@@ -848,6 +856,38 @@ export type LevelsDto = {
 	gpus: GpuLevelsDto[],
 	temps: LevelDto[],
 };
+
+/**  L'issue d'un geste de pilotage. */
+export type LifecycleOutcome = 
+/**  L'agent a accepté : l'opération est lancée à l'arrière-plan (`202`). L'issue arrive par le flux. */
+{ kind: "accepted"; actionId: string; 
+/**  Le délai d'arrêt du service, en secondes (BR-LIFE-009), pour le décompte. */
+graceS: number } | { kind: "refused"; refusal: LifecycleRefusal } | 
+/**  Le lien est tombé avant la réponse : on ne sait pas. Jamais rejoué ; l'issue se lit sur le flux. */
+{ kind: "unknown"; opId: string };
+
+/**  Pourquoi l'agent a refusé le geste. Sans texte : l'interface choisit le message d'après `kind`. */
+export type LifecycleRefusal = 
+/**  Le mot de passe de confirmation est incorrect. */
+{ kind: "wrong_password" } | 
+/**  L'élévation s'est fermée côté agent : la fenêtre redemande le mot de passe sans perdre la saisie. */
+{ kind: "password_required" } | 
+/**  Trop d'essais de mot de passe. */
+{ kind: "too_many_attempts"; retry_after_s: number } | 
+/**  L'agent est saturé : réessayer dans un instant. */
+{ kind: "busy" } | 
+/**  Le moteur n'est pas prêt (BR-LIFE-019) ; son état, si l'agent l'a dit. */
+{ kind: "engine_unavailable"; engine: EngineStateDto | null } | 
+/**  Le service n'existe plus (BR-LIFE-015). */
+{ kind: "service_not_found" } | 
+/**  Une action tient déjà le service (BR-LIFE-013) ; qui, et laquelle. */
+{ kind: "service_busy"; by: string | null; action: OperationKindDto | null } | 
+/**  Le service est déjà dans l'état demandé (BR-LIFE-014). */
+{ kind: "already_in_state"; state: ServiceStateDto | null } | 
+/**  L'état du service ne permet pas ce geste (BR-LIFE-003). */
+{ kind: "not_drivable"; state: ServiceStateDto | null } | 
+/**  Tout autre refus. */
+{ kind: "other" };
 
 /**  Échec d'une commande de liaison, sans texte : l'interface choisit le message d'après `kind`. */
 export type LinkFailure = 

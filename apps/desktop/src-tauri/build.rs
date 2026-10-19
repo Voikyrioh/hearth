@@ -68,6 +68,9 @@ const COMMANDS: &[&str] = &[
     "list_service_operations",
     "ack_service_operations",
     "decide_service_operation",
+    "service_start",
+    "service_stop",
+    "service_restart",
 ];
 
 fn main() {

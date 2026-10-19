@@ -364,6 +364,20 @@ const EXPECTED: &[(&str, &str)] = &[
         "decideServiceOperation",
         "serverId: string, opId: string, choice: OperationChoiceDto, adminPassword: string | null",
     ),
+    // HRT-65 : démarrer, arrêter, redémarrer un service : trois actes confirmés, une commande par geste (la route
+    // est construite par la liaison, la clé du service est vérifiée ; aucun chemin ni méthode venus de l'interface).
+    (
+        "serviceStart",
+        "serverId: string, key: string, adminPassword: string | null",
+    ),
+    (
+        "serviceStop",
+        "serverId: string, key: string, adminPassword: string | null",
+    ),
+    (
+        "serviceRestart",
+        "serverId: string, key: string, adminPassword: string | null",
+    ),
 ];
 
 /// Les commandes qui portent UN ACTE D'ADMINISTRATION, avec le paramètre qui porte le mot de passe de
@@ -383,6 +397,9 @@ const ADMIN_COMMANDS: &[(&str, &str)] = &[
     ("setReauthSetting", "password"),
     ("removeTrustedDevice", "password"),
     ("decideServiceOperation", "adminPassword"),
+    ("serviceStart", "adminPassword"),
+    ("serviceStop", "adminPassword"),
+    ("serviceRestart", "adminPassword"),
 ];
 
 /// Les commandes qui ne modifient RIEN chez l'agent : lectures, réglages locaux, abonnements.

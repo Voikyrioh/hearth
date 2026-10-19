@@ -113,6 +113,9 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             service_ops::commands::list_service_operations,
             service_ops::commands::ack_service_operations,
             service_ops::commands::decide_service_operation,
+            service_ops::commands::service_start,
+            service_ops::commands::service_stop,
+            service_ops::commands::service_restart,
         ])
         .typ::<link_dto::ServersEvent>()
         .typ::<link_dto::OperationEventDto>()
