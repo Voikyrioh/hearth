@@ -119,6 +119,10 @@
   --halo-width: 3px;
   --radius-puck: 2px;
   --border-width: 1px;
+  --slider-track: 8px;
+  --slider-thumb: 24px;
+  --resource-field-width: 96px;
+  --resource-unit-width: 88px;
   --control-sm: 32px;
   --control-lg: 48px;
   --field-pad-y: 10px;

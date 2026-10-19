@@ -1308,6 +1308,37 @@ export const fr = {
     retry: "Réessayer",
     retrying: "Nouvelle tentative…",
   },
+  // HRT-146 : curseurs de mémoire et de processeur à la création (BR-RES-004, BR-RES-037 à BR-RES-039).
+  resources: {
+    unitMb: "{n} Mo",
+    unitGb: "{n} Go",
+    unitCore: "{n} cœur",
+    unitCores: "{n} cœurs",
+    region: "Ressources du service",
+    memory: "Mémoire",
+    cpu: "Processeur",
+    memorySlider: "Mémoire, curseur",
+    cpuSlider: "Processeur, curseur",
+    memoryField: "Mémoire, valeur exacte",
+    cpuField: "Processeur, valeur exacte",
+    memoryUnit: "Unité de la mémoire",
+    unitMoOption: "Mo",
+    unitGoOption: "Go",
+    unitCoresSuffix: "cœurs",
+    memoryEmpty: "Indiquez la mémoire du service.",
+    cpuEmpty: "Indiquez le processeur du service.",
+    memoryRange: "La mémoire se règle entre {min} et {max}.",
+    cpuRange: "Le processeur se règle entre 0,25 et {n} cœurs, par pas de 0,25.",
+    recommended: "Recommandé : {value} ({proof}).",
+    proofMeasured: "mesuré",
+    proofPublisher: "chiffre de l'éditeur",
+    noFigure: "Hearth n'a pas de chiffre pour ce programme.",
+    proposed:
+      "Hearth propose {value} parce qu'il ne connaît pas cette application. Montez ce chiffre si elle en demande plus.",
+    belowRecommended: "Sous la mémoire recommandée : le serveur peut ralentir ou s'arrêter.",
+    noCapacity:
+      "Hearth n'a pas pu lire les limites de ce serveur. Le service ne peut pas être envoyé sans elles.",
+  },
   rights: {
     tag: "Peut gérer les services",
     // Bulle du repère : ce que le droit permet (BR-GRANT-003) et comment il se donne (BR-GRANT-005).
