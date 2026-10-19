@@ -24,8 +24,9 @@ import {
 } from "@/services/detail";
 import { imageLabel, loopBand, portLabel, stateLine } from "@/services/format";
 import { type Controls, controlsOf, type Gesture } from "@/services/lifecycle";
-import { pilotLock } from "@/services/pilot";
+import { busyText, pilotLock } from "@/services/pilot";
 import { canAct, type RightsGate } from "@/services/rights";
+import { useServersStore } from "@/stores/servers";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import Callout from "../molecules/Callout.vue";
 import DashCard from "../molecules/DashCard.vue";
@@ -85,10 +86,11 @@ const operations = useServiceOpsStore();
 const ongoing = computed(() =>
   service.value ? operations.forService(props.serverId, service.value.key) : undefined,
 );
+const servers = useServersStore();
 const lock = computed(() =>
   service.value
-    ? pilotLock(service.value, ongoing.value !== undefined)
-    : { locked: false, by: null },
+    ? pilotLock(service.value, ongoing.value !== undefined, servers.byId(props.serverId)?.username)
+    : { locked: false, by: null, own: false },
 );
 const allowed = computed(() => canAct(props.gate));
 /** Ce que le pilotage montre : les gestes de l'état, bloqués ou non (HRT-65, BR-LIFE-003, 013). */
@@ -207,7 +209,7 @@ const commandNote = computed(() => {
     <header v-if="service" class="detail__head">
       <!-- Une action tient le service : les boutons de pilotage sont désactivés, quel que soit l'état réel (BR-SVC-031) -->
       <Callout v-if="!gone && lock.locked" tone="info" data-detail-busy>
-        {{ t("serviceOps.busy") }}
+        {{ busyText(lock) }}
         <template v-if="lock.by"> {{ lock.by }}</template>
       </Callout>
       <OperationCard

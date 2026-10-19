@@ -14,7 +14,8 @@ export const fr = {
     colLastLogin: "Dernière connexion",
     colSessions: "Sessions ouvertes",
     colActions: "Actions",
-    you: "toi",
+    // FIX:01M5A5VKBEZ7XCZ2P0CD2VXV9M
+    you: "vous",
     neverLoggedIn: "Jamais",
     roleAdmin: "Administrateur",
     roleReadonly: "Lecture seule",
@@ -1098,6 +1099,9 @@ export const fr = {
     // Le verrou d'un service tenu par une action (BR-SVC-031).
     busy: "Une action est déjà en cours sur ce service.",
     busyBy: "Lancée par {account}.",
+    // FIX:01M5A5VH5GR2M9PF9Y1SB04D65 : l'action lancée par le compte connecté se dit « par vous », sans « déjà ».
+    busyOwn: "Une action est en cours sur ce service.",
+    byYou: "Lancée par vous.",
   },
   // Démarrer, arrêter, redémarrer un service (HRT-65, BR-LIFE-003 à 022).
   lifecycle: {
@@ -1107,6 +1111,9 @@ export const fr = {
     groupLabel: "Actions sur le service",
     // Aucun geste dans cet état (BR-LIFE-003).
     notDrivable: "Hearth ne pilote pas ce service dans son état actuel.",
+    // FIX:01M5A5VG2H1ESNN212NNMT2PP0 (BR-LIFE-024) : un service créé hors de Hearth et non adopté n'est pas pilotable, ni proposé, ni accepté.
+    notAdopted:
+      "Hearth ne pilote pas ce service : il a été créé hors de Hearth et ne lui a pas été confié. Vous pouvez le consulter, mais pas le démarrer, l'arrêter ni le redémarrer d'ici.",
     // Hors spec : le moteur ne peut pas recevoir l'ordre (BR-ENGINE-014).
     engineNotReady: "Indisponible tant que le moteur de conteneurs n'est pas prêt.",
     // Le menu de la ligne (design, écran A2).

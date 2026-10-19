@@ -115,3 +115,53 @@ test("une action d'un autre compte bloque les boutons, la raison est écrite des
   );
   await shoot(page, page, "lifecycle-verrou");
 });
+
+test("un service créé hors de Hearth et non adopté n'offre ni bouton ni menu, et dit pourquoi (BR-LIFE-024)", async ({
+  page,
+}) => {
+  await open(page);
+  await sim(page, (s) =>
+    s.services.seed("forge", [
+      { key: "c_base", name: "base-externe", origin: "external" },
+      { key: "h_terraria", name: "terraria", origin: "hearth", graceS: 120 },
+    ]),
+  );
+  await expect(row(page, "c_base")).toBeVisible();
+  await expect(row(page, "c_base").locator("[data-row-menu-button]")).toHaveCount(0);
+  await row(page, "c_base").click();
+  await expect(page.locator("[data-service-detail]")).toBeVisible();
+  await expect(page.locator("[data-lifecycle-action]")).toHaveCount(0);
+  await expect(page.locator("[data-lifecycle-note]")).toContainText(
+    "Hearth ne pilote pas ce service : il a été créé hors de Hearth",
+  );
+  await shoot(page, page, "lifecycle-non-adopte");
+});
+
+test("l'action lancée par soi se dit « par vous », sans « déjà » (marie est connectée)", async ({
+  page,
+}) => {
+  await open(page);
+  await sim(page, (s) =>
+    s.serviceOps.accept("forge", { key: "h_terraria", kind: "backup" }, "marie"),
+  );
+  await row(page, "h_terraria").click();
+  await expect(page.locator("[data-lifecycle-reason]")).toHaveText(
+    "Une action est en cours sur ce service. Lancée par vous.",
+  );
+});
+
+test("le cadre de focus n'entoure pas le titre après un clic, seulement au clavier", async ({
+  page,
+}) => {
+  await open(page);
+  await row(page, "h_terraria").click();
+  const title = page.locator("[data-detail-title]");
+  await expect(title).toBeVisible();
+  await title.evaluate((el) => (el as HTMLElement).focus());
+  await expect(title).toBeFocused();
+  expect(await title.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("none");
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await title.evaluate((el) => (el as HTMLElement).focus());
+  expect(await title.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe("none");
+});

@@ -243,7 +243,12 @@ export function progressOf(
 }
 
 /** « Lancée par {compte}. » : seulement pour un identifiant de compte valide (texte de l'agent), sinon `null`. */
-export function launchedBy(account: string | null | undefined): string | null {
+export function launchedBy(
+  account: string | null | undefined,
+  self?: string | null,
+): string | null {
   if (!account || !isHearthUsername(account)) return null;
+  // FIX:01M5A5VH5GR2M9PF9Y1SB04D65 : l'action lancée par le compte connecté se dit « par vous ».
+  if (self && account === self) return t("serviceOps.byYou");
   return t("serviceOps.by", { account });
 }

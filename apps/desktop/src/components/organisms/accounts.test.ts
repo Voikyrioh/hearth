@@ -103,7 +103,7 @@ describe("AccountTable", () => {
       "Sessions ouvertes",
       "Actions",
     ]);
-    expect(wrapper.get('[data-account="marie"] th').text()).toContain("toi");
+    expect(wrapper.get('[data-account="marie"] th').text()).toContain("vous");
     expect(wrapper.get('[data-account="lea"] td:nth-child(4)').text()).toBe("Jamais");
     wrapper.unmount();
   });

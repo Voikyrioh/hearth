@@ -80,6 +80,46 @@ describe("les boutons de pilotage", () => {
     wrapper.unmount();
   });
 
+  it("l'action lancée par le compte connecté se dit « par vous », sans « déjà » (FIX:01M5A5VH5GR2M9PF9Y1SB04D65)", async () => {
+    const { wrapper } = await open((bridge) =>
+      bridge.serviceOps.accept("forge", { key: "h_web", kind: "backup" }, "marie"),
+    );
+    expect(wrapper.get("[data-lifecycle-reason]").text()).toBe(
+      "Une action est en cours sur ce service. Lancée par vous.",
+    );
+    expect(wrapper.get("[data-detail-busy]").text()).toBe(
+      "Une action est en cours sur ce service. Lancée par vous.",
+    );
+    wrapper.unmount();
+  });
+
+  it("un service créé hors de Hearth et non adopté n'a ni bouton ni menu, et dit pourquoi (BR-LIFE-024, FIX:01M5A5VG2H1ESNN212NNMT2PP0)", async () => {
+    const { wrapper } = await open((bridge) => {
+      bridge.services.upsert("forge", { key: "e_base", name: "base-externe", origin: "external" });
+      bridge.services.upsert("forge", {
+        key: "e_old",
+        name: "ancien",
+        origin: "external",
+        adopted: { by: "claire", at: "2026-10-13T08:00:00Z" },
+      });
+    });
+    expect(wrapper.find('[data-row][data-key="e_base"] [data-row-menu-button]').exists()).toBe(
+      false,
+    );
+    await wrapper.get('[data-row][data-key="e_base"]').trigger("click");
+    await flushPromises();
+    expect(actions(wrapper)).toEqual([]);
+    expect(wrapper.get("[data-lifecycle-note]").text()).toContain(
+      "Hearth ne pilote pas ce service : il a été créé hors de Hearth",
+    );
+    // Un service adopté reste pilotable.
+    expect(wrapper.find('[data-row][data-key="e_old"] [data-row-menu-button]').exists()).toBe(true);
+    await wrapper.get('[data-row][data-key="e_old"]').trigger("click");
+    await flushPromises();
+    expect(actions(wrapper)).toEqual(["stop", "restart"]);
+    wrapper.unmount();
+  });
+
   it("sans le droit, les boutons restent visibles et désactivés avec la raison (BR-GRANT-014)", async () => {
     const { wrapper } = await open((bridge) =>
       bridge.setServiceRightOnServer("forge", "marie", false),
@@ -121,6 +161,17 @@ describe("arrêter", () => {
     expect(document.querySelector("[data-lifecycle-warning='adopted']")?.textContent).toContain(
       "créé hors de Hearth",
     );
+    wrapper.unmount();
+  });
+
+  it("la fenêtre s'ouvre sans avertissement de Vue (attribut sans destinataire, FIX:01M5A5VMDW33WJG3S1BWKE3N15)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { wrapper } = await open();
+    await wrapper.get('[data-lifecycle-action="stop"]').trigger("click");
+    await flushPromises();
+    expect(document.querySelector("dialog")).not.toBeNull();
+    expect(warn.mock.calls.flat().join(" ")).not.toContain("Extraneous");
+    warn.mockRestore();
     wrapper.unmount();
   });
 

@@ -196,7 +196,7 @@ const running = computed(() => (server.value ? operations.of(server.value.id) : 
 /** Qui a lancé l'opération : l'indication de la liste des services (`busy`), jamais deviné. */
 function launchedByOf(operation: TrackedOperation["operation"]): string | null {
   const service = entry.value?.services.find((item) => item.key === operation.key);
-  return launchedBy(service?.busy?.by);
+  return launchedBy(service?.busy?.by, server.value?.username);
 }
 /** « Voir » ouvre le détail du service touché, où se trouve la carte de l'opération. */
 function seeOperation(tracked: TrackedOperation) {
@@ -234,7 +234,7 @@ function controlsFor(service: ServiceInfo): Controls | null {
   return controlsOf({
     service,
     gate: rights.gate.value,
-    lock: pilotLock(service, running),
+    lock: pilotLock(service, running, server.value.username),
     engineReady: engineReady.value,
   });
 }
@@ -242,7 +242,11 @@ function controlsFor(service: ServiceInfo): Controls | null {
 const lifecycleLocked = computed(() => {
   const current = lifecycle.current.value;
   return current !== null && server.value
-    ? pilotLock(current, operations.forService(server.value.id, current.key) !== undefined).locked
+    ? pilotLock(
+        current,
+        operations.forService(server.value.id, current.key) !== undefined,
+        server.value.username,
+      ).locked
     : false;
 });
 /** La fenêtre se ferme : le focus revient au bouton d'origine, sinon au titre du détail (le bouton a pu disparaître). */

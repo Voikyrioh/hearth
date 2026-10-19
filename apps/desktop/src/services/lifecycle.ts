@@ -5,7 +5,7 @@ import { type MessageKey, t } from "@/i18n";
 import type { LifecycleGesture, LifecycleRefusal, ServiceInfo, ServiceState } from "@/link";
 import { launchedBy } from "@/serviceOps/messages";
 import { ENGINE_STATE_KEYS, STATE_KEYS } from "@/services/format";
-import type { PilotLock } from "@/services/pilot";
+import { busyText, type PilotLock } from "@/services/pilot";
 import { canAct, type RightsGate } from "@/services/rights";
 
 /**
@@ -36,6 +36,13 @@ const OFFERED: Partial<Record<ServiceState, readonly Gesture[]>> = {
 
 export function offeredGestures(state: ServiceState): readonly Gesture[] {
   return OFFERED[state] ?? [];
+}
+
+/**
+ * Un service créé hors de Hearth et pas adopté (BR-LIFE-024) : l'agent le refuse comme une clé inconnue. FIX:01M5A5VG2H1ESNN212NNMT2PP0
+ */
+export function isNotAdopted(service: Pick<ServiceInfo, "origin" | "adopted">): boolean {
+  return service.origin === "external" && service.adopted === null;
 }
 
 /** Les états où une action est déjà en cours (transition) : aucun geste, et le service le dit. */
@@ -84,13 +91,15 @@ export function controlsOf(input: {
     note,
     by: null,
   });
+  // FIX:01M5A5VG2H1ESNN212NNMT2PP0 (BR-LIFE-024) : l'agent refuserait tout geste sur un service non adopté ; aucun n'est proposé, la raison est dite.
+  if (isNotAdopted(service)) return none(t("lifecycle.notAdopted"));
   const absent = noGestureReason(service.state);
   if (absent === "not-drivable") return none(t("lifecycle.notDrivable"));
-  if (absent === "transition") return none(t("serviceOps.busy"));
+  if (absent === "transition") return none(busyText(lock));
   const gestures = offeredGestures(service.state);
   // Une action tient le service, quel que soit l'état réel affiché : les boutons sont désactivés (BR-SVC-031).
   if (lock.locked) {
-    return { gestures, disabled: true, reason: t("serviceOps.busy"), note: null, by: lock.by };
+    return { gestures, disabled: true, reason: busyText(lock), note: null, by: lock.by };
   }
   if (!canAct(gate)) {
     return { gestures, disabled: true, reason: rightsReason(gate), note: null, by: null };
@@ -245,7 +254,10 @@ function by(account: string | null): string | null {
  * Le texte d'un refus de l'agent hors de la confirmation (BR-LIFE-013, 014, 015, 019). `null` : un refus que la
  * fenêtre ne dit pas elle-même (la confirmation se dit sous son champ).
  */
-export function refusalText(refusal: { kind: string }, service: Pick<ServiceInfo, "name">): string {
+export function refusalText(
+  refusal: { kind: string },
+  service: Pick<ServiceInfo, "name"> & Partial<Pick<ServiceInfo, "origin" | "adopted">>,
+): string {
   const shown = refusal as LifecycleRefusal;
   switch (shown.kind) {
     case "engine_unavailable": {
@@ -256,7 +268,10 @@ export function refusalText(refusal: { kind: string }, service: Pick<ServiceInfo
         : t("lifecycle.refusedEngineNoState");
     }
     case "service_not_found":
-      return t("serviceDetail.gone");
+      // FIX:01M5A5VG2H1ESNN212NNMT2PP0 : le refus d'un service non adopté ressemble à « inconnu » (BR-LIFE-024) ; ce n'est pas qu'il a disparu.
+      return isNotAdopted({ origin: service.origin ?? "hearth", adopted: service.adopted ?? null })
+        ? t("lifecycle.notAdopted")
+        : t("serviceDetail.gone");
     case "service_busy": {
       const who = by(shown.by);
       return who === null ? t("serviceOps.busy") : `${t("serviceOps.busy")} ${who}`;

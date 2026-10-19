@@ -35,7 +35,7 @@ describe("« moi » vient de l'agent", () => {
   it("a login typed in capitals still shows « toi » and only « Changer mon mot de passe » on one's own line", async () => {
     const { wrapper } = await bootAsCapitals();
     const own = wrapper.get('[data-account="marie"]');
-    expect(own.text()).toContain("toi");
+    expect(own.text()).toContain("vous");
     expect(own.findAll("td button:not([data-services-right])").map((b) => b.text())).toEqual([
       "Changer mon mot de passe",
     ]);

@@ -38,6 +38,17 @@ describe("les textes", () => {
     expect(alreadyText("running", { name: "web" })).toBe("Le service web est déjà en marche.");
   });
 
+  it("un refus « introuvable » sur un service non adopté ne dit pas qu'il a disparu (BR-LIFE-024)", () => {
+    const refusal = { kind: "service_not_found" };
+    expect(refusalText(refusal, { name: "base", origin: "external", adopted: null })).toContain(
+      "créé hors de Hearth",
+    );
+    expect(refusalText(refusal, { name: "web", origin: "hearth", adopted: null })).toBe(
+      "Ce service n'existe plus.",
+    );
+    expect(refusalText(refusal, { name: "web" })).toBe("Ce service n'existe plus.");
+  });
+
   it("un service géré par le système remplace la règle « Redémarre toujours »", () => {
     const service = {
       adopted: null,

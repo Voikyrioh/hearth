@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
 import { launchedBy } from "@/serviceOps/messages";
 
@@ -16,13 +17,29 @@ export interface PilotLock {
    * du service ne reçoit pas cette indication) et que l'identifiant est valide.
    */
   by: string | null;
+  /** FIX:01M5A5VH5GR2M9PF9Y1SB04D65 : l'action tenant le service a été lancée par le compte connecté. */
+  own: boolean;
 }
 
 /**
  * `running` : le magasin des opérations suit une opération sur ce service (une opération vue par le flux tient le
  * service même si la liste n'a pas encore son `busy`).
  */
-export function pilotLock(service: Pick<ServiceInfo, "busy">, running = false): PilotLock {
-  if (!service.busy && !running) return { locked: false, by: null };
-  return { locked: true, by: launchedBy(service.busy?.by) };
+export function pilotLock(
+  service: Pick<ServiceInfo, "busy">,
+  running = false,
+  self: string | null = null,
+): PilotLock {
+  if (!service.busy && !running) return { locked: false, by: null, own: false };
+  const account = service.busy?.by;
+  return {
+    locked: true,
+    by: launchedBy(account, self),
+    own: !!self && !!account && account === self,
+  };
+}
+
+/** La phrase du verrou : « Une action est déjà en cours » pour une action d'un autre, sans « déjà » pour la sienne. */
+export function busyText(lock: Pick<PilotLock, "own">): string {
+  return t(lock.own ? "serviceOps.busyOwn" : "serviceOps.busy");
 }

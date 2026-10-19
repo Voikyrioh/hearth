@@ -51,6 +51,7 @@ function refusal(refused: { kind: string }): string {
 </script>
 
 <template>
+  <!-- FIX:01M5A5VMDW33WJG3S1BWKE3N15 : aucun attribut ici que la fenêtre (racine téléportée) ne pourrait recevoir. -->
   <AdminActDialog
     :open="open"
     :server-id="serverId"
@@ -60,7 +61,6 @@ function refusal(refused: { kind: string }): string {
     :can-submit="stale === null"
     :perform="perform"
     :refusal-text="refusal"
-    data-lifecycle-dialog
     @close="emit('close')"
   >
     <Callout v-if="stale" tone="info" role="status" data-lifecycle-stale>{{ stale }}</Callout>
