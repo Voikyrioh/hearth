@@ -4,6 +4,7 @@ import HInput from "@/components/atoms/HInput.vue";
 import HSelect from "@/components/atoms/HSelect.vue";
 import { t } from "@/i18n";
 import {
+  CPU_STEP_MILLIS,
   cpuFieldOf,
   cpuFromField,
   formatCpu,
@@ -46,8 +47,8 @@ function parsed(): number | null {
   const value =
     props.kind === "memory" ? memoryFromField(text.value, unit.value) : cpuFromField(text.value);
   if (value === null || value < min.value || value > max.value) return null;
-  // Le processeur se règle par pas de 0,25 cœur, soit le plancher lui-même (BR-RES-004).
-  return props.kind === "cpu" && value % min.value !== 0 ? null : value;
+  // Le processeur se règle par pas de 0,25 cœur (BR-RES-004).
+  return props.kind === "cpu" && value % CPU_STEP_MILLIS !== 0 ? null : value;
 }
 
 function writeField(value: number): void {
@@ -60,10 +61,11 @@ function writeField(value: number): void {
   }
 }
 
-// La valeur vient d'ailleurs (curseur, appelant) : la saisie la recopie, sauf si elle la dit déjà.
+// La valeur vient d'ailleurs (curseur, appelant) : la saisie la recopie, sauf si elle la dit déjà. Les crans
+// peuvent changer sous une même valeur (bornes relues) : le curseur se replace alors sur la nouvelle liste.
 watch(
-  () => props.modelValue,
-  (value) => {
+  [() => props.modelValue, () => props.stops],
+  ([value]) => {
     if (value === null) return;
     index.value = nearestStopIndex(props.stops, value);
     if (parsed() !== value) writeField(value);
@@ -122,7 +124,8 @@ const unitOptions = [
   { value: "go" as const, label: t("resources.unitGoOption") },
 ];
 
-// Le remplissage de la piste suit la poignée : une variable CSS posée sur l'élément, jamais un style en ligne.
+// Le remplissage de la piste suit la poignée : seule la variable CSS `--fill` est écrite dans le style de
+// l'élément, depuis le script ; le gabarit n'a pas d'attribut `style=` et les couleurs restent dans le bloc <style>.
 const slider = ref<HTMLInputElement | null>(null);
 function paint(): void {
   const last = Math.max(props.stops.length - 1, 1);
@@ -133,7 +136,7 @@ watch([index, () => props.stops], paint);
 </script>
 
 <template>
-  <div class="resource" :data-kind="kind">
+  <div class="resource" :data-kind="kind" role="group" :aria-labelledby="`${id}-title`">
     <h4 :id="`${id}-title`" class="resource__title">{{ title }}</h4>
     <div class="resource__row">
       <div class="resource__track">
@@ -216,7 +219,7 @@ watch([index, () => props.stops], paint);
 .resource__ends {
   display: flex;
   justify-content: space-between;
-  color: var(--tx2);
+  color: var(--tx3);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
 }
@@ -237,7 +240,7 @@ watch([index, () => props.stops], paint);
 
 .resource__suffix {
   padding-bottom: var(--field-pad-y);
-  color: var(--tx2);
+  color: var(--tx-secondary);
 }
 
 .resource__slider {

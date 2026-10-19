@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed } from "vue";
 import Callout from "@/components/molecules/Callout.vue";
 import ResourceSlider from "@/components/molecules/ResourceSlider.vue";
 import { t } from "@/i18n";
@@ -10,14 +10,13 @@ import {
   memoryStops,
   proposedMemoryBytes,
   type Resources,
-  resourcesIssue,
 } from "@/resources";
 
 // Mémoire et processeur d'un service qu'on crée (HRT-146). Les bornes viennent de la machine (`capacity`, lue sur
 // `GET /engine/capacity`) ; la valeur de départ est donnée par l'appelant (`startingResources`). Il n'existe aucune
-// position « sans limite » (BR-RES-037) : une valeur vide est refusée sur place et `valid` reste faux, de même
-// quand les bornes ne sont pas lues. Le composant ne réclame rien d'autre : l'appelant (déploiement, installation
-// par fiche) garde son bouton d'envoi inactif tant que `valid` est faux.
+// position « sans limite » (BR-RES-037) : une valeur vide ou refusée est signalée sur place et vaut `null`. Le
+// composant ne juge pas l'envoi : l'appelant (déploiement, installation par fiche), qui a déjà `capacity` et la
+// valeur, garde son bouton d'envoi inactif tant que `resourcesIssue(capacity, valeur)` n'est pas `null`.
 const props = withDefaults(
   defineProps<{
     /** Les bornes de la machine ; `null` tant que le serveur n'a pas répondu. */
@@ -30,16 +29,10 @@ const props = withDefaults(
   { recommended: null, disabled: false },
 );
 
-const emit = defineEmits<{
-  "update:modelValue": [value: Resources];
-  "update:valid": [valid: boolean];
-}>();
+const emit = defineEmits<{ "update:modelValue": [value: Resources] }>();
 
 const memoryList = computed(() => (props.capacity ? memoryStops(props.capacity.memoryBytes) : []));
 const cpuList = computed(() => (props.capacity ? cpuStops(props.capacity.cpus) : []));
-
-const valid = computed(() => resourcesIssue(props.capacity, props.modelValue) === null);
-watch(valid, (value) => emit("update:valid", value), { immediate: true });
 
 function setMemory(memoryBytes: number | null): void {
   emit("update:modelValue", { ...props.modelValue, memoryBytes });

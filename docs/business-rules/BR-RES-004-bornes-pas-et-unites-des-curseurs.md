@@ -16,7 +16,7 @@ Le maximum du curseur de processeur est le nombre de processeurs logiques du ser
 La partie « fin de "Sans limite" » de la règle d'origine est remplacée par `BR-RES-037`.
 
 ## Application (code)
-- `apps/desktop/src/resources/scale.ts::{memoryStops, cpuStops, nearestStopIndex, memoryInRange, cpuInRange}`
+- `apps/desktop/src/resources/scale.ts::{maxMemoryBytes, memoryStops, cpuStops, nearestStopIndex, memoryInRange, cpuInRange}`
 - `apps/desktop/src/resources/format.ts::{formatMemory, formatCpu, memoryFromField, cpuFromField, memoryFieldOf}`
 - `apps/desktop/src/resources/capacity.ts::engineCapacityFromWire` (lecture des bornes)
 - `apps/desktop/src/components/molecules/ResourceSlider.vue`

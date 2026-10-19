@@ -15,7 +15,7 @@ Tout service créé par Hearth a une limite de mémoire et une limite de process
 
 ## Application (code)
 - `apps/desktop/src/resources/ready.ts::resourcesIssue`
-- `apps/desktop/src/components/organisms/ResourceSliders.vue` (événement `update:valid`)
+- `apps/desktop/src/components/organisms/ResourceSliders.vue` (aucune sortie « sans limite », valeur vide ou refusée à `null`)
 
 ## Vérification
 - `apps/desktop/src/resources/resources.test.ts` (`resourcesIssue`)

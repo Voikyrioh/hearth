@@ -1,6 +1,13 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
-import { type EngineCapacity, GIB, MIB, type Resources, startingResources } from "@/resources";
+import {
+  type EngineCapacity,
+  GIB,
+  MIB,
+  type Resources,
+  resourcesIssue,
+  startingResources,
+} from "@/resources";
 import ResourceSliders from "./ResourceSliders.vue";
 
 const capacity: EngineCapacity = {
@@ -24,7 +31,6 @@ function open(
 type Opened = ReturnType<typeof open>;
 const lastModel = (wrapper: Opened) =>
   wrapper.emitted("update:modelValue")?.at(-1)?.[0] as Resources;
-const lastValid = (wrapper: Opened) => wrapper.emitted("update:valid")?.at(-1)?.[0];
 const memorySlider = (wrapper: Opened) =>
   wrapper.get<HTMLInputElement>('input[aria-label="Mémoire, curseur"]');
 const cpuSlider = (wrapper: Opened) => wrapper.get('input[aria-label="Processeur, curseur"]');
@@ -44,7 +50,6 @@ describe("ResourceSliders (HRT-146)", () => {
     expect(memorySlider(wrapper).attributes("aria-valuetext")).toBe("2 Go");
     expect(cpuSlider(wrapper).attributes("aria-valuetext")).toBe("16 cœurs");
     expect(fields(wrapper)[0]?.element.value).toBe("2");
-    expect(lastValid(wrapper)).toBe(true);
   });
 
   it("moves the memory slider by one stop and keeps the wire in bytes", async () => {
@@ -71,6 +76,7 @@ describe("ResourceSliders (HRT-146)", () => {
     const wrapper = open();
     await fields(wrapper)[0]?.setValue("");
     expect(lastModel(wrapper).memoryBytes).toBeNull();
+    expect(resourcesIssue(capacity, lastModel(wrapper))).toBe("memory");
     expect(wrapper.text()).toContain("Indiquez la mémoire du service.");
   });
 
@@ -91,19 +97,10 @@ describe("ResourceSliders (HRT-146)", () => {
     );
   });
 
-  it("becomes invalid when a value is emptied, valid again when it is fixed", async () => {
-    const wrapper = open();
-    await wrapper.setProps({ modelValue: { memoryBytes: null, cpuMillis: 4000 } });
-    expect(lastValid(wrapper)).toBe(false);
-    await wrapper.setProps({ modelValue: { memoryBytes: 2 * GIB, cpuMillis: 4000 } });
-    expect(lastValid(wrapper)).toBe(true);
-  });
-
   it("cannot be sent without the bounds, and says so", () => {
     const wrapper = open({ capacity: null });
     expect(wrapper.text()).toContain("Hearth n'a pas pu lire les limites de ce serveur.");
     expect(wrapper.find('input[type="range"]').exists()).toBe(false);
-    expect(lastValid(wrapper)).toBe(false);
   });
 
   it("shows the recommendation and its proof under the memory slider", () => {
@@ -129,9 +126,15 @@ describe("ResourceSliders (HRT-146)", () => {
     expect(warned.text()).toContain(
       "Sous la mémoire recommandée : le serveur peut ralentir ou s'arrêter.",
     );
-    expect(lastValid(warned)).toBe(true);
+    expect(warned.emitted("update:modelValue")).toBeUndefined();
     const fine = open({ recommended: { bytes: 4 * GIB, proof: "measured" } });
     expect(fine.text()).not.toContain("Sous la mémoire recommandée");
+  });
+
+  it("puts the slider back on the new list when the bounds change under the same value", async () => {
+    const wrapper = open({ value: { memoryBytes: 64 * GIB, cpuMillis: 16000 } });
+    await wrapper.setProps({ capacity: { ...capacity, memoryBytes: 32 * GIB } });
+    expect(memorySlider(wrapper).attributes("aria-valuetext")).toBe("32 Go");
   });
 
   it("follows the caller when the value changes from outside", async () => {

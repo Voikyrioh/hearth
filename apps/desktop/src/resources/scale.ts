@@ -7,7 +7,13 @@ export const GIB = 1024 * MIB;
 /** Plancher des deux limites (BR-RES-004) : 128 Mo, 0,25 cœur. */
 export const MIN_MEMORY_BYTES = 128 * MIB;
 export const MIN_CPU_MILLIS = 250;
-const CPU_STEP_MILLIS = 250;
+/** Pas du processeur (BR-RES-004) : 0,25 cœur, pour le curseur comme pour la saisie. */
+export const CPU_STEP_MILLIS = 250;
+
+/** La mémoire la plus haute permise : la mémoire totale arrondie au Mo inférieur, jamais sous le plancher. */
+export function maxMemoryBytes(totalBytes: number): number {
+  return Math.max(Math.floor(totalBytes / MIB) * MIB, MIN_MEMORY_BYTES);
+}
 
 /**
  * Les valeurs que le curseur de mémoire parcourt (BR-RES-004) : de 128 Mo à 2 Go par 128 Mo, jusqu'à 8 Go par
@@ -15,9 +21,9 @@ const CPU_STEP_MILLIS = 250;
  * ronde). Le curseur est discret : une liste de valeurs permises, pas un pas uniforme.
  */
 export function memoryStops(totalBytes: number): number[] {
-  const maxMib = Math.max(Math.floor(totalBytes / MIB), MIN_MEMORY_BYTES / MIB);
+  const maxMib = maxMemoryBytes(totalBytes) / MIB;
   const stops: number[] = [];
-  for (let mib = 128; mib <= maxMib; ) {
+  for (let mib = MIN_MEMORY_BYTES / MIB; mib <= maxMib; ) {
     stops.push(mib * MIB);
     mib += mib < 2048 ? 128 : mib < 8192 ? 256 : 1024;
   }
@@ -46,7 +52,7 @@ export function nearestStopIndex(stops: readonly number[], value: number): numbe
 /** Une mémoire est valable si c'est un nombre entier de Mo entre le plancher et la mémoire totale. */
 export function memoryInRange(capacity: EngineCapacity, bytes: number | null): boolean {
   if (bytes === null || !Number.isInteger(bytes) || bytes % MIB !== 0) return false;
-  return bytes >= MIN_MEMORY_BYTES && bytes <= (memoryStops(capacity.memoryBytes).at(-1) ?? 0);
+  return bytes >= MIN_MEMORY_BYTES && bytes <= maxMemoryBytes(capacity.memoryBytes);
 }
 
 /** Un processeur est valable s'il est un multiple de 0,25 cœur entre le plancher et le nombre de processeurs. */

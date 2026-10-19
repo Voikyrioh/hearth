@@ -1,5 +1,5 @@
 import type { EngineCapacity } from "./capacity";
-import { GIB, MIB, MIN_MEMORY_BYTES, memoryStops } from "./scale";
+import { GIB, MIB, MIN_MEMORY_BYTES, maxMemoryBytes } from "./scale";
 
 /** BR-RES-039 : 2 Go, ou la moitié de la mémoire disponible si elle est plus petite, jamais moins de 256 Mo. */
 const PROPOSED_MEMORY_BYTES = 2 * GIB;
@@ -11,7 +11,7 @@ function availableBytes(capacity: EngineCapacity): number {
 }
 
 function clampToMachine(capacity: EngineCapacity, bytes: number): number {
-  const max = memoryStops(capacity.memoryBytes).at(-1) ?? bytes;
+  const max = maxMemoryBytes(capacity.memoryBytes);
   return Math.max(MIN_MEMORY_BYTES, Math.min(Math.floor(bytes / MIB) * MIB, max));
 }
 
