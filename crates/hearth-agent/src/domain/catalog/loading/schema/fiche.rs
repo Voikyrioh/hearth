@@ -556,6 +556,28 @@ pub struct Resources {
     pub cpu: CpuResource,
     pub memory: MemoryResource,
     pub disk: DiskResource,
+    /// Crans déclarés « Fluide », « Ultra », « Communautaire » (zéro à trois ; HRT-122).
+    #[serde(default)]
+    pub memory_tier: Vec<MemoryTier>,
+    pub tiers: Option<Tiers>,
+}
+
+/// Un cran de mémoire déclaré. L'identifiant reste un texte pour que le refus soit typé (`CranInconnu`).
+/// Aucun champ de texte libre : les libellés et les textes sont ceux de Hearth.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryTier {
+    pub id: String,
+    pub from_bytes: u64,
+    pub evidence: Evidence,
+}
+
+/// Crans qui n'ont pas de sens pour ce jeu : jamais servis, même avec un chiffre.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Tiers {
+    #[serde(default)]
+    pub hidden: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

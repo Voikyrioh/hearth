@@ -54,6 +54,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`StatRow`](./StatRow.md) — Ligne « libellé : valeur » d'une carte.
 - [`DashCard`](./DashCard.md) — Carte du tableau de bord (titre de section, corps).
 - [`CoreBars`](./CoreBars.md) — Une barre par cœur du processeur.
+- [`ResourceSlider`](./ResourceSlider.md) — Un curseur discret de mémoire ou de processeur et sa saisie exacte (HRT-146).
 
 ## Organismes
 
@@ -105,6 +106,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`NetworkCard`](./NetworkCard.md) — Section Réseau (montant, descendant).
 - [`DisksCard`](./DisksCard.md) — Section Disques (suit les montages).
 - [`TemperaturesCard`](./TemperaturesCard.md) — Section Températures (ou explication sans sonde).
+- [`ResourceSliders`](./ResourceSliders.md) — Mémoire et processeur à la création d'un service, bornes de la machine, jamais « sans limite » (HRT-146).
 
 ## Gabarits
 
