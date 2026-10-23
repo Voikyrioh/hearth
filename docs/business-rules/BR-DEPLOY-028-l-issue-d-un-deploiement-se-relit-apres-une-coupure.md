@@ -17,10 +17,12 @@ Un déploiement est une opération de service (genre `deploy`) : son issue se re
 - `crates/hearth-agent/src/application/service_op_access.rs::ServiceOpAccess::read`
 - `crates/hearth-agent/src/entrypoint/http/service_ops.rs::get`
 - `apps/desktop/src/composables/useDeployFlow.ts::perform` et `components/organisms/DeployProgressDialog.vue (data-deploy-unknown)` (client : résultat inconnu dit, jamais rejoué ; l'issue arrive par le suivi des opérations)
+- `apps/desktop/src-tauri/src/service_ops/deploy.rs::deploy` (résultat inconnu : `Unknown`, jamais rejoué) et `cancel`
 
 ## Vérification
 - `crates/hearth-agent/tests/service_ops_https.rs::any_account_reads_an_operation_of_a_hearth_service_with_its_steps_and_progress` (le genre est celui de l'opération)
 - `apps/desktop/src/pages/DeployFlow.test.ts (en arrière-plan et résultat inconnu)`
+- `apps/desktop/src/link/tauri-deploy.test.ts (résultat inconnu rendu sans rejeu)`
 
 ## Cas limites
 - La route qui crée un déploiement n'existe pas encore (HRT-68) : cette fiche s'applique à elle dès qu'elle existera ; aujourd'hui seule la relecture existe.
@@ -31,3 +33,4 @@ Un déploiement est une opération de service (genre `deploy`) : son issue se re
 ## Historique
 - 2026-10-14 — création (HRT-144 : le socle des opérations branché sur des routes et sur le flux).
 - 2026-10-24 — côté client (HRT-69, déployer une image).
+- 2026-10-24 — coquille Rust et liaison (HRT-69, déployer une image).

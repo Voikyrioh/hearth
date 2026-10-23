@@ -3,7 +3,7 @@
 Stack : Rust (Cargo workspace + Tauri 2) · Vue 3 · SQLite · Tokio · axum · rustls
 Style : Hexagonale (agent, link) · Atomic design (front)
 Entrée : `crates/hearth-agent/src/main.rs` (→ `entrypoint/cli.rs`), `apps/desktop/src-tauri/main.rs`, `apps/desktop/src/main.ts`
-Maj : 2026-10-24 (HRT-69 déployer une image, interface seule : `apps/desktop/src/deploy/` règles pures, formulaire, récapitulatif, progression, pont simulé ; coquille et liaison Rust à écrire) ; 2026-10-19 (HRT-65 pilotage d'un service côté client : `hearth-link` `domain/service_lifecycle.rs` et `manager/service_lifecycle.rs`, coquille `service_ops/lifecycle.rs`, boutons, fenêtre de confirmation et menu de ligne) ; 2026-10-17 (HRT-84 suivi des opérations côté client : `hearth-link` `domain/service_op_tracker.rs`, coquille `service_ops/`, bande « Opérations en cours »)
+Maj : 2026-10-24 (HRT-69 déployer une image côté client : `apps/desktop/src/deploy/` règles pures, formulaire, récapitulatif, progression, pont simulé ; `hearth-link` `manager/service_deploy.rs` (acte `ServiceDeploy`, consultation, bornes de la machine) ; coquille `service_ops/{deploy,deploy_dto}.rs`) ; 2026-10-19 (HRT-65 pilotage d'un service côté client : `hearth-link` `domain/service_lifecycle.rs` et `manager/service_lifecycle.rs`, coquille `service_ops/lifecycle.rs`, boutons, fenêtre de confirmation et menu de ligne) ; 2026-10-17 (HRT-84 suivi des opérations côté client : `hearth-link` `domain/service_op_tracker.rs`, coquille `service_ops/`, bande « Opérations en cours »)
 
 ## Vue d'ensemble
 
