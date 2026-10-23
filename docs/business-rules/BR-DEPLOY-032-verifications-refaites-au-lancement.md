@@ -5,7 +5,7 @@ titre: Les vérifications du formulaire (nom, ports, dossiers) sont indicatives 
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-deployer-image.md (BR-DEPLOY-032), HRT-68
-maj: 2026-10-17
+maj: 2026-10-24
 ---
 
 # BR-DEPLOY-032 — Les vérifications du formulaire (nom, ports, dossiers) sont indicatives ; le serveur les refait toutes au lancement avec la même sévérité
@@ -15,10 +15,12 @@ maj: 2026-10-17
 
 ## Application (code)
 - `crates/hearth-agent/src/application/deployments.rs::Deployments::{check, deploy}`
+- `apps/desktop/src/composables/useDeployFlow.ts::{openSummary, settleRefusal}` (client : consultation refaite au clic, refus de champ qui ramène au champ)
 
 ## Vérification
 - `crates/hearth-agent/tests/service_deploy_https.rs::the_check_reports_each_field_writes_nothing_and_is_not_journaled`
 - `crates/hearth-agent/tests/service_deploy_https.rs::a_port_held_by_a_container_a_program_or_the_agent_is_refused_with_a_suggestion`
+- `apps/desktop/src/pages/DeployFlow.test.ts (les refus du serveur au lancement)`
 
 ## Cas limites
 - Aucun cas particulier connu.
@@ -28,3 +30,4 @@ BR-DEPLOY-004, BR-DEPLOY-008
 
 ## Historique
 - 2026-10-17 — création (HRT-68, déployer une image, côté agent).
+- 2026-10-24 — côté client (HRT-69, déployer une image).

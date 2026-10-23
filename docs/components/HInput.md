@@ -8,3 +8,4 @@ Champ texte : libellé toujours visible, aide, erreur sous le champ (`role="aler
 - Événements et slots : événement `update:modelValue` ; slot `suffix`
 - Notes : Jetons : `--bg`, `--bd`, `--ac`, `--crit`, `--focus-halo`, `--field-pad-*`. Tests : `atoms.test.ts`.
 - HRT-47 (S3) : halo de focus dessiné à l'intérieur de la bordure (même axe gauche que le reste) ; idem `HSelect` et `MultiSelect`. FIX:01M4EPX90N9QNNPCHVNB6MCDDF. Décision de Claude, à confirmer par Voiky.
+- HRT-69 : `hideLabel` (libellé lu par les lecteurs d'écran seulement, pour une rangée de formulaire), `inputmode`, `maxlength`, événement `blur`.
