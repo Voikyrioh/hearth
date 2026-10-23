@@ -72,6 +72,15 @@ fn act_of(kind: AdminActKindDto, role: Option<RoleDto>) -> AdminAct<'static> {
             target: "",
             choice: hearth_proto::api::service_ops::OperationChoice::Continue,
         },
+        // Déployer et annuler : le genre seul décide (la table de l'élévation), ni la cible ni le corps ne comptent.
+        AdminActKindDto::ServiceDeploy => AdminAct::ServiceDeploy {
+            name: "".into(),
+            image: "".into(),
+            digest: [0; hearth_proto::admin_act::FINGERPRINT_LEN],
+            env_count: 0,
+            command: false,
+        },
+        AdminActKindDto::OperationCancel => AdminAct::OperationCancel { target: "" },
         AdminActKindDto::ServiceStart => AdminAct::ServiceStart { target: "".into() },
         AdminActKindDto::ServiceStop => AdminAct::ServiceStop { target: "".into() },
         AdminActKindDto::ServiceRestart => AdminAct::ServiceRestart { target: "".into() },
@@ -168,6 +177,9 @@ mod tests {
                 (Kind::AttackModeDisable, None, Yes),
                 (Kind::AccountPasswordOwn, None, Yes),
                 (Kind::ReauthSetting, None, Yes),
+                // Déployer : jamais couvert par l'élévation (BR-DEPLOY-030). Annuler : la table de l'élévation.
+                (Kind::ServiceDeploy, None, Yes),
+                (Kind::OperationCancel, None, UnlessElevated),
             ] {
                 assert_eq!(
                     password_need_of(kind, role, trust),

@@ -71,6 +71,10 @@ const COMMANDS: &[&str] = &[
     "service_start",
     "service_stop",
     "service_restart",
+    "deploy_check",
+    "deploy_service",
+    "cancel_service_operation",
+    "read_engine_capacity",
 ];
 
 fn main() {

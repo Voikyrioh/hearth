@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-deploy-service"
+description = "Enables the deploy_service command without any pre-configured scope."
+commands.allow = ["deploy_service"]
+
+[[permission]]
+identifier = "deny-deploy-service"
+description = "Denies the deploy_service command without any pre-configured scope."
+commands.deny = ["deploy_service"]
