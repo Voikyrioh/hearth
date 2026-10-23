@@ -112,6 +112,16 @@ pub enum PlanError {
     LimitsRequired,
 }
 
+/// La référence de l'image telle que le moteur la reçoit : `dépôt:version`, et `@sha256:...` ajouté quand la
+/// description épingle une empreinte (une fiche, BR-FICHE-009) : le moteur crée alors le conteneur depuis cette
+/// image-là et aucune autre, même si la version a été déplacée depuis. Sans empreinte, rien ne change.
+pub fn image_reference(image: &super::spec::SpecImage) -> String {
+    match &image.digest {
+        Some(digest) => format!("{}:{}@{digest}", image.repository, image.tag),
+        None => format!("{}:{}", image.repository, image.tag),
+    }
+}
+
 /// Le constructeur unique du plan (conception technique 9, ADR-0041).
 pub fn plan_from_spec(
     body: &SpecBody,
@@ -151,7 +161,7 @@ pub fn plan_from_spec(
     ]);
     Ok(ContainerPlan {
         name: body.name.clone(),
-        image: format!("{}:{}", body.image.repository, body.image.tag),
+        image: image_reference(&body.image),
         labels,
         env: secrets
             .env
@@ -237,6 +247,34 @@ mod tests {
         assert_eq!(plan.ports.len(), 1);
         assert_eq!(plan.env.len(), 1);
         assert_eq!(plan.command.as_ref().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn a_pinned_image_is_created_by_its_digest() {
+        let spec = serde_json::from_value(json()).expect("spec");
+        let mut valid = validate(
+            &spec,
+            Some(Machine {
+                cpus: 8,
+                memory_bytes: 16 << 30,
+            }),
+        )
+        .expect("valide");
+        let key = ServiceKey::parse(KEY).expect("clé");
+        let context = PlanContext {
+            key: &key,
+            install_id: "inst-1",
+            created_by: "marie",
+            rev: 1,
+            managed_root: "/var/lib/hearth/services",
+        };
+        let digest = format!("sha256:{}", "ab".repeat(32));
+        valid.body.image.digest = Some(digest.clone());
+        let pinned = plan_from_spec(&valid.body, &valid.secrets, &context).expect("plan");
+        assert_eq!(pinned.image, format!("nginx:1.27@{digest}"));
+        valid.body.image.digest = None;
+        let loose = plan_from_spec(&valid.body, &valid.secrets, &context).expect("plan");
+        assert_eq!(loose.image, "nginx:1.27", "sans empreinte, rien ne change");
     }
 
     #[test]
