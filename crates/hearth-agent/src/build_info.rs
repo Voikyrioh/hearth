@@ -10,6 +10,11 @@
 pub const ALLOW_LOCAL_DOWNLOADS: bool =
     option_env!("HEARTH_UPDATE_ALLOW_LOCAL_ADDRESSES").is_some();
 
+/// Les fiches `preview` du catalogue sont proposées (HRT-101, ADR-0050). Faux dans toute construction de
+/// publication ; `HEARTH_PREVIEW_FICHES` n'est donnée qu'à une construction d'essai, et le contrôle préalable
+/// de publication (`release-preflight`) refuse la variable.
+pub const PREVIEW_FICHES: bool = option_env!("HEARTH_PREVIEW_FICHES").is_some();
+
 /// Ce qui distingue cette construction d'une construction de publication (vide pour une
 /// publication) : clé de test, adresses locales permises, version imposée.
 pub const BUILD_NOTES: &str = env!("HEARTH_BUILD_NOTES");
