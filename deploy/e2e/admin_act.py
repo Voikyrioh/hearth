@@ -17,7 +17,9 @@ ce que fait la liaison cliente, avec `openssl` pour Ed25519 :
     admin_act.py confirm-service VERB HOST PORT TOKEN USER PASSWORD KEYFILE KEY
                                                                lit un corps JSON (`{}`) et le rend + `reauth` pour
                                                                `POST /services/KEY/VERB`, VERB étant `start`, `stop`
-                                                               ou `restart` (codes d'acte 0x0C, 0x0D, 0x0E, HRT-64)
+                                                               ou `restart` (codes d'acte 0x0C, 0x0D, 0x0E, HRT-64) ;
+                                                               PASSWORD vide : le membre `reauth` n'a pas de mot de
+                                                               passe (état normal, HRT-194)
     admin_act.py confirm-deploy HOST PORT TOKEN USER PASSWORD KEYFILE
                                                                lit le corps de `POST /deployments` (nom, image,
                                                                ports, montages, limites…) et le rend + `reauth`
@@ -190,7 +192,11 @@ def signed_member(host, port, token, user, password, keyfile, tail):
     text, raw = challenge_for(connection, user, "admin_act")
     token_hash = hashlib.sha256(bytes.fromhex(token)).digest()
     message = head(USAGE_ADMIN_ACT, fingerprint(connection), user, raw) + token_hash + tail
-    return ({"password": password, "device": device_member(keyfile, message, text)},)
+    member = {"device": device_member(keyfile, message, text)}
+    # Un mot de passe vide n'est pas envoyé (HRT-194 : piloter un service en état normal n'en demande pas).
+    if password:
+        member["password"] = password
+    return (member,)
 
 
 def confirm_adopt(host, port, token, user, password, keyfile):
