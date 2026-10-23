@@ -5,6 +5,7 @@
 
 use hearth_proto::api::deploy::CAPABILITY_SERVICE_DEPLOY;
 use hearth_proto::api::service_logs::CAPABILITY_SERVICE_LOGS;
+use hearth_proto::api::service_ops::CAPABILITY_CATALOG;
 use hearth_proto::api::service_ops::CAPABILITY_SERVICE_OPS;
 use hearth_proto::api::services::{
     CAPABILITY_SERVICE_ADOPTION, CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES,
@@ -58,6 +59,8 @@ impl HelloService {
                     CAPABILITY_SERVICE_OPS,
                     // Déployer une image (HRT-68) : `POST /deployments`, sa vérification et les bornes de la machine.
                     CAPABILITY_SERVICE_DEPLOY,
+                    // Le catalogue des fiches de serveurs de jeu (HRT-101) : `GET /catalog` et `GET /catalog/{id}`.
+                    CAPABILITY_CATALOG,
                 ],
             },
         }
@@ -111,7 +114,8 @@ mod tests {
                 "service-logs",
                 "service-adoption",
                 "service-ops",
-                "service-deploy"
+                "service-deploy",
+                "catalog"
             ]
         );
     }

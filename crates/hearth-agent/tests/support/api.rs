@@ -218,6 +218,7 @@ fn state_over_rig(
         service_ops,
         service_lifecycle,
         deployments,
+        catalog: Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         hello: Arc::new(HelloService::new(
             InstallId::from_bytes([3; 16]),
             false,
