@@ -13,13 +13,17 @@ type Sim = {
   serviceOps: { accept(serverId: string, patch: Record<string, unknown>, by?: string): unknown };
   finishGesture(serverId: string, key: string): void;
   gestures: Array<{ key: string; gesture: string }>;
+  reauth: { setTrust(serverId: string, trust: "normal" | "alert" | "attack" | null): void };
 };
 
-const sim = <T>(page: Page, run: (sim: Sim) => T) =>
-  page.evaluate((source) => {
-    const bridge = (window as unknown as { __hearthSim: Sim }).__hearthSim;
-    return new Function("sim", `return (${source})(sim)`)(bridge);
-  }, run.toString());
+const sim = <T>(page: Page, run: (sim: Sim) => T, arg?: unknown) =>
+  page.evaluate(
+    ([source, value]) => {
+      const bridge = (window as unknown as { __hearthSim: Sim }).__hearthSim;
+      return new Function("sim", "arg", `return (${source as string})(sim, arg)`)(bridge, value);
+    },
+    [run.toString(), arg] as const,
+  );
 
 async function shoot(target: Page | Locator, page: Page, name: string) {
   for (const width of WIDTHS) {
@@ -87,7 +91,9 @@ test("arrêter : acte envoyé, service verrouillé, issue annoncée une fois", a
   await shoot(page, page, "lifecycle-detail");
   await page.locator('[data-lifecycle-action="stop"]').click();
   const dialog = page.locator("dialog[open]");
-  await dialog.locator("[data-reauth-field] input").fill(PASSWORD);
+  // HRT-194 : en état normal, la fenêtre confirme l'effet de l'arrêt et ne demande aucun mot de passe.
+  await expect(dialog).toContainText("Arrêter terraria ?");
+  await expect(dialog.locator("[data-reauth-field]")).toHaveCount(0);
   await dialog.getByRole("button", { name: "Arrêter le service" }).click();
   await expect(dialog).toHaveCount(0);
   await expect(page.locator("[data-lifecycle-action]")).toHaveCount(0);
@@ -96,6 +102,28 @@ test("arrêter : acte envoyé, service verrouillé, issue annoncée une fois", a
   await expect(page.getByText("Le service terraria est arrêté.")).toBeVisible();
   await expect(page.locator('[data-lifecycle-action="start"]')).toBeVisible();
   await shoot(page, page, "lifecycle-arrete");
+});
+
+test("HRT-194 : démarrer part sans fenêtre en état normal, le champ revient en état d'alerte", async ({
+  page,
+}) => {
+  await open(page);
+  await row(page, "h_robot").click();
+  await page.locator('[data-lifecycle-action="start"]').click();
+  await expect(page.locator("dialog[open]")).toHaveCount(0);
+  expect(await sim(page, (s) => s.gestures.length)).toBe(1);
+  await sim(page, (s) => s.finishGesture("forge", "h_robot"));
+  await expect(page.getByText("Le service robot-discord est en marche.")).toBeVisible();
+  // Alerte : le même geste ouvre la fenêtre avec le champ du mot de passe.
+  await sim(page, (s) => s.reauth.setTrust("forge", "alert"));
+  await row(page, "h_robot").click();
+  await page.locator('[data-lifecycle-action="stop"]').click();
+  const dialog = page.locator("dialog[open]");
+  await expect(dialog.locator("[data-reauth-field] input")).toBeVisible();
+  await shoot(page, page, "lifecycle-alerte-champ");
+  await dialog.locator("[data-reauth-field] input").fill(PASSWORD);
+  await dialog.getByRole("button", { name: "Arrêter le service" }).click();
+  await expect(dialog).toHaveCount(0);
 });
 
 test("une action d'un autre compte bloque les boutons, la raison est écrite dessous", async ({

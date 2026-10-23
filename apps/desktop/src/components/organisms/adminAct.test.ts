@@ -320,6 +320,76 @@ describe("AdminActDialog", () => {
     wrapper.unmount();
   });
 
+  it("piloting a service asks no password in the normal state and the password in the alert and attack states (HRT-194)", async () => {
+    for (const [trust, asks] of [
+      ["normal", false],
+      ["alert", true],
+      ["attack", true],
+    ] as const) {
+      const ctx = await startedApp();
+      ctx.bridge.reauth.setTrust("forge", trust);
+      const sent: Array<string | null> = [];
+      const wrapper = mount(AdminActDialog, {
+        props: {
+          open: true,
+          serverId: "forge",
+          kind: "service_stop",
+          title: "Arrêter ?",
+          submitLabel: "Arrêter",
+          perform: async (adminPassword: string | null) => {
+            sent.push(adminPassword);
+            return { kind: "done" } as ActReport;
+          },
+        },
+        global: { plugins: [ctx.pinia] },
+        attachTo: document.body,
+      });
+      await flushPromises();
+      expect(reauthField() !== null, trust).toBe(asks);
+      expect(document.querySelector("[data-reauth-elevated]"), trust).toBeNull();
+      await confirmDialog("Arrêter");
+      expect(sent, trust).toEqual([asks ? OWN : null]);
+      wrapper.unmount();
+      document.body.innerHTML = "";
+    }
+  });
+
+  it("when the state goes from normal to alert before the send, it asks the password without losing the entry of the act", async () => {
+    const ctx = await startedApp();
+    let calls = 0;
+    const wrapper = mount(AdminActDialog, {
+      props: {
+        open: true,
+        serverId: "forge",
+        kind: "service_stop",
+        title: "Arrêter ?",
+        submitLabel: "Arrêter",
+        perform: async (adminPassword: string | null) => {
+          calls += 1;
+          const outcome = await ctx.bridge.closeAccountSessions("forge", PAUL, adminPassword);
+          return outcome.kind === "done" ? ({ kind: "done" } as ActReport) : (outcome as ActReport);
+        },
+      },
+      slots: { default: () => h("input", { placeholder: "saisie de l'acte" }) },
+      global: { plugins: [ctx.pinia] },
+      attachTo: document.body,
+    });
+    await flushPromises();
+    expect(reauthField()).toBeNull();
+    typeInto(document.querySelector('input[placeholder="saisie de l\'acte"]'), "ce que j'ai tapé");
+    ctx.bridge.reauth.setTrust("forge", "alert");
+    dialogButton("Arrêter")?.click();
+    await flushPromises();
+    expect(calls).toBe(1);
+    expect(wrapper.emitted("close")).toBeUndefined();
+    expect(text()).toContain("Le serveur demande maintenant votre mot de passe.");
+    expect(reauthField()).not.toBeNull();
+    expect(
+      document.querySelector<HTMLInputElement>('input[placeholder="saisie de l\'acte"]')?.value,
+    ).toBe("ce que j'ai tapé");
+    wrapper.unmount();
+  });
+
   it("writes the texts of the confirmation with « vous », without a long dash", () => {
     const texts = JSON.stringify(fr.reauth);
     expect(texts).not.toContain("—");

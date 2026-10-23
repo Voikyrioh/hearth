@@ -39,9 +39,11 @@ import { type LogMessage, type LogReading, toLogMessage } from "./logs";
 import { type MachineEvent, toHistory, toMetrics, toView } from "./machine";
 import {
   type AdminActKind,
+  type PasswordNeed,
   type ReauthMode,
   type ReauthSettingOutcome,
   type ReauthState,
+  type TrustLevel,
   toReauthSettingOutcome,
 } from "./reauth";
 import {
@@ -481,8 +483,12 @@ export class TauriLinkBridge implements LinkBridge {
     return unwrap(await commands.getReauthState(serverId));
   }
 
-  async reauthCovers(kind: AdminActKind, role: Role | null): Promise<boolean> {
-    return commands.reauthCovers(kind, role);
+  async reauthPasswordNeed(
+    kind: AdminActKind,
+    role: Role | null,
+    trust: TrustLevel | null,
+  ): Promise<PasswordNeed> {
+    return commands.reauthPasswordNeed(kind, role, trust);
   }
 
   async setReauthSetting(

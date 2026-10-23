@@ -1,8 +1,10 @@
 import type {
   AdminActKindDto,
   ReauthSettingOutcome as BoundSettingOutcome,
+  PasswordNeedDto,
   ReauthModeDto,
   ReauthStateDto,
+  TrustLevelDto,
 } from "@/bindings";
 
 /**
@@ -28,6 +30,19 @@ export type AdminActKind = AdminActKindDto;
  * - `elevatedForS` : secondes restantes du délai de cette session depuis cette adresse (0 : fermé).
  */
 export type ReauthState = ReauthStateDto;
+
+/**
+ * L'état de confiance du compte que l'agent annonce (HRT-194, BR-TRUST-052). Indicatif : l'agent le juge à
+ * l'acte et le client ne l'envoie jamais. `null` dans `ReauthState.trust` : agent d'avant, règle d'avant.
+ */
+export type TrustLevel = TrustLevelDto;
+
+/**
+ * Ce que l'agent exige du mot de passe pour un acte : `no` (rien, rien ne s'ouvre), `unless_elevated` (le mot
+ * de passe, sauf délai de 5 minutes ouvert), `yes` (à chaque fois). La règle est celle de l'agent
+ * (`reauthPasswordNeed`) ; l'interface ne la recopie pas.
+ */
+export type PasswordNeed = PasswordNeedDto;
 
 export type ReauthSettingRefusal = Extract<BoundSettingOutcome, { kind: "refused" }>["refusal"];
 

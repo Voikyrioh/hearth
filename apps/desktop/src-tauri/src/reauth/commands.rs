@@ -7,7 +7,10 @@ use std::sync::Arc;
 use hearth_link::domain::secret::Secret;
 use tauri::State;
 
-use super::dto::{AdminActKindDto, ReauthModeDto, ReauthSettingOutcome, ReauthStateDto};
+use super::dto::{
+    AdminActKindDto, PasswordNeedDto, ReauthModeDto, ReauthSettingOutcome, ReauthStateDto,
+    TrustLevelDto,
+};
 use super::service;
 use crate::link::LinkRuntime;
 use crate::link_dto::{LinkFailure, RoleDto};
@@ -25,12 +28,17 @@ pub async fn get_reauth_state(
     service::state(link.manager(), &service::server(&server_id)?).await
 }
 
-/// L'élévation de 5 minutes couvre-t-elle cet acte ? La règle est celle de l'agent, lue de
-/// `hearth-proto` : la fenêtre ne la recopie pas. Ne parle pas à l'agent.
+/// Que demande l'agent du mot de passe pour cet acte, dans l'état de confiance qu'il a annoncé (`trust`,
+/// absent pour un agent d'avant HRT-194) ? La règle est celle de l'agent, lue de `hearth-proto` : la fenêtre
+/// ne la recopie pas. Ne parle pas à l'agent.
 #[tauri::command]
 #[specta::specta]
-pub fn reauth_covers(kind: AdminActKindDto, role: Option<RoleDto>) -> bool {
-    service::covers(kind, role)
+pub fn reauth_password_need(
+    kind: AdminActKindDto,
+    role: Option<RoleDto>,
+    trust: Option<TrustLevelDto>,
+) -> PasswordNeedDto {
+    service::password_need_of(kind, role, trust)
 }
 
 /// Change le réglage « Demander mon mot de passe » (à chaque action, ou 5 minutes). `password` est le

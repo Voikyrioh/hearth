@@ -3,7 +3,14 @@ import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./au
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
-import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
+import type {
+  AdminActKind,
+  PasswordNeed,
+  ReauthMode,
+  ReauthSettingOutcome,
+  ReauthState,
+  TrustLevel,
+} from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
 import type { LifecycleGesture, LifecycleOutcome } from "./serviceLifecycle";
 import type { DecisionOutcome, OperationChoice, ServiceOperationEvent } from "./serviceOps";
@@ -166,8 +173,15 @@ export interface LinkBridge {
 
   /** Ce que l'agent annonce de la confirmation des actes, et si ce PC a une clé au coffre (une lecture). */
   getReauthState(serverId: string): Promise<ReauthState>;
-  /** L'élévation de 5 minutes couvre-t-elle cet acte ? La règle est celle de l'agent (ne parle pas à l'agent). */
-  reauthCovers(kind: AdminActKind, role: Role | null): Promise<boolean>;
+  /**
+   * Que demande l'agent du mot de passe pour cet acte, dans l'état de confiance qu'il a annoncé (`trust`,
+   * `null` pour un agent d'avant : règle d'avant) ? La règle est celle de l'agent (ne parle pas à l'agent).
+   */
+  reauthPasswordNeed(
+    kind: AdminActKind,
+    role: Role | null,
+    trust: TrustLevel | null,
+  ): Promise<PasswordNeed>;
   /**
    * Change « Demander mon mot de passe » (à chaque action, ou 5 minutes) : un acte d'administration, le
    * mot de passe actuel ET la preuve de la clé de CE PC. Jamais couvert par l'élévation.

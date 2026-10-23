@@ -2,6 +2,7 @@
 //! signature ne figure ici, en entrée comme en sortie.
 
 use hearth_link::ReauthState;
+use hearth_proto::admin_act::{PasswordNeed, TrustLevel};
 use hearth_proto::api::reauth::{AdminReauthInfo, ReauthMode};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -54,12 +55,67 @@ pub enum AdminActKindDto {
     AttackModeDisable,
     AccountPasswordOwn,
     ReauthSetting,
-    /// Décider d'une opération de service (HRT-84) : jamais couvert par l'élévation.
+    /// Décider d'une opération de service (HRT-84) : un acte de pilotage depuis HRT-194.
     OperationDecide,
-    /// Démarrer, arrêter, redémarrer un service (HRT-65) : couverts par l'élévation de cinq minutes.
+    /// Démarrer, arrêter, redémarrer un service (HRT-65) : actes de pilotage (HRT-194, BR-LIFE-016).
     ServiceStart,
     ServiceStop,
     ServiceRestart,
+}
+
+/// L'état de confiance du compte que l'agent annonce (HRT-194, BR-TRUST-052) : de lui dépend si piloter un
+/// service demande le mot de passe. Indicatif, l'agent le recalcule à l'acte ; le client ne l'envoie jamais.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustLevelDto {
+    Normal,
+    Alert,
+    Attack,
+    // Une valeur que cette version ne connaît pas (agent plus récent) : transmise telle quelle, l'interface
+    // la traite comme le mode attaque (le plus strict).
+    Unknown,
+}
+
+impl From<TrustLevel> for TrustLevelDto {
+    fn from(trust: TrustLevel) -> Self {
+        match trust {
+            TrustLevel::Normal => Self::Normal,
+            TrustLevel::Alert => Self::Alert,
+            TrustLevel::Attack => Self::Attack,
+            TrustLevel::Unknown => Self::Unknown,
+        }
+    }
+}
+
+impl From<TrustLevelDto> for TrustLevel {
+    fn from(trust: TrustLevelDto) -> Self {
+        match trust {
+            TrustLevelDto::Normal => Self::Normal,
+            TrustLevelDto::Alert => Self::Alert,
+            TrustLevelDto::Attack => Self::Attack,
+            TrustLevelDto::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// Ce que l'agent exige du mot de passe pour un acte (HRT-194, BR-GRANT-017) : aucun, sauf élévation en
+/// cours, ou à chaque fois. La règle est celle de `hearth_proto::admin_act::password_need`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PasswordNeedDto {
+    No,
+    UnlessElevated,
+    Yes,
+}
+
+impl From<PasswordNeed> for PasswordNeedDto {
+    fn from(need: PasswordNeed) -> Self {
+        match need {
+            PasswordNeed::No => Self::No,
+            PasswordNeed::UnlessElevated => Self::UnlessElevated,
+            PasswordNeed::Yes => Self::Yes,
+        }
+    }
 }
 
 /// L'état de la confirmation des actes pour un serveur : lu de l'agent à l'ouverture d'une fenêtre
@@ -77,6 +133,9 @@ pub struct ReauthStateDto {
     pub elevated_for_s: u32,
     /// Ce PC a une clé d'appareil au coffre pour ce serveur. Faux : aucun acte ne part d'ici.
     pub has_device_key: bool,
+    /// L'état de confiance annoncé par l'agent. Absent : agent d'avant HRT-194, la règle d'avant s'applique
+    /// (BR-COMPAT-001), jamais « normal » par défaut.
+    pub trust: Option<TrustLevelDto>,
 }
 
 impl From<ReauthState> for ReauthStateDto {
@@ -87,6 +146,7 @@ impl From<ReauthState> for ReauthStateDto {
                 required,
                 password,
                 elevated_for_s,
+                trust,
                 ..
             }) => Self {
                 supported: true,
@@ -94,6 +154,7 @@ impl From<ReauthState> for ReauthStateDto {
                 mode: password.into(),
                 elevated_for_s: u32::try_from(elevated_for_s).unwrap_or(u32::MAX),
                 has_device_key,
+                trust: trust.map(TrustLevelDto::from),
             },
             None => Self {
                 supported: false,
@@ -101,6 +162,7 @@ impl From<ReauthState> for ReauthStateDto {
                 mode: ReauthModeDto::Window,
                 elevated_for_s: 0,
                 has_device_key,
+                trust: None,
             },
         }
     }

@@ -238,6 +238,8 @@ const NOT_SHOWN: Record<string, string> = {
     "la cause n'est pas mise en phrase : l'issue se dit par le statut de l'opération, la cause reste un code",
   StepStateDto:
     "l'état d'une étape n'est pas affiché : seule l'étape courante l'est, par son code connu",
+  TrustLevelDto:
+    "ne s'affiche pas : sert à la règle du mot de passe (inconnu = le plus strict), testé dans simulated-reauth.test.ts et password_need",
   ProtocolDto: "dit par portLabel (testé dans services.test.ts)",
   ScopeDto: "dit par portLabel (testé dans services.test.ts)",
 };

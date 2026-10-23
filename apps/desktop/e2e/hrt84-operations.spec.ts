@@ -14,6 +14,7 @@ const PASSWORD = "Correct-Horse-9";
 
 type Sim = {
   setServiceRightOnServer(serverId: string, username: string, granted: boolean): void;
+  reauth: { setTrust(serverId: string, trust: "normal" | "alert" | "attack" | null): void };
   seedDemoOperations(serverId: string): void;
   publish(serverId: string, state: string): void;
   services: { seed(serverId: string, services: Array<Record<string, unknown>>): void };
@@ -75,8 +76,26 @@ test("A, administrateur avec le droit : trois opérations, qui les a lancées, l
   await shoot(page, page, "hrt84-A-bande");
 });
 
-test("A : répondre demande le mot de passe puis l'opération repart", async ({ page }) => {
+test("A : en état normal, répondre ne demande pas le mot de passe et l'opération repart (HRT-194)", async ({
+  page,
+}) => {
   await openAs(page, "forge", (s) => s.seedDemoOperations("forge"));
+  await strip(page).locator("[data-operation-decide]").click();
+  const dialog = page.locator("dialog[open]");
+  await dialog.getByLabel("Revenir à l'état d'avant").check();
+  await expect(dialog.locator("[data-reauth-field]")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Valider la réponse" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await sim(page, (s) => s.serviceOps.decisions.length)).toBe(1);
+});
+
+test("A : en état d'alerte, répondre demande le mot de passe puis l'opération repart", async ({
+  page,
+}) => {
+  await openAs(page, "forge", (s) => {
+    s.seedDemoOperations("forge");
+    s.reauth.setTrust("forge", "alert");
+  });
   await strip(page).locator("[data-operation-decide]").click();
   const dialog = page.locator("dialog[open]");
   await expect(dialog).toContainText("Répondre pour robot-discord");
