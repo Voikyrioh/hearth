@@ -169,6 +169,17 @@ impl ActKind {
 /// Taille de l'empreinte des clés d'une adoption (SHA-256).
 pub const FINGERPRINT_LEN: usize = 32;
 
+/// Ce qu'un déploiement par fiche signe de sa source (HRT-101) : la fiche, sa version et son empreinte, le
+/// NOMBRE de réponses, et si un monde est repris. Jamais une réponse (un mot de passe de serveur de jeu).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FicheClaim {
+    pub id: String,
+    pub version: u32,
+    pub digest: String,
+    pub answers: u32,
+    pub world: bool,
+}
+
 /// Un acte tel que l'agent le **reconstruit depuis la requête** (jamais lu dans la preuve) et tel que
 /// le client le signe : l'acte, sa cible et les paramètres non secrets qui changent son sens. Les
 /// secrets (mot de passe de confirmation, nouveau mot de passe d'un compte) n'y entrent jamais : une
@@ -219,6 +230,9 @@ pub enum AdminAct<'a> {
         digest: [u8; FINGERPRINT_LEN],
         env_count: u32,
         command: bool,
+        /// Le service vient d'une fiche (HRT-101) : sa référence et le NOMBRE de réponses, jamais une
+        /// réponse. `None` pour une image à la main : la signature ne change pas.
+        fiche: Option<FicheClaim>,
     },
     /// Annuler l'opération `target` (son identifiant).
     OperationCancel { target: &'a str },
@@ -277,10 +291,32 @@ impl AdminAct<'_> {
     /// valeur, ni nom de variable, ni commande. Source unique pour l'agent (qui reconstruit l'acte depuis le
     /// corps) et la liaison cliente (qui le signe).
     pub fn service_deploy(spec: &crate::api::deploy::DeploySpec) -> AdminAct<'static> {
+        use crate::api::deploy::DeploySource;
         use crate::api::service_spec::{deploy_digest, deploy_image_ref};
+        let fiche = spec.source.as_ref().map(|source| match source {
+            DeploySource::Fiche {
+                id,
+                version,
+                digest,
+                answers,
+                world_imported,
+                ..
+            } => FicheClaim {
+                id: id.clone(),
+                version: *version,
+                digest: digest.clone(),
+                answers: u32::try_from(answers.len()).unwrap_or(u32::MAX),
+                world: *world_imported,
+            },
+        });
         AdminAct::ServiceDeploy {
             name: Cow::Owned(spec.name.clone()),
-            image: Cow::Owned(deploy_image_ref(&spec.image, spec.tag.as_deref())),
+            // Une fiche n'a pas d'image dans le corps : l'acte dit la fiche.
+            image: Cow::Owned(match &fiche {
+                Some(claim) => format!("fiche:{}", claim.id),
+                None => deploy_image_ref(&spec.image, spec.tag.as_deref()),
+            }),
+            fiche,
             digest: deploy_digest(spec),
             env_count: u32::try_from(spec.env.len()).unwrap_or(u32::MAX),
             command: spec
@@ -389,13 +425,25 @@ impl AdminAct<'_> {
                 digest,
                 env_count,
                 command,
+                fiche,
                 ..
-            } => vec![
-                image.as_bytes().to_vec(),
-                hex(digest).into_bytes(),
-                env_count.to_string().into_bytes(),
-                flag(*command),
-            ],
+            } => {
+                let mut params = vec![
+                    image.as_bytes().to_vec(),
+                    hex(digest).into_bytes(),
+                    env_count.to_string().into_bytes(),
+                    flag(*command),
+                ];
+                // Seulement pour une fiche : la signature d'une image à la main ne change pas.
+                if let Some(claim) = fiche {
+                    params.push(claim.id.as_bytes().to_vec());
+                    params.push(claim.version.to_string().into_bytes());
+                    params.push(claim.digest.as_bytes().to_vec());
+                    params.push(claim.answers.to_string().into_bytes());
+                    params.push(flag(claim.world));
+                }
+                params
+            }
             Self::ServiceDelete { data, backups, .. } => vec![flag(*data), flag(*backups)],
             Self::BackupCreate { mode, ignored, .. } => {
                 vec![mode.as_bytes().to_vec(), ignored.to_string().into_bytes()]
@@ -1003,6 +1051,7 @@ mod tests {
             digest: [0xab; FINGERPRINT_LEN],
             env_count: 3,
             command: true,
+            fiche: None,
         };
         assert_eq!((deploy.code(), deploy.target()), (0x0F, "terraria"));
         assert_eq!(
@@ -1147,6 +1196,7 @@ mod tests {
                 digest: [0; FINGERPRINT_LEN],
                 env_count: 0,
                 command: false,
+                fiche: None,
             },
             ActKind::OperationCancel => AdminAct::OperationCancel { target: "01OP" },
             ActKind::ServiceDelete => AdminAct::ServiceDelete {
@@ -1311,5 +1361,66 @@ mod tests {
             serde_json::to_value(TrustLevel::Alert).unwrap(),
             serde_json::json!("alert")
         );
+    }
+
+    #[test]
+    fn a_fiche_source_signs_id_version_digest_answer_count_and_world_never_an_answer() {
+        let fiche_body = |answer: &str, world: bool| -> crate::api::deploy::DeploySpec {
+            serde_json::from_value(serde_json::json!({
+                "name": "mon-terraria",
+                "resources": {"cpu_millis": 1000, "memory_bytes": 1u64 << 31},
+                "source": {"type": "fiche", "id": "terraria", "version": 2, "digest": "ab12",
+                    "answers": [{"id": "password", "value": answer}], "world_imported": world}
+            }))
+            .unwrap()
+        };
+        let act = AdminAct::service_deploy(&fiche_body("SENTINEL-ANSWER", false));
+        let AdminAct::ServiceDeploy { image, fiche, .. } = &act else {
+            panic!("acte");
+        };
+        assert_eq!(image, "fiche:terraria");
+        assert_eq!(
+            fiche,
+            &Some(FicheClaim {
+                id: "terraria".into(),
+                version: 2,
+                digest: "ab12".into(),
+                answers: 1,
+                world: false
+            })
+        );
+        let params = act.params();
+        assert_eq!(
+            params.len(),
+            9,
+            "les quatre paramètres ordinaires, puis la fiche"
+        );
+        assert_eq!(
+            params[4..],
+            [
+                b"terraria".to_vec(),
+                b"2".to_vec(),
+                b"ab12".to_vec(),
+                b"1".to_vec(),
+                b"0".to_vec()
+            ]
+        );
+        // Jamais une réponse, ni dans les paramètres ni dans l'empreinte : changer la valeur ne change rien.
+        let again = AdminAct::service_deploy(&fiche_body("AUTRE", false));
+        assert_eq!(act.params(), again.params());
+        assert!(
+            act.params()
+                .iter()
+                .all(|p| !String::from_utf8_lossy(p).contains("SENTINEL"))
+        );
+        // Mais le monde repris et la fiche changent la signature.
+        assert_ne!(
+            act.params(),
+            AdminAct::service_deploy(&fiche_body("x", true)).params()
+        );
+        // Un déploiement ordinaire garde ses quatre paramètres.
+        let plain: crate::api::deploy::DeploySpec =
+            serde_json::from_value(serde_json::json!({"name": "web", "image": "nginx"})).unwrap();
+        assert_eq!(AdminAct::service_deploy(&plain).params().len(), 4);
     }
 }

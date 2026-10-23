@@ -237,7 +237,7 @@ def deploy_digest(spec):
     digest = hashlib.sha256()
     put(digest, b"hearth/deploy-digest/1")
     put(digest, spec["name"].encode())
-    repository, tag = split_image(spec["image"], spec.get("tag"))
+    repository, tag = split_image(spec.get("image", ""), spec.get("tag"))
     put(digest, repository.encode())
     put(digest, tag.encode())
     ports = sorted(
@@ -272,20 +272,60 @@ def deploy_digest(spec):
     digest.update(b"\x00" if memory is None else b"\x01" + memory.to_bytes(8, "big"))
     accept = spec.get("accept", {})
     digest.update(bytes([int(bool(accept.get("reserved_ports"))), int(bool(accept.get("low_disk")))]))
+    source = spec.get("source")
+    if source and source.get("type") == "fiche":
+        # Une fiche (HRT-101) : sa référence, ses choix, les IDENTIFIANTS des réponses, jamais une valeur.
+        put(digest, b"fiche/1")
+        put(digest, source["id"].encode())
+        digest.update(source["version"].to_bytes(4, "big"))
+        put(digest, source["digest"].encode())
+        put(digest, (source.get("variant") or "").encode())
+        for items in (
+            sorted(a["id"] for a in source.get("answers", [])),
+            sorted(source.get("agreements", [])),
+        ):
+            digest.update(len(items).to_bytes(4, "big"))
+            for item in items:
+                put(digest, item.encode())
+        chosen = sorted((p["id"], p["host_port"]) for p in source.get("ports", []))
+        digest.update(len(chosen).to_bytes(4, "big"))
+        for port_id, host in chosen:
+            put(digest, port_id.encode())
+            digest.update(host.to_bytes(2, "big"))
+        optional = sorted(source.get("optional_ports", []))
+        digest.update(len(optional).to_bytes(4, "big"))
+        for port_id in optional:
+            put(digest, port_id.encode())
+        digest.update(bytes([int(bool(source.get("world_imported")))]))
     return digest.hexdigest()
 
 
 def deploy_params(spec):
     """Les paramètres signés d'un déploiement : `dépôt:version`, l'empreinte, le NOMBRE de variables, `cmd:0|1`.
     Jamais une valeur, un nom de variable ni la commande."""
-    repository, tag = split_image(spec["image"], spec.get("tag"))
+    source = spec.get("source")
+    fiche = bool(source and source.get("type") == "fiche")
+    if fiche:
+        image = f"fiche:{source['id']}"
+    else:
+        repository, tag = split_image(spec["image"], spec.get("tag"))
+        image = f"{repository}:{tag}"
     command = bool((spec.get("command") or "").strip())
-    return [
-        f"{repository}:{tag}".encode(),
+    params = [
+        image.encode(),
         deploy_digest(spec).encode(),
         str(len(spec.get("env", []))).encode(),
         b"1" if command else b"0",
     ]
+    if fiche:
+        params += [
+            source["id"].encode(),
+            str(source["version"]).encode(),
+            source["digest"].encode(),
+            str(len(source.get("answers", []))).encode(),
+            b"1" if source.get("world_imported") else b"0",
+        ]
+    return params
 
 
 def confirm_deploy(host, port, token, user, password, keyfile):

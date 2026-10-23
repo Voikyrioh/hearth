@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::deploy::{DeployMount, DeployPlace, DeployPort, DeploySpec};
+use super::deploy::{DeployMount, DeployPlace, DeployPort, DeploySource, DeploySpec};
 
 /// L'écart entre ce qui est VOULU (la description) et ce qui est OBSERVÉ (le moteur). Il est affiché,
 /// jamais corrigé seul (BR-EDIT-024).
@@ -129,6 +129,65 @@ pub fn deploy_digest(spec: &DeploySpec) -> [u8; 32] {
         u8::from(spec.accept.reserved_ports),
         u8::from(spec.accept.low_disk),
     ]);
+    // Une fiche (HRT-101) : sa référence, ses choix et les IDENTIFIANTS des réponses, jamais une valeur. Rien
+    // n'est ajouté à un déploiement ordinaire : sa signature ne change pas.
+    if let Some(DeploySource::Fiche {
+        id,
+        version,
+        digest,
+        variant,
+        answers,
+        agreements,
+        ports,
+        optional_ports,
+        world_imported,
+    }) = &spec.source
+    {
+        put(&mut hasher, b"fiche/1");
+        put(&mut hasher, id.as_bytes());
+        hasher.update(version.to_be_bytes());
+        put(&mut hasher, digest.as_bytes());
+        put(&mut hasher, variant.as_deref().unwrap_or("").as_bytes());
+        let mut ids: Vec<&str> = answers.iter().map(|a| a.id.as_str()).collect();
+        ids.sort_unstable();
+        hasher.update(u32::try_from(ids.len()).unwrap_or(u32::MAX).to_be_bytes());
+        for id in ids {
+            put(&mut hasher, id.as_bytes());
+        }
+        let mut agreed: Vec<&str> = agreements.iter().map(String::as_str).collect();
+        agreed.sort_unstable();
+        hasher.update(
+            u32::try_from(agreed.len())
+                .unwrap_or(u32::MAX)
+                .to_be_bytes(),
+        );
+        for id in agreed {
+            put(&mut hasher, id.as_bytes());
+        }
+        let mut chosen: Vec<(&str, u16)> =
+            ports.iter().map(|p| (p.id.as_str(), p.host_port)).collect();
+        chosen.sort_unstable();
+        hasher.update(
+            u32::try_from(chosen.len())
+                .unwrap_or(u32::MAX)
+                .to_be_bytes(),
+        );
+        for (id, host) in chosen {
+            put(&mut hasher, id.as_bytes());
+            hasher.update(host.to_be_bytes());
+        }
+        let mut optional: Vec<&str> = optional_ports.iter().map(String::as_str).collect();
+        optional.sort_unstable();
+        hasher.update(
+            u32::try_from(optional.len())
+                .unwrap_or(u32::MAX)
+                .to_be_bytes(),
+        );
+        for id in optional {
+            put(&mut hasher, id.as_bytes());
+        }
+        hasher.update([u8::from(*world_imported)]);
+    }
     hasher.finalize().into()
 }
 
@@ -226,5 +285,23 @@ mod tests {
         assert_eq!(base, changed(&|s| s.env[0].value = "AUTRE".into()));
         assert_eq!(base, changed(&|s| s.env[0].name = "B".into()));
         assert_eq!(base, changed(&|s| s.command = None));
+    }
+
+    #[test]
+    fn a_fiche_source_moves_the_digest_by_its_choices_and_never_by_an_answer_value() {
+        let fiche = |answer: &str, port: u16, world: bool| -> DeploySpec {
+            serde_json::from_value(serde_json::json!({
+                "name": "jeu",
+                "resources": {"cpu_millis": 1000, "memory_bytes": 1u64 << 31},
+                "source": {"type": "fiche", "id": "terraria", "version": 1, "digest": "ab",
+                    "answers": [{"id": "password", "value": answer}],
+                    "ports": [{"id": "game", "host_port": port}], "world_imported": world}
+            }))
+            .expect("spec")
+        };
+        let base = deploy_digest(&fiche("a", 7777, false));
+        assert_eq!(base, deploy_digest(&fiche("AUTRE", 7777, false)));
+        assert_ne!(base, deploy_digest(&fiche("a", 7778, false)));
+        assert_ne!(base, deploy_digest(&fiche("a", 7777, true)));
     }
 }

@@ -92,6 +92,7 @@ struct DeployAct {
     digest: [u8; hearth_proto::admin_act::FINGERPRINT_LEN],
     env_count: u32,
     command: bool,
+    fiche: Option<hearth_proto::admin_act::FicheClaim>,
 }
 
 impl Parsed {
@@ -142,12 +143,14 @@ impl Parsed {
                             digest,
                             env_count,
                             command,
+                            fiche,
                         } => Some(Self::Deploy(Box::new(DeployAct {
                             name: name.into_owned(),
                             image: image.into_owned(),
                             digest,
                             env_count,
                             command,
+                            fiche,
                         }))),
                         _ => None,
                     })
@@ -206,6 +209,7 @@ impl Parsed {
                 digest: deploy.digest,
                 env_count: deploy.env_count,
                 command: deploy.command,
+                fiche: deploy.fiche.clone(),
             },
             (Self::Decide(request), _) => AdminAct::OperationDecide {
                 target: id,
