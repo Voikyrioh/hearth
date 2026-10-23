@@ -42,6 +42,7 @@ use tokio::time::Instant;
 use super::catalog::CatalogService;
 use super::fiche_install::{FicheInstaller, InstallAudit};
 use super::folders::{FolderFacts, check_mount_folder};
+use super::game_phase::GamePhases;
 use super::ports::{
     AuditSink, Clock, ContainerEngine, EngineError, EngineInfo, FreeSpace, HostFolders, HostPorts,
     IdGen, Ownership, Perms, PullProgress, SafeFs, SecretRandom, ServiceContainers,
@@ -308,6 +309,8 @@ pub struct Deployments {
     running: Arc<AtomicUsize>,
     /// L'installation depuis une fiche (HRT-101) : juge la demande et la traduit en description ordinaire.
     installer: FicheInstaller,
+    /// Les phases d'un serveur de jeu installé depuis une fiche (BR-FICHE-028), en mémoire.
+    phases: Arc<GamePhases>,
 }
 
 /// Les ports du serveur tels que le domaine les juge (`PortWorld`) : le moteur, les sockets en écoute, le port de
@@ -362,6 +365,7 @@ impl Deployments {
         context: DeployContext,
         catalog: Arc<CatalogService>,
         random: Arc<dyn SecretRandom>,
+        phases: Arc<GamePhases>,
     ) -> Arc<Self> {
         let installer = FicheInstaller::new(catalog, random, Arc::clone(&clock));
         Arc::new(Self {
@@ -379,6 +383,7 @@ impl Deployments {
             context,
             running: Arc::new(AtomicUsize::new(0)),
             installer,
+            phases,
         })
     }
 
@@ -949,6 +954,12 @@ impl Deployments {
                     "done",
                 );
                 self.registry.reread(&container).await;
+                // Un serveur de jeu installé depuis une fiche : ses phases commencent à ce lancement, le premier
+                // (BR-FICHE-028, BR-FICHE-056).
+                if let Some(install) = &job.install {
+                    self.phases
+                        .begin(&job.key, &container, install.rule.clone(), true);
+                }
             }
             Err(error) => {
                 journal(self.ops.failed(&job.id, step::START).await, "failed");

@@ -25,6 +25,7 @@ use super::deployments::DeployError;
 use super::ports::{Clock, SecretRandom};
 use crate::domain::audit::Actor;
 use crate::domain::catalog::generate::draw_secret;
+use crate::domain::catalog::readiness::ReadyRule;
 use crate::domain::catalog::settings_state::Reason as SettingReason;
 use crate::domain::catalog::translate::{Request, TranslateError, translate};
 use crate::domain::secret::Secret;
@@ -47,6 +48,8 @@ pub struct InstallAudit {
     pub memory_bytes: u64,
     /// Le titre de chaque contrat accepté.
     pub agreements: Vec<String>,
+    /// Comment savoir que le jeu est prêt (BR-FICHE-028).
+    pub rule: ReadyRule,
 }
 
 /// Une demande jugée : la même description qu'un déploiement ordinaire, les fichiers à produire avant la création
@@ -305,6 +308,7 @@ impl FicheInstaller {
                 .filter(|a| agreed.contains(&a.id))
                 .map(|a| a.title.clone())
                 .collect(),
+            rule: ReadyRule::of(fiche),
         };
         Ok(Prepared {
             valid: built.valid,

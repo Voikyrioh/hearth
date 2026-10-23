@@ -9,6 +9,7 @@
 //!   `xtask` l'incluent par `#[path]` pour appliquer le chargeur réel ;
 //! - `formats/` : `kv_lines` et `xml_properties`, lecture et retouche sans perte d'un fichier de réglages ;
 //! - `settings_state` : état des réglages, validation d'un changement, effet déduit du canal, écart ;
+//! - `readiness` : le signe « prêt » (sous-chaîne littérale) et les phases d'un serveur de jeu ;
 //! - `stop_plan` : séquence d'arrêt bornée, un élément `untested` n'est jamais exécuté ;
 //! - `translate` : fiche, variante, réponses, secrets, contrats donnent un `ServiceSpecDraft` ;
 //! - `embedded` : les fiches embarquées par `build.rs`.
@@ -17,6 +18,7 @@ pub mod embedded;
 pub mod formats;
 pub mod generate;
 pub mod loading;
+pub mod readiness;
 pub mod settings_state;
 pub mod stop_plan;
 pub mod translate;

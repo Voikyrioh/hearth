@@ -22,6 +22,7 @@ use crate::application::catalog::CatalogService;
 use crate::application::deployments::{DeployContext, DeployTimings, Deployments, FolderGuard};
 use crate::application::elevation::Elevations;
 use crate::application::folders::FolderFacts;
+use crate::application::game_phase::GamePhases;
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
@@ -940,6 +941,7 @@ pub async fn start_engined(
         },
         catalog.clone(),
         engine.catalog.random.clone(),
+        GamePhases::new(container_engine.clone(), adapters.clock.clone()),
     );
     let service_logs = Arc::new(ServiceLogs::new(
         registry.clone(),
