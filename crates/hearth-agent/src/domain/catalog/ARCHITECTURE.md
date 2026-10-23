@@ -1,6 +1,6 @@
 # Architecture — domain/catalog
 
-Fiches de serveur de jeu, format version 2 (HRT-113, ADR-0050, ADR-0051, ADR-0052). **Domaine pur** : ni E/S, ni processus, ni réseau, ni `async`, ni tirage aléatoire (garde de test : `architecture_guard.rs`). Les octets des fiches viennent de l'appelant : `build.rs` à la compilation, plus tard un catalogue distant signé. Aucune route, aucun acte, aucune migration, aucun appel au moteur dans ce dossier.
+Fiches de serveur de jeu, format version 2 (HRT-113, ADR-0050, ADR-0051, ADR-0052). **Domaine pur** : ni E/S, ni processus, ni réseau, ni `async`, ni tirage aléatoire (garde de test : `architecture_guard.rs`). Les octets des fiches viennent de l'appelant : `build.rs` à la compilation, plus tard un catalogue distant signé. Aucune route, aucun acte, aucune migration, aucun appel au moteur dans ce dossier : HRT-101 les ajoute autour (`application/catalog.rs`, `application/fiche_install.rs`, `entrypoint/http/catalog.rs`), jamais dedans.
 
 Une fiche = deux fichiers TOML par jeu dans `crates/hearth-agent/catalog/<id>/` : `fiche.toml` (la surface de sécurité : image, ports, dossiers, canaux, secrets, console, contrat, arrêt, mondes) et `settings.toml` (le contenu : thèmes et catalogue de réglages), plus `ids.lock` (registre des identifiants de réglage, vérifié par `cargo xtask catalog-check`). Le format est FERMÉ : tout champ inconnu est refusé, et neuf invariants (I1 à I9) refusent le reste avec un motif typé (BR-FICHE-007).
 
@@ -19,10 +19,12 @@ catalog/
 ├── formats/          → `kv_lines` et `xml_properties`, écrits à la main : lecture et retouche SANS PERTE d'un fichier de réglages (identité, localité, refus plutôt que perte). `contract.rs` : la suite de contrat unique passée par les deux formats
 ├── settings_state.rs → trois états d'un réglage (valeur, proposée, non écrit), validation d'un changement, effet DÉDUIT du canal, écart avec le fichier, réglages imposés défaits
 ├── stop_plan.rs      → plan d'arrêt borné ; un élément `untested` n'est jamais exécuté ni cru
-├── translate.rs      → fiche + variante + réponses + secrets + contrats donnent un `ServiceSpecDraft` (brouillon local ; HRT-101 le remplace par le vrai `ServiceSpec`) ; interface attendue du validateur du déploiement ordinaire (`DeploymentValidator`, non branché)
-└── embedded.rs       → la table des fiches embarquées, engendrée par `build.rs` (`include!` de `OUT_DIR`)
+├── translate.rs      → fiche + variante + réponses + secrets + contrats donnent un `ServiceSpecDraft` ; interface du validateur du déploiement ordinaire (`DeploymentValidator`, implémentée par `domain::services::deploy::OrdinaryDeployment`, branchée par `domain::services::from_fiche`, HRT-101)
+├── generate.rs       → un secret tiré par l'agent (HRT-101) : `secret_from_bytes` / `draw_secret` transforment des octets (le port `SecretRandom`) en secret `alnum` de la longueur déclarée, octets biaisés rejetés, abandon plutôt que boucle ; aucun tirage ici
+├── readiness.rs      → le signe « le jeu est prêt » (sous-chaîne LITTÉRALE, lignes postérieures au lancement seulement, jamais un signe `untested`) et les phases d'un serveur de jeu (`phase_of`, `ReadyRule`) — HRT-101, BR-FICHE-028, 056
+└── embedded.rs       → la table des fiches embarquées, engendrée par `build.rs` (`include!` de `OUT_DIR`) ; `offered_with(include_preview)` : les fiches `published`, plus les `preview` dans une construction d'essai (`HEARTH_PREVIEW_FICHES`, HRT-101)
 ```
 
 Tests : `test_support.rs` (une fiche minimale et une fiche riche, dont les fiches piégées sont dérivées d'UNE modification), `tests_fiches.rs` (format fermé, I1 à I9, cohérence, Terraria, `ids.lock`), `tests_state.rs` (réglages, écart, arrêt), `tests_translate.rs` (traduction et test de propriété à graine fixe), `architecture_guard.rs`.
 
-Règles : BR-FICHE-005 à 011, 037, 038, 046 à 049 ; BR-RES-031 à 033, 038 ; BR-JEU-002, 038, 039, 040.
+Règles : BR-FICHE-005 à 011, 028, 037, 038, 046 à 049, 056 ; BR-RES-031 à 033, 038 ; BR-JEU-002, 038, 039, 040.
