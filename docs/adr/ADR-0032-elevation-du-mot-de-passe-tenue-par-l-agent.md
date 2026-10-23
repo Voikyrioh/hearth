@@ -33,7 +33,7 @@ Q19 (2026-10-07) : « Pour la fréquence du mdp en administration -> 5min c'est 
 
 ## Amendement 2026-10-20 (décision Voiky) : piloter un service suit l'état de confiance
 
-Source : spec fonctionnelle `2026-10-13-fonctionnelle-cycle-de-vie-service`, section 14 ; règles de la spec amendées : BR-EDIT-031 et BR-GRANT-017 (numéros de la spec, pas des fiches du repo) ; fiches du repo amendées : `BR-TRUST-042`, `BR-TRUST-043`, `BR-LIFE-016`, `BR-OPS-003`, `BR-TRUST-052` ; ticket HRT-194. Raison : piloter sans retaper son mot de passe hors alerte.
+Source : spec fonctionnelle `2026-10-13-fonctionnelle-cycle-de-vie-service`, section 14 ; règles de la spec amendées : EDIT-031 et GRANT-017 de la spec (numérotation propre à la spec, sans le préfixe des fiches : ce ne sont pas des fiches du repo) ; fiches du repo amendées : `BR-TRUST-042`, `BR-TRUST-043`, `BR-LIFE-016`, `BR-OPS-003`, `BR-TRUST-052` ; ticket HRT-194. Raison : piloter sans retaper son mot de passe hors alerte.
 
 1. **Actes de pilotage** (liste fermée, `hearth_proto::admin_act::is_piloting`, correspondance exhaustive) : `ServiceStart 0x0C`, `ServiceStop 0x0D`, `ServiceRestart 0x0E`, `OperationDecide 0x1D` (tout choix, quel que soit le genre de l'opération : l'acte d'origine a déjà été confirmé selon sa propre règle). `OperationCancel 0x10` n'en est pas : il garde la règle générale (couvert par l'élévation).
 2. **Grille**, pour les actes de pilotage seulement :
