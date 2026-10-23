@@ -1,0 +1,218 @@
+[[theme]]
+id = "game"
+label = "Partie"
+order = 1
+
+[[theme]]
+id = "network"
+label = "Réseau"
+order = 2
+
+[[setting]]
+id = "level_name"
+key = "level-name"
+channel = "props"
+theme = "game"
+level = "essential"
+label = "Nom du monde"
+help = "Le nom du monde."
+type = "text"
+charset = "file_stem"
+max_len = 32
+proposed = "world"
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "motd"
+key = "MOTD"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Message d'accueil"
+help = "Le message montré aux joueurs."
+type = "text"
+charset = "line"
+max_len = 64
+proposed = "Bienvenue"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "max_players"
+key = "MAX_PLAYERS"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Joueurs"
+help = "Le nombre de joueurs."
+type = "int"
+min = 1
+max = 100
+proposed = "10"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "difficulty"
+key = "Difficulty"
+channel = "xml"
+theme = "game"
+level = "essential"
+label = "Difficulté"
+help = "La difficulté du monde."
+type = "choice"
+choices = [
+  { value = "easy", label = "Facile" },
+  { value = "normal", label = "Normale" },
+  { value = "hard", label = "Difficile" },
+]
+proposed = "normal"
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "hardcore"
+key = "HARDCORE"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Hardcore"
+help = "Une seule vie."
+type = "bool"
+on = "TRUE"
+off = "FALSE"
+proposed = "FALSE"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "server_port"
+key = "server-port"
+channel = "props"
+theme = "network"
+level = "advanced"
+label = "Port du jeu"
+help = "Le port annoncé par le jeu."
+type = "int"
+min = 1024
+max = 65535
+change = "anytime"
+imposed = { port = "game", why = "Le jeu annonce son port : il suit celui du service." }
+source = "verified"
+
+[[setting]]
+id = "rcon_enabled"
+key = "enable-rcon"
+channel = "props"
+theme = "network"
+level = "advanced"
+label = "Console distante"
+help = "Active la console distante."
+type = "bool"
+on = "true"
+off = "false"
+change = "anytime"
+imposed = { value = "true", why = "L'arrêt propre du jeu en dépend." }
+source = "verified"
+
+[[setting]]
+id = "rcon_port"
+key = "rcon.port"
+channel = "props"
+theme = "network"
+level = "advanced"
+label = "Port de la console"
+help = "Le port de la console distante."
+type = "int"
+min = 1024
+max = 65535
+change = "anytime"
+imposed = { port = "rcon", why = "Le port de la console n'est jamais publié." }
+source = "verified"
+
+[[setting]]
+id = "rcon_password"
+key = "rcon.password"
+channel = "props"
+theme = "network"
+level = "advanced"
+label = "Mot de passe de la console"
+help = "Généré par Hearth."
+type = "secret"
+secret_kind = "admin_password"
+max_len = 64
+change = "anytime"
+imposed = { secret = "rcon", why = "Généré par Hearth, jamais affiché." }
+source = "verified"
+
+[[setting]]
+id = "admin_password"
+key = "admin-password"
+channel = "props"
+theme = "game"
+level = "common"
+label = "Mot de passe d'administration"
+help = "Le mot de passe des opérateurs."
+type = "secret"
+secret_kind = "admin_password"
+min_len = 8
+max_len = 64
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "mods"
+key = "MODS"
+channel = "env"
+theme = "game"
+level = "advanced"
+label = "Mods"
+help = "Les identifiants de mods que le programme télécharge lui-même."
+type = "id_list"
+item_charset = "digits"
+separator = ","
+max_items = 20
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "view"
+key = "-view"
+channel = "args"
+arg = { flag = "-view", form = "flag_value" }
+theme = "game"
+level = "common"
+label = "Distance de vue"
+help = "La distance de vue."
+type = "int"
+min = 2
+max = 32
+proposed = "10"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "bedrock_only"
+key = "BEDROCK_FLAG"
+channel = "env"
+theme = "game"
+level = "advanced"
+label = "Option Bedrock"
+help = "Une option de la version Bedrock."
+type = "bool"
+on = "1"
+off = "0"
+only_variants = ["bedrock"]
+proposed = "0"
+change = "anytime"
+source = "partial"
+
+[[retired]]
+id = "old_mode"
+key = "old-mode"
+channel = "props"
+label = "Ancien mode"
+until = "2.0"
+replaced_by = "difficulty"
+why = "Le jeu a remplacé ce réglage par la difficulté."

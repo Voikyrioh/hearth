@@ -6,6 +6,7 @@ pub mod audit;
 pub mod catalog;
 pub mod deployments;
 pub mod elevation;
+pub mod fiche_install;
 pub mod folders;
 pub mod hello;
 pub mod install;

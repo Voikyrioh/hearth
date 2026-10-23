@@ -103,6 +103,48 @@ fn deploy_error(error: DeployError) -> ApiError {
             "Il reste peu de place sur le disque des images. Coche « Continuer malgré le manque de place » pour lancer quand même.",
             serde_json::json!({ "reason": "low_disk", "free_bytes": free_bytes }),
         )),
+        // Installer depuis une fiche (HRT-101) : des refus typés, sans jamais citer une valeur reçue.
+        DeployError::FicheUnknown => ApiError::new(
+            ErrorCode::FicheUnknown,
+            "Cette fiche n'est pas proposée par ce serveur.",
+        ),
+        DeployError::FicheChanged => ApiError::new(
+            ErrorCode::FicheChanged,
+            "Cette fiche a changé depuis son affichage. Relis-la avant d'installer.",
+        ),
+        DeployError::AgreementRequired(ids) => ApiError(ErrorBody::with_details(
+            ErrorCode::AgreementRequired,
+            "Ce serveur ne peut pas être installé sans que le contrat de licence soit accepté.",
+            serde_json::json!({ "ids": ids }),
+        )),
+        DeployError::SettingRefused {
+            id,
+            reason,
+            character,
+        } => ApiError(ErrorBody::with_details(
+            ErrorCode::SettingRefused,
+            "Une réponse n'est pas valable.",
+            serde_json::json!({ "id": id, "reason": reason, "char": character }),
+        )),
+        DeployError::HostTooSmall { lack, needed, has } => ApiError(ErrorBody::with_details(
+            ErrorCode::HostTooSmall,
+            "Ce serveur est trop petit pour ce jeu.",
+            serde_json::json!({ "lack": lack, "needed": needed, "has": has }),
+        )),
+        DeployError::NotEnoughSpace {
+            needed,
+            free,
+            missing,
+        } => ApiError(ErrorBody::with_details(
+            ErrorCode::NoSpace,
+            "Il n'y a pas assez de place pour installer ce jeu.",
+            serde_json::json!({
+                "reason": "install",
+                "needed_bytes": needed,
+                "free_bytes": free,
+                "missing_bytes": missing,
+            }),
+        )),
         DeployError::Internal(message) => {
             tracing::error!(error = %message, "déploiement refusé : erreur interne");
             ApiError::new(ErrorCode::InternalError, "Une erreur interne est survenue.")

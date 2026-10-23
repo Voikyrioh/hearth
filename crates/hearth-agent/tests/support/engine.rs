@@ -68,6 +68,7 @@ pub fn parts_supervised(
         catalog: hearth_agent::app::CatalogParts {
             include_preview: false,
             random: Arc::new(super::fake_random::FakeRandom::counting_from(0)),
+            service: None,
         },
     }
 }

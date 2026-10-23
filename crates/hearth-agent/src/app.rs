@@ -219,6 +219,8 @@ pub struct CatalogParts {
     /// Les fiches `preview` sont proposées (construction d'essai seulement, `HEARTH_PREVIEW_FICHES`).
     pub include_preview: bool,
     pub random: Arc<dyn SecretRandom>,
+    /// Un catalogue donné (tests : fiches de fabrication) à la place des fiches embarquées.
+    pub service: Option<Arc<CatalogService>>,
 }
 
 impl CatalogParts {
@@ -227,6 +229,7 @@ impl CatalogParts {
         Self {
             include_preview: crate::build_info::PREVIEW_FICHES,
             random: Arc::new(OsSecretRandom),
+            service: None,
         }
     }
 }
@@ -910,7 +913,11 @@ pub async fn start_engined(
         facts,
     });
     // Le catalogue des fiches : celles que cette construction propose, et les écartées, consignées une fois.
-    let catalog = Arc::new(CatalogService::embedded(engine.catalog.include_preview));
+    let catalog = engine
+        .catalog
+        .service
+        .clone()
+        .unwrap_or_else(|| Arc::new(CatalogService::embedded(engine.catalog.include_preview)));
     catalog.record_refused(services.audit_sink.as_ref()).await;
     let deployments = Deployments::new(
         registry.clone(),
@@ -931,6 +938,8 @@ pub async fn start_engined(
             folders,
             timings: engine.deploy,
         },
+        catalog.clone(),
+        engine.catalog.random.clone(),
     );
     let service_logs = Arc::new(ServiceLogs::new(
         registry.clone(),

@@ -197,17 +197,14 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::BackupCorrupt // sauvegarde corrompue : restauration impossible
         | ErrorCode::BackupInUse // sauvegarde en cours d'usage
         | ErrorCode::RestorePlanChanged // plan de restauration changé depuis son aperçu
-        | ErrorCode::HostTooSmall // serveur trop petit pour la demande
         | ErrorCode::WorldGone // monde disparu depuis la lecture
         | ErrorCode::TooLateToCancel // point de non-retour passé
         | ErrorCode::TransferExpired // transfert expiré : à refaire
-        | ErrorCode::NoSpace // espace disque insuffisant
         // Codes des tranches L1 à L3 (HRT-144), déclarés d'un coup : chacun est classé ici, la route qui le
         // rendra peut préciser une raison plus fine.
         | ErrorCode::NameTaken // nom pris
         | ErrorCode::DeployLimit // trop de déploiements à la fois
         | ErrorCode::DecisionNotOffered // choix absent de ceux que l'opération offre
-        | ErrorCode::FicheChanged // fiche changée depuis sa lecture
         | ErrorCode::SettingsConflict // réglages changés depuis leur lecture
         | ErrorCode::RecreateNotAvailable => Some(Outcome::Failed(Reason::Conflict)), // recréer n'est pas encore possible
         // Données refusées par une règle de validation.
@@ -215,13 +212,17 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::PathRefused // chemin hors règle
         | ErrorCode::FolderRefused // dossier refusé
         | ErrorCode::LimitsRequired // limites obligatoires absentes
-        | ErrorCode::AgreementRequired // contrat de la fiche non accepté
         | ErrorCode::SettingRefused => Some(Outcome::Failed(Reason::Validation)), // valeur de réglage refusée
         // Ressource inexistante.
-        ErrorCode::FicheUnknown // fiche de jeu inconnue
-        | ErrorCode::ServiceNotFound // service inconnu
+        ErrorCode::ServiceNotFound // service inconnu
         | ErrorCode::OperationNotFound // opération inconnue, ou sur un service que le compte ne voit pas
         | ErrorCode::BackupNotFound => Some(Outcome::Failed(Reason::NotFound)), // sauvegarde inconnue
+        // Installer depuis une fiche (HRT-101, BR-FICHE-032) : une cause typée par refus.
+        ErrorCode::HostTooSmall => Some(Outcome::Failed(Reason::HostTooSmall)), // machine trop petite
+        ErrorCode::NoSpace => Some(Outcome::Failed(Reason::NotEnoughSpace)), // espace insuffisant
+        ErrorCode::FicheUnknown => Some(Outcome::Failed(Reason::FicheUnknown)), // fiche non proposée
+        ErrorCode::FicheChanged => Some(Outcome::Failed(Reason::FicheChanged)), // fiche changée depuis l'affichage
+        ErrorCode::AgreementRequired => Some(Outcome::Failed(Reason::AgreementRequired)), // contrat non accepté
         // Démarrer, arrêter, redémarrer (HRT-64, BR-LIFE-018) : une cause typée par refus, dans la liste fermée.
         ErrorCode::ServiceBusy => Some(Outcome::Failed(Reason::ActionInProgress)), // une opération tient déjà le service
         ErrorCode::ServiceAlreadyInState => Some(Outcome::Failed(Reason::AlreadyInState)), // déjà dans l'état demandé

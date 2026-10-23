@@ -190,6 +190,8 @@ fn state_over_rig(
             folders: None,
             timings: rig.timings,
         },
+        Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
+        Arc::new(super::fake_random::FakeRandom::counting_from(0)),
     );
     let service_lifecycle = hearth_agent::application::service_lifecycle::ServiceLifecycle::new(
         services.clone(),
