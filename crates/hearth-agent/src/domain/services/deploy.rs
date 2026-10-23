@@ -508,7 +508,7 @@ fn spec_refusal(error: SpecError) -> Refusal {
         SpecError::Limits => "resources",
         SpecError::Env | SpecError::SecretTooLong => "env",
         SpecError::Command => "command",
-        SpecError::Ignored | SpecError::Answers => "spec",
+        SpecError::Ignored | SpecError::Answers | SpecError::Fiche => "spec",
     };
     invalid(field, "bounds")
 }

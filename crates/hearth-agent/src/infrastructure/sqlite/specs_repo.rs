@@ -18,7 +18,8 @@ use crate::application::ports::{
 use crate::domain::sealed::{DatabaseFacts, NONCE_LEN, SealedBlob, SecretField};
 use crate::domain::services::key::ServiceKey;
 use crate::domain::services::spec::{
-    SpecBody, SpecFiche, SpecImage, SpecMount, SpecPort, SpecRestart, SpecSettings, fold_name,
+    SpecAgreement, SpecAnswer, SpecBody, SpecFiche, SpecImage, SpecMount, SpecPort, SpecRestart,
+    SpecSettings, fold_name,
 };
 
 const RESOURCE: &str = "service_specs";
@@ -52,6 +53,20 @@ struct StoredSpec {
     cpu_millis: Option<u32>,
     #[serde(default)]
     memory_bytes: Option<u64>,
+    /// Ce que la fiche garde de plus que ses trois colonnes (variante, réponses, contrats) : dans `spec_json`,
+    /// sans migration (HRT-101). Absent des révisions plus anciennes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fiche_extra: Option<FicheExtra>,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct FicheExtra {
+    #[serde(default)]
+    variant: Option<String>,
+    #[serde(default)]
+    answers: Vec<SpecAnswer>,
+    #[serde(default)]
+    agreements: Vec<SpecAgreement>,
 }
 
 struct SpecRow {
@@ -81,11 +96,17 @@ fn into_revision(row: SpecRow, sealed: Vec<SealedField>) -> Result<StoredRevisio
     let settings: SpecSettings =
         serde_json::from_str(&row.settings_json).map_err(|_| unreadable("settings_json"))?;
     let fiche = match (row.fiche_id, row.fiche_version, row.fiche_digest) {
-        (Some(id), Some(version), Some(digest)) => Some(SpecFiche {
-            id,
-            version: u32::try_from(version).map_err(|_| unreadable("fiche_version"))?,
-            digest,
-        }),
+        (Some(id), Some(version), Some(digest)) => {
+            let extra = stored.fiche_extra.unwrap_or_default();
+            Some(SpecFiche {
+                id,
+                version: u32::try_from(version).map_err(|_| unreadable("fiche_version"))?,
+                digest,
+                variant: extra.variant,
+                answers: extra.answers,
+                agreements: extra.agreements,
+            })
+        }
         (None, None, None) => None,
         _ => return Err(unreadable("fiche")),
     };
@@ -154,6 +175,11 @@ impl ServiceSpecRepo for SqliteSpecRepo {
             stdin_open: body.stdin_open,
             cpu_millis: body.cpu_millis,
             memory_bytes: body.memory_bytes,
+            fiche_extra: body.fiche.as_ref().map(|fiche| FicheExtra {
+                variant: fiche.variant.clone(),
+                answers: fiche.answers.clone(),
+                agreements: fiche.agreements.clone(),
+            }),
         };
         let spec_json = serde_json::to_string(&stored).map_err(|_| unreadable("spec_json"))?;
         let settings_json =

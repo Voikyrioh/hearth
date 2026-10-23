@@ -103,13 +103,110 @@ pub struct SpecSettings {
     pub backup_ignored: Vec<IgnoredItem>,
 }
 
-/// Le service vient d'une fiche de serveur de jeu : sa fiche, sa version, son empreinte. Les réponses
-/// (les secrètes scellées) sont à part.
+/// Nombre maximal de contrats acceptés gardés avec une fiche.
+pub const MAX_AGREEMENTS: usize = 4;
+/// Longueur maximale de l'identifiant d'une réponse ou d'un contrat.
+pub const MAX_FICHE_ID_CHARS: usize = 64;
+/// Longueur maximale d'une réponse non secrète gardée en clair.
+pub const MAX_ANSWER_VALUE_CHARS: usize = 1024;
+
+/// Une réponse donnée à une question de la fiche (HRT-101, BR-FICHE-029). La valeur n'est gardée EN CLAIR que
+/// pour une question non secrète : pour une question secrète, `value` est absent et la valeur est scellée dans
+/// [`SpecSecrets::answers`] sous le même identifiant (ADR-0044).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpecAnswer {
+    /// Identifiant du réglage de la fiche (`[a-z0-9_]`).
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub secret: bool,
+    /// Question figée par la fiche au moment de l'installation : une mise à jour de la fiche ne la change pas
+    /// (BR-EDIT-035).
+    #[serde(default)]
+    pub frozen: bool,
+}
+
+/// Un contrat accepté à l'installation : qui, quand (BR-FICHE-058).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpecAgreement {
+    pub id: String,
+    pub accepted_by: String,
+    /// Secondes Unix.
+    pub accepted_at: i64,
+}
+
+/// Le service vient d'une fiche de serveur de jeu : sa fiche, sa version, son empreinte, la variante choisie,
+/// les réponses (les secrètes scellées à part) et les contrats acceptés. Les champs ajoutés par HRT-101 sont
+/// facultatifs : une révision plus ancienne reste lisible.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpecFiche {
     pub id: String,
     pub version: u32,
     pub digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub answers: Vec<SpecAnswer>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agreements: Vec<SpecAgreement>,
+}
+
+impl SpecFiche {
+    /// Une fiche sans variante, réponse ni contrat.
+    pub fn new(id: impl Into<String>, version: u32, digest: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            version,
+            digest: digest.into(),
+            variant: None,
+            answers: Vec::new(),
+            agreements: Vec::new(),
+        }
+    }
+
+    fn validate(&self) -> Result<(), SpecError> {
+        let id_ok = |id: &str| {
+            !id.is_empty()
+                && id.chars().count() <= MAX_FICHE_ID_CHARS
+                && id
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+        };
+        if !id_ok(&self.id) || self.digest.is_empty() {
+            return Err(SpecError::Fiche);
+        }
+        if self.variant.as_deref().is_some_and(|v| !id_ok(v)) {
+            return Err(SpecError::Fiche);
+        }
+        let mut seen = std::collections::HashSet::new();
+        if self.answers.len() > MAX_ANSWERS
+            || self.answers.iter().any(|answer| {
+                !id_ok(&answer.id)
+                    || !seen.insert(answer.id.as_str())
+                    // Une valeur secrète n'est jamais en clair ici ; une non secrète est bornée.
+                    || (answer.secret && answer.value.is_some())
+                    || answer
+                        .value
+                        .as_ref()
+                        .is_some_and(|v| v.chars().count() > MAX_ANSWER_VALUE_CHARS)
+            })
+        {
+            return Err(SpecError::Fiche);
+        }
+        let mut agreed = std::collections::HashSet::new();
+        if self.agreements.len() > MAX_AGREEMENTS
+            || self.agreements.iter().any(|a| {
+                !id_ok(&a.id)
+                    || !agreed.insert(a.id.as_str())
+                    || a.accepted_by.is_empty()
+                    || a.accepted_by.chars().count() > MAX_NAME_CHARS
+            })
+        {
+            return Err(SpecError::Fiche);
+        }
+        Ok(())
+    }
 }
 
 /// La partie de la description qui n'est pas secrète.
@@ -156,6 +253,8 @@ pub enum SpecError {
     Command,
     #[error("trop de réponses, ou deux réponses à la même question")]
     Answers,
+    #[error("la fiche du service est mal formée (identifiant, réponses ou contrats)")]
+    Fiche,
     #[error("un secret dépasse {MAX_PLAIN_BYTES} octets")]
     SecretTooLong,
 }
@@ -196,6 +295,9 @@ impl SpecBody {
         }
         if self.settings.backup_ignored.len() > MAX_BACKUP_IGNORED {
             return Err(SpecError::Ignored);
+        }
+        if let Some(fiche) = &self.fiche {
+            fiche.validate()?;
         }
         Ok(())
     }
@@ -578,6 +680,98 @@ mod tests {
         bad = body("A");
         bad.cpu_millis = Some(0);
         assert_eq!(bad.validate(), Err(SpecError::Limits));
+    }
+
+    fn fiche_body() -> SpecBody {
+        let mut body = body("Terraria");
+        body.fiche = Some(SpecFiche {
+            id: "terraria".into(),
+            version: 3,
+            digest: "sha256:abc".into(),
+            variant: Some("vanilla".into()),
+            answers: vec![
+                SpecAnswer {
+                    id: "max_players".into(),
+                    value: Some("8".into()),
+                    secret: false,
+                    frozen: true,
+                },
+                SpecAnswer {
+                    id: "password".into(),
+                    value: None,
+                    secret: true,
+                    frozen: false,
+                },
+            ],
+            agreements: vec![SpecAgreement {
+                id: "eula".into(),
+                accepted_by: "voiky".into(),
+                accepted_at: 1_790_000_000,
+            }],
+        });
+        body
+    }
+
+    #[test]
+    fn a_fiche_description_keeps_fiche_version_digest_answers_agreements_and_frozen_questions() {
+        let original = fiche_body();
+        assert!(original.validate().is_ok());
+        let json = serde_json::to_string(&original).unwrap();
+        let read: SpecBody = serde_json::from_str(&json).unwrap();
+        assert_eq!(read, original);
+        let fiche = read.fiche.unwrap();
+        assert_eq!((fiche.id.as_str(), fiche.version), ("terraria", 3));
+        assert_eq!(fiche.digest, "sha256:abc");
+        assert_eq!(fiche.variant.as_deref(), Some("vanilla"));
+        assert!(fiche.answers[0].frozen && !fiche.answers[1].frozen);
+        // Une réponse secrète n'a jamais de valeur en clair dans la description.
+        assert!(fiche.answers[1].value.is_none());
+        assert_eq!(fiche.agreements[0].id, "eula");
+        // Une révision plus ancienne, sans ces champs, reste lisible.
+        let old = r#"{"name":"A","image":{"repository":"r","tag":"t"},"restart":"always",
+            "fiche":{"id":"terraria","version":1,"digest":"sha256:x"}}"#;
+        let old: SpecBody = serde_json::from_str(old).unwrap();
+        let fiche = old.fiche.unwrap();
+        assert!(fiche.variant.is_none() && fiche.answers.is_empty() && fiche.agreements.is_empty());
+    }
+
+    #[test]
+    fn a_fiche_description_refuses_a_clear_secret_a_duplicate_or_too_many() {
+        let bad = |edit: &dyn Fn(&mut SpecFiche)| {
+            let mut body = fiche_body();
+            edit(body.fiche.as_mut().unwrap());
+            body.validate()
+        };
+        assert_eq!(
+            bad(&|f| f.answers[1].value = Some("x".into())),
+            Err(SpecError::Fiche)
+        );
+        assert_eq!(
+            bad(&|f| f.answers[1].id = "max_players".into()),
+            Err(SpecError::Fiche)
+        );
+        assert_eq!(bad(&|f| f.id = "Terraria".into()), Err(SpecError::Fiche));
+        assert_eq!(
+            bad(&|f| f.agreements = (0..=MAX_AGREEMENTS)
+                .map(|n| SpecAgreement {
+                    id: format!("c{n}"),
+                    accepted_by: "v".into(),
+                    accepted_at: 0
+                })
+                .collect()),
+            Err(SpecError::Fiche)
+        );
+        assert_eq!(
+            bad(&|f| f.answers = (0..=MAX_ANSWERS)
+                .map(|n| SpecAnswer {
+                    id: format!("q{n}"),
+                    value: None,
+                    secret: true,
+                    frozen: false
+                })
+                .collect()),
+            Err(SpecError::Fiche)
+        );
     }
 
     #[test]
