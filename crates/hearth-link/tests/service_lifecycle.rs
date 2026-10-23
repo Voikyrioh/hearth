@@ -13,6 +13,7 @@ use hearth_link::domain::event::Event;
 use hearth_link::domain::secret::Secret;
 use hearth_link::domain::service_lifecycle::{Gesture, Refusal, refusal_of};
 use hearth_link::{ActionOutcome, LinkError};
+use hearth_proto::admin_act::TrustLevel;
 use hearth_proto::api::services::{ActionAccepted, ServiceState, ServicesState};
 use hearth_proto::error::ErrorCode;
 use support::agent::fake_engine::{FakeEngine, container};
@@ -197,5 +198,73 @@ async fn the_refusals_of_the_agent_come_back_typed_and_nothing_is_ordered() {
             .await
             .unwrap_err(),
         LinkError::UnreadableAct
+    );
+}
+
+/// HRT-194 : en état normal, piloter un service ne demande aucun mot de passe ; en mode attaque, la ceinture
+/// de la liaison refuse d'envoyer un geste sans mot de passe (rien ne part, pas même un défi).
+#[tokio::test]
+async fn a_gesture_needs_no_password_in_the_normal_state_and_is_not_sent_without_one_in_the_attack_mode()
+ {
+    let world = World::connected(options()).await;
+    adopt_web(&world).await;
+    let key = web_key();
+    let info = world
+        .manager
+        .admin_reauth(&world.id)
+        .await
+        .unwrap()
+        .agent
+        .unwrap();
+    assert_eq!(info.trust, Some(TrustLevel::Normal));
+
+    let mark = world.recorder.mark();
+    accepted(
+        world
+            .manager
+            .service_gesture(&world.id, &key, Gesture::Stop, None)
+            .await
+            .unwrap(),
+    );
+    wait_state(&world, mark, "web arrêté", |state| {
+        state
+            .services
+            .iter()
+            .any(|item| item.state == ServiceState::Stopped)
+    })
+    .await;
+
+    let password = Secret::from(PASSWORD);
+    world
+        .manager
+        .set_attack_mode(&world.id, true, &password)
+        .await
+        .unwrap();
+    let info = world
+        .manager
+        .admin_reauth(&world.id)
+        .await
+        .unwrap()
+        .agent
+        .unwrap();
+    assert_eq!(info.trust, Some(TrustLevel::Attack));
+    let challenges = world.spy.calls();
+    let writes = world.spy.write_count();
+    assert_eq!(
+        world
+            .manager
+            .service_gesture(&world.id, &key, Gesture::Start, None)
+            .await
+            .unwrap_err(),
+        LinkError::InvalidInput(hearth_link::InputField::Credentials)
+    );
+    assert_eq!(world.spy.calls(), challenges, "aucun défi ne part");
+    assert_eq!(world.spy.write_count(), writes, "aucune écriture ne part");
+    accepted(
+        world
+            .manager
+            .service_gesture(&world.id, &key, Gesture::Start, Some(&password))
+            .await
+            .unwrap(),
     );
 }

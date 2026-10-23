@@ -65,7 +65,7 @@ impl LinkManager {
             path: ATTACK_MODE_PATH.to_owned(),
             body: Some(json!({ "active": active })),
         };
-        self.send_confirmed(id, &target, &token, action, Some(password))
+        self.send_confirmed(id, &target, &token, action, Some(password), None)
             .await
     }
 }

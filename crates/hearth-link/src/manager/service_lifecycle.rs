@@ -23,7 +23,8 @@ impl LinkManager {
     /// Envoie le geste de pilotage `gesture` pour le service `key` (clé de la liste des services, en clair).
     /// Une clé qui n'a pas la forme d'une clé de service : `UnreadableAct`, rien n'est envoyé. Les erreurs de
     /// `execute_act` s'appliquent (`NotConnected`, `NoDeviceKey`, `Incompatible(UpdateAgent)`,
-    /// `InvalidInput(Credentials)` sans mot de passe pour un acte que l'élévation ne couvre pas). La réponse
+    /// `InvalidInput(Credentials)` sans mot de passe quand la grille de l'état de confiance annoncé l'exige à chaque
+    /// fois, HRT-194). La réponse
     /// de l'agent (`202` ou refus typé) est rendue telle quelle ; `domain::service_lifecycle::refusal_of` la lit.
     pub async fn service_gesture(
         &self,
