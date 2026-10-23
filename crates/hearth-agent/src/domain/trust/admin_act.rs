@@ -2,7 +2,7 @@
 //! de temps elle dure, comment se lit le réglage de fréquence (BR-TRUST-042, 043, 047). Le temps est un
 //! paramètre (millisecondes d'horloge monotone) : aucune horloge murale, aucune E/S.
 
-use hearth_proto::admin_act::AdminAct;
+use hearth_proto::admin_act::{AdminAct, PasswordNeed, TrustLevel};
 use hearth_proto::api::reauth::ReauthMode;
 
 /// Durée de l'élévation : 5 minutes fixes depuis la saisie du mot de passe (Q19). **Non glissante** : un
@@ -38,6 +38,14 @@ pub fn elevation_remaining_s(opened_ms: u64, now_ms: u64) -> u64 {
 /// La correspondance est exhaustive : un acte de plus oblige à choisir.
 pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
     hearth_proto::admin_act::covered_by_elevation(act)
+}
+
+/// Ce que l'acte exige du mot de passe dans l'état de confiance `trust` (HRT-194, BR-GRANT-017) : la
+/// grille du pilotage (`No` en normal, `UnlessElevated` en alerte, `Yes` en attaque) ou, hors pilotage, la
+/// table de l'élévation. Le réglage `each` du compte et le mode attaque sont appliqués par l'appelant sur
+/// `UnlessElevated`.
+pub fn password_need(act: &AdminAct<'_>, trust: TrustLevel) -> PasswordNeed {
+    hearth_proto::admin_act::password_need(act, trust)
 }
 
 /// Le réglage d'un compte lu dans la colonne. Toute valeur inconnue est lue comme `each` (le plus strict).
@@ -223,6 +231,30 @@ mod tests {
                 acts.iter().any(|(act, _)| act.kind() == kind),
                 "{kind:?} sans exemple"
             );
+        }
+    }
+
+    #[test]
+    fn piloting_follows_the_trust_grid_and_the_rest_keeps_the_elevation_table() {
+        for (act, covered) in every_act() {
+            for trust in [TrustLevel::Normal, TrustLevel::Alert, TrustLevel::Attack] {
+                let need = password_need(&act, trust);
+                if hearth_proto::admin_act::is_piloting(act.kind()) {
+                    let expected = match trust {
+                        TrustLevel::Normal => PasswordNeed::No,
+                        TrustLevel::Alert => PasswordNeed::UnlessElevated,
+                        _ => PasswordNeed::Yes,
+                    };
+                    assert_eq!(need, expected, "{act:?} {trust:?}");
+                } else {
+                    let expected = if covered {
+                        PasswordNeed::UnlessElevated
+                    } else {
+                        PasswordNeed::Yes
+                    };
+                    assert_eq!(need, expected, "{act:?} {trust:?}");
+                }
+            }
         }
     }
 
