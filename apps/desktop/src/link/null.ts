@@ -99,7 +99,7 @@ export class NullLinkBridge implements LinkBridge {
   async getReauthState(): Promise<never> {
     return this.unavailable();
   }
-  async reauthCovers(): Promise<never> {
+  async reauthPasswordNeed(): Promise<never> {
     return this.unavailable();
   }
   async setReauthSetting(): Promise<never> {

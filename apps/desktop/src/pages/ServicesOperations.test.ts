@@ -204,7 +204,7 @@ describe("la fenêtre de décision", () => {
   });
 
   it("un mot de passe faux se dit sous le champ, rien n'est décidé", async () => {
-    const { wrapper, bridge } = await open(undefined, "forge");
+    const { wrapper, bridge } = await open((sim) => sim.reauth.setTrust("forge", "alert"), "forge");
     await wrapper.get("[data-operation-decide]").trigger("click");
     await flushPromises();
     document.querySelector<HTMLInputElement>('[data-decision-choice="keep"]')?.click();

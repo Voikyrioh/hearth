@@ -6,14 +6,15 @@ use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use hearth_link::ports::transport::Method;
 use hearth_link::{ActionOutcome, ActionRequest, LinkManager};
-use hearth_proto::admin_act::{AdminAct, covered_by_elevation};
+use hearth_proto::admin_act::{AdminAct, password_need_announced};
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::reauth::{AdminReauthInfo, ReauthMode};
 use hearth_proto::error::ErrorBody;
 use serde_json::{Value, json};
 
 use super::dto::{
-    AdminActKindDto, ReauthModeDto, ReauthSettingOutcome, ReauthSettingRefusal, ReauthStateDto,
+    AdminActKindDto, PasswordNeedDto, ReauthModeDto, ReauthSettingOutcome, ReauthSettingRefusal,
+    ReauthStateDto, TrustLevelDto,
 };
 use super::wire::{Confirmation, confirmation_of};
 use crate::link_dto::{LinkFailure, RoleDto};
@@ -31,15 +32,27 @@ pub async fn state(manager: &LinkManager, id: &ServerId) -> Result<ReauthStateDt
     Ok(manager.admin_reauth(id).await?.into())
 }
 
-/// L'élévation couvre-t-elle cet acte ? La règle est celle de l'agent (`hearth_proto`, source unique).
-/// Un rôle absent pour un acte qui le porte vaut « Administrateur » : le plus strict.
-pub fn covers(kind: AdminActKindDto, role: Option<RoleDto>) -> bool {
+/// Que demande l'agent du mot de passe pour cet acte, dans cet état de confiance ? La règle est celle de
+/// l'agent (`hearth_proto::admin_act::password_need`, source unique) : la fenêtre ne la recopie pas. Un état
+/// absent (agent d'avant HRT-194) garde la règle d'avant : l'élévation seule. Un état inconnu vaut le mode
+/// attaque. Un rôle absent pour un acte qui le porte vaut « Administrateur » : le plus strict.
+pub fn password_need_of(
+    kind: AdminActKindDto,
+    role: Option<RoleDto>,
+    trust: Option<TrustLevelDto>,
+) -> PasswordNeedDto {
+    let act = act_of(kind, role);
+    password_need_announced(&act, trust.map(Into::into)).into()
+}
+
+/// Un acte du genre demandé, sans cible ni secret : de quoi interroger la règle.
+fn act_of(kind: AdminActKindDto, role: Option<RoleDto>) -> AdminAct<'static> {
     let role = match role {
         Some(RoleDto::Readonly) => RoleName::Readonly,
         // Un rôle inconnu (agent plus récent) vaut « Administrateur » : le plus strict.
         Some(RoleDto::Admin | RoleDto::Unknown) | None => RoleName::Admin,
     };
-    let act = match kind {
+    match kind {
         AdminActKindDto::AccountCreate => AdminAct::AccountCreate { username: "", role },
         AdminActKindDto::AccountRole => AdminAct::AccountRole { target: "", role },
         AdminActKindDto::AccountPassword => AdminAct::AccountPassword { target: "" },
@@ -62,8 +75,7 @@ pub fn covers(kind: AdminActKindDto, role: Option<RoleDto>) -> bool {
         AdminActKindDto::ServiceStart => AdminAct::ServiceStart { target: "".into() },
         AdminActKindDto::ServiceStop => AdminAct::ServiceStop { target: "".into() },
         AdminActKindDto::ServiceRestart => AdminAct::ServiceRestart { target: "".into() },
-    };
-    covered_by_elevation(&act)
+    }
 }
 
 /// Change le réglage « Demander mon mot de passe » : un acte d'administration comme les autres (mot de
@@ -134,30 +146,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_elevation_covers_what_the_agent_covers_and_nothing_else() {
+    fn the_password_need_is_the_grid_of_the_agent_for_piloting_and_the_elevation_table_for_the_rest()
+     {
         use AdminActKindDto as Kind;
-        for (kind, role, covered) in [
-            (Kind::AccountCreate, Some(RoleDto::Readonly), true),
-            (Kind::AccountCreate, Some(RoleDto::Admin), false),
-            (Kind::AccountCreate, None, false),
-            (Kind::AccountRole, Some(RoleDto::Readonly), true),
-            (Kind::AccountRole, Some(RoleDto::Admin), false),
-            (Kind::AccountRole, None, false),
-            (Kind::AccountDelete, None, true),
-            (Kind::SessionsRevoke, None, true),
-            (Kind::AccountPassword, None, false),
-            (Kind::AgentUpdate, None, false),
-            (Kind::AttackModeEnable, None, false),
-            (Kind::AttackModeDisable, None, false),
-            (Kind::AccountPasswordOwn, None, false),
-            (Kind::ReauthSetting, None, false),
-            (Kind::OperationDecide, None, false),
-            (Kind::ServiceStart, None, true),
-            (Kind::ServiceStop, None, true),
-            (Kind::ServiceRestart, None, true),
-        ] {
-            assert_eq!(covers(kind, role), covered, "{kind:?} {role:?}");
+        use PasswordNeedDto::{No, UnlessElevated, Yes};
+        use TrustLevelDto::{Alert, Attack, Normal, Unknown};
+        // Hors pilotage : la table de l'élévation, quel que soit l'état.
+        for trust in [Some(Normal), Some(Alert), Some(Attack), Some(Unknown), None] {
+            for (kind, role, need) in [
+                (Kind::AccountCreate, Some(RoleDto::Readonly), UnlessElevated),
+                (Kind::AccountCreate, Some(RoleDto::Admin), Yes),
+                (Kind::AccountCreate, None, Yes),
+                (Kind::AccountRole, Some(RoleDto::Readonly), UnlessElevated),
+                (Kind::AccountRole, Some(RoleDto::Admin), Yes),
+                (Kind::AccountRole, None, Yes),
+                (Kind::AccountDelete, None, UnlessElevated),
+                (Kind::SessionsRevoke, None, UnlessElevated),
+                (Kind::AccountPassword, None, Yes),
+                (Kind::AgentUpdate, None, Yes),
+                (Kind::AttackModeEnable, None, Yes),
+                (Kind::AttackModeDisable, None, Yes),
+                (Kind::AccountPasswordOwn, None, Yes),
+                (Kind::ReauthSetting, None, Yes),
+            ] {
+                assert_eq!(
+                    password_need_of(kind, role, trust),
+                    need,
+                    "{kind:?} {role:?} {trust:?}"
+                );
+            }
         }
+        // Pilotage : la grille de confiance de l'agent.
+        for kind in [
+            Kind::ServiceStart,
+            Kind::ServiceStop,
+            Kind::ServiceRestart,
+            Kind::OperationDecide,
+        ] {
+            assert_eq!(password_need_of(kind, None, Some(Normal)), No, "{kind:?}");
+            assert_eq!(
+                password_need_of(kind, None, Some(Alert)),
+                UnlessElevated,
+                "{kind:?}"
+            );
+            assert_eq!(password_need_of(kind, None, Some(Attack)), Yes, "{kind:?}");
+            // Un état inconnu vaut le mode attaque.
+            assert_eq!(password_need_of(kind, None, Some(Unknown)), Yes, "{kind:?}");
+        }
+        // Agent d'avant HRT-194 (état absent) : la règle d'avant, jamais « normal » par défaut.
+        for kind in [Kind::ServiceStart, Kind::ServiceStop, Kind::ServiceRestart] {
+            assert_eq!(password_need_of(kind, None, None), UnlessElevated);
+        }
+        assert_eq!(password_need_of(Kind::OperationDecide, None, None), Yes);
     }
 
     #[test]

@@ -5,7 +5,14 @@ import type { LinkBridge } from "./bridge";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
-import type { AdminActKind, ReauthMode, ReauthSettingOutcome, ReauthState } from "./reauth";
+import type {
+  AdminActKind,
+  PasswordNeed,
+  ReauthMode,
+  ReauthSettingOutcome,
+  ReauthState,
+  TrustLevel,
+} from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
 import {
   LIFECYCLE_ACT_KINDS,
@@ -29,7 +36,7 @@ import { SimulatedAudit } from "./simulated-audit";
 import { SimulatedDevices } from "./simulated-devices";
 import { SimulatedLogs } from "./simulated-logs";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
-import { SimulatedReauth, simulatedCovers } from "./simulated-reauth";
+import { SimulatedReauth, simulatedPasswordNeed } from "./simulated-reauth";
 import { SimulatedSecurity } from "./simulated-security";
 import { SimulatedServiceOps } from "./simulated-service-ops";
 import { SimulatedServices } from "./simulated-services";
@@ -922,8 +929,12 @@ export class SimulatedLinkBridge implements LinkBridge {
     return this.reauth.state(serverId);
   }
 
-  async reauthCovers(kind: AdminActKind, role: Role | null): Promise<boolean> {
-    return simulatedCovers(kind, role);
+  async reauthPasswordNeed(
+    kind: AdminActKind,
+    role: Role | null,
+    trust: TrustLevel | null,
+  ): Promise<PasswordNeed> {
+    return simulatedPasswordNeed(kind, role, trust);
   }
 
   async setReauthSetting(

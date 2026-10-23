@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use hearth_proto::admin_act::AdminAct;
+use hearth_proto::admin_act::{AdminAct, PasswordNeed, TrustLevel, password_need};
 use hearth_proto::api::reauth::{AdminReauthInfo, Reauth, ReauthMode};
 use hearth_proto::api::sessions::{DeviceProof, DeviceStatus};
 use hearth_proto::device_proof::Binding;
@@ -24,7 +24,7 @@ use super::ports::{
     AccountRepo, AuditSink, Clock, HashError, IdGen, KnownAddressRepo, LoginAttemptRepo,
     PasswordHasher, SessionRepo, Store, StoreError, TokenGen, TokenGenError, UnitOfWork,
 };
-use super::security::SecurityService;
+use super::security::{SecurityService, identifier_alert};
 use super::trust::{
     AttackProofError, DeviceLogin, InFlight, RemoveError, TrustService, VerifiedKey,
 };
@@ -44,7 +44,7 @@ use crate::domain::sessions::{
     ClosureNotice, Session, SessionEnd, SessionId, check, expiry_from, renewed_expiry,
 };
 use crate::domain::trust::DeviceId;
-use crate::domain::trust::admin_act::covered_by_elevation;
+use crate::domain::trust::act_trust;
 use crate::domain::trust::attack_mode::{Effective, EndHow};
 use crate::domain::trust::{
     LoginCriteria, Mode, SessionStanding, TrialKind, judge_login, judge_session, mode_of,
@@ -1158,21 +1158,28 @@ impl SessionService {
                 _reservation: reservation,
             })))
         };
-        // Pendant le mode attaque (actif ou suspendu), aucune élévation n'existe.
-        let attacking = match &self.attack {
-            Some(attack) => attack.effective().await? != Effective::Off,
-            None => false,
-        };
+        // L'état de confiance est jugé ICI, à l'acte, après la preuve de clé : le client ne le fournit jamais
+        // (HRT-194, BR-TRUST-052). Pendant le mode attaque (actif ou suspendu), aucune élévation n'existe.
+        let attacking = self.attacking().await?;
+        let level = self.trust_level(session, attacking).await?;
+        let need = password_need(act, level);
+        // Le niveau jugé est tracé à chaque acte (jamais le compte ni un secret) : de quoi expliquer, après coup,
+        // pourquoi un mot de passe a été demandé ou non.
+        tracing::info!(act = act.kind().audit_code(), trust = ?level, need = ?need, "confirmation d'un acte");
         let windowed = !attacking
             && self.accounts.reauth_mode(&session.account.id).await? == ReauthMode::Window;
-        if windowed
-            && covered_by_elevation(act)
+        if need == PasswordNeed::UnlessElevated
+            && windowed
             && let Some(elevations) = &self.elevations
             && elevations.covers(&session.session_id, &device, &client.addr)
         {
             return confirmed(None);
         }
         if reauth.password.is_empty() {
+            // Piloter un service en état normal : ni mot de passe, ni élévation (BR-LIFE-016).
+            if need == PasswordNeed::No {
+                return confirmed(None);
+            }
             return Err(ReauthError::PasswordRequired);
         }
         let purpose = Purpose::Act(act_audit_action(act));
@@ -1186,7 +1193,12 @@ impl SessionService {
             )
             .await
             .map_err(|error| ReauthError::Password(Box::new(error)))?;
-        if windowed && let Some(elevations) = &self.elevations {
+        // Un mot de passe envoyé alors qu'il n'est pas demandé est vérifié (faux : refusé) mais n'ouvre
+        // aucune élévation (ADR-0032 point 7).
+        if windowed
+            && need != PasswordNeed::No
+            && let Some(elevations) = &self.elevations
+        {
             elevations.open(
                 &session.session_id,
                 &session.account.id,
@@ -1282,6 +1294,33 @@ impl SessionService {
         Ok(())
     }
 
+    /// Le mode attaque est-il actif ou suspendu (le régime d'alerte s'applique) ?
+    async fn attacking(&self) -> Result<bool, StoreError> {
+        Ok(match &self.attack {
+            Some(attack) => attack.effective().await? != Effective::Off,
+            None => false,
+        })
+    }
+
+    /// L'état de confiance de ce compte maintenant (HRT-194, BR-TRUST-052) : le mode attaque, sinon
+    /// l'alerte de l'IDENTIFIANT du compte (jamais de l'adresse, BR-TRUST-006, même clé que
+    /// `SecurityService::state_for`), sinon normal. Aucun état stocké : l'alerte se déduit du compteur.
+    async fn trust_level(
+        &self,
+        session: &CurrentSession,
+        attacking: bool,
+    ) -> Result<TrustLevel, StoreError> {
+        let own_alert = !attacking
+            && identifier_alert(
+                &*self.attempts,
+                session.account.username.as_str(),
+                self.clock.now(),
+            )
+            .await?
+            .active;
+        Ok(act_trust::level(attacking, own_alert))
+    }
+
     /// Ce que `GET /security` annonce de la confirmation des actes pour cette session depuis cette
     /// adresse. `None` : l'agent n'a pas l'identité d'appareil (aucune confirmation possible).
     pub async fn admin_reauth_info(
@@ -1293,10 +1332,8 @@ impl SessionService {
             return Ok(None);
         }
         let mode = self.accounts.reauth_mode(&session.account.id).await?;
-        let attacking = match &self.attack {
-            Some(attack) => attack.effective().await? != Effective::Off,
-            None => false,
-        };
+        let attacking = self.attacking().await?;
+        let trust = self.trust_level(session, attacking).await?;
         let elevated_for_s = match &self.elevations {
             Some(elevations) if !attacking && mode == ReauthMode::Window => {
                 elevations.remaining_s(&session.session_id, addr)
@@ -1309,6 +1346,7 @@ impl SessionService {
             factors: vec!["password".to_owned(), "device_key".to_owned()],
             password: mode,
             elevated_for_s,
+            trust: Some(trust),
         }))
     }
 

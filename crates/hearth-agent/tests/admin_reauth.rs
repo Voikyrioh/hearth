@@ -11,7 +11,7 @@ mod support;
 
 use axum::http::{Method, StatusCode};
 use hearth_agent::domain::accounts::{Authority, Role};
-use hearth_proto::admin_act::{ActKind, AdminAct};
+use hearth_proto::admin_act::{ActKind, AdminAct, is_piloting};
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::reauth::ReauthMode;
 use hearth_proto::api::service_ops::OperationChoice;
@@ -885,23 +885,28 @@ async fn a_confirmation_without_a_proof_or_without_a_password_is_refused_with_it
             "proof_missing",
             &format!("{kind:?} / illisible"),
         );
-        // La preuve sans le mot de passe, hors élévation.
-        let reply = b.act(who, &spec, "").await;
-        assert_refused_with(
-            &reply,
-            StatusCode::CONFLICT,
-            "POST_NOT_RECOGNIZED",
-            "password_required",
-            &format!("{kind:?} / sans mot de passe"),
-        );
-        assert_eq!(b.snapshot().await, before, "{kind:?} : base inchangée");
-        assert_eq!(
-            b.env.hasher.verifications(),
-            verifications,
-            "{kind:?} : aucun mot de passe n'est essayé"
-        );
+        // La preuve sans le mot de passe, hors élévation. Un acte de pilotage en état normal n'en demande pas
+        // (HRT-194) : sa grille a ses propres tests plus bas.
+        if !is_piloting(kind) {
+            let reply = b.act(who, &spec, "").await;
+            assert_refused_with(
+                &reply,
+                StatusCode::CONFLICT,
+                "POST_NOT_RECOGNIZED",
+                "password_required",
+                &format!("{kind:?} / sans mot de passe"),
+            );
+            assert_eq!(b.snapshot().await, before, "{kind:?} : base inchangée");
+            assert_eq!(
+                b.env.hasher.verifications(),
+                verifications,
+                "{kind:?} : aucun mot de passe n'est essayé"
+            );
+            assert!(b.entries(kind, "denied", "mot de passe requis").await >= 1);
+        } else {
+            assert_eq!(b.snapshot().await, before, "{kind:?} : base inchangée");
+        }
         assert!(b.entries(kind, "denied", "preuve de clé absente").await >= 1);
-        assert!(b.entries(kind, "denied", "mot de passe requis").await >= 1);
     }
 }
 
@@ -1265,9 +1270,6 @@ async fn the_acts_the_elevation_never_covers_ask_for_the_password_during_the_ele
         ActKind::ReauthSetting,
         // Adopter ouvre la frontière de confidentialité : le mot de passe à chaque fois (BR-ADOPT-008).
         ActKind::ServicesAdopt,
-        // Répondre à une décision : le mot de passe à chaque fois, quel que soit le choix (défaut non
-        // validé par le propriétaire, revue de la PR 94).
-        ActKind::OperationDecide,
         ActKind::AttackModeDisable,
     ]
     .into_iter()
@@ -2158,31 +2160,48 @@ async fn opening_an_elevation_is_journaled_with_who_which_device_and_when_never_
 // HRT-144 : annuler et décider une opération, et les actes déclarés sans route
 // ---------------------------------------------------------------------------------------------
 
-/// Défaut NON VALIDÉ par le propriétaire (revue de la PR 94) : seule l'ANNULATION est couverte par une saisie
-/// récente du mot de passe ; TOUTE réponse à une décision, quel que soit le choix, le redemande.
+/// HRT-194 : répondre à une décision est un acte de PILOTAGE, quel que soit le choix (`revert` et `keep`
+/// compris, BR-EDIT-031) : en état normal, aucun mot de passe ; en alerte, la saisie ou l'élévation ;
+/// en mode attaque, la saisie à chaque fois. Annuler garde sa règle (couvert par l'élévation).
 #[tokio::test]
-async fn every_answer_to_a_decision_asks_for_the_password_during_the_elevation_and_only_cancelling_is_covered()
- {
+async fn every_answer_to_a_decision_follows_the_piloting_grid_and_cancelling_keeps_its_rule() {
     let b = bench().await;
     b.env.grant_services("marie").await;
-    for (index, choice) in [
+    let choices = [
         OperationChoice::Continue,
         OperationChoice::Cancel,
         OperationChoice::Revert,
         OperationChoice::Keep,
         OperationChoice::Verified,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let opened = b
-            .act(
-                &b.marie,
-                &readonly_account(&format!("ouvre-{index}")),
-                PASSWORD,
-            )
-            .await;
-        assert_eq!(opened.status, StatusCode::CREATED, "{:?}", opened.body);
+    ];
+    // Normal : la preuve de la clé suffit ; la réponse est examinée (jamais refusée pour la confirmation).
+    for choice in choices {
+        let decide = Spec::Decide {
+            target: b.running_operation(true).await,
+            choice,
+        };
+        let verifications = b.env.hasher.verifications();
+        let reply = b.act(&b.marie, &decide, "").await;
+        assert_ne!(
+            reply.code(),
+            "POST_NOT_RECOGNIZED",
+            "{choice:?} : {:?}",
+            reply.body
+        );
+        assert_eq!(b.env.hasher.verifications(), verifications, "{choice:?}");
+    }
+    // Annuler, sous élévation, passe sur la seule preuve de la clé.
+    b.act(&b.marie, &readonly_account("rouvre"), PASSWORD).await;
+    let cancel = Spec::Cancel {
+        target: b.running_operation(false).await,
+    };
+    let verifications = b.env.hasher.verifications();
+    let reply = b.act(&b.marie, &cancel, "").await;
+    assert!(reply.status.is_success(), "{:?}", reply.body);
+    assert_eq!(b.env.hasher.verifications(), verifications);
+    // Mode attaque : toute réponse redemande le mot de passe, quel que soit le choix.
+    become_attacked(&b).await;
+    for choice in choices {
         let decide = Spec::Decide {
             target: b.running_operation(true).await,
             choice,
@@ -2194,23 +2213,12 @@ async fn every_answer_to_a_decision_asks_for_the_password_during_the_elevation_a
             StatusCode::CONFLICT,
             "POST_NOT_RECOGNIZED",
             "password_required",
-            &format!("{choice:?} sous élévation"),
+            &format!("{choice:?} en mode attaque"),
         );
         assert_eq!(b.snapshot().await, before, "{choice:?}");
-        // Avec le mot de passe, la réponse est examinée (elle peut être refusée pour une autre raison : le
-        // statut de l'opération), mais jamais pour la confirmation.
         let reply = b.act(&b.marie, &decide, PASSWORD).await;
         assert_ne!(reply.code(), "POST_NOT_RECOGNIZED", "{choice:?}");
     }
-    // Annuler, lui, passe sous l'élévation sur la seule preuve de la clé.
-    b.act(&b.marie, &readonly_account("rouvre"), PASSWORD).await;
-    let cancel = Spec::Cancel {
-        target: b.running_operation(false).await,
-    };
-    let verifications = b.env.hasher.verifications();
-    let reply = b.act(&b.marie, &cancel, "").await;
-    assert!(reply.status.is_success(), "{:?}", reply.body);
-    assert_eq!(b.env.hasher.verifications(), verifications);
 }
 
 /// Un choix que cette version ne connaît pas n'est jamais un acte : refus de validation AVANT toute
@@ -2407,4 +2415,300 @@ async fn an_account_without_the_services_right_cannot_cancel_or_decide_even_with
         let reply = b.act(&b.marie, spec, PASSWORD).await;
         assert!(reply.status.is_success(), "{spec:?} : {:?}", reply.body);
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// HRT-194 : la grille du mot de passe pour piloter un service (BR-LIFE-016, BR-TRUST-042, 043, 052)
+// ---------------------------------------------------------------------------------------------
+
+/// Les actes de pilotage de la grille.
+const PILOTING: [ActKind; 4] = [
+    ActKind::ServiceStart,
+    ActKind::ServiceStop,
+    ActKind::ServiceRestart,
+    ActKind::OperationDecide,
+];
+
+/// L'identifiant de marie est visé : onze échecs d'adresses inconnues, donc ALERTE (BR-TRUST-006).
+async fn become_alerted(b: &Bench) {
+    for n in 0..11 {
+        let _ = b
+            .env
+            .sessions
+            .login(
+                "marie",
+                support::secret(WRONG),
+                &support::client_at(&format!("10.77.0.{}", n + 1)),
+            )
+            .await;
+    }
+}
+
+/// Le mode attaque est actif.
+async fn become_attacked(b: &Bench) {
+    b.env
+        .attack
+        .change(
+            true,
+            by(),
+            hearth_agent::domain::trust::attack_mode::EndHow::Manual,
+        )
+        .await
+        .unwrap();
+}
+
+async fn elevation_entries(b: &Bench) -> i64 {
+    b.env.audit_recorder.flush_all().await;
+    sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE action = 'reauth.elevation'")
+        .fetch_one(b.env.db.pool())
+        .await
+        .unwrap()
+}
+
+/// Passe marie au réglage `each` (acte confirmé, qui ferme l'élévation qu'il vient d'ouvrir).
+async fn set_each(b: &Bench) {
+    let reply = b
+        .act(
+            &b.marie,
+            &Spec::Setting {
+                mode: ReauthMode::Each,
+            },
+            PASSWORD,
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+    assert!(b.env.elevations.is_empty());
+}
+
+#[tokio::test]
+async fn in_the_normal_state_piloting_needs_no_password_opens_no_elevation_and_ignores_the_each_setting()
+ {
+    for each in [false, true] {
+        for kind in PILOTING {
+            let b = bench().await;
+            if each {
+                set_each(&b).await;
+            }
+            let spec = b.spec(kind).await;
+            let entries = elevation_entries(&b).await;
+            let verifications = b.env.hasher.verifications();
+            let reply = b.act(&b.marie, &spec, "").await;
+            assert!(
+                reply.status.is_success(),
+                "{kind:?} / each {each} : {:?}",
+                reply.body
+            );
+            assert_eq!(b.env.hasher.verifications(), verifications, "{kind:?}");
+            assert!(b.env.elevations.is_empty(), "{kind:?} : aucune élévation");
+            assert_eq!(
+                elevation_entries(&b).await,
+                entries,
+                "{kind:?} : aucune entrée"
+            );
+            assert_eq!(elevated_for(&b).await, 0);
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_password_sent_when_it_is_not_asked_is_checked_wrong_is_refused_right_passes_without_an_elevation()
+ {
+    let b = bench().await;
+    let spec = b.spec(ActKind::ServiceRestart).await;
+    let before = b.snapshot().await;
+    let reply = b.act(&b.marie, &spec, WRONG).await;
+    assert!(!reply.status.is_success(), "{:?}", reply.body);
+    assert_eq!(b.snapshot().await, before);
+    assert!(b.env.elevations.is_empty());
+    let reply = b.act(&b.marie, &spec, PASSWORD).await;
+    assert!(reply.status.is_success(), "{:?}", reply.body);
+    assert!(
+        b.env.elevations.is_empty(),
+        "un mot de passe superflu n'ouvre rien"
+    );
+    assert_eq!(elevation_entries(&b).await, 0);
+}
+
+#[tokio::test]
+async fn in_the_alert_state_the_first_piloting_act_asks_the_password_then_five_minutes_cover_the_next_ones()
+ {
+    let b = bench().await;
+    become_alerted(&b).await;
+    let first = b.spec(ActKind::ServiceRestart).await;
+    let before = b.snapshot().await;
+    let reply = b.act(&b.marie, &first, "").await;
+    assert_refused_with(
+        &reply,
+        StatusCode::CONFLICT,
+        "POST_NOT_RECOGNIZED",
+        "password_required",
+        "alerte, premier acte",
+    );
+    assert_eq!(b.snapshot().await, before);
+    let reply = b.act(&b.marie, &first, PASSWORD).await;
+    assert!(reply.status.is_success(), "{:?}", reply.body);
+    assert!(elevated_for(&b).await >= 299);
+    assert_eq!(elevation_entries(&b).await, 1);
+    // Pendant les 5 minutes, les actes de pilotage suivants (décision comprise) ne redemandent rien.
+    let verifications = b.env.hasher.verifications();
+    for kind in [
+        ActKind::ServiceStop,
+        ActKind::ServiceStart,
+        ActKind::OperationDecide,
+    ] {
+        let spec = b.spec(kind).await;
+        let reply = b.act(&b.marie, &spec, "").await;
+        assert!(reply.status.is_success(), "{kind:?} : {:?}", reply.body);
+    }
+    assert_eq!(b.env.hasher.verifications(), verifications);
+    assert_eq!(elevation_entries(&b).await, 1, "une seule ouverture");
+    // Après : le mot de passe est redemandé.
+    b.env
+        .monotonic
+        .advance(Duration::minutes(5) + Duration::milliseconds(1));
+    let spec = b.spec(ActKind::ServiceStop).await;
+    let reply = b.act(&b.marie, &spec, "").await;
+    assert_refused_with(
+        &reply,
+        StatusCode::CONFLICT,
+        "POST_NOT_RECOGNIZED",
+        "password_required",
+        "alerte, après les 5 minutes",
+    );
+}
+
+#[tokio::test]
+async fn in_the_alert_state_with_the_each_setting_every_piloting_act_asks_the_password() {
+    let b = bench().await;
+    set_each(&b).await;
+    become_alerted(&b).await;
+    for kind in PILOTING {
+        let spec = b.spec(kind).await;
+        let reply = b.act(&b.marie, &spec, "").await;
+        assert_refused_with(
+            &reply,
+            StatusCode::CONFLICT,
+            "POST_NOT_RECOGNIZED",
+            "password_required",
+            &format!("{kind:?} / alerte + each"),
+        );
+        let reply = b.act(&b.marie, &spec, PASSWORD).await;
+        assert!(reply.status.is_success(), "{kind:?} : {:?}", reply.body);
+        assert!(
+            b.env.elevations.is_empty(),
+            "{kind:?} : rien ne s'ouvre avec each"
+        );
+    }
+}
+
+#[tokio::test]
+async fn in_the_attack_mode_active_or_suspended_every_piloting_act_asks_the_password_and_no_elevation_opens()
+ {
+    for suspended in [false, true] {
+        let b = bench().await;
+        // Le service note le démarrage du noyau en cours (comme un agent qui tourne depuis un moment).
+        assert!(!b.env.attack.on_start().await.unwrap());
+        become_attacked(&b).await;
+        if suspended {
+            b.env.boot.set_id(Some("boot-2"));
+            b.env.boot.set_uptime(Duration::minutes(1));
+            assert!(b.env.attack.on_start().await.unwrap());
+        }
+        for kind in PILOTING {
+            let spec = b.spec(kind).await;
+            let reply = b.act(&b.marie, &spec, "").await;
+            assert_refused_with(
+                &reply,
+                StatusCode::CONFLICT,
+                "POST_NOT_RECOGNIZED",
+                "password_required",
+                &format!("{kind:?} / attaque (suspendu {suspended})"),
+            );
+            let reply = b.act(&b.marie, &spec, PASSWORD).await;
+            assert!(reply.status.is_success(), "{kind:?} : {:?}", reply.body);
+            assert!(b.env.elevations.is_empty(), "{kind:?}");
+        }
+        assert_eq!(elevation_entries(&b).await, 0);
+    }
+}
+
+#[tokio::test]
+async fn the_proof_of_the_key_is_required_for_a_piloting_act_in_every_state() {
+    for state in ["normal", "alert", "attack"] {
+        let b = bench().await;
+        match state {
+            "alert" => become_alerted(&b).await,
+            "attack" => become_attacked(&b).await,
+            _ => {}
+        }
+        let spec = b.spec(ActKind::ServiceRestart).await;
+        let other = b.spec(ActKind::ServiceStop).await;
+        let before = b.snapshot().await;
+        // Aucune preuve, même avec le mot de passe juste.
+        let reply = b
+            .send(
+                &b.marie,
+                &spec,
+                Some(json!({ "password": PASSWORD })),
+                PASSWORD,
+            )
+            .await;
+        assert_refused_with(
+            &reply,
+            StatusCode::CONFLICT,
+            "POST_NOT_RECOGNIZED",
+            "proof_missing",
+            &format!("{state} / sans preuve"),
+        );
+        // La preuve d'un autre acte.
+        let member = b.member(&b.marie, &other, PASSWORD).await;
+        let reply = b.send(&b.marie, &spec, Some(member), PASSWORD).await;
+        assert_refused_with(
+            &reply,
+            StatusCode::CONFLICT,
+            "POST_NOT_RECOGNIZED",
+            "proof_invalid",
+            &format!("{state} / autre acte"),
+        );
+        assert_eq!(b.snapshot().await, before, "{state}");
+        // Une preuve rejouée.
+        let member = b.member(&b.marie, &spec, PASSWORD).await;
+        let first = b
+            .send(&b.marie, &spec, Some(member.clone()), PASSWORD)
+            .await;
+        assert!(first.status.is_success(), "{state} : {:?}", first.body);
+        let replay = b.send(&b.marie, &spec, Some(member), PASSWORD).await;
+        assert!(!replay.status.is_success(), "{state} : rejouée");
+    }
+}
+
+/// HRT-194 : `alert.own` et `admin_reauth.trust` de `GET /security` viennent du MÊME calcul : ils s'accordent
+/// dans chaque état (normal, alerte, attaque), et l'état annoncé est celui que l'agent juge ensuite à l'acte.
+#[tokio::test]
+async fn the_alert_and_the_announced_trust_of_the_security_state_always_agree() {
+    let b = bench().await;
+    let read = || async {
+        let reply = b.api.get("/security").token(&b.marie.token).send().await;
+        (
+            reply.body["alert"]["own"].as_bool().unwrap(),
+            reply.body["admin_reauth"]["trust"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        )
+    };
+    assert_eq!(read().await, (false, "normal".to_owned()));
+    become_alerted(&b).await;
+    assert_eq!(read().await, (true, "alert".to_owned()));
+    // L'état annoncé est celui que l'acte rencontre : le pilotage demande le mot de passe.
+    let spec = b.spec(ActKind::ServiceStop).await;
+    let reply = b.act(&b.marie, &spec, "").await;
+    assert_eq!(reason(&reply), "password_required");
+    become_attacked(&b).await;
+    let (own, trust) = read().await;
+    assert_eq!(trust, "attack");
+    assert!(
+        !own || trust == "attack",
+        "le mode attaque l'emporte sur l'alerte"
+    );
 }

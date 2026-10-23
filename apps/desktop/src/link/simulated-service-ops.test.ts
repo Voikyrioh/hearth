@@ -177,13 +177,18 @@ describe("répondre à une opération", () => {
     expect(sim.serviceOps.decisions).toEqual([]);
   });
 
-  it("le mot de passe est redemandé à chaque réponse, même sous l'élévation", async () => {
+  it("répondre est un acte de pilotage : rien à saisir en état normal, le mot de passe en mode attaque (HRT-194)", async () => {
+    const normal = bridge();
+    const accepted = waiting(normal);
+    expect(await normal.decideServiceOperation("forge", accepted.id, "keep", null)).toMatchObject({
+      kind: "done",
+    });
     const sim = bridge();
     const op = waiting(sim);
-    sim.reauth.open("forge");
-    expect(await sim.decideServiceOperation("forge", op.id, "keep", null)).toEqual({
-      kind: "refused",
-      refusal: { kind: "password_required" },
+    sim.reauth.setTrust("forge", "attack");
+    // La ceinture de la liaison : rien ne part sans mot de passe en mode attaque.
+    await expect(sim.decideServiceOperation("forge", op.id, "keep", null)).rejects.toMatchObject({
+      failure: { kind: "invalid_input", field: "credentials" },
     });
     expect(await sim.decideServiceOperation("forge", op.id, "keep", "faux")).toMatchObject({
       refusal: { kind: "wrong_password" },

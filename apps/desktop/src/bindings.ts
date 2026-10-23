@@ -150,10 +150,11 @@ export const commands = {
 	 */
 	getReauthState: (serverId: string) => typedError<ReauthStateDto, LinkFailure>(__TAURI_INVOKE("get_reauth_state", { serverId })),
 	/**
-	 *  L'élévation de 5 minutes couvre-t-elle cet acte ? La règle est celle de l'agent, lue de
-	 *  `hearth-proto` : la fenêtre ne la recopie pas. Ne parle pas à l'agent.
+	 *  Que demande l'agent du mot de passe pour cet acte, dans l'état de confiance qu'il a annoncé (`trust`,
+	 *  absent pour un agent d'avant HRT-194) ? La règle est celle de l'agent, lue de `hearth-proto` : la fenêtre
+	 *  ne la recopie pas. Ne parle pas à l'agent.
 	 */
-	reauthCovers: (kind: AdminActKindDto, role: "admin" | "readonly" | "unknown" | null) => __TAURI_INVOKE<boolean>("reauth_covers", { kind, role }),
+	reauthPasswordNeed: (kind: AdminActKindDto, role: "admin" | "readonly" | "unknown" | null, trust: "normal" | "alert" | "attack" | "unknown" | null) => __TAURI_INVOKE<PasswordNeedDto>("reauth_password_need", { kind, role, trust }),
 	/**
 	 *  Change le réglage « Demander mon mot de passe » (à chaque action, ou 5 minutes). `password` est le
 	 *  mot de passe actuel de confirmation, la preuve de la clé de ce PC est faite par la coquille.
@@ -352,9 +353,9 @@ export type AddServerInput = {
 
 /**  Le genre d'un acte d'administration, tel que la fenêtre le connaît (sans cible ni secret). */
 export type AdminActKindDto = "account_create" | "account_role" | "account_password" | "account_delete" | "sessions_revoke" | "agent_update" | "attack_mode_enable" | "attack_mode_disable" | "account_password_own" | "reauth_setting" | 
-/**  Décider d'une opération de service (HRT-84) : jamais couvert par l'élévation. */
+/**  Décider d'une opération de service (HRT-84) : un acte de pilotage depuis HRT-194. */
 "operation_decide" | 
-/**  Démarrer, arrêter, redémarrer un service (HRT-65) : couverts par l'élévation de cinq minutes. */
+/**  Démarrer, arrêter, redémarrer un service (HRT-65) : actes de pilotage (HRT-194, BR-LIFE-016). */
 "service_start" | "service_stop" | "service_restart";
 
 /**  Qui a adopté un service, et quand (HRT-79). */
@@ -1112,6 +1113,12 @@ export type OsDto = {
 
 export type OutcomeDto = "done" | "not_executed" | "unknown";
 
+/**
+ *  Ce que l'agent exige du mot de passe pour un acte (HRT-194, BR-GRANT-017) : aucun, sauf élévation en
+ *  cours, ou à chaque fois. La règle est celle de `hearth_proto::admin_act::password_need`.
+ */
+export type PasswordNeedDto = "no" | "unless_elevated" | "yes";
+
 export type PasswordRuleDto = "required" | "min_length" | "digit" | "lowercase" | "uppercase" | "contains_username";
 
 export type PortDto = {
@@ -1172,6 +1179,11 @@ export type ReauthStateDto = {
 	elevatedForS: number,
 	/**  Ce PC a une clé d'appareil au coffre pour ce serveur. Faux : aucun acte ne part d'ici. */
 	hasDeviceKey: boolean,
+	/**
+	 *  L'état de confiance annoncé par l'agent. Absent : agent d'avant HRT-194, la règle d'avant s'applique
+	 *  (BR-COMPAT-001), jamais « normal » par défaut.
+	 */
+	trust: TrustLevelDto | null,
 };
 
 export type RestartDto = "unless_stopped" | "always" | "on_failure" | "none" | "supervisor" | "unknown";
@@ -1378,6 +1390,12 @@ export type TempDto = {
 	label: string,
 	celsius: number | null,
 };
+
+/**
+ *  L'état de confiance du compte que l'agent annonce (HRT-194, BR-TRUST-052) : de lui dépend si piloter un
+ *  service demande le mot de passe. Indicatif, l'agent le recalcule à l'acte ; le client ne l'envoie jamais.
+ */
+export type TrustLevelDto = "normal" | "alert" | "attack" | "unknown";
 
 /**
  *  Un poste de confiance du compte de la session. Les dates sont celles de l'agent (RFC 3339, UTC) ;

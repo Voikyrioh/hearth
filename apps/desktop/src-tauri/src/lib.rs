@@ -98,7 +98,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             agent_update::commands::update_agent,
             agent_update::commands::ack_agent_result,
             reauth::commands::get_reauth_state,
-            reauth::commands::reauth_covers,
+            reauth::commands::reauth_password_need,
             reauth::commands::set_reauth_setting,
             services::commands::list_services_states,
             services::commands::engine_recheck,

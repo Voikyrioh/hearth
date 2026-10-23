@@ -1,4 +1,11 @@
-import { type AdminActKind, ELEVATION_SECONDS, type ReauthMode, type ReauthState } from "./reauth";
+import {
+  type AdminActKind,
+  ELEVATION_SECONDS,
+  type PasswordNeed,
+  type ReauthMode,
+  type ReauthState,
+  type TrustLevel,
+} from "./reauth";
 import { LinkCommandError, type Role } from "./types";
 
 /**
@@ -18,6 +25,8 @@ interface Book {
   elevatedUntil: number;
   /** Mots de passe faux de suite : au-delà de 5 l'agent fait attendre. */
   wrong: number;
+  /** L'état de confiance que l'agent annonce (HRT-194) ; `null` : agent d'avant, règle d'avant. */
+  trust: TrustLevel | null;
 }
 
 const FREE_TRIES = 5;
@@ -25,7 +34,8 @@ const WAIT_SECONDS = 30;
 
 /**
  * L'élévation couvre-t-elle cet acte ? Le miroir de `hearth_proto::admin_act::covered_by_elevation` pour
- * le simulateur seulement : le vrai pont demande la règle à la coquille (`reauthCovers`).
+ * le simulateur seulement : le vrai pont demande la règle à la coquille (`reauthPasswordNeed`). C'est la
+ * règle d'AVANT la grille (agent qui n'annonce pas l'état de confiance) et celle des actes hors pilotage.
  */
 export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean {
   switch (kind) {
@@ -34,7 +44,7 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
       return role === "readonly";
     case "account_delete":
     case "sessions_revoke":
-    // Démarrer, arrêter, redémarrer : couverts par l'élévation de cinq minutes (BR-LIFE-016).
+    // Démarrer, arrêter, redémarrer : couverts par l'élévation de cinq minutes (agent d'avant la grille).
     case "service_start":
     case "service_stop":
     case "service_restart":
@@ -45,10 +55,56 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
     case "attack_mode_disable":
     case "account_password_own":
     case "reauth_setting":
-    // Répondre à une opération n'est jamais couvert : le mot de passe est redemandé à chaque réponse.
+    // Répondre à une opération n'est jamais couvert par l'élévation seule (agent d'avant la grille).
     case "operation_decide":
       return false;
   }
+}
+
+/** Les actes de pilotage d'un service (HRT-194) : leur mot de passe suit l'état de confiance. */
+function isPiloting(kind: AdminActKind): boolean {
+  switch (kind) {
+    case "service_start":
+    case "service_stop":
+    case "service_restart":
+    case "operation_decide":
+      return true;
+    case "account_create":
+    case "account_role":
+    case "account_delete":
+    case "sessions_revoke":
+    case "account_password":
+    case "agent_update":
+    case "attack_mode_enable":
+    case "attack_mode_disable":
+    case "account_password_own":
+    case "reauth_setting":
+      return false;
+  }
+}
+
+/**
+ * Le miroir de `hearth_proto::admin_act::password_need` pour le simulateur SEUL (BR-GRANT-017) : le vrai pont
+ * demande la règle à la coquille. Pilotage : normal = rien, alerte = sauf délai ouvert, attaque ou inconnu =
+ * à chaque fois. Hors pilotage ou état non annoncé (agent d'avant) : la table de l'élévation.
+ */
+export function simulatedPasswordNeed(
+  kind: AdminActKind,
+  role: Role | null,
+  trust: TrustLevel | null,
+): PasswordNeed {
+  if (trust !== null && isPiloting(kind)) {
+    switch (trust) {
+      case "normal":
+        return "no";
+      case "alert":
+        return "unless_elevated";
+      case "attack":
+      case "unknown":
+        return "yes";
+    }
+  }
+  return simulatedCovers(kind, role) ? "unless_elevated" : "yes";
 }
 
 export type SimConfirmation =
@@ -73,7 +129,14 @@ export class SimulatedReauth {
   private book(serverId: string): Book {
     let book = this.books.get(serverId);
     if (!book) {
-      book = { supported: true, required: true, mode: "window", elevatedUntil: 0, wrong: 0 };
+      book = {
+        supported: true,
+        required: true,
+        mode: "window",
+        elevatedUntil: 0,
+        wrong: 0,
+        trust: "normal",
+      };
       this.books.set(serverId, book);
     }
     return book;
@@ -84,6 +147,16 @@ export class SimulatedReauth {
   /** Faux : l'agent n'annonce pas la confirmation des actes. */
   setSupported(serverId: string, supported: boolean): void {
     this.book(serverId).supported = supported;
+  }
+
+  /**
+   * L'état de confiance annoncé (HRT-194) : normal, alerte, attaque. `null` : agent d'avant la grille (règle
+   * d'avant). Le mode attaque et l'alerte ferment l'élévation en cours si c'est l'attaque.
+   */
+  setTrust(serverId: string, trust: TrustLevel | null): void {
+    const book = this.book(serverId);
+    book.trust = trust;
+    if (trust === "attack" || trust === "unknown") book.elevatedUntil = 0;
   }
 
   /** Le réglage du compte ; « à chaque action » ferme l'élévation. */
@@ -114,15 +187,17 @@ export class SimulatedReauth {
       mode: book.mode,
       elevatedForS: book.supported ? left : 0,
       hasDeviceKey: this.hasKey(serverId),
+      trust: book.supported ? book.trust : null,
     };
   }
 
   /**
    * La confirmation d'un acte, dans l'ordre de l'agent. Agent ancien : rien à confirmer. Sans clé au
-   * coffre : la coquille ne part pas (`not_recognized`, rien n'est noté). Acte couvert sous élévation :
-   * la preuve de la clé suffit, le mot de passe n'est pas examiné. Sinon le mot de passe : absent
-   * (`password_required`), faux (le premier ferme l'élévation ; au-delà de 5, l'attente), juste (ouvre
-   * l'élévation si le réglage est « 5 minutes »).
+   * coffre : la coquille ne part pas (`not_recognized`, rien n'est noté). Acte de pilotage en état normal :
+   * la preuve de la clé suffit, aucune élévation ne s'ouvre. Acte couvert sous élévation : idem, le mot de
+   * passe n'est pas examiné. Sinon le mot de passe : absent (`password_required`), faux (le premier ferme
+   * l'élévation ; au-delà de 5, l'attente), juste (ouvre l'élévation si le réglage est « 5 minutes », sauf
+   * en mode attaque et sauf pour un acte qui n'en demandait pas).
    */
   confirm(
     serverId: string,
@@ -135,8 +210,16 @@ export class SimulatedReauth {
     // Comme la liaison : un agent qui n'annonce pas la confirmation ne reçoit aucun acte.
     if (!book.supported) throw new LinkCommandError({ kind: "incompatible_agent" });
     if (!this.hasKey(serverId)) throw new LinkCommandError({ kind: "not_recognized" });
-    const elevated = book.elevatedUntil > this.now();
-    if (elevated && simulatedCovers(kind, role) && !password) return { kind: "ok" };
+    const need = simulatedPasswordNeed(kind, role, book.trust);
+    // La ceinture de la liaison : un acte de pilotage que l'état annoncé (attaque) fait demander à chaque fois ne
+    // part pas sans mot de passe (HRT-194) ; rien n'est envoyé à l'agent.
+    if (!password && need === "yes" && book.trust !== null && isPiloting(kind)) {
+      throw new LinkCommandError({ kind: "invalid_input", field: "credentials" });
+    }
+    const attacking = book.trust === "attack" || book.trust === "unknown";
+    const elevated = !attacking && book.elevatedUntil > this.now();
+    if (!password && need === "no") return { kind: "ok" };
+    if (!password && need === "unless_elevated" && elevated) return { kind: "ok" };
     if (!password) return { kind: "refused", refusal: { kind: "password_required" } };
     if (password !== own) {
       book.elevatedUntil = 0;
@@ -146,7 +229,11 @@ export class SimulatedReauth {
         : { kind: "refused", refusal: { kind: "wrong_password" } };
     }
     book.wrong = 0;
-    book.elevatedUntil = book.mode === "window" ? this.now() + ELEVATION_SECONDS * 1000 : 0;
+    // Un mot de passe superflu (acte qui n'en demande pas) est vérifié mais n'ouvre rien.
+    book.elevatedUntil =
+      book.mode === "window" && need !== "no" && !attacking
+        ? this.now() + ELEVATION_SECONDS * 1000
+        : 0;
     return { kind: "ok" };
   }
 }

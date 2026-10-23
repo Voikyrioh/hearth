@@ -7,7 +7,7 @@ import { useServiceOpsStore } from "@/stores/serviceOps";
 import { useServiceRightsStore } from "@/stores/serviceRights";
 import { useServicesStore } from "@/stores/services";
 import { useToastsStore } from "@/stores/toasts";
-import { confirmDialog, dialogButton, OWN } from "@/test/confirm";
+import { confirmDialog, dialogButton, OWN, reauthField } from "@/test/confirm";
 import { mountContext } from "@/test/mount";
 
 // Démarrer, arrêter, redémarrer depuis la section Services (HRT-65, BR-LIFE-003, 007, 008, 013, 016, 017, 020, 022),
@@ -141,6 +141,8 @@ describe("arrêter", () => {
     expect(dialog?.textContent).toContain("Arrêter web ?");
     expect(dialog?.textContent).toContain("au bout de 120 secondes");
     expect(dialogButton("Arrêter le service")).toBeDefined();
+    // En état normal, la fenêtre confirme l'effet sans demander le mot de passe (HRT-194).
+    expect(reauthField()).toBeNull();
     dialogButton("Annuler")?.click();
     await flushPromises();
     expect(bridge.gestures).toEqual([]);
@@ -213,15 +215,116 @@ describe("arrêter", () => {
   });
 });
 
-describe("démarrer et redémarrer", () => {
-  it("démarrer ouvre la fenêtre du socle quand le mot de passe est demandé, sans effet à confirmer", async () => {
+describe("la grille du mot de passe (HRT-194)", () => {
+  it("arrêter demande le mot de passe en état d'alerte et en mode attaque, jamais l'élévation en attaque", async () => {
+    for (const trust of ["alert", "attack"] as const) {
+      const { wrapper, bridge } = await open((sim) => sim.reauth.setTrust("forge", trust));
+      await wrapper.get('[data-lifecycle-action="stop"]').trigger("click");
+      await flushPromises();
+      expect(reauthField(), trust).not.toBeNull();
+      await confirmDialog("Arrêter le service", OWN);
+      expect(bridge.gestures, trust).toEqual([
+        { serverId: "forge", key: "h_web", gesture: "stop" },
+      ]);
+      expect(bridge.reauth.state("forge").elevatedForS > 0, trust).toBe(trust === "alert");
+      wrapper.unmount();
+      document.body.innerHTML = "";
+    }
+  });
+
+  it("un agent d'avant, qui n'annonce pas l'état, garde la règle d'avant : le mot de passe, jamais « normal » par défaut", async () => {
+    const { wrapper, bridge } = await open((sim) => sim.reauth.setTrust("forge", null));
+    await wrapper.get('[data-lifecycle-action="stop"]').trigger("click");
+    await flushPromises();
+    expect(reauthField()).not.toBeNull();
+    await confirmDialog("Arrêter le service", OWN);
+    expect(bridge.gestures).toEqual([{ serverId: "forge", key: "h_web", gesture: "stop" }]);
+    wrapper.unmount();
+  });
+});
+
+describe("le mode attaque entre la lecture et l'envoi (HRT-194)", () => {
+  it("démarrer rouvre la fenêtre avec le champ, sans toast d'erreur, et l'ordre part avec le mot de passe", async () => {
     const { wrapper, bridge } = await open();
+    const read = bridge.getReauthState.bind(bridge);
+    bridge.getReauthState = async (serverId) => {
+      const state = await read(serverId);
+      bridge.reauth.setTrust(serverId, "attack");
+      return state;
+    };
+    await wrapper.get('[data-row][data-key="h_db"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-lifecycle-action="start"]').trigger("click");
+    await flushPromises();
+    expect(bridge.gestures).toEqual([]);
+    expect(toasts()).toEqual([]);
+    expect(document.querySelector("dialog")?.textContent).toContain("Démarrer base");
+    expect(reauthField()).not.toBeNull();
+    await confirmDialog("Démarrer", OWN);
+    expect(bridge.gestures).toEqual([{ serverId: "forge", key: "h_db", gesture: "start" }]);
+    wrapper.unmount();
+  });
+
+  it("arrêter : la fenêtre ouverte en normal, puis l'attaque : la saisie est gardée et le champ apparaît", async () => {
+    const { wrapper, bridge } = await open();
+    await wrapper.get('[data-lifecycle-action="stop"]').trigger("click");
+    await flushPromises();
+    expect(reauthField()).toBeNull();
+    bridge.reauth.setTrust("forge", "attack");
+    dialogButton("Arrêter le service")?.click();
+    await flushPromises();
+    expect(bridge.gestures).toEqual([]);
+    expect(toasts()).toEqual([]);
+    expect(document.querySelector("dialog")).not.toBeNull();
+    expect(reauthField()).not.toBeNull();
+    await confirmDialog("Arrêter le service", OWN);
+    expect(bridge.gestures).toEqual([{ serverId: "forge", key: "h_web", gesture: "stop" }]);
+    wrapper.unmount();
+  });
+});
+
+describe("démarrer et redémarrer", () => {
+  it("démarrer part sans fenêtre en état normal, la clé du poste suffit (HRT-194, BR-LIFE-016)", async () => {
+    const { wrapper, bridge } = await open();
+    await wrapper.get('[data-row][data-key="h_db"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-lifecycle-action="start"]').trigger("click");
+    await flushPromises();
+    expect(document.querySelector("dialog[open]")).toBeNull();
+    expect(bridge.gestures).toEqual([{ serverId: "forge", key: "h_db", gesture: "start" }]);
+    expect(bridge.reauth.state("forge").elevatedForS).toBe(0);
+    wrapper.unmount();
+  });
+
+  it("démarrer ouvre la fenêtre avec le champ en état d'alerte, sans effet à confirmer", async () => {
+    const { wrapper, bridge } = await open((sim) => sim.reauth.setTrust("forge", "alert"));
     await wrapper.get('[data-row][data-key="h_db"]').trigger("click");
     await flushPromises();
     await wrapper.get('[data-lifecycle-action="start"]').trigger("click");
     await flushPromises();
     expect(document.querySelector("dialog")?.textContent).toContain("Démarrer base");
     expect(document.querySelector("[data-lifecycle-effect]")).toBeNull();
+    expect(reauthField()).not.toBeNull();
+    await confirmDialog("Démarrer", OWN);
+    expect(bridge.gestures).toEqual([{ serverId: "forge", key: "h_db", gesture: "start" }]);
+    wrapper.unmount();
+  });
+
+  it("l'état passe de normal à alerte entre la lecture et l'ordre : la fenêtre s'ouvre avec le champ, rien n'est perdu", async () => {
+    const { wrapper, bridge } = await open();
+    const read = bridge.getReauthState.bind(bridge);
+    bridge.getReauthState = async (serverId) => {
+      const state = await read(serverId);
+      bridge.reauth.setTrust(serverId, "alert");
+      return state;
+    };
+    await wrapper.get('[data-row][data-key="h_db"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-lifecycle-action="start"]').trigger("click");
+    await flushPromises();
+    expect(bridge.gestures).toEqual([]);
+    expect(document.querySelector("dialog")?.textContent).toContain("Démarrer base");
+    expect(reauthField()).not.toBeNull();
     await confirmDialog("Démarrer", OWN);
     expect(bridge.gestures).toEqual([{ serverId: "forge", key: "h_db", gesture: "start" }]);
     wrapper.unmount();

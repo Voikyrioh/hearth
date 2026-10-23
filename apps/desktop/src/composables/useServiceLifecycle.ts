@@ -17,9 +17,9 @@ export interface PendingGesture {
  * Le parcours de pilotage d'un service, tenu par la page (HRT-65, BR-LIFE-007, 016, 017, 022) :
  *
  * - arrêter et redémarrer ouvrent TOUJOURS la fenêtre de confirmation (l'effet, les avertissements du service, puis
- *   le mot de passe si le socle le demande) ;
- * - démarrer n'ouvre la fenêtre que si le socle a quelque chose à demander (mot de passe) ; sinon l'ordre part tout
- *   de suite ;
+ *   le mot de passe seulement si l'agent le demande : jamais en état normal, HRT-194) ;
+ * - démarrer n'ouvre la fenêtre que si l'agent a quelque chose à demander (mot de passe) ; sinon, en état normal
+ *   avec la clé de ce poste, l'ordre part tout de suite ;
  * - annuler la fenêtre ne change rien et n'envoie rien (BR-LIFE-017) ;
  * - l'agent répond « accepté » : l'issue arrive par le suivi des opérations (HRT-84), jamais ici.
  *
@@ -71,8 +71,8 @@ export function useServiceLifecycle(
   }
 
   /**
-   * Demande un geste. Arrêter et redémarrer : la fenêtre s'ouvre. Démarrer : la fenêtre ne s'ouvre que si le
-   * socle demande quelque chose (BR-LIFE-016), sinon l'ordre part directement.
+   * Demande un geste. Arrêter et redémarrer : la fenêtre s'ouvre. Démarrer : la fenêtre ne s'ouvre que si l'agent
+   * demande quelque chose (BR-LIFE-016, grille de confiance HRT-194), sinon l'ordre part directement.
    */
   async function request(service: ServiceInfo, gesture: Gesture): Promise<void> {
     if (gesture !== "start") {
@@ -93,7 +93,8 @@ export function useServiceLifecycle(
         return;
       }
       const report = settle(await actions.perform(service.key, "start", null), service);
-      // L'élévation s'est fermée entre la lecture et l'ordre : la fenêtre redemande le mot de passe.
+      // L'état de confiance a changé entre la lecture et l'ordre (normal vers alerte, ou délai fermé) : la fenêtre
+      // s'ouvre avec le champ, le geste n'est pas perdu.
       if (report.kind === "refused" && report.refusal?.kind === "password_required") {
         show(service, gesture);
         return;

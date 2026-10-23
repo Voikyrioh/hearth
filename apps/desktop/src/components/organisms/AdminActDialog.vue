@@ -18,12 +18,14 @@ import type { AdminActKind, Role } from "@/link";
 //   l'agent à jour et ne propose rien ;
 // - ce PC sans clé au coffre : rien ne peut partir, la fenêtre l'explique et propose de se reconnecter
 //   pour enregistrer ce poste (le mot de passe ne sert alors à rien) ;
+// - acte de pilotage d'un service en état normal (HRT-194) : pas de champ, rien n'est demandé ;
 // - délai de 5 minutes ouvert ET acte couvert : pas de champ, le temps restant est écrit ;
 // - sinon : le champ.
 // La preuve de la clé de ce PC est faite par la coquille, sans geste. Le champ est vidé après CHAQUE envoi
 // et à chaque ouverture ; le mot de passe n'est jamais gardé (ni store, ni état au-delà du champ).
 // Un refus se montre DANS la fenêtre : mot de passe faux ou attente sous le champ ; délai fermé entre-temps
-// (`password_required`) : la fenêtre redemande le mot de passe SANS perdre la saisie de l'acte ; les
+// (`password_required`), ou état passé de normal à alerte entre l'ouverture et l'envoi : la fenêtre
+// demande le mot de passe SANS perdre la saisie de l'acte ; les
 // autres refus : le texte de l'acte (`refusalText`). Fait ou résultat inconnu : la fenêtre se ferme
 // (jamais rejoué, BR-RESIL-009). Échec déjà notifié : elle reste ouverte.
 
@@ -31,7 +33,7 @@ const props = withDefaults(
   defineProps<{
     open: boolean;
     serverId: string;
-    /** Le genre d'acte : il décide si le délai de 5 minutes le couvre (règle de l'agent). */
+    /** Le genre d'acte : il décide ce que l'agent exige du mot de passe (règle de l'agent, `reauthPasswordNeed`). */
     kind: AdminActKind;
     /** Le rôle visé par l'acte (création, changement de rôle) : donner « Administrateur » n'est jamais couvert. */
     role?: Role | null;
@@ -154,6 +156,8 @@ async function submit() {
   notice.value = undefined;
   // Sous le délai, pour un acte couvert, aucun mot de passe n'est envoyé ; sinon celui du champ.
   const typed = reauth.needsPassword.value ? password.value : null;
+  // Rien n'était demandé à l'ouverture : si l'agent le demande maintenant, c'est que l'état a changé.
+  const askedNothing = reauth.need.value === "no";
   sending.value = true;
   let report: ActReport;
   try {
@@ -184,7 +188,7 @@ async function submit() {
       passwordError.value = t("reauth.waiting", { n: refusal.retry_after_s ?? 60 });
       break;
     case "password_required":
-      notice.value = t("reauth.elapsed");
+      notice.value = askedNothing ? t("reauth.nowRequired") : t("reauth.elapsed");
       break;
     case "busy":
       error.value = t("reauth.busy");

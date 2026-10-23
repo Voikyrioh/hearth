@@ -5,7 +5,7 @@ titre: Une opération interrompue par un redémarrage de l'agent n'est jamais re
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-modifier-un-service.md (BR-EDIT-031), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md (sections 0, 0 bis et 6), HRT-83
-maj: 2026-10-13
+maj: 2026-10-23
 ---
 
 # BR-EDIT-031 — Une opération interrompue par un redémarrage de l'agent n'est jamais reprise, rejouée ni défaite seule
@@ -13,7 +13,7 @@ maj: 2026-10-13
 ## Règle
 Au démarrage de l'agent, chaque opération non terminée est CLASSÉE, jamais continuée. Aucune étape destructive n'a de ligne : « interrompue », rien n'a eu lieu. Une étape destructive a un `intent` sans `done`, ou a échoué : « à vérifier », le verrou du service est repris et les décisions possibles sont offertes au compte. Tout est `done` et un seul état complet existe (ancien ou nouveau) : « interrompue », avec le côté où tourne le service. Tout est `done` mais deux états coexistent, ou le moteur n'a pas pu être lu : « à vérifier ». Le journal d'une opération classée n'est pas modifié : aucun geste n'est rejoué. Les seuls objets retirés sont ceux que l'opération avait créés pour elle-même et nommés au journal (BR-BACKUP-025, BR-MONDE-026).
 
-La reprise n'empêche jamais l'agent de démarrer : un journal d'étapes qui ne se relit pas classe l'opération « à vérifier » (cause « état inconnu »), verrou repris, rien retiré ni rejoué ; une ligne d'opération illisible est isolée et son service reste refusé par l'index de la base. Choisir « revenir » sur une opération à vérifier démarre un retour arrière (`rolling_back`), jamais un « revenu en arrière » sans geste.
+La reprise n'empêche jamais l'agent de démarrer : un journal d'étapes qui ne se relit pas classe l'opération « à vérifier » (cause « état inconnu »), verrou repris, rien retiré ni rejoué ; une ligne d'opération illisible est isolée et son service reste refusé par l'index de la base. Choisir « revenir » sur une opération à vérifier démarre un retour arrière (`rolling_back`), jamais un « revenu en arrière » sans geste. « Revenir à l'état d'avant » et « Garder la nouvelle configuration » sont des réponses à une décision, donc des actes de pilotage (BR-LIFE-016, BR-OPS-003) : en état normal aucun mot de passe, la preuve de clé du poste à chaque réponse ; en alerte le mot de passe puis l'élévation ; en mode attaque le mot de passe à chaque réponse.
 
 Aucun geste réel (modifier, supprimer, sauvegarder) n'est encore écrit : le classement, le journal et ses tests sont prêts. L'observateur du moteur (HRT-144, BR-OPS-008) compte les conteneurs du service dans le vrai moteur, en lecture seule ; il ne dit « cohérent » que si le plan est allé au bout de ses gestes destructifs et que le moteur montre exactement ce que sa fin laisse. L'observateur « illisible » (`UnobservedState`) ne sert plus qu'aux tests.
 
@@ -45,3 +45,4 @@ Aucun geste réel (modifier, supprimer, sauvegarder) n'est encore écrit : le cl
 ## Historique
 - 2026-10-14 — l'observateur du vrai moteur remplace l'observateur « illisible » en production (HRT-144).
 - 2026-10-13 — création (HRT-83, ADR-0044 et ADR-0045 : socle des services créés par Hearth, côté agent).
+- 2026-10-23 : HRT-194 : « revenir » et « garder » suivent la grille de confiance du pilotage.

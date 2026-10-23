@@ -53,7 +53,7 @@ const COMMANDS: &[&str] = &[
     "update_agent",
     "ack_agent_result",
     "get_reauth_state",
-    "reauth_covers",
+    "reauth_password_need",
     "set_reauth_setting",
     "list_services_states",
     "engine_recheck",

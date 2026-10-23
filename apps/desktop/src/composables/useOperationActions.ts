@@ -17,8 +17,15 @@ export function useOperationActions(serverId: () => string) {
   ): Promise<ActReport> {
     const result = await action.run(
       () => getLinkBridge().decideServiceOperation(serverId(), opId, choice, adminPassword),
-      { unknownMessage: "serviceOps.unknownResult", forbiddenMessage: "serviceOps.forbidden" },
+      {
+        unknownMessage: "serviceOps.unknownResult",
+        forbiddenMessage: "serviceOps.forbidden",
+        passwordMissingIsRefusal: true,
+      },
     );
+    if (!result && action.passwordMissing.value) {
+      return { kind: "refused", refusal: { kind: "password_required" } };
+    }
     if (!result) return action.failedReport();
     if (result.kind === "done") return { kind: "done" };
     if (result.kind === "refused") return { kind: "refused", refusal: result.refusal };

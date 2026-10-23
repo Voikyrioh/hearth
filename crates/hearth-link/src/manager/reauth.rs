@@ -16,7 +16,7 @@
 //! - **un agent qui n'annonce pas `admin_reauth`** n'est pas de cette famille (aucune version d'avant n'a
 //!   été publiée) : `Incompatible(UpdateAgent)` (« agent trop ancien » à l'écran), rien n'est envoyé.
 
-use hearth_proto::admin_act::covered_by_elevation;
+use hearth_proto::admin_act::{AdminAct, PasswordNeed, TrustLevel, password_need_announced};
 use hearth_proto::api::reauth::AdminReauthInfo;
 use hearth_proto::api::security::SecurityResponse;
 use hearth_proto::api::sessions::ChallengePurpose;
@@ -34,6 +34,13 @@ use crate::error::{InputField, LinkError};
 use crate::ports::transport::Target;
 
 const SECURITY_PATH: &str = "/security";
+
+/// Cet acte exige-t-il le mot de passe à chaque fois, d'après l'état de confiance que l'agent annonce
+/// (HRT-194, BR-GRANT-017) ? Un agent qui n'annonce pas l'état (d'avant HRT-194) garde la règle d'avant :
+/// la table de l'élévation seule (BR-COMPAT-001). Une valeur inconnue vaut le mode attaque (`Yes`).
+fn password_always_needed(act: &AdminAct<'_>, trust: Option<TrustLevel>) -> bool {
+    password_need_announced(act, trust) == PasswordNeed::Yes
+}
 
 /// Ce que l'interface doit savoir pour construire sa fenêtre : ce que l'agent annonce, et si ce PC a une
 /// clé au coffre.
@@ -105,10 +112,11 @@ impl LinkManager {
                 return Err(LinkError::UnreadableAct);
             }
         }
-        if self.read_admin_reauth(&target, &token).await?.is_none() {
+        let Some(info) = self.read_admin_reauth(&target, &token).await? else {
             return Err(LinkError::Incompatible(Compatibility::UpdateAgent));
-        }
-        self.send_confirmed(id, &target, &token, action, password)
+        };
+        // L'état de confiance annoncé sert à la ceinture seulement : l'agent le recalcule à l'acte.
+        self.send_confirmed(id, &target, &token, action, password, info.trust)
             .await
     }
 
@@ -121,6 +129,7 @@ impl LinkManager {
         token: &Secret,
         mut action: ActionRequest,
         password: Option<&Secret>,
+        trust: Option<TrustLevel>,
     ) -> Result<ActionOutcome, LinkError> {
         let deps = &self.inner.deps;
         // Sans clé : AUCUN appel, pas même un défi (BR-TRUST-044 : la voie de secours est de se
@@ -135,9 +144,9 @@ impl LinkManager {
             let Route::Act(act) = route else {
                 return Err(LinkError::UnreadableAct);
             };
-            // Un acte que l'élévation ne couvre jamais ne part pas sans mot de passe : l'interface le
-            // demande toujours, ceci n'est que la ceinture.
-            if password.is_none() && !covered_by_elevation(&act) {
+            // Un acte qui exige le mot de passe à chaque fois ne part pas sans : l'interface le demande
+            // toujours, ceci n'est que la ceinture (HRT-194 : la grille de l'état de confiance annoncé).
+            if password.is_none() && password_always_needed(&act, trust) {
                 return Err(LinkError::InvalidInput(InputField::Credentials));
             }
             let (_, shared) = self.handle(id)?;
@@ -180,5 +189,42 @@ impl LinkManager {
         object.insert("reauth".into(), Value::Object(reauth));
         action.body = Some(Value::Object(object));
         self.execute_unchecked(id, action).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn start() -> AdminAct<'static> {
+        AdminAct::ServiceStart {
+            target: "c_ab".into(),
+        }
+    }
+
+    #[test]
+    fn the_belt_follows_the_announced_trust_and_keeps_the_old_rule_without_it() {
+        // Annoncé : la grille du pilotage.
+        assert!(!password_always_needed(&start(), Some(TrustLevel::Normal)));
+        assert!(!password_always_needed(&start(), Some(TrustLevel::Alert)));
+        assert!(password_always_needed(&start(), Some(TrustLevel::Attack)));
+        // Une valeur inconnue vaut le mode attaque.
+        assert!(password_always_needed(&start(), Some(TrustLevel::Unknown)));
+        // Agent d'avant HRT-194 : la table de l'élévation seule (démarrer y est couvert).
+        assert!(!password_always_needed(&start(), None));
+        let decide = AdminAct::OperationDecide {
+            target: "01OP",
+            choice: hearth_proto::api::service_ops::OperationChoice::Keep,
+        };
+        assert!(
+            password_always_needed(&decide, None),
+            "comportement d'avant"
+        );
+        assert!(!password_always_needed(&decide, Some(TrustLevel::Normal)));
+        // Hors pilotage, l'état ne change rien.
+        let delete = AdminAct::AccountDelete { target: "01ABC" };
+        assert!(!password_always_needed(&delete, Some(TrustLevel::Attack)));
+        let own = AdminAct::AccountPasswordOwn;
+        assert!(password_always_needed(&own, Some(TrustLevel::Normal)));
     }
 }

@@ -321,11 +321,11 @@ const EXPECTED: &[(&str, &str)] = &[
     ("ackAgentResult", "serverId: string, at: string"),
     // HRT-30 : la confirmation des actes. `adminPassword` / `password` sont les mots de passe de
     // confirmation (enveloppés dans un `Secret`, jamais gardés) ; la preuve de la clé, le défi et la
-    // signature n'ont ni paramètre ni commande. `reauthCovers` ne parle pas à l'agent.
+    // signature n'ont ni paramètre ni commande. `reauthPasswordNeed` ne parle pas à l'agent.
     ("getReauthState", "serverId: string"),
     (
-        "reauthCovers",
-        "kind: AdminActKindDto, role: \"admin\" | \"readonly\" | \"unknown\" | null",
+        "reauthPasswordNeed",
+        "kind: AdminActKindDto, role: \"admin\" | \"readonly\" | \"unknown\" | null, trust: \"normal\" | \"alert\" | \"attack\" | \"unknown\" | null",
     ),
     (
         "setReauthSetting",
@@ -444,7 +444,7 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "getAgentUpdate",
     "ackAgentResult",
     "getReauthState",
-    "reauthCovers",
+    "reauthPasswordNeed",
     "listServicesStates",
     "engineRecheck",
     "readServiceRights",

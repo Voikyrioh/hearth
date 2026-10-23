@@ -54,7 +54,7 @@
     "allow-update-agent",
     "allow-ack-agent-result",
     "allow-get-reauth-state",
-    "allow-reauth-covers",
+    "allow-reauth-password-need",
     "allow-set-reauth-setting",
     "allow-list-services-states",
     "allow-engine-recheck",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { failureMessage } from "./messages";
-import { SimulatedReauth, simulatedCovers } from "./simulated-reauth";
+import { SimulatedReauth, simulatedCovers, simulatedPasswordNeed } from "./simulated-reauth";
 import { LinkCommandError } from "./types";
 
 const OWN = "Correct-Horse-9";
@@ -99,5 +99,64 @@ describe("les textes d'une clé non reconnue et d'un mot de passe manquant", () 
     expect(failureMessage({ kind: "invalid_input", field: "credentials" })).toBe(
       "Cette action demande votre mot de passe.",
     );
+  });
+
+  it("applique la grille du pilotage : rien en normal, le délai en alerte, le mot de passe en attaque (HRT-194)", () => {
+    const pilotage = [
+      "service_start",
+      "service_stop",
+      "service_restart",
+      "operation_decide",
+    ] as const;
+    for (const kind of pilotage) {
+      expect(simulatedPasswordNeed(kind, null, "normal"), kind).toBe("no");
+      expect(simulatedPasswordNeed(kind, null, "alert"), kind).toBe("unless_elevated");
+      expect(simulatedPasswordNeed(kind, null, "attack"), kind).toBe("yes");
+      expect(simulatedPasswordNeed(kind, null, "unknown"), kind).toBe("yes");
+    }
+    // Agent d'avant (état non annoncé) : la règle d'avant.
+    expect(simulatedPasswordNeed("service_start", null, null)).toBe("unless_elevated");
+    expect(simulatedPasswordNeed("operation_decide", null, null)).toBe("yes");
+    // Hors pilotage, l'état ne change rien.
+    expect(simulatedPasswordNeed("account_delete", null, "normal")).toBe("unless_elevated");
+    expect(simulatedPasswordNeed("account_role", "admin", "normal")).toBe("yes");
+  });
+
+  it("en état normal, piloter ne demande rien et n'ouvre aucune élévation ; un mot de passe superflu est vérifié", () => {
+    const { reauth } = sim();
+    expect(reauth.state("s").trust).toBe("normal");
+    expect(reauth.confirm("s", "service_stop", null, null, OWN)).toEqual({ kind: "ok" });
+    expect(reauth.state("s").elevatedForS).toBe(0);
+    expect(reauth.confirm("s", "service_stop", null, "Faux", OWN)).toEqual({
+      kind: "refused",
+      refusal: { kind: "wrong_password" },
+    });
+    expect(reauth.confirm("s", "service_stop", null, OWN, OWN)).toEqual({ kind: "ok" });
+    expect(reauth.state("s").elevatedForS).toBe(0);
+  });
+
+  it("en alerte, le premier acte demande le mot de passe puis 5 minutes couvrent ; en attaque, rien ne s'ouvre", () => {
+    const { reauth, advance } = sim();
+    reauth.setTrust("s", "alert");
+    expect(reauth.confirm("s", "service_start", null, null, OWN).kind).toBe("refused");
+    expect(reauth.confirm("s", "service_start", null, OWN, OWN)).toEqual({ kind: "ok" });
+    expect(reauth.state("s").elevatedForS).toBe(300);
+    expect(reauth.confirm("s", "operation_decide", null, null, OWN)).toEqual({ kind: "ok" });
+    advance(300_001);
+    expect(reauth.confirm("s", "service_start", null, null, OWN).kind).toBe("refused");
+    reauth.setTrust("s", "attack");
+    expect(reauth.confirm("s", "service_start", null, OWN, OWN)).toEqual({ kind: "ok" });
+    expect(reauth.state("s").elevatedForS).toBe(0);
+    // La ceinture de la liaison : en attaque, rien ne part sans mot de passe.
+    expect(() => reauth.confirm("s", "service_start", null, null, OWN)).toThrow(LinkCommandError);
+  });
+
+  it("n'annonce pas l'état à un agent d'avant", () => {
+    const { reauth } = sim();
+    reauth.setTrust("s", null);
+    expect(reauth.state("s").trust).toBeNull();
+    reauth.setSupported("s", false);
+    reauth.setTrust("s", "alert");
+    expect(reauth.state("s").trust).toBeNull();
   });
 });

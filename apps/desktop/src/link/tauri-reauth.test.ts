@@ -89,22 +89,28 @@ describe("le pont réel envoie le mot de passe de confirmation de chaque acte d'
           mode: "window",
           elevatedForS: 120,
           hasDeviceKey: true,
+          trust: "alert",
         };
       }
-      if (cmd === "reauth_covers") return true;
+      if (cmd === "reauth_password_need") return "unless_elevated";
       return { kind: "unknown", op_id: "op-1" };
     });
     const bridge = new TauriLinkBridge();
     expect((await bridge.getReauthState("s1")).elevatedForS).toBe(120);
-    expect(await bridge.reauthCovers("account_delete", null)).toBe(true);
+    expect((await bridge.getReauthState("s1")).trust).toBe("alert");
+    expect(await bridge.reauthPasswordNeed("service_start", null, "alert")).toBe("unless_elevated");
     expect(await bridge.setReauthSetting("s1", "each", SECRET)).toEqual({
       kind: "unknown",
       opId: "op-1",
     });
     expect(calls[0]).toEqual({ cmd: "get_reauth_state", args: { serverId: "s1" } });
     expect(calls[1]).toEqual({
-      cmd: "reauth_covers",
-      args: { kind: "account_delete", role: null },
+      cmd: "get_reauth_state",
+      args: { serverId: "s1" },
+    });
+    expect(calls[2]).toEqual({
+      cmd: "reauth_password_need",
+      args: { kind: "service_start", role: null, trust: "alert" },
     });
   });
 });

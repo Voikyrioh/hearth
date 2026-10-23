@@ -767,8 +767,16 @@ for VERB in start stop restart; do
     CODE=$(adopt_call POST "/services/$OTHER_KEY/$VERB" "$ADOPT_TOKEN" "$CONFIRMED")
     { [ "$CODE" = 409 ] && body_matches '"reason": *"proof_invalid"'; } || die "$VERB : une preuve pour une autre clé devrait être refusée, proof_invalid (reçu $CODE) : $(cat "$OUT.body")"
     [ "$(audit_count "service.$VERB" failed)" = 1 ] || die "$VERB : le refus (moteur inaccessible) devrait être au journal, une entrée"
+    # HRT-194 : en état normal (ni alerte sur l'identifiant, ni mode attaque), piloter ne demande PAS le mot de
+    # passe : la preuve de la clé du poste suffit, l'agent juge l'état à l'acte. L'acte est donc examiné jusqu'au
+    # moteur (503 absent), jamais refusé pour `password_required`, et aucune élévation n'est ouverte.
+    CONFIRMED=$(printf '{}'         | python3 /deploy/e2e/admin_act.py confirm-service "$VERB" 127.0.0.1 "$PORT" "$ADOPT_TOKEN" "$USER_NAME" "" "$ADOPT_KEYFILE" "$UNKNOWN_KEY")         || die "$VERB : confirmation sans mot de passe non signée"
+    CODE=$(adopt_call POST "/services/$UNKNOWN_KEY/$VERB" "$ADOPT_TOKEN" "$CONFIRMED")
+    { [ "$CODE" = 503 ] && body_matches '"code": *"ENGINE_UNAVAILABLE"'; } || die "$VERB sans mot de passe en état normal : 503 ENGINE_UNAVAILABLE attendu, pas password_required (reçu $CODE) : $(cat "$OUT.body")"
+    # Un refus identique répété est REGROUPÉ par le journal (une ligne, un compteur de répétitions) : toujours une entrée.
+    [ "$(audit_count "service.$VERB" failed)" = 1 ] || die "$VERB : le second refus identique (moteur inaccessible) devrait être regroupé avec le premier, une entrée"
 done
-ok "démarrer, arrêter, redémarrer de bout en bout (sans moteur) : confirmation exigée, preuve reconnue, preuve pour une autre clé refusée, moteur absent refusé et consigné"
+ok "démarrer, arrêter, redémarrer de bout en bout (sans moteur) : confirmation exigée, preuve reconnue, preuve pour une autre clé refusée, moteur absent refusé et consigné, état normal sans mot de passe"
 run "$INSTALLED" account services "$USER_NAME" --revoke || die "adoption : retrait du droit"
 [ "$(adopt_call GET /services/external "$ADOPT_TOKEN")" = 403 ] || die "adoption : droit retiré, la liste des candidats devrait être refusée : $(cat "$OUT.body")"
 ok "adoption et relâche de bout en bout (sans moteur) : droit exigé, lecture des candidats au journal, confirmation exigée, preuve reconnue, preuve pour une autre clé refusée, clé au nom échappé, moteur non prêt"

@@ -13,7 +13,7 @@ L'état de sécurité du compte connecté (HRT-24, ADR-0024, BR-TRUST-008) et le
   "alert": { "own": true, "since": "2026-10-07T01:04:11Z", "others": 1 },
   "attack_mode": { "state": "off" },
   "device": "proven",
-  "admin_reauth": { "required": false, "factors": ["password", "device_key"], "password": "window", "elevated_for_s": 0 }
+  "admin_reauth": { "required": false, "factors": ["password", "device_key"], "password": "window", "elevated_for_s": 0, "trust": "normal" }
 }
 ```
 
@@ -27,6 +27,7 @@ L'état de sécurité du compte connecté (HRT-24, ADR-0024, BR-TRUST-008) et le
   - Exemples : `{"state":"off"}`, `{"state":"active","since":"2026-10-07T01:00:00Z"}`, `{"state":"suspended","since":"…","resumes_in_s":1200}`, `{"state":"off","last_end":"auto"}`.
 - `erasure_pending` (HRT-32, ADR-0034) : **administrateur seulement**, présent et `true` quand l'effacement physique des anciennes empreintes de requêtes (après la mise à jour qui apporte BR-RESIL-021) a échoué au démarrage du service et sera retenté au suivant. Absent sinon (rien en attente, compte lecture seule, agent d'avant). Un fait, jamais un contenu.
 - `device` : `proven` si la session a été ouverte ou prouvée par la clé d'un poste inscrit, `none` sinon. Le poste d'une session est posé à la connexion par mot de passe et n'est jamais réécrit par une preuve de session (BR-TRUST-048).
+- `admin_reauth.trust` (HRT-194, `normal` | `alert` | `attack`) : l'état de confiance que l'agent juge pour CE compte à cet instant (mode attaque actif ou suspendu, sinon alerte de l'identifiant du compte, sinon normal) ; de lui dépend si piloter un service demande le mot de passe (`hearth_proto::admin_act::password_need`). Indicatif : l'agent le recalcule à l'acte. **Absent : agent d'avant HRT-194**, le client garde la règle d'avant ; une valeur inconnue se lit comme `attack`.
 - `admin_reauth` (HRT-28) : la confirmation des actes d'administration. **Absent : agent d'avant ce ticket** (le client agit comme avant, sans rien confirmer). `required` : l'agent **exige** la confirmation (`true` depuis HRT-30 : le client qui confirme est livré, ADR-0033 ; `false` seulement pour un banc de test qui construit le service à la main). Un acte sans `reauth` reçoit alors `426 INCOMPATIBLE_VERSION` (`details.upgrade: "client"`, `details.reason: "reauth_required"`). `factors` : ce qu'il faut réunir (`password`, `device_key`). `password` : le réglage du compte, `window` (défaut, une saisie pour 5 minutes) ou `each` (à chaque action). `elevated_for_s` : secondes restantes de l'élévation de **cette session depuis cette adresse**, 0 sinon (indicatif : l'agent décide à l'acte).
 
 ## Message de flux `security`
