@@ -1,7 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   type AccountListDto,
-  type AdminActKindDto,
   type AuditLiveEvent,
   type AgentUpdateEvent as BoundAgentUpdateEvent,
   type LinkFailure as BoundFailure,
@@ -31,12 +30,18 @@ import {
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import { toAuditFilterDto, toAuditLive, toAuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
-import type {
-  CancelOutcome,
-  DeployCheck,
-  DeployCheckInput,
-  DeployOutcome,
-  DeployRequest,
+import {
+  type CancelOutcome,
+  type DeployCheck,
+  type DeployCheckInput,
+  type DeployOutcome,
+  type DeployRequest,
+  toCancelOutcome,
+  toDeployCheck,
+  toDeployCheckInputDto,
+  toDeployOutcome,
+  toDeployRequestDto,
+  toEngineCapacity,
 } from "./deploy";
 import {
   type DeviceRemovalOutcome,
@@ -497,9 +502,7 @@ export class TauriLinkBridge implements LinkBridge {
     role: Role | null,
     trust: TrustLevel | null,
   ): Promise<PasswordNeed> {
-    // `service_deploy` et `operation_cancel` n'existent pas encore côté Rust (HRT-69, moitié coquille) : la coquille
-    // les refuse, la fenêtre retombe sur la règle la plus stricte (`yes`), jamais sur « aucun mot de passe ».
-    return commands.reauthPasswordNeed(kind as AdminActKindDto, role, trust);
+    return commands.reauthPasswordNeed(kind, role, trust);
   }
 
   async setReauthSetting(
@@ -606,33 +609,36 @@ export class TauriLinkBridge implements LinkBridge {
     return toLifecycleOutcome(unwrap(await run(serverId, key, adminPassword)));
   }
 
-  // Déployer une image (HRT-69) : la moitié « interface » est livrée sur le pont simulé ; les commandes de la
-  // coquille (`deploy_check`, `deploy_service`, `cancel_service_operation`, `read_engine_capacity`), la liaison
-  // (`hearth-link`, actes `ServiceDeploy 0x0F` et `OperationCancel 0x10`) et la régénération de `bindings.ts` sont
-  // la moitié Rust, à compiler à part. Tant qu'elles n'existent pas, ces quatre appels échouent en « incident
-  // interne » plutôt que de simuler un succès : le bouton « Déployer un service » ne ment jamais.
-  async checkDeployment(_serverId: string, _input: DeployCheckInput): Promise<DeployCheck> {
-    throw new LinkCommandError({ kind: "internal" });
+  // Déployer une image (HRT-69) : UNE commande typée par geste. L'agent juge tout ; la coquille ne fait que
+  // construire la requête, l'envoyer et lire la réponse par son code.
+  async checkDeployment(serverId: string, input: DeployCheckInput): Promise<DeployCheck> {
+    return toDeployCheck(
+      unwrap(await commands.deployCheck(serverId, toDeployCheckInputDto(input))),
+    );
   }
 
   async deployService(
-    _serverId: string,
-    _request: DeployRequest,
-    _adminPassword: string | null,
+    serverId: string,
+    request: DeployRequest,
+    adminPassword: string | null,
   ): Promise<DeployOutcome> {
-    throw new LinkCommandError({ kind: "internal" });
+    return toDeployOutcome(
+      unwrap(await commands.deployService(serverId, toDeployRequestDto(request), adminPassword)),
+    );
   }
 
   async cancelServiceOperation(
-    _serverId: string,
-    _opId: string,
-    _adminPassword: string | null,
+    serverId: string,
+    opId: string,
+    adminPassword: string | null,
   ): Promise<CancelOutcome> {
-    throw new LinkCommandError({ kind: "internal" });
+    return toCancelOutcome(
+      unwrap(await commands.cancelServiceOperation(serverId, opId, adminPassword)),
+    );
   }
 
-  async readEngineCapacity(_serverId: string): Promise<EngineCapacity | null> {
-    throw new LinkCommandError({ kind: "internal" });
+  async readEngineCapacity(serverId: string): Promise<EngineCapacity | null> {
+    return toEngineCapacity(unwrap(await commands.readEngineCapacity(serverId)));
   }
 
   async recheckEngine(serverId: string): Promise<EngineInfo> {

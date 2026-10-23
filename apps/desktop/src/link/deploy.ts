@@ -1,4 +1,13 @@
-import type { ServiceOperation } from "./serviceOps";
+import type {
+  CancelOutcome as BoundCancelOutcome,
+  DeployOutcome as BoundDeployOutcome,
+  DeployCheckDto,
+  DeployCheckInputDto,
+  DeployRequestDto,
+  EngineCapacityDto,
+} from "@/bindings";
+import { type EngineCapacity, engineCapacityFromWire } from "@/resources";
+import { type ServiceOperation, toOperation } from "./serviceOps";
 import type { EngineState } from "./services";
 
 /**
@@ -157,3 +166,90 @@ export const DEPLOY_FIELDS: readonly DeployField[] = [
   "command",
   "resources",
 ];
+
+// ── Conversions depuis les types générés (`bindings.ts`) ──────────────────────────────────────────
+// Aucune règle ici : les types de l'interface sont ceux ci-dessus, la coquille ne fait que les remplir.
+
+/** La consultation telle que la coquille la reçoit : jamais un secret (BR-DEPLOY-033). */
+export function toDeployCheckInputDto(input: DeployCheckInput): DeployCheckInputDto {
+  return {
+    name: input.name,
+    image: input.image,
+    tag: input.tag,
+    ports: input.ports.map((port) => ({
+      hostPort: port.hostPort,
+      containerPort: port.containerPort,
+      protocol: port.protocol,
+    })),
+  };
+}
+
+/** La demande telle que la coquille la reçoit. Les secrets ne traversent que ici, jamais gardés. */
+export function toDeployRequestDto(request: DeployRequest): DeployRequestDto {
+  return {
+    ...toDeployCheckInputDto(request),
+    env: request.env.map((variable) => ({ name: variable.name, value: variable.value })),
+    command: request.command,
+    resources: {
+      memoryBytes: request.resources.memoryBytes,
+      cpuMillis: request.resources.cpuMillis,
+    },
+    accept: { reservedPorts: request.accept.reservedPorts, lowDisk: request.accept.lowDisk },
+  };
+}
+
+export function toDeployCheck(dto: DeployCheckDto): DeployCheck {
+  return {
+    name: dto.name,
+    invalidFields: dto.invalidFields,
+    ports: dto.ports.map((port) => ({
+      hostPort: port.hostPort,
+      protocol: port.protocol,
+      status: port.status,
+      holder: port.holder,
+      suggested: port.suggested,
+      privileged: port.privileged,
+    })),
+    // Un nombre illisible (`null` sur le fil) n'est pas un espace libre : pas de constat sur le disque.
+    disk:
+      dto.disk && dto.disk.freeBytes !== null
+        ? { freeBytes: dto.disk.freeBytes, low: dto.disk.low }
+        : null,
+    imagePresent: dto.imagePresent,
+  };
+}
+
+export function toDeployOutcome(dto: BoundDeployOutcome): DeployOutcome {
+  switch (dto.kind) {
+    case "accepted":
+      return { kind: "accepted", operationId: dto.operationId, serviceKey: dto.serviceKey };
+    case "unknown":
+      return { kind: "unknown", opId: dto.opId };
+    case "refused":
+      return { kind: "refused", refusal: dto.refusal as DeployRefusal };
+  }
+}
+
+export function toCancelOutcome(dto: BoundCancelOutcome): CancelOutcome {
+  switch (dto.kind) {
+    case "done":
+      return { kind: "done", operation: toOperation(dto.operation) };
+    case "unknown":
+      return { kind: "unknown", opId: dto.opId };
+    case "refused":
+      return { kind: "refused", refusal: dto.refusal };
+  }
+}
+
+/** Les bornes de la machine ; `null` : réponse incomplète ou hors bornes (la validation reste à `engineCapacityFromWire`). */
+export function toEngineCapacity(dto: EngineCapacityDto): EngineCapacity | null {
+  return engineCapacityFromWire({
+    host: { cpus: dto.cpus, memory_bytes: dto.memoryBytes, reserve_bytes: dto.reserveBytes },
+    committed: {
+      memory: {
+        managed_running: dto.managedRunningBytes,
+        unmanaged_running: dto.unmanagedRunningBytes,
+      },
+    },
+  });
+}
