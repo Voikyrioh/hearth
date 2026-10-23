@@ -1,17 +1,17 @@
 ---
 id: BR-LIFE-016
 domaine: LIFE
-titre: Démarrer, arrêter et redémarrer sont des actes d'administration du socle, couverts par l'élévation de cinq minutes
+titre: Démarrer, arrêter et redémarrer sont des actes de pilotage : le mot de passe suit l'état de confiance
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-cycle-de-vie-service.md (BR-LIFE-016), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lot-1.md, HRT-64
-maj: 2026-10-17
+maj: 2026-10-23
 ---
 
-# BR-LIFE-016 — Démarrer, arrêter et redémarrer sont des actes d'administration du socle, couverts par l'élévation de cinq minutes
+# BR-LIFE-016 — Démarrer, arrêter et redémarrer sont des actes de pilotage : le mot de passe suit l'état de confiance
 
 ## Règle
-`ServiceStart` `0x0C`, `ServiceStop` `0x0D`, `ServiceRestart` `0x0E` sont dans `ActKind::ALL`, `audit_code` et `covered_by_elevation` (vrai), et leurs trois routes sont dans `ROUTES` : la cible signée est la clé du service (décodée du chemin comme l'agent le fait), sans paramètre. L'agent exige donc le droit, puis la preuve de clé du poste et le mot de passe selon le réglage du compte (élévation de cinq minutes comprise). Le test de garde `every_modifying_route_is_an_admin_act_or_a_named_exception` reste vert sans exception de plus. La liaison cliente reconstruit l'acte depuis la requête (`hearth-link domain/act.rs`).
+`ServiceStart` `0x0C`, `ServiceStop` `0x0D`, `ServiceRestart` `0x0E` sont dans `ActKind::ALL`, `audit_code` et `covered_by_elevation` (vrai : en ALERTE, l'élévation les couvre), et leurs trois routes sont dans `ROUTES` : la cible signée est la clé du service (décodée du chemin comme l'agent le fait), sans paramètre. L'agent exige donc le droit, puis la preuve de clé du poste (à chaque acte, dans tous les états) et le mot de passe selon l'état de confiance (grille HRT-194) : NORMAL, aucun mot de passe ; ALERTE, mot de passe une fois puis élévation de cinq minutes (réglage « à chaque action » : à chaque acte) ; MODE ATTAQUE (actif ou suspendu), mot de passe à chaque acte. Un acte de pilotage confirmé en NORMAL n'ouvre aucune élévation. Implémenté par HRT-194 (`hearth_proto::admin_act::{is_piloting, password_need}`, pas encore dans le code) ; les pointeurs ci-dessous sont inchangés. Le test de garde `every_modifying_route_is_an_admin_act_or_a_named_exception` reste vert sans exception de plus. La liaison cliente reconstruit l'acte depuis la requête (`hearth-link domain/act.rs`).
 
 ## Application (code)
 - `crates/hearth-proto/src/admin_act.rs::{ROUTES, ActKind::DECLARED_WITHOUT_ROUTE, covered_by_elevation}`
@@ -34,3 +34,4 @@ maj: 2026-10-17
 
 ## Historique
 - 2026-10-17 — création (HRT-64 : démarrer, arrêter, redémarrer un service, côté agent).
+- 2026-10-23 : grille d'état de confiance pour le pilotage (HRT-194, décision Voiky 2026-10-20) : démarrer, arrêter, redémarrer ne demandent plus le mot de passe en NORMAL ; ALERTE : mot de passe puis élévation ; MODE ATTAQUE : à chaque acte. `covered_by_elevation` reste la source unique de la couverture en ALERTE (ADR-0032, amendement 2026-10-20). Supprimer un service garde le mot de passe dans tous les états.
