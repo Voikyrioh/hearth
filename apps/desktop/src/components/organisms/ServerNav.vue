@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { RouterLink } from "vue-router";
+import { RouterLink, useRoute } from "vue-router";
 import { arrowNav } from "@/composables/arrowNav";
 import { type MessageKey, t } from "@/i18n";
 import type { ServerInfo } from "@/link";
@@ -28,6 +28,12 @@ const entries = computed(() =>
   ENTRIES.filter((entry) => !entry.adminOnly || props.server.role === "admin"),
 );
 const nav = ref<HTMLElement | null>(null);
+const route = useRoute();
+
+/** Le formulaire de déploiement fait partie de la section Services : son entrée reste marquée (HRT-69). */
+function inSection(entry: Entry): boolean {
+  return entry.route === "services" && route.name === "services-deploy";
+}
 </script>
 
 <template>
@@ -45,7 +51,7 @@ const nav = ref<HTMLElement | null>(null);
       <RouterLink
         v-for="entry in entries"
         :key="entry.route"
-        class="nav__item"
+        :class="['nav__item', { 'router-link-active': inSection(entry) }]"
         :to="{ name: entry.route, params: { id: server.id } }"
         data-nav-item
       >
