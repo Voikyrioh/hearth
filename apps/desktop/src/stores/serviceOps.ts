@@ -48,6 +48,20 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
   const announced = new Set<string>();
   /** Le dernier nom vu de chaque service (`serveur/clé`). */
   const names = new Map<string, string>();
+  /**
+   * Les opérations qu'une fenêtre suit elle-même (le déploiement dont la progression est ouverte, HRT-69) : leur
+   * issue n'est PAS annoncée par une notification mais retenue dans `finished`, la fenêtre la dit à sa façon puis la
+   * « règle » (`settle`) ; si la fenêtre se ferme avant (`release`), l'issue est annoncée comme les autres.
+   */
+  const watched = new Set<string>();
+  const finished = shallowReactive(
+    new Map<string, { operation: ServiceOperation; name: string }>(),
+  );
+  /**
+   * Les dernières issues déjà annoncées : l'issue d'une opération rapide peut arriver avant la réponse qui permet de la
+   * suivre (`watch`). Bornée, comme `announced`.
+   */
+  const recent = new Map<string, { operation: ServiceOperation; name: string }>();
   const failed = ref(false);
   const settled = ref(false);
   let unsubscribe: Unsubscribe | null = null;
@@ -105,6 +119,15 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
     const name = nameOf(event.serverId, operation.key);
     if (isFinished(operation.status)) {
       entries.delete(id);
+      if (watched.has(id)) {
+        finished.set(id, { operation, name });
+        return;
+      }
+      recent.set(id, { operation, name });
+      if (recent.size > 50) {
+        const oldest = recent.keys().next().value;
+        if (oldest !== undefined) recent.delete(oldest);
+      }
       // Déjà dite : un rejeu de la coquille (l'acquittement précédent n'est pas arrivé), on la réacquitte.
       if (announced.has(id)) {
         acknowledge(event.serverId, operation.id);
@@ -128,6 +151,48 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
       order: known?.order ?? order,
       name: known?.name ?? name,
     });
+  }
+
+  /** L'opération `opId` telle qu'elle court, ou `undefined` (terminée, inconnue). */
+  function get(serverId: string, opId: string): TrackedOperation | undefined {
+    return entries.get(tag(serverId, opId));
+  }
+
+  /** Une fenêtre suit cette opération : son issue lui revient (`finishedOf`), sans notification. */
+  function watch(serverId: string, opId: string): void {
+    const id = tag(serverId, opId);
+    watched.add(id);
+    // L'issue est déjà arrivée (opération plus rapide que la réponse qui la désigne) : la fenêtre la reçoit.
+    const past = recent.get(id);
+    if (past) finished.set(id, past);
+  }
+
+  /** L'issue d'une opération suivie par une fenêtre, une fois terminée ; `undefined` tant qu'elle court. */
+  function finishedOf(
+    serverId: string,
+    opId: string,
+  ): { operation: ServiceOperation; name: string } | undefined {
+    return finished.get(tag(serverId, opId));
+  }
+
+  /** La fenêtre a dit l'issue : elle n'est plus retenue ni rejouée (BR-RESIL-010). */
+  function settle(serverId: string, opId: string): void {
+    const id = tag(serverId, opId);
+    watched.delete(id);
+    finished.delete(id);
+    announced.add(id);
+    acknowledge(serverId, opId);
+  }
+
+  /** La fenêtre se ferme sans avoir dit l'issue : elle sera annoncée comme toute autre, tout de suite si elle est connue. */
+  function release(serverId: string, opId: string): void {
+    const id = tag(serverId, opId);
+    watched.delete(id);
+    const done = finished.get(id);
+    if (!done) return;
+    finished.delete(id);
+    announced.add(id);
+    announce(serverId, done.operation, done.name);
   }
 
   /** L'issue, dite une fois, puis acquittée : la coquille ne la rejoue plus (BR-RESIL-010). */
@@ -186,6 +251,8 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
     for (const id of [...lastSeq.keys()]) if (id.startsWith(`${serverId}/`)) lastSeq.delete(id);
     for (const id of [...names.keys()]) if (id.startsWith(`${serverId}/`)) names.delete(id);
     for (const id of [...announced]) if (id.startsWith(`${serverId}/`)) announced.delete(id);
+    for (const id of [...watched]) if (id.startsWith(`${serverId}/`)) watched.delete(id);
+    for (const id of [...finished.keys()]) if (id.startsWith(`${serverId}/`)) finished.delete(id);
   }
 
   // Un serveur retiré du carnet est oublié.
@@ -209,11 +276,30 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
     entries.clear();
     lastSeq.clear();
     announced.clear();
+    watched.clear();
+    finished.clear();
+    recent.clear();
     names.clear();
     failed.value = false;
     settled.value = false;
     order = 0;
   }
 
-  return { entries, failed, settled, of, forService, nameOf, apply, start, forget, reset };
+  return {
+    entries,
+    failed,
+    settled,
+    of,
+    forService,
+    get,
+    watch,
+    finishedOf,
+    settle,
+    release,
+    nameOf,
+    apply,
+    start,
+    forget,
+    reset,
+  };
 });
