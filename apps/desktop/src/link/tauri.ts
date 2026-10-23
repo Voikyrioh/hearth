@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import {
   type AccountListDto,
+  type AdminActKindDto,
   type AuditLiveEvent,
   type AgentUpdateEvent as BoundAgentUpdateEvent,
   type LinkFailure as BoundFailure,
@@ -20,6 +21,7 @@ import {
   type ServiceLogEvent,
   type SnapshotEvent,
 } from "@/bindings";
+import type { EngineCapacity } from "@/resources";
 import {
   type AgentUpdateEvent,
   type AgentUpdateOutcome,
@@ -29,6 +31,13 @@ import {
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import { toAuditFilterDto, toAuditLive, toAuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
+import type {
+  CancelOutcome,
+  DeployCheck,
+  DeployCheckInput,
+  DeployOutcome,
+  DeployRequest,
+} from "./deploy";
 import {
   type DeviceRemovalOutcome,
   type TrustedDevices,
@@ -488,7 +497,9 @@ export class TauriLinkBridge implements LinkBridge {
     role: Role | null,
     trust: TrustLevel | null,
   ): Promise<PasswordNeed> {
-    return commands.reauthPasswordNeed(kind, role, trust);
+    // `service_deploy` et `operation_cancel` n'existent pas encore côté Rust (HRT-69, moitié coquille) : la coquille
+    // les refuse, la fenêtre retombe sur la règle la plus stricte (`yes`), jamais sur « aucun mot de passe ».
+    return commands.reauthPasswordNeed(kind as AdminActKindDto, role, trust);
   }
 
   async setReauthSetting(
@@ -593,6 +604,35 @@ export class TauriLinkBridge implements LinkBridge {
       restart: commands.serviceRestart,
     }[gesture];
     return toLifecycleOutcome(unwrap(await run(serverId, key, adminPassword)));
+  }
+
+  // Déployer une image (HRT-69) : la moitié « interface » est livrée sur le pont simulé ; les commandes de la
+  // coquille (`deploy_check`, `deploy_service`, `cancel_service_operation`, `read_engine_capacity`), la liaison
+  // (`hearth-link`, actes `ServiceDeploy 0x0F` et `OperationCancel 0x10`) et la régénération de `bindings.ts` sont
+  // la moitié Rust, à compiler à part. Tant qu'elles n'existent pas, ces quatre appels échouent en « incident
+  // interne » plutôt que de simuler un succès : le bouton « Déployer un service » ne ment jamais.
+  async checkDeployment(_serverId: string, _input: DeployCheckInput): Promise<DeployCheck> {
+    throw new LinkCommandError({ kind: "internal" });
+  }
+
+  async deployService(
+    _serverId: string,
+    _request: DeployRequest,
+    _adminPassword: string | null,
+  ): Promise<DeployOutcome> {
+    throw new LinkCommandError({ kind: "internal" });
+  }
+
+  async cancelServiceOperation(
+    _serverId: string,
+    _opId: string,
+    _adminPassword: string | null,
+  ): Promise<CancelOutcome> {
+    throw new LinkCommandError({ kind: "internal" });
+  }
+
+  async readEngineCapacity(_serverId: string): Promise<EngineCapacity | null> {
+    throw new LinkCommandError({ kind: "internal" });
   }
 
   async recheckEngine(serverId: string): Promise<EngineInfo> {

@@ -18,8 +18,13 @@ import type {
 /** Le réglage « Demander mon mot de passe » du compte : une saisie vaut 5 minutes, ou à chaque action. */
 export type ReauthMode = ReauthModeDto;
 
-/** Le genre d'un acte d'administration, tel que la fenêtre le connaît (sans cible ni secret). */
-export type AdminActKind = AdminActKindDto;
+/**
+ * Le genre d'un acte d'administration, tel que la fenêtre le connaît (sans cible ni secret). `service_deploy` (déployer
+ * une image : JAMAIS couvert par l'élévation, HRT-69) et `operation_cancel` (annuler une opération de service, couvert
+ * par l'élévation) sont les deux genres que la coquille Rust n'a pas encore : ils rejoignent `AdminActKindDto` à la
+ * prochaine régénération de `bindings.ts`, et cette union se réduit alors à `AdminActKindDto`.
+ */
+export type AdminActKind = AdminActKindDto | "service_deploy" | "operation_cancel";
 
 /**
  * Ce que l'agent annonce, lu à l'ouverture d'une fenêtre : l'interface ne devine pas l'élévation de

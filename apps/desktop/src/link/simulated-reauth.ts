@@ -49,12 +49,17 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
     case "service_stop":
     case "service_restart":
       return true;
+    // Annuler une opération (le déploiement qui récupère son image) : couvert par l'élévation (BR-DEPLOY-016).
+    case "operation_cancel":
+      return true;
     case "account_password":
     case "agent_update":
     case "attack_mode_enable":
     case "attack_mode_disable":
     case "account_password_own":
     case "reauth_setting":
+    // Déployer une image n'est JAMAIS couvert par l'élévation (BR-DEPLOY-015) : le mot de passe est redemandé.
+    case "service_deploy":
     // Répondre à une opération n'est jamais couvert par l'élévation seule (agent d'avant la grille).
     case "operation_decide":
       return false;
@@ -79,6 +84,8 @@ function isPiloting(kind: AdminActKind): boolean {
     case "attack_mode_disable":
     case "account_password_own":
     case "reauth_setting":
+    case "service_deploy":
+    case "operation_cancel":
       return false;
   }
 }
