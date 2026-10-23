@@ -27,7 +27,7 @@ pub use loading::model::Fiche;
 #[cfg(test)]
 mod architecture_guard;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests_fiches;
 #[cfg(test)]

@@ -12,8 +12,7 @@ use super::loading::value::{ChannelPath, Charset, container_target_ok, first_ref
 use super::settings_state::{InstallContext, Reason, resolve_install};
 use super::test_support::*;
 use super::translate::{
-    DeploymentValidator, EnvDraft, EnvValue, NotYetWired, Request, ServiceSpecDraft,
-    TranslateError, translate,
+    DeploymentValidator, EnvDraft, EnvValue, Request, ServiceSpecDraft, TranslateError, translate,
 };
 use crate::domain::secret::Secret;
 
@@ -654,7 +653,7 @@ fn property_every_accepted_fiche_and_valid_answers_give_a_closed_description() {
     let mut check_refused = 0usize;
     for (n, fiche) in fiches.iter().enumerate() {
         let mut rng = Rng(0x9E37_79B9_7F4A_7C15 ^ (n as u64 + 1));
-        for case in 0..150 {
+        for case in 0..700 {
             let variants: Vec<&str> = fiche.file.variant.iter().map(|v| v.id.as_str()).collect();
             let variant = if variants.is_empty() {
                 None
@@ -722,6 +721,10 @@ fn property_every_accepted_fiche_and_valid_answers_give_a_closed_description() {
                         "{label} : contrat accepté d'office"
                     );
                     assert_closed(fiche, variant, world_imported, &inputs, &draft, &label);
+                    // HRT-101 : toute traduction est acceptée par le validateur du déploiement ordinaire.
+                    crate::domain::services::deploy::OrdinaryDeployment
+                        .validate(&draft)
+                        .unwrap_or_else(|why| panic!("{label} : {why}"));
                 }
                 Err(TranslateError::AgreementRequired(ids)) => {
                     assert!(!accept_all && !ids.is_empty(), "{label}");
@@ -742,21 +745,7 @@ fn property_every_accepted_fiche_and_valid_answers_give_a_closed_description() {
     assert!(check_refused > 0, "les contrôles croisés sont exercés");
 }
 
-// ---- Validateur du déploiement ordinaire : à brancher ---------------------------------------------------------------------------
-
-/// L'interface est posée (`DeploymentValidator`) ; le branchement de la traduction est HRT-101. Cette garde
-/// empêche qu'on prenne le placeholder `NotYetWired` pour une validation.
-#[test]
-fn the_ordinary_deployment_validator_is_not_wired_yet_and_says_so() {
-    let draft = translate(&terraria(), &Inputs::new().request(None, false)).expect("valide");
-    let verdict = NotYetWired.validate(&draft);
-    assert!(
-        verdict
-            .as_ref()
-            .is_err_and(|why| why.contains("non branché")),
-        "{verdict:?}"
-    );
-}
+// ---- Validateur du déploiement ordinaire ----------------------------------------------------------------------------------------
 
 /// I1 « plan égal à celui du validateur » : toute fiche embarquée, une fois traduite, est acceptée par le validateur
 /// du déploiement ordinaire (HRT-68), le même que celui d'une image déployée à la main.
