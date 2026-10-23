@@ -15,6 +15,10 @@ const props = withDefaults(
     autocomplete?: string;
     disabled?: boolean;
     mono?: boolean;
+    /** Libellé lu par les lecteurs d'écran seulement (une rangée de formulaire en porte déjà un visible). */
+    hideLabel?: boolean;
+    inputmode?: "text" | "numeric" | "decimal" | "search";
+    maxlength?: number;
   }>(),
   {
     type: "text",
@@ -24,10 +28,13 @@ const props = withDefaults(
     autocomplete: "off",
     disabled: false,
     mono: false,
+    hideLabel: false,
+    inputmode: undefined,
+    maxlength: undefined,
   },
 );
 
-defineEmits<{ "update:modelValue": [value: string] }>();
+defineEmits<{ "update:modelValue": [value: string]; blur: [] }>();
 
 const id = useId();
 const helpId = `${id}-help`;
@@ -40,7 +47,7 @@ const describedBy = computed(() => {
 
 <template>
   <div class="field">
-    <label class="field__label" :for="id">{{ label }}</label>
+    <label :class="hideLabel ? 'sr-only' : 'field__label'" :for="id">{{ label }}</label>
     <div :class="['field__box', { 'field__box--error': error, 'field__box--disabled': disabled }]">
       <input
         :id="id"
@@ -49,10 +56,13 @@ const describedBy = computed(() => {
         :type="type"
         :placeholder="placeholder"
         :autocomplete="autocomplete"
+        :inputmode="inputmode"
+        :maxlength="maxlength"
         :disabled="disabled"
         :aria-invalid="error ? 'true' : undefined"
         :aria-describedby="describedBy"
         @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
+        @blur="$emit('blur')"
       />
       <slot name="suffix" />
     </div>

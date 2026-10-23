@@ -21,6 +21,8 @@ const props = withDefaults(
     cancelLabel?: string;
     /** Pas de bouton d'action : l'action est impossible, la fenêtre ne propose que de la quitter (HRT-40). */
     hideSubmit?: boolean;
+    /** Fenêtre large (640 px) : un récapitulatif qui défile, titre et boutons collants (HRT-69). */
+    wide?: boolean;
   }>(),
   {
     canSubmit: true,
@@ -29,6 +31,7 @@ const props = withDefaults(
     destructive: false,
     cancelLabel: undefined,
     hideSubmit: false,
+    wide: false,
   },
 );
 
@@ -85,7 +88,7 @@ function onNativeClose() {
     <dialog
       v-if="open"
       ref="dialog"
-      class="dialog"
+      :class="['dialog', { 'dialog--wide': wide }]"
       :aria-labelledby="titleId"
       @cancel.prevent="cancel"
       @close="onNativeClose"
@@ -131,6 +134,10 @@ function onNativeClose() {
   background: var(--card);
   color: var(--tx);
   box-shadow: var(--card-edge);
+}
+
+.dialog--wide {
+  width: var(--wide-dialog-width);
 }
 
 .dialog[open] {
