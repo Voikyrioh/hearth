@@ -57,15 +57,15 @@ impl LinkManager {
             return Err(LinkError::InvalidInput(InputField::Credentials));
         }
         let (target, token) = self.credentials(id)?;
-        if self.read_admin_reauth(&target, &token).await?.is_none() {
+        let Some(info) = self.read_admin_reauth(&target, &token).await? else {
             return Err(LinkError::Incompatible(Compatibility::UpdateAgent));
-        }
+        };
         let action = ActionRequest {
             method: Method::Put,
             path: ATTACK_MODE_PATH.to_owned(),
             body: Some(json!({ "active": active })),
         };
-        self.send_confirmed(id, &target, &token, action, Some(password), None)
+        self.send_confirmed(id, &target, &token, action, Some(password), info.trust)
             .await
     }
 }

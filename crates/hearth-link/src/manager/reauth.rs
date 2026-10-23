@@ -16,9 +16,7 @@
 //! - **un agent qui n'annonce pas `admin_reauth`** n'est pas de cette famille (aucune version d'avant n'a
 //!   été publiée) : `Incompatible(UpdateAgent)` (« agent trop ancien » à l'écran), rien n'est envoyé.
 
-use hearth_proto::admin_act::{
-    AdminAct, PasswordNeed, TrustLevel, covered_by_elevation, password_need,
-};
+use hearth_proto::admin_act::{AdminAct, PasswordNeed, TrustLevel, password_need_announced};
 use hearth_proto::api::reauth::AdminReauthInfo;
 use hearth_proto::api::security::SecurityResponse;
 use hearth_proto::api::sessions::ChallengePurpose;
@@ -41,10 +39,7 @@ const SECURITY_PATH: &str = "/security";
 /// (HRT-194, BR-GRANT-017) ? Un agent qui n'annonce pas l'état (d'avant HRT-194) garde la règle d'avant :
 /// la table de l'élévation seule (BR-COMPAT-001). Une valeur inconnue vaut le mode attaque (`Yes`).
 fn password_always_needed(act: &AdminAct<'_>, trust: Option<TrustLevel>) -> bool {
-    match trust {
-        Some(trust) => password_need(act, trust) == PasswordNeed::Yes,
-        None => !covered_by_elevation(act),
-    }
+    password_need_announced(act, trust) == PasswordNeed::Yes
 }
 
 /// Ce que l'interface doit savoir pour construire sa fenêtre : ce que l'agent annonce, et si ce PC a une

@@ -564,6 +564,18 @@ pub fn password_need(act: &AdminAct<'_>, trust: TrustLevel) -> PasswordNeed {
     }
 }
 
+/// Comme [`password_need`], pour un état de confiance qui peut ne pas être annoncé : agent d'avant HRT-194
+/// (`None`, BR-COMPAT-001). Absent : la règle d'avant, l'élévation seule (`UnlessElevated` si
+/// `covered_by_elevation`, `Yes` sinon), jamais `Normal` par défaut. **Source unique** de ce repli, lue par la
+/// liaison cliente et la coquille.
+pub fn password_need_announced(act: &AdminAct<'_>, trust: Option<TrustLevel>) -> PasswordNeed {
+    match trust {
+        Some(trust) => password_need(act, trust),
+        None if covered_by_elevation(act) => PasswordNeed::UnlessElevated,
+        None => PasswordNeed::Yes,
+    }
+}
+
 /// Décode un segment de chemin encodé en pourcentage (`%5C` donne `\`). `None` : encodage illisible ou
 /// octets qui ne sont pas de l'UTF-8. Source unique de l'agent (qui lit la clé de `/services/{key}/release`)
 /// et de la liaison cliente (qui signe la même clé). Un `%` est suivi de DEUX chiffres hexadécimaux, rien
@@ -1256,6 +1268,34 @@ mod tests {
             ),
             PasswordNeed::Yes
         );
+    }
+
+    #[test]
+    fn an_absent_trust_keeps_the_old_rule_and_an_announced_one_follows_the_grid() {
+        for kind in ActKind::ALL {
+            let act = act_of(kind, RoleName::Admin);
+            let old = if covered_by_elevation(&act) {
+                PasswordNeed::UnlessElevated
+            } else {
+                PasswordNeed::Yes
+            };
+            assert_eq!(password_need_announced(&act, None), old, "{kind:?}");
+            for trust in ALL_TRUST {
+                assert_eq!(
+                    password_need_announced(&act, Some(trust)),
+                    password_need(&act, trust),
+                    "{kind:?} {trust:?}"
+                );
+            }
+        }
+        // Le repli ne dit jamais « aucun mot de passe » : démarrer couvert, décider jamais.
+        let start = act_of(ActKind::ServiceStart, RoleName::Admin);
+        assert_eq!(
+            password_need_announced(&start, None),
+            PasswordNeed::UnlessElevated
+        );
+        let decide = act_of(ActKind::OperationDecide, RoleName::Admin);
+        assert_eq!(password_need_announced(&decide, None), PasswordNeed::Yes);
     }
 
     #[test]

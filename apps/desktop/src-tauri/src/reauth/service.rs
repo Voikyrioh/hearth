@@ -6,7 +6,7 @@ use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use hearth_link::ports::transport::Method;
 use hearth_link::{ActionOutcome, ActionRequest, LinkManager};
-use hearth_proto::admin_act::{AdminAct, covered_by_elevation, password_need};
+use hearth_proto::admin_act::{AdminAct, password_need_announced};
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::reauth::{AdminReauthInfo, ReauthMode};
 use hearth_proto::error::ErrorBody;
@@ -42,11 +42,7 @@ pub fn password_need_of(
     trust: Option<TrustLevelDto>,
 ) -> PasswordNeedDto {
     let act = act_of(kind, role);
-    match trust {
-        Some(trust) => password_need(&act, trust.into()).into(),
-        None if covered_by_elevation(&act) => PasswordNeedDto::UnlessElevated,
-        None => PasswordNeedDto::Yes,
-    }
+    password_need_announced(&act, trust.map(Into::into)).into()
 }
 
 /// Un acte du genre demandé, sans cible ni secret : de quoi interroger la règle.

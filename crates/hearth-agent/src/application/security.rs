@@ -32,6 +32,30 @@ use crate::domain::identifier_slowdown::{self, AlertChange, Slowdown};
 use crate::domain::lockout::{AttemptKey, retry_after_seconds};
 use crate::domain::sessions::SessionId;
 
+/// L'alerte de l'identifiant d'un compte à un instant (BR-TRUST-006, 008).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdentifierAlert {
+    pub active: bool,
+    /// Début de l'épisode, quand l'alerte est active.
+    pub since: Option<OffsetDateTime>,
+}
+
+/// L'identifiant `username` est-il en alerte à `now` ? **Source unique** : l'alerte propre que `GET /security`
+/// montre (`SecurityService::state_for`) et l'état de confiance annoncé et jugé à chaque acte
+/// (`SessionService::trust_level`, HRT-194) viennent de ce calcul, jamais de deux lectures du compteur.
+pub async fn identifier_alert(
+    attempts: &dyn LoginAttemptRepo,
+    username: &str,
+    now: OffsetDateTime,
+) -> Result<IdentifierAlert, StoreError> {
+    let row = attempts
+        .identifier(&AttemptKey::identifier(username))
+        .await?;
+    let active = identifier_slowdown::is_alert(&row, now);
+    let since = row.alerted_at.or(row.last_failure_at).filter(|_| active);
+    Ok(IdentifierAlert { active, since })
+}
+
 /// L'alerte, telle que le compte connecté a le droit de la voir.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlertState {
@@ -186,11 +210,8 @@ impl SecurityService {
         let now = self.clock.now();
         let rows: HashMap<String, Slowdown> = self.attempts.alerting().await?.into_iter().collect();
         let own_key = AttemptKey::identifier(account.username.as_str());
-        let own_row = rows.get(own_key.as_str());
-        let own = own_row.is_some_and(|row| identifier_slowdown::is_alert(row, now));
-        let since = own_row
-            .filter(|_| own)
-            .and_then(|row| row.alerted_at.or(row.last_failure_at));
+        let IdentifierAlert { active: own, since } =
+            identifier_alert(&*self.attempts, account.username.as_str(), now).await?;
         // Le nombre des autres : calculé seulement pour un administrateur, et seulement sur des
         // comptes qui existent (un identifiant inexistant ne compte pas).
         let others = if account.role.can_manage_accounts() {

@@ -2681,3 +2681,34 @@ async fn the_proof_of_the_key_is_required_for_a_piloting_act_in_every_state() {
         assert!(!replay.status.is_success(), "{state} : rejouée");
     }
 }
+
+/// HRT-194 : `alert.own` et `admin_reauth.trust` de `GET /security` viennent du MÊME calcul : ils s'accordent
+/// dans chaque état (normal, alerte, attaque), et l'état annoncé est celui que l'agent juge ensuite à l'acte.
+#[tokio::test]
+async fn the_alert_and_the_announced_trust_of_the_security_state_always_agree() {
+    let b = bench().await;
+    let read = || async {
+        let reply = b.api.get("/security").token(&b.marie.token).send().await;
+        (
+            reply.body["alert"]["own"].as_bool().unwrap(),
+            reply.body["admin_reauth"]["trust"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        )
+    };
+    assert_eq!(read().await, (false, "normal".to_owned()));
+    become_alerted(&b).await;
+    assert_eq!(read().await, (true, "alert".to_owned()));
+    // L'état annoncé est celui que l'acte rencontre : le pilotage demande le mot de passe.
+    let spec = b.spec(ActKind::ServiceStop).await;
+    let reply = b.act(&b.marie, &spec, "").await;
+    assert_eq!(reason(&reply), "password_required");
+    become_attacked(&b).await;
+    let (own, trust) = read().await;
+    assert_eq!(trust, "attack");
+    assert!(
+        !own || trust == "attack",
+        "le mode attaque l'emporte sur l'alerte"
+    );
+}

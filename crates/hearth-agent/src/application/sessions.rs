@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use hearth_proto::admin_act::{AdminAct, PasswordNeed, TrustLevel};
+use hearth_proto::admin_act::{AdminAct, PasswordNeed, TrustLevel, password_need};
 use hearth_proto::api::reauth::{AdminReauthInfo, Reauth, ReauthMode};
 use hearth_proto::api::sessions::{DeviceProof, DeviceStatus};
 use hearth_proto::device_proof::Binding;
@@ -24,7 +24,7 @@ use super::ports::{
     AccountRepo, AuditSink, Clock, HashError, IdGen, KnownAddressRepo, LoginAttemptRepo,
     PasswordHasher, SessionRepo, Store, StoreError, TokenGen, TokenGenError, UnitOfWork,
 };
-use super::security::SecurityService;
+use super::security::{SecurityService, identifier_alert};
 use super::trust::{
     AttackProofError, DeviceLogin, InFlight, RemoveError, TrustService, VerifiedKey,
 };
@@ -45,7 +45,6 @@ use crate::domain::sessions::{
 };
 use crate::domain::trust::DeviceId;
 use crate::domain::trust::act_trust;
-use crate::domain::trust::admin_act::password_need;
 use crate::domain::trust::attack_mode::{Effective, EndHow};
 use crate::domain::trust::{
     LoginCriteria, Mode, SessionStanding, TrialKind, judge_login, judge_session, mode_of,
@@ -1164,6 +1163,9 @@ impl SessionService {
         let attacking = self.attacking().await?;
         let level = self.trust_level(session, attacking).await?;
         let need = password_need(act, level);
+        // Le niveau jugé est tracé à chaque acte (jamais le compte ni un secret) : de quoi expliquer, après coup,
+        // pourquoi un mot de passe a été demandé ou non.
+        tracing::info!(act = act.kind().audit_code(), trust = ?level, need = ?need, "confirmation d'un acte");
         let windowed = !attacking
             && self.accounts.reauth_mode(&session.account.id).await? == ReauthMode::Window;
         if need == PasswordNeed::UnlessElevated
@@ -1308,15 +1310,14 @@ impl SessionService {
         session: &CurrentSession,
         attacking: bool,
     ) -> Result<TrustLevel, StoreError> {
-        let own_alert = if attacking {
-            false
-        } else {
-            let row = self
-                .attempts
-                .identifier(&AttemptKey::identifier(session.account.username.as_str()))
-                .await?;
-            identifier_slowdown::is_alert(&row, self.clock.now())
-        };
+        let own_alert = !attacking
+            && identifier_alert(
+                &*self.attempts,
+                session.account.username.as_str(),
+                self.clock.now(),
+            )
+            .await?
+            .active;
         Ok(act_trust::level(attacking, own_alert))
     }
 
