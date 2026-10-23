@@ -461,15 +461,14 @@ pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
         // (BR-ADOPT-008). Rendre un service retire un accès, il n'en donne pas (BR-ADOPT-013).
         | AdminAct::ServicesAdopt { .. } => false,
         AdminAct::ServiceRelease { .. } => true,
-        // Déclarés par HRT-144. DÉFAUT NON VALIDÉ par le propriétaire (revue de la PR 94) : piloter un service
-        // qui existe déjà, ANNULER une opération (le geste qui va dans le sens sûr : il ne retire que ce que
-        // l'opération avait créé pour elle-même), sauvegarder et régler un jeu : le mot de passe de la session
-        // suffit à 5 minutes. Créer un service (image et variables choisies par le compte), supprimer un
-        // service ou une sauvegarde : le mot de passe à chaque fois, comme pour adopter (ce sont les gestes
-        // qui ne se rattrapent pas). RÉPONDRE à une décision (`continue`, `revert`, `keep`, `verified`, et
-        // tout autre choix) : le mot de passe à chaque fois, quelle que soit la réponse, même `cancel` : une
-        // décision peut valider ce que l'acte d'origine exigeait de confirmer (poursuivre une suppression en
-        // attente, lancer un retour arrière, fermer une opération « à vérifier » sur la foi du compte).
+        // Déclarés par HRT-144. Cette table est celle de l'élévation SEULE (hors pilotage, et agent d'avant
+        // HRT-194). Piloter un service (démarrer, arrêter, redémarrer) et RÉPONDRE à une décision sont des
+        // actes de pilotage (`is_piloting`) : leur besoin de mot de passe vient de la grille de confiance
+        // (`password_need`), cette table ne sert plus pour eux qu'au comportement d'avant quand l'agent
+        // n'annonce pas son état de confiance. ANNULER une opération, sauvegarder et régler un jeu : le mot
+        // de passe de la session suffit à 5 minutes. Créer un service, supprimer un service ou une
+        // sauvegarde : le mot de passe à chaque fois, comme pour adopter (ce sont les gestes qui ne se
+        // rattrapent pas).
         AdminAct::ServiceStart { .. }
         | AdminAct::ServiceStop { .. }
         | AdminAct::ServiceRestart { .. }
@@ -480,6 +479,88 @@ pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
         | AdminAct::ServiceDeploy { .. }
         | AdminAct::ServiceDelete { .. }
         | AdminAct::BackupDelete { .. } => false,
+    }
+}
+
+/// L'état de confiance d'un compte au moment d'un acte (HRT-194, ADR-0032 amendée, BR-TRUST-052). Calculé
+/// par l'AGENT à l'acte, après la preuve de clé : le client ne l'envoie jamais. Du plus sûr au plus
+/// strict : `Normal`, `Alert` (l'identifiant du compte est en alerte, BR-TRUST-006), `Attack` (mode
+/// attaque actif ou suspendu).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustLevel {
+    Normal,
+    Alert,
+    Attack,
+    /// Une valeur que cette version ne connaît pas (annoncée par un agent plus récent). Traitée comme
+    /// `Attack`, le plus strict : jamais comme `Normal`.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Ce que l'agent exige du mot de passe pour un acte, dans un état de confiance donné (HRT-194).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PasswordNeed {
+    /// Aucun mot de passe, aucune élévation : un acte de pilotage en état normal.
+    No,
+    /// Le mot de passe, sauf si une élévation de cette session le couvre (réglage `window`).
+    UnlessElevated,
+    /// Le mot de passe à chaque acte.
+    Yes,
+}
+
+/// L'acte est-il un acte de pilotage d'un service (HRT-194, BR-LIFE-016) ? Démarrer, arrêter, redémarrer
+/// et répondre à la décision d'une opération (`continue`, `revert`, `keep`, `verified`...). Annuler une
+/// opération n'en est pas un : elle garde sa règle. Correspondance exhaustive, sans `_` : un acte de plus
+/// oblige à choisir.
+pub const fn is_piloting(kind: ActKind) -> bool {
+    match kind {
+        ActKind::ServiceStart
+        | ActKind::ServiceStop
+        | ActKind::ServiceRestart
+        | ActKind::OperationDecide => true,
+        ActKind::AccountCreate
+        | ActKind::AccountRole
+        | ActKind::AccountPassword
+        | ActKind::AccountDelete
+        | ActKind::SessionsRevoke
+        | ActKind::AgentUpdate
+        | ActKind::AttackModeEnable
+        | ActKind::AttackModeDisable
+        | ActKind::AccountPasswordOwn
+        | ActKind::ReauthSetting
+        | ActKind::ServicesAdopt
+        | ActKind::ServiceRelease
+        | ActKind::ServiceDeploy
+        | ActKind::OperationCancel
+        | ActKind::ServiceDelete
+        | ActKind::BackupCreate
+        | ActKind::BackupDelete
+        | ActKind::GameSettingsSave => false,
+    }
+}
+
+/// Ce que l'acte `act` exige du mot de passe dans l'état `trust` (BR-GRANT-017, BR-TRUST-043). **Source
+/// unique** lue par l'agent (qui décide) et par la liaison cliente (qui sait s'il faut le demander).
+///
+/// - Pilotage (`is_piloting`) : `Normal` donne `No`, `Alert` donne `UnlessElevated`, `Attack` et
+///   `Unknown` donnent `Yes`.
+/// - Tout autre acte : la table d'élévation, inchangée (`UnlessElevated` si `covered_by_elevation`, `Yes`
+///   sinon), quel que soit `trust`.
+///
+/// Le réglage `each` du compte et le mode attaque restent appliqués par l'appelant sur `UnlessElevated`.
+pub fn password_need(act: &AdminAct<'_>, trust: TrustLevel) -> PasswordNeed {
+    if is_piloting(act.kind()) {
+        return match trust {
+            TrustLevel::Normal => PasswordNeed::No,
+            TrustLevel::Alert => PasswordNeed::UnlessElevated,
+            TrustLevel::Attack | TrustLevel::Unknown => PasswordNeed::Yes,
+        };
+    }
+    if covered_by_elevation(act) {
+        PasswordNeed::UnlessElevated
+    } else {
+        PasswordNeed::Yes
     }
 }
 
@@ -966,7 +1047,8 @@ mod tests {
         revert.write_to(&mut b);
         assert_ne!(a, b);
         assert_eq!(keep.code(), 0x1D);
-        // Défaut non validé : répondre à une décision demande le mot de passe, quel que soit le choix.
+        // Répondre à une décision est un acte de pilotage (HRT-194), quel que soit le choix ; l'élévation seule
+        // (agent d'avant) ne la couvre jamais.
         for choice in [
             OperationChoice::Continue,
             OperationChoice::Cancel,
@@ -980,6 +1062,7 @@ mod tests {
                 choice,
             };
             assert!(!covered_by_elevation(&decide), "{choice:?}");
+            assert!(is_piloting(decide.kind()), "{choice:?}");
         }
         assert!(covered_by_elevation(&AdminAct::OperationCancel {
             target: "01OP"
@@ -1007,5 +1090,186 @@ mod tests {
                 "{kind:?} déclaré sans route mais présent dans ROUTES"
             );
         }
+    }
+
+    fn act_of(kind: ActKind, role: RoleName) -> AdminAct<'static> {
+        let target = "h_01J9ZY0G3Q8M2K6W4T7V5N1B9D";
+        match kind {
+            ActKind::AccountCreate => AdminAct::AccountCreate {
+                username: "a",
+                role,
+            },
+            ActKind::AccountRole => AdminAct::AccountRole {
+                target: "01ABC",
+                role,
+            },
+            ActKind::AccountPassword => AdminAct::AccountPassword { target: "01ABC" },
+            ActKind::AccountDelete => AdminAct::AccountDelete { target: "01ABC" },
+            ActKind::SessionsRevoke => AdminAct::SessionsRevoke { target: "01ABC" },
+            ActKind::AgentUpdate => AdminAct::AgentUpdate {
+                version: "1.0.0",
+                sha256: "00",
+            },
+            ActKind::AttackModeEnable => AdminAct::AttackMode { enable: true },
+            ActKind::AttackModeDisable => AdminAct::AttackMode { enable: false },
+            ActKind::AccountPasswordOwn => AdminAct::AccountPasswordOwn,
+            ActKind::ReauthSetting => AdminAct::ReauthSetting {
+                mode: ReauthMode::Each,
+            },
+            ActKind::ServicesAdopt => AdminAct::services_adopt(["c_aa"]),
+            ActKind::ServiceRelease => AdminAct::ServiceRelease {
+                target: "c_ab".into(),
+            },
+            ActKind::ServiceStart => AdminAct::ServiceStart {
+                target: target.into(),
+            },
+            ActKind::ServiceStop => AdminAct::ServiceStop {
+                target: target.into(),
+            },
+            ActKind::ServiceRestart => AdminAct::ServiceRestart {
+                target: target.into(),
+            },
+            ActKind::ServiceDeploy => AdminAct::ServiceDeploy {
+                name: "t".into(),
+                image: "i".into(),
+                digest: [0; FINGERPRINT_LEN],
+                env_count: 0,
+                command: false,
+            },
+            ActKind::OperationCancel => AdminAct::OperationCancel { target: "01OP" },
+            ActKind::ServiceDelete => AdminAct::ServiceDelete {
+                target: target.into(),
+                data: false,
+                backups: false,
+            },
+            ActKind::BackupCreate => AdminAct::BackupCreate {
+                target: target.into(),
+                mode: "stopped",
+                ignored: 0,
+            },
+            ActKind::BackupDelete => AdminAct::BackupDelete { target: "01BK" },
+            ActKind::OperationDecide => AdminAct::OperationDecide {
+                target: "01OP",
+                choice: OperationChoice::Keep,
+            },
+            ActKind::GameSettingsSave => AdminAct::GameSettingsSave {
+                target: target.into(),
+                base_rev: 1,
+                changes: 1,
+                ids_digest: [0; FINGERPRINT_LEN],
+                origin: "form",
+                effect: "restart",
+            },
+        }
+    }
+
+    const ALL_TRUST: [TrustLevel; 4] = [
+        TrustLevel::Normal,
+        TrustLevel::Alert,
+        TrustLevel::Attack,
+        TrustLevel::Unknown,
+    ];
+
+    #[test]
+    fn only_the_four_piloting_acts_are_piloting() {
+        let piloting: Vec<ActKind> = ActKind::ALL
+            .into_iter()
+            .filter(|kind| is_piloting(*kind))
+            .collect();
+        assert_eq!(
+            piloting,
+            vec![
+                ActKind::ServiceStart,
+                ActKind::ServiceStop,
+                ActKind::ServiceRestart,
+                ActKind::OperationDecide
+            ]
+        );
+        assert!(!is_piloting(ActKind::OperationCancel));
+    }
+
+    #[test]
+    fn the_password_need_follows_the_trust_grid_for_piloting_and_the_elevation_table_for_the_rest()
+    {
+        for kind in ActKind::ALL {
+            for role in [RoleName::Admin, RoleName::Readonly] {
+                let act = act_of(kind, role);
+                assert_eq!(act.kind(), kind);
+                for trust in ALL_TRUST {
+                    let expected = if is_piloting(kind) {
+                        match trust {
+                            TrustLevel::Normal => PasswordNeed::No,
+                            TrustLevel::Alert => PasswordNeed::UnlessElevated,
+                            TrustLevel::Attack | TrustLevel::Unknown => PasswordNeed::Yes,
+                        }
+                    } else if covered_by_elevation(&act) {
+                        PasswordNeed::UnlessElevated
+                    } else {
+                        PasswordNeed::Yes
+                    };
+                    assert_eq!(
+                        password_need(&act, trust),
+                        expected,
+                        "{kind:?} {role:?} {trust:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn what_is_not_piloting_keeps_its_password_in_every_state() {
+        for kind in [
+            ActKind::ServiceDelete,
+            ActKind::ServiceDeploy,
+            ActKind::BackupDelete,
+            ActKind::ServicesAdopt,
+            ActKind::AccountPassword,
+            ActKind::AttackModeEnable,
+        ] {
+            let act = act_of(kind, RoleName::Admin);
+            for trust in ALL_TRUST {
+                assert_eq!(password_need(&act, trust), PasswordNeed::Yes, "{kind:?}");
+            }
+        }
+        // Annuler une opération garde sa règle (l'élévation la couvre), quel que soit l'état.
+        let cancel = act_of(ActKind::OperationCancel, RoleName::Admin);
+        for trust in ALL_TRUST {
+            assert_eq!(
+                password_need(&cancel, trust),
+                PasswordNeed::UnlessElevated,
+                "{trust:?}"
+            );
+        }
+        // Le rôle compte pour la création et le changement de rôle, pas pour la confiance.
+        assert_eq!(
+            password_need(
+                &act_of(ActKind::AccountRole, RoleName::Readonly),
+                TrustLevel::Normal
+            ),
+            PasswordNeed::UnlessElevated
+        );
+        assert_eq!(
+            password_need(
+                &act_of(ActKind::AccountCreate, RoleName::Admin),
+                TrustLevel::Normal
+            ),
+            PasswordNeed::Yes
+        );
+    }
+
+    #[test]
+    fn an_unknown_trust_value_is_read_as_unknown_and_never_as_normal() {
+        let read = |text: &str| serde_json::from_str::<TrustLevel>(text).unwrap();
+        assert_eq!(read("\"normal\""), TrustLevel::Normal);
+        assert_eq!(read("\"alert\""), TrustLevel::Alert);
+        assert_eq!(read("\"attack\""), TrustLevel::Attack);
+        assert_eq!(read("\"panic\""), TrustLevel::Unknown);
+        let start = act_of(ActKind::ServiceStart, RoleName::Admin);
+        assert_eq!(password_need(&start, read("\"panic\"")), PasswordNeed::Yes);
+        assert_eq!(
+            serde_json::to_value(TrustLevel::Alert).unwrap(),
+            serde_json::json!("alert")
+        );
     }
 }

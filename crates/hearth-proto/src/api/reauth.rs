@@ -11,6 +11,7 @@ use std::fmt;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::sessions::{DeviceProof, lenient_proof};
+use crate::admin_act::TrustLevel;
 
 /// Le membre `reauth` du corps d'un acte. Lecture tolérante : un membre absent ou illisible n'est jamais
 /// une erreur de lecture mais un refus typé.
@@ -89,6 +90,12 @@ pub struct AdminReauthInfo {
     /// Secondes restantes de l'élévation de cette session depuis cette adresse, 0 sinon. Indicatif :
     /// l'agent décide à l'acte.
     pub elevated_for_s: u64,
+    /// L'état de confiance que l'agent juge pour CE compte à cet instant (HRT-194, BR-TRUST-052) : ce qui
+    /// décide si piloter un service demande le mot de passe. Indicatif, l'agent le recalcule à l'acte.
+    /// Absent : agent d'avant HRT-194, le client garde le comportement d'avant (BR-COMPAT-001), jamais
+    /// `Normal` par défaut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust: Option<TrustLevel>,
 }
 
 /// Corps de `PUT /me/reauth`. Le champ `password` porte le **réglage** (`each` ou `window`) ; le mot de
@@ -193,7 +200,9 @@ mod tests {
             factors: vec!["password".into(), "device_key".into()],
             password: ReauthMode::Window,
             elevated_for_s: 0,
+            trust: None,
         };
+        // Sans annonce (agent d'avant), le membre n'existe pas sur le fil.
         assert_eq!(
             serde_json::to_value(&info).unwrap(),
             json!({
@@ -203,5 +212,24 @@ mod tests {
                 "elevated_for_s": 0
             })
         );
+        let announced = AdminReauthInfo {
+            trust: Some(TrustLevel::Alert),
+            ..info
+        };
+        assert_eq!(
+            serde_json::to_value(&announced).unwrap()["trust"],
+            json!("alert")
+        );
+        let old: AdminReauthInfo = serde_json::from_value(json!({
+            "required": true, "factors": [], "password": "each", "elevated_for_s": 3
+        }))
+        .unwrap();
+        assert_eq!(old.trust, None, "absent = comportement d'avant");
+        let future: AdminReauthInfo = serde_json::from_value(json!({
+            "required": true, "factors": [], "password": "each", "elevated_for_s": 3,
+            "trust": "lockdown"
+        }))
+        .unwrap();
+        assert_eq!(future.trust, Some(TrustLevel::Unknown));
     }
 }

@@ -23,6 +23,7 @@
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 
+use hearth_proto::admin_act::TrustLevel;
 use hearth_proto::api::accounts::{AccountInfo, RoleName};
 use hearth_proto::api::audit::{OriginKindName, OutcomeName};
 use hearth_proto::api::deploy::{DeployPlace, DeployProtocol, MountStatus, NameStatus, PortStatus};
@@ -115,6 +116,7 @@ fn enums() -> Vec<Entry> {
             HttpOperationStatus
         ),
         entry!("api/reauth.rs::ReauthMode", Tolerant, ReauthMode),
+        entry!("admin_act.rs::TrustLevel", Tolerant, TrustLevel),
         entry!(
             "api/security.rs::AttackModeState",
             Tolerant,
@@ -609,6 +611,10 @@ const LOCAL_ENUMS: &[(&str, &str)] = &[
     ),
     ("reauth/dto.rs::AdminActKindDto", "commande de la WebView"),
     (
+        "reauth/dto.rs::TrustLevelDto",
+        "commande de la WebView (état annoncé, renvoyé à la coquille) ; lu de l'agent par `hearth_proto::TrustLevel`",
+    ),
+    (
         "service_ops/dto.rs::OperationChoiceDto",
         "commande de la WebView (choix de la décision) ; lu de l'agent par `hearth_proto::OperationChoice`",
     ),
@@ -973,6 +979,12 @@ const UNKNOWN_FOLDS: &[(&str, &str, &str, &str)] = &[
         "RoleDto",
         "Some(RoleDto::Admin | RoleDto::Unknown) | None => RoleName::Admin",
         "un rôle inconnu se traite comme administrateur : le plus strict (le mot de passe est demandé)",
+    ),
+    (
+        "hearth-proto/src/admin_act.rs",
+        "TrustLevel",
+        "TrustLevel::Attack | TrustLevel::Unknown => PasswordNeed::Yes",
+        "un état de confiance inconnu se traite comme le mode attaque : le plus strict (HRT-194, BR-TRUST-052)",
     ),
 ];
 
