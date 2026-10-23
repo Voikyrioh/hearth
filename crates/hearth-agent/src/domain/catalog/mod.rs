@@ -15,6 +15,7 @@
 
 pub mod embedded;
 pub mod formats;
+pub mod generate;
 pub mod loading;
 pub mod settings_state;
 pub mod stop_plan;

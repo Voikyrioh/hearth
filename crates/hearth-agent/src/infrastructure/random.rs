@@ -2,7 +2,7 @@
 
 use zeroize::Zeroize;
 
-use crate::application::ports::{TokenGen, TokenGenError};
+use crate::application::ports::{RandomError, SecretRandom, TokenGen, TokenGenError};
 use crate::domain::session_token::{SessionToken, TOKEN_LEN};
 
 pub struct OsTokenGen;
@@ -17,9 +17,27 @@ impl TokenGen for OsTokenGen {
     }
 }
 
+/// Les octets d'un secret de jeu : le hasard du système, sans repli.
+pub struct OsSecretRandom;
+
+impl SecretRandom for OsSecretRandom {
+    fn fill(&self, buf: &mut [u8]) -> Result<(), RandomError> {
+        getrandom::fill(buf).map_err(|error| RandomError(error.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_system_fills_a_buffer_and_never_the_same_twice() {
+        let (mut a, mut b) = ([0_u8; 32], [0_u8; 32]);
+        OsSecretRandom.fill(&mut a).unwrap();
+        OsSecretRandom.fill(&mut b).unwrap();
+        assert_ne!(a, b);
+        assert_ne!(a, [0_u8; 32]);
+    }
 
     #[test]
     fn tokens_are_64_hex_digits_and_never_repeat() {
