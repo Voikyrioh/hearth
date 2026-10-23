@@ -243,6 +243,46 @@ describe("la grille du mot de passe (HRT-194)", () => {
   });
 });
 
+describe("le mode attaque entre la lecture et l'envoi (HRT-194)", () => {
+  it("démarrer rouvre la fenêtre avec le champ, sans toast d'erreur, et l'ordre part avec le mot de passe", async () => {
+    const { wrapper, bridge } = await open();
+    const read = bridge.getReauthState.bind(bridge);
+    bridge.getReauthState = async (serverId) => {
+      const state = await read(serverId);
+      bridge.reauth.setTrust(serverId, "attack");
+      return state;
+    };
+    await wrapper.get('[data-row][data-key="h_db"]').trigger("click");
+    await flushPromises();
+    await wrapper.get('[data-lifecycle-action="start"]').trigger("click");
+    await flushPromises();
+    expect(bridge.gestures).toEqual([]);
+    expect(toasts()).toEqual([]);
+    expect(document.querySelector("dialog")?.textContent).toContain("Démarrer base");
+    expect(reauthField()).not.toBeNull();
+    await confirmDialog("Démarrer", OWN);
+    expect(bridge.gestures).toEqual([{ serverId: "forge", key: "h_db", gesture: "start" }]);
+    wrapper.unmount();
+  });
+
+  it("arrêter : la fenêtre ouverte en normal, puis l'attaque : la saisie est gardée et le champ apparaît", async () => {
+    const { wrapper, bridge } = await open();
+    await wrapper.get('[data-lifecycle-action="stop"]').trigger("click");
+    await flushPromises();
+    expect(reauthField()).toBeNull();
+    bridge.reauth.setTrust("forge", "attack");
+    dialogButton("Arrêter le service")?.click();
+    await flushPromises();
+    expect(bridge.gestures).toEqual([]);
+    expect(toasts()).toEqual([]);
+    expect(document.querySelector("dialog")).not.toBeNull();
+    expect(reauthField()).not.toBeNull();
+    await confirmDialog("Arrêter le service", OWN);
+    expect(bridge.gestures).toEqual([{ serverId: "forge", key: "h_web", gesture: "stop" }]);
+    wrapper.unmount();
+  });
+});
+
 describe("démarrer et redémarrer", () => {
   it("démarrer part sans fenêtre en état normal, la clé du poste suffit (HRT-194, BR-LIFE-016)", async () => {
     const { wrapper, bridge } = await open();

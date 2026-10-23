@@ -25,6 +25,12 @@ export interface RunOptions {
    * de l'appelant n'est pas relu comme perdu.
    */
   protectedHolderMessage?: MessageKey;
+  /**
+   * Un acte de pilotage que la ceinture de la liaison refuse faute de mot de passe (`invalid_input` sur les
+   * identifiants : l'état est passé à « attaque » entre la lecture et l'envoi, HRT-194) n'est pas un échec : rien
+   * n'est notifié, `passwordMissing` le dit, l'appelant rouvre la fenêtre avec le champ sans perdre l'acte.
+   */
+  passwordMissingIsRefusal?: boolean;
 }
 
 /**
@@ -51,6 +57,8 @@ export function useServerAction(serverId: () => string | null) {
    * (`ActReport` `right_lost`).
    */
   const rightLost = ref(false);
+  /** La dernière action n'est pas partie : le mot de passe manquait (`passwordMissingIsRefusal`). */
+  const passwordMissing = ref(false);
 
   async function run<T extends ActionOutcome>(
     perform: () => Promise<T>,
@@ -59,6 +67,7 @@ export function useServerAction(serverId: () => string | null) {
     if (busy.value) return null;
     busy.value = true;
     rightLost.value = false;
+    passwordMissing.value = false;
     try {
       const result = await perform();
       if (result.kind === "unknown") {
@@ -72,6 +81,14 @@ export function useServerAction(serverId: () => string | null) {
       return result;
     } catch (error) {
       const failure = failureOf(error);
+      if (
+        options.passwordMissingIsRefusal &&
+        failure?.kind === "invalid_input" &&
+        failure.field === "credentials"
+      ) {
+        passwordMissing.value = true;
+        return null;
+      }
       if (failure?.kind === "missing_services_right" && options.protectedHolderMessage) {
         toasts.push({ kind: "error", message: t(options.protectedHolderMessage) });
         return null;
@@ -105,5 +122,5 @@ export function useServerAction(serverId: () => string | null) {
     return rightLost.value ? { kind: "right_lost" } : { kind: "failed" };
   }
 
-  return { run, busy, rightLost, failedReport };
+  return { run, busy, rightLost, passwordMissing, failedReport };
 }

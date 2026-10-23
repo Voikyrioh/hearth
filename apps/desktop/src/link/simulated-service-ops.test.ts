@@ -186,9 +186,9 @@ describe("répondre à une opération", () => {
     const sim = bridge();
     const op = waiting(sim);
     sim.reauth.setTrust("forge", "attack");
-    expect(await sim.decideServiceOperation("forge", op.id, "keep", null)).toEqual({
-      kind: "refused",
-      refusal: { kind: "password_required" },
+    // La ceinture de la liaison : rien ne part sans mot de passe en mode attaque.
+    await expect(sim.decideServiceOperation("forge", op.id, "keep", null)).rejects.toMatchObject({
+      failure: { kind: "invalid_input", field: "credentials" },
     });
     expect(await sim.decideServiceOperation("forge", op.id, "keep", "faux")).toMatchObject({
       refusal: { kind: "wrong_password" },

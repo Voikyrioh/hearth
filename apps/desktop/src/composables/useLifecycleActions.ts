@@ -18,8 +18,16 @@ export function useLifecycleActions(serverId: () => string) {
   ): Promise<ActReport> {
     const result = await action.run(
       () => getLinkBridge().pilotService(serverId(), key, gesture, adminPassword),
-      { unknownMessage: "lifecycle.unknownResult", forbiddenMessage: "lifecycle.forbidden" },
+      {
+        unknownMessage: "lifecycle.unknownResult",
+        forbiddenMessage: "lifecycle.forbidden",
+        passwordMissingIsRefusal: true,
+      },
     );
+    // L'état est passé à « attaque » entre la lecture et l'envoi : même parcours que `password_required`.
+    if (!result && action.passwordMissing.value) {
+      return { kind: "refused", refusal: { kind: "password_required" } };
+    }
     if (!result) return action.failedReport();
     if (result.kind === "accepted") return { kind: "done" };
     if (result.kind === "refused") return { kind: "refused", refusal: result.refusal };

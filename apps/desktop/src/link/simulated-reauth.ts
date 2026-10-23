@@ -211,6 +211,11 @@ export class SimulatedReauth {
     if (!book.supported) throw new LinkCommandError({ kind: "incompatible_agent" });
     if (!this.hasKey(serverId)) throw new LinkCommandError({ kind: "not_recognized" });
     const need = simulatedPasswordNeed(kind, role, book.trust);
+    // La ceinture de la liaison : un acte de pilotage que l'état annoncé (attaque) fait demander à chaque fois ne
+    // part pas sans mot de passe (HRT-194) ; rien n'est envoyé à l'agent.
+    if (!password && need === "yes" && book.trust !== null && isPiloting(kind)) {
+      throw new LinkCommandError({ kind: "invalid_input", field: "credentials" });
+    }
     const attacking = book.trust === "attack" || book.trust === "unknown";
     const elevated = !attacking && book.elevatedUntil > this.now();
     if (!password && need === "no") return { kind: "ok" };

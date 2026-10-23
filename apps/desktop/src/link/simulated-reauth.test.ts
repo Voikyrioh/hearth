@@ -147,7 +147,8 @@ describe("les textes d'une clé non reconnue et d'un mot de passe manquant", () 
     reauth.setTrust("s", "attack");
     expect(reauth.confirm("s", "service_start", null, OWN, OWN)).toEqual({ kind: "ok" });
     expect(reauth.state("s").elevatedForS).toBe(0);
-    expect(reauth.confirm("s", "service_start", null, null, OWN).kind).toBe("refused");
+    // La ceinture de la liaison : en attaque, rien ne part sans mot de passe.
+    expect(() => reauth.confirm("s", "service_start", null, null, OWN)).toThrow(LinkCommandError);
   });
 
   it("n'annonce pas l'état à un agent d'avant", () => {
