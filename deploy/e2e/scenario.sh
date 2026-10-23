@@ -773,7 +773,8 @@ for VERB in start stop restart; do
     CONFIRMED=$(printf '{}'         | python3 /deploy/e2e/admin_act.py confirm-service "$VERB" 127.0.0.1 "$PORT" "$ADOPT_TOKEN" "$USER_NAME" "" "$ADOPT_KEYFILE" "$UNKNOWN_KEY")         || die "$VERB : confirmation sans mot de passe non signée"
     CODE=$(adopt_call POST "/services/$UNKNOWN_KEY/$VERB" "$ADOPT_TOKEN" "$CONFIRMED")
     { [ "$CODE" = 503 ] && body_matches '"code": *"ENGINE_UNAVAILABLE"'; } || die "$VERB sans mot de passe en état normal : 503 ENGINE_UNAVAILABLE attendu, pas password_required (reçu $CODE) : $(cat "$OUT.body")"
-    [ "$(audit_count "service.$VERB" failed)" = 2 ] || die "$VERB : le second refus (moteur inaccessible) devrait être au journal, deux entrées"
+    # Un refus identique répété est REGROUPÉ par le journal (une ligne, un compteur de répétitions) : toujours une entrée.
+    [ "$(audit_count "service.$VERB" failed)" = 1 ] || die "$VERB : le second refus identique (moteur inaccessible) devrait être regroupé avec le premier, une entrée"
 done
 ok "démarrer, arrêter, redémarrer de bout en bout (sans moteur) : confirmation exigée, preuve reconnue, preuve pour une autre clé refusée, moteur absent refusé et consigné, état normal sans mot de passe"
 run "$INSTALLED" account services "$USER_NAME" --revoke || die "adoption : retrait du droit"
