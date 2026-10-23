@@ -2,14 +2,14 @@
 id: ADR-0045
 titre: Un seul modèle pour toutes les opérations de service : journal d'intention écrit avant chaque geste destructif, reprise qui ne rejoue rien, verrou partagé, décisions demandées au compte
 type: architecture
-statut: proposée (non validée par Voiky ; posée avec HRT-83, moitié agent du socle)
+statut: proposée (non validée par Voiky ; posée avec HRT-83, moitié agent du socle ; seul l'amendement mot de passe du 2026-10-20 est une décision Voiky)
 date: 2026-10-13
 portee: repo
 remplace: les tables `service_actions` et `deployments` de la migration `0009` (jamais écrites)
-liens: [ADR-0031, ADR-0032, HRT-194, ADR-0033, ADR-0034, ADR-0038, ADR-0044, BR-LIFE-013, BR-EDIT-031, BR-DEL-019, BR-DEL-025, BR-BACKUP-025, BR-JEU-006, BR-JEU-011, BR-MONDE-026, BR-FILES-024, BR-RESIL-009, BR-RESIL-010, HRT-83, HRT-64, HRT-68]
+liens: [ADR-0031, ADR-0032, HRT-194, ADR-0033, ADR-0034, ADR-0038, ADR-0044, BR-LIFE-013, BR-OPS-003, BR-EDIT-031, BR-DEL-019, BR-DEL-025, BR-BACKUP-025, BR-JEU-006, BR-JEU-011, BR-MONDE-026, BR-FILES-024, BR-RESIL-009, BR-RESIL-010, HRT-83, HRT-64, HRT-68]
 ---
 
-> Posée par HRT-83, branchée par HRT-144 (2026-10-14). Non validée par Voiky. L'acte `DeploymentCancel` prévu par le lot 1 est devenu `OperationCancel` (`0x10`), avec `OperationDecide` (`0x1D`) : leurs routes existent (voir « Révision HRT-144 » en fin de fichier). Les codes d'acte et d'erreur des tranches L1 à L3 sont déclarés d'un coup.
+> Posée par HRT-83, branchée par HRT-144 (2026-10-14). Proposée : l'ADR n'est pas validée par Voiky ; seul l'amendement mot de passe du 2026-10-20 (défaut de mot de passe de la décision) est une décision Voiky. L'acte `DeploymentCancel` prévu par le lot 1 est devenu `OperationCancel` (`0x10`), avec `OperationDecide` (`0x1D`) : leurs routes existent (voir « Révision HRT-144 » en fin de fichier). Les codes d'acte et d'erreur des tranches L1 à L3 sont déclarés d'un coup.
 
 # ADR-0045 : Journal des opérations de service
 
@@ -74,7 +74,7 @@ Démarrer, déployer, modifier, supprimer, sauvegarder, restaurer, installer par
 
 ## Amendement 2026-10-20 (décision Voiky) : le mot de passe pour répondre à une décision
 
-Source : spec fonctionnelle `2026-10-13-fonctionnelle-cycle-de-vie-service`, section 14, et `BR-EDIT-031` amendée ; ticket HRT-194. Remplace le défaut « toute réponse à une décision redemande le mot de passe » de la révision HRT-144 (revue de la PR 94), qui n'avait pas été validé.
+Source : spec fonctionnelle `2026-10-13-fonctionnelle-cycle-de-vie-service`, section 14 (règle `BR-EDIT-031` de la spec, numéro de la spec et non de la fiche du repo du même nom, qui traite d'un autre sujet et n'est pas modifiée) ; fiche du repo amendée : `BR-OPS-003` ; ticket HRT-194. Remplace le défaut « toute réponse à une décision redemande le mot de passe » de la révision HRT-144 (revue de la PR 94), qui n'avait pas été validé.
 
 - `OperationDecide` (`0x1D`) est un **acte de pilotage** au sens de l'amendement 2026-10-20 de l'ADR-0032, avec démarrer, arrêter, redémarrer : NORMAL, aucun mot de passe ; ALERTE, mot de passe puis élévation de 5 minutes (réglage `each` : à chaque réponse) ; MODE ATTAQUE, mot de passe à chaque réponse. Tous les choix (`continue`, `revert`, `keep`, `verified`, `cancel`) et tous les genres d'opération sont traités pareil : l'acte d'origine a déjà été confirmé selon sa propre règle (avec mot de passe dans tous les états pour supprimer, restaurer, reprendre un monde), la décision ne fait que choisir parmi les issues que l'opération offre.
 - Inchangé : la décision SIGNE son choix et l'identifiant de l'opération (un autre choix est un autre acte) ; la preuve de clé du poste est exigée à chaque réponse ; le droit « gérer les services » (ADR-0041) ; un choix inconnu est refusé avant la confirmation (`422`) ; le journal sous l'action du genre.
