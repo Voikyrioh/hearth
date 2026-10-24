@@ -31,6 +31,14 @@ import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./au
 import { toAuditFilterDto, toAuditLive, toAuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
 import {
+  type Catalog,
+  type FicheInstallRequest,
+  type FicheRead,
+  toCatalog,
+  toFicheInstallRequestDto,
+  toFicheRead,
+} from "./catalog";
+import {
   type CancelOutcome,
   type DeployCheck,
   type DeployCheckInput,
@@ -639,6 +647,36 @@ export class TauriLinkBridge implements LinkBridge {
 
   async readEngineCapacity(serverId: string): Promise<EngineCapacity | null> {
     return toEngineCapacity(unwrap(await commands.readEngineCapacity(serverId)));
+  }
+
+  // Le Catalogue et l'installation depuis une fiche (HRT-102) : deux lectures et un acte confirmé.
+  async readCatalog(serverId: string): Promise<Catalog> {
+    return toCatalog(unwrap(await commands.readCatalog(serverId)));
+  }
+
+  async readFiche(serverId: string, ficheId: string): Promise<FicheRead> {
+    return toFicheRead(unwrap(await commands.readFiche(serverId, ficheId)));
+  }
+
+  async openFicheLink(
+    serverId: string,
+    ficheId: string,
+    kind: "agreement" | "token" | "evidence",
+    key: string,
+  ): Promise<void> {
+    unwrap(await commands.openFicheLink(serverId, ficheId, kind, key));
+  }
+
+  async installFiche(
+    serverId: string,
+    request: FicheInstallRequest,
+    adminPassword: string | null,
+  ): Promise<DeployOutcome> {
+    return toDeployOutcome(
+      unwrap(
+        await commands.installFiche(serverId, toFicheInstallRequestDto(request), adminPassword),
+      ),
+    );
   }
 
   async recheckEngine(serverId: string): Promise<EngineInfo> {
