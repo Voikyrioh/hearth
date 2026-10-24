@@ -4,7 +4,7 @@ import type { SimulatedLinkBridge } from "@/link";
 import { useDeployFormStore } from "@/stores/deployForm";
 import { useServiceRightsStore } from "@/stores/serviceRights";
 import { useServicesStore } from "@/stores/services";
-import { typeInto } from "@/test/confirm";
+import { dialogButton, typeInto } from "@/test/confirm";
 import {
   blur,
   boot,
@@ -102,6 +102,35 @@ describe("la garde et les bornes de la machine", () => {
     await ctx.router.push("/servers/forge/services/deployer");
     await settle();
     expect(ctx.router.currentRoute.value.name).toBe("services");
+  });
+
+  it("changer de serveur ignore la réponse encore en vol de l'ancien (même nom, même clé de consultation)", async () => {
+    const { wrapper, bridge, router } = await boot((sim) => {
+      sim.services.seed("salon", [{ key: "h_x", name: "x", origin: "hearth" }]);
+    });
+    const real = bridge.checkDeployment.bind(bridge);
+    let release: (value: Awaited<ReturnType<typeof real>>) => void = () => undefined;
+    let first = true;
+    vi.spyOn(bridge, "checkDeployment").mockImplementation((serverId, input) => {
+      if (!first) return real(serverId, input);
+      first = false;
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    });
+    await fillMinimum(wrapper);
+    await router.push("/servers/salon/services/deployer");
+    await settle();
+    dialogButton("Abandonner")?.click();
+    await settle();
+    expect(router.currentRoute.value.params.id).toBe("salon");
+    await fillMinimum(wrapper);
+    // La réponse tardive de « forge » dit « pris » : elle n'a rien à faire dans le formulaire de « salon ».
+    release({ name: "taken", invalidFields: [], ports: [], disk: null, imagePresent: false });
+    await settle();
+    expect(wrapper.text()).not.toContain("Ce nom est déjà pris");
+    expect(submit(wrapper).attributes("aria-disabled")).toBeUndefined();
+    wrapper.unmount();
   });
 
   it("changer de serveur relit les bornes de la machine : celles de l'ancien ne restent pas", async () => {
@@ -347,9 +376,9 @@ describe("le formulaire (BR-DEPLOY-002 à 007, 014)", () => {
     }
     await flushPromises();
     expect(wrapper.get("[data-env-add]").attributes("aria-disabled")).toBe("true");
-    expect(wrapper.get("[data-env-limit]").text()).toBe("Limite atteinte");
+    expect(wrapper.get("[data-env-limit]").text()).toBe("La limite est atteinte.");
     expect(wrapper.get("[data-port-add]").attributes("aria-disabled")).toBe("true");
-    expect(wrapper.get("[data-ports-limit]").text()).toBe("Limite atteinte");
+    expect(wrapper.get("[data-ports-limit]").text()).toBe("La limite est atteinte.");
     wrapper.unmount();
   });
 
@@ -498,7 +527,7 @@ describe("les ports (BR-DEPLOY-007 à 009, 031)", () => {
     expect(row?.get("[data-port-warning]").text()).toContain(
       "réservé par le service arrêté « arrete »",
     );
-    expect(row?.text()).toContain("À confirmer au lancement");
+    expect(row?.text()).toContain("Vous devrez le confirmer au lancement");
     expect(submit(wrapper).attributes("aria-disabled")).toBeUndefined();
     await openSummary(wrapper);
     expect(document.querySelector("[data-attention='reserved']")?.textContent).toContain("arrete");

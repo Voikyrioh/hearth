@@ -1432,20 +1432,21 @@ export const fr = {
     backToList: "Retour à la liste",
     formLabel: "Formulaire de déploiement",
     counter: "{n} sur {max}",
-    limitReached: "Limite atteinte",
+    limitReached: "La limite est atteinte.",
     // Pourquoi le bouton « Déployer un service » est inactif (BR-ENGINE-014, BR-GRANT-014).
     engineStopped: "Le déploiement est indisponible : le moteur de conteneurs est arrêté.",
     engineDenied:
       "Le déploiement est indisponible : l'agent n'a pas le droit d'utiliser le moteur.",
     engineUnresponsive: "Le déploiement est indisponible : le moteur de conteneurs ne répond pas.",
-    engineNotReady: "Indisponible tant que le moteur de conteneurs n'est pas prêt.",
+    engineNotReady:
+      "Le déploiement est indisponible tant que le moteur de conteneurs n'est pas prêt.",
     fixFields: "Corrigez les champs signalés pour continuer.",
     // Hors spec : le formulaire est vide, aucun champ n'est encore signalé.
     fillRequired: "Renseignez le nom et l'image pour continuer.",
     goToField: "Aller au premier champ à corriger",
     // Hors spec : les bornes de la machine ne sont pas encore lues.
-    capacityPending: "Lecture des limites du serveur en cours.",
-    checking: "Vérification en cours.",
+    capacityPending: "Les limites du serveur sont en cours de lecture.",
+    checking: "La vérification est en cours.",
     indicative:
       "Ces vérifications sont indicatives : le serveur les refait au lancement et a le dernier mot.",
     // Section Général
@@ -1520,8 +1521,8 @@ export const fr = {
       "Les ports sous 1024 sont réservés aux programmes du système : vérifiez que c'est voulu.",
     portSuggested: "Le port libre le plus proche est le {port}.",
     portUseSuggested: "Utiliser le port {port}",
-    portChecking: "Vérification du port…",
-    portToConfirm: "À confirmer au lancement",
+    portChecking: "Le port est en cours de vérification…",
+    portToConfirm: "Vous devrez le confirmer au lancement",
     portExposed: "Ce port sera accessible à tout appareil qui peut joindre votre serveur.",
     // Commande
     commandTitle: "Commande",
@@ -1586,7 +1587,7 @@ export const fr = {
     restartText:
       "Le service redémarre tout seul après un redémarrage du serveur, sauf si vous l'avez arrêté.",
     summaryResources: "Ressources",
-    summaryResourcesText: "Mémoire : {memory}. Processeur : {cpu}.",
+    summaryResourcesText: "Le service reçoit {memory} de mémoire et {cpu} de processeur.",
     attentionTitle: "Points d'attention",
     attentionReserved: "Continuer malgré le port réservé",
     attentionDisk: "Continuer malgré le manque de place",
@@ -1609,9 +1610,9 @@ export const fr = {
     keep: "Garder le déploiement",
     cancelTitle: "Annuler le déploiement de {name} ?",
     background: "Continuer en arrière-plan",
-    tooLate: "Trop tard pour annuler : le service est en cours de création.",
-    cancelling: "Annulation en cours…",
-    cancelled: "Déploiement annulé. Rien n'a été créé.",
+    tooLate: "Il est trop tard pour annuler : le service est en cours de création.",
+    cancelling: "L'annulation est en cours…",
+    cancelled: "Le déploiement a été annulé et rien n'a été créé.",
     cancelNotFound: "Ce déploiement n'existe plus.",
     cancelNotCancellable: "Ce déploiement ne peut plus être annulé.",
     cancelChanged:
@@ -1624,7 +1625,7 @@ export const fr = {
     seeLogs: "Voir les journaux",
     success: "Le service {name} est en marche.",
     // Échecs : aucun service n'est créé (BR-DEPLOY-017, 019, 034)
-    failImageNotFound: "Image introuvable : vérifiez le nom de l'image.",
+    failImageNotFound: "Cette image est introuvable : vérifiez son nom.",
     failTagNotFound: "Cette version n'existe pas pour cette image.",
     failPrivate:
       "Cette image est privée ou n'existe pas. Les images privées ne sont pas prises en charge pour l'instant.",

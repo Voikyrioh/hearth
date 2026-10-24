@@ -421,7 +421,10 @@ describe("la suite de l'opération et l'annulation (BR-DEPLOY-016, 019)", () => 
     });
     const done = await sim.cancelServiceOperation("forge", first.operationId, PASSWORD);
     // Comme l'agent : l'opération PASSE PAR « cancelling », son exécuteur la clôt ensuite « cancelled ».
-    expect(done).toMatchObject({ kind: "done", operation: { status: "cancelling" } });
+    expect(done).toMatchObject({
+      kind: "done",
+      operation: { status: "cancelling", cause: "cancelled_by_account" },
+    });
     expect(sim.services.find("forge", first.serviceKey)?.state).toBe("deploying");
     // Idempotent : une seconde demande pendant l'annulation répond la même chose.
     expect(await sim.cancelServiceOperation("forge", first.operationId, PASSWORD)).toMatchObject({

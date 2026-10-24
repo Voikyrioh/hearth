@@ -136,7 +136,9 @@ describe("PortMappingRow", () => {
       },
     });
     expect(wrapper.get("[data-port-warning]").text()).toContain("réservé par le service arrêté");
-    expect(wrapper.get("[data-port-warning]").text()).toContain("À confirmer au lancement");
+    expect(wrapper.get("[data-port-warning]").text()).toContain(
+      "Vous devrez le confirmer au lancement",
+    );
   });
 
   it("montre l'attente de la réponse du serveur et nomme le bouton de retrait par son rang", async () => {

@@ -152,11 +152,17 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
   }
   // Un autre serveur a d'autres bornes (et d'autres constats) : rien de l'ancien ne reste.
   watch(serverId, () => {
+    clearTimeout(timer);
+    // Une réponse encore en vol de l'ancien serveur ne doit atterrir nulle part, même si la clé de consultation est
+    // la même (deux brouillons de même nom).
+    ticket += 1;
     capacityTicket += 1;
     capacity.value = null;
     capacityFailed.value = false;
     check.value = null;
     checkSent.value = null;
+    checking.value = false;
+    if (inputKey.value !== null && enabled()) void refreshCheck();
   });
   watch(
     [serverId, enabled],

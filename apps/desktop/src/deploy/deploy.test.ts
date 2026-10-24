@@ -456,7 +456,7 @@ describe("l'issue d'un déploiement, dite par sa cause (BR-DEPLOY-017, 019, 020)
   it("chaque cause de récupération a sa phrase, son fragment et son champ", () => {
     const table: [ServiceOperation["cause"], string, "name" | "image" | "tag" | "ports" | null][] =
       [
-        ["image_not_found", "Image introuvable : vérifiez le nom de l'image.", "image"],
+        ["image_not_found", "Cette image est introuvable : vérifiez son nom.", "image"],
         ["tag_not_found", "Cette version n'existe pas pour cette image.", "tag"],
         [
           "image_private_or_missing",
@@ -513,7 +513,7 @@ describe("l'issue d'un déploiement, dite par sa cause (BR-DEPLOY-017, 019, 020)
     });
     expect(
       deployOutcome(op({ status: "cancelled", cause: "cancelled_by_account" }), "web")?.message,
-    ).toBe("Déploiement annulé. Rien n'a été créé.");
+    ).toBe("Le déploiement a été annulé et rien n'a été créé.");
     expect(
       deployOutcome(op({ status: "interrupted", cause: "engine_unavailable" }), "web")?.tone,
     ).toBe("warn");
@@ -610,7 +610,7 @@ describe("le bouton « Déployer un service » et la route (BR-DEPLOY-001, 027, 
       "Vous n'avez plus le droit de gérer les services de ce serveur.",
     );
     expect(submitReason({ ...base, capacityReady: false })?.text).toBe(
-      "Lecture des limites du serveur en cours.",
+      "Les limites du serveur sont en cours de lecture.",
     );
     expect(submitReason({ ...base, pristine: true })?.text).toBe(
       "Renseignez le nom et l'image pour continuer.",

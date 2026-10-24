@@ -61,7 +61,7 @@ describe("le bouton « Annuler le déploiement »", () => {
     expect(button?.getAttribute("aria-disabled")).toBe("true");
     expect(
       tooltipFor({ attributes: (name) => button?.getAttribute(name) ?? undefined }).text(),
-    ).toBe("Annulation en cours…");
+    ).toBe("L'annulation est en cours…");
     expect(document.querySelector("[data-deploy-too-late]")).toBeNull();
   });
 
@@ -69,7 +69,7 @@ describe("le bouton « Annuler le déploiement »", () => {
     const button = dialog(op({ step: "create", cancellable: false }));
     expect(
       tooltipFor({ attributes: (name) => button?.getAttribute(name) ?? undefined }).text(),
-    ).toBe("Trop tard pour annuler : le service est en cours de création.");
+    ).toBe("Il est trop tard pour annuler : le service est en cours de création.");
     expect(document.querySelector("[data-deploy-too-late]")).not.toBeNull();
   });
 });

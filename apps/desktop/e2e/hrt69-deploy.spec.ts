@@ -194,7 +194,7 @@ test("annulation pendant la récupération : rien n'est créé, le formulaire re
   );
   await shoot(confirm, page, "deploy-annulation");
   await confirm.getByRole("button", { name: "Annuler le déploiement" }).click();
-  await expect(page.getByText("Déploiement annulé. Rien n'a été créé.")).toBeVisible();
+  await expect(page.getByText("Le déploiement a été annulé et rien n'a été créé.")).toBeVisible();
   await expect(progress).toHaveCount(0);
   await expect(page.getByLabel("Nom du service")).toHaveValue("web");
   expect(await sim(page, (s) => s.deploys.running("forge").length)).toBe(0);
@@ -211,7 +211,7 @@ test("après la création, l'annulation n'existe plus", async ({ page }) => {
   const progress = page.locator("[data-deploy-progress]");
   await expect(progress.locator("[data-deploy-cancel]")).toHaveAttribute("aria-disabled", "true");
   await expect(progress).toContainText(
-    "Trop tard pour annuler : le service est en cours de création.",
+    "Il est trop tard pour annuler : le service est en cours de création.",
   );
 });
 

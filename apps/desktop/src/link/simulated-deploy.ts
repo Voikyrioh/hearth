@@ -552,7 +552,12 @@ export class SimulatedDeploys {
     }
     if (!dto.cancellable) return { kind: "refused", refusal: { kind: "too_late" } };
     // Comme l'agent : l'opération passe par « cancelling », puis son exécuteur la clôt « cancelled ».
-    this.ops.update(serverId, opId, { status: "cancelling", cancellable: false });
+    // La cause est posée dès cette transition (la clôture ne fait que changer le statut).
+    this.ops.update(serverId, opId, {
+      status: "cancelling",
+      cancellable: false,
+      cause: "cancelled_by_account",
+    });
     const held = this.held.get(serverId)?.get(opId);
     setTimeout(() => {
       if (held) this.services.remove(serverId, held.key);

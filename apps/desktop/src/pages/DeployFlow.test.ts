@@ -89,7 +89,7 @@ describe("le récapitulatif (BR-DEPLOY-015, 031)", () => {
       "Le service redémarre tout seul après un redémarrage du serveur, sauf si vous l'avez arrêté.",
     );
     expect(document.querySelector("[data-sum-resources]")?.textContent).toBe(
-      "Mémoire : 2 Go. Processeur : 4 cœurs.",
+      "Le service reçoit 2 Go de mémoire et 4 cœurs de processeur.",
     );
     // Ni la valeur de la variable, ni la commande n'apparaissent dans la page.
     expect(document.body.textContent).not.toContain(SECRET);
@@ -275,7 +275,7 @@ describe("le lancement et la progression (BR-DEPLOY-016)", () => {
       "true",
     );
     expect(document.querySelector("[data-deploy-too-late]")?.textContent).toBe(
-      "Trop tard pour annuler : le service est en cours de création.",
+      "Il est trop tard pour annuler : le service est en cours de création.",
     );
     expect(stepStates()).toEqual([
       "check:done",
@@ -301,7 +301,7 @@ describe("le lancement et la progression (BR-DEPLOY-016)", () => {
     await confirmTop("Annuler le déploiement");
     await settle();
     expect(bridge.deploys.cancels).toEqual([{ serverId: "forge", opId: operationId }]);
-    expect(toasts()).toContain("Déploiement annulé. Rien n'a été créé.");
+    expect(toasts()).toContain("Le déploiement a été annulé et rien n'a été créé.");
     expect(progress()).toBeNull();
     expect(bridge.services.find("forge", key)).toBeUndefined();
     // Toujours sur le formulaire, rempli.
@@ -326,7 +326,7 @@ describe("le lancement et la progression (BR-DEPLOY-016)", () => {
     await confirmTop("Annuler le déploiement", OWN);
     await settle();
     expect(bridge.deploys.cancels).toHaveLength(1);
-    expect(toasts()).toContain("Déploiement annulé. Rien n'a été créé.");
+    expect(toasts()).toContain("Le déploiement a été annulé et rien n'a été créé.");
     wrapper.unmount();
   });
 
@@ -343,7 +343,9 @@ describe("le lancement et la progression (BR-DEPLOY-016)", () => {
     bridge.deploys.toStep("forge", operationId, "create");
     await confirmTop("Annuler le déploiement");
     await settle();
-    expect(dialogText()).toContain("Trop tard pour annuler : le service est en cours de création.");
+    expect(dialogText()).toContain(
+      "Il est trop tard pour annuler : le service est en cours de création.",
+    );
     expect(progress()).not.toBeNull();
     wrapper.unmount();
   });
@@ -420,7 +422,7 @@ describe("l'état de confiance change entre la lecture et l'envoi", () => {
 
 describe("les échecs : rien n'est créé, le formulaire reste rempli (BR-DEPLOY-017, 019)", () => {
   const causes: [Parameters<SimulatedLinkBridge["deploys"]["fail"]>[2], string][] = [
-    ["image_not_found", "Image introuvable : vérifiez le nom de l'image."],
+    ["image_not_found", "Cette image est introuvable : vérifiez son nom."],
     ["tag_not_found", "Cette version n'existe pas pour cette image."],
     [
       "image_private_or_missing",
@@ -848,7 +850,7 @@ describe("les ressources (BR-DEPLOY-038, BR-RES-037)", () => {
     await fillMinimum(wrapper);
     expect(submit(wrapper).attributes("aria-disabled")).toBe("true");
     expect(wrapper.get("[data-deploy-reason]").text()).toBe(
-      "Lecture des limites du serveur en cours.",
+      "Les limites du serveur sont en cours de lecture.",
     );
     expect(wrapper.get("[data-resources]").text()).toContain(
       "Hearth n'a pas pu lire les limites de ce serveur.",

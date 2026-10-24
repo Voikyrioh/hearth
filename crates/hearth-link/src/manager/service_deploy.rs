@@ -63,13 +63,7 @@ impl LinkManager {
         let body = serde_json::to_value(request)
             .map_err(|_| LinkError::Protocol("consultation illisible".into()))?;
         let answer = self
-            .typed_request(
-                &target,
-                &token,
-                Method::Post,
-                CHECK_PATH.to_owned(),
-                Some(body),
-            )
+            .typed_post(&target, &token, CHECK_PATH.to_owned(), body)
             .await?;
         parse(answer, "constats du déploiement")
     }
