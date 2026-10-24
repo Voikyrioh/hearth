@@ -4,8 +4,9 @@ import { knownStep, REASONS, resultMessage } from "@/agentUpdate/messages";
 import { OUTCOME_KEYS, originOf } from "@/audit/format";
 import bindings from "@/bindings.ts?raw";
 import { portVerdict } from "@/deploy/messages";
+import { kindText, stopTexts } from "@/fiche/messages";
 import { type MessageKey, t } from "@/i18n";
-import type { AuditEntry } from "@/link";
+import type { AuditEntry, QuestionKind, WorldSaved } from "@/link";
 import { type OperationChoice, type OperationKind, toOperation } from "@/link/serviceOps";
 import { endNotice, gapKindOf, gapText, LOG_STATE_KEYS, sourceTag } from "@/logs/view";
 import { ATTACK_STATE_KEYS } from "@/security/messages";
@@ -95,6 +96,21 @@ const SAYS: Record<string, (value: string) => void> = {
     ),
   AgentUpdateReasonDto: (value) => {
     text(REASONS[value as keyof typeof REASONS]);
+  },
+  FicheQuestionKindDto: (value) => {
+    // Le genre d'une question se dit par `kindText` ; un genre inconnu devient « Valeur » et un champ de texte (HRT-102).
+    key(kindText(value as QuestionKind));
+    expect(kindText(value as QuestionKind)).not.toMatch(/^fiche\./);
+  },
+  FicheWorldSavedDto: (value) => {
+    // La façon d'enregistrer le monde à l'arrêt se dit par `stopTexts` ; une valeur inconnue le dit aussi (HRT-102).
+    const lines = stopTexts({
+      graceSeconds: 10,
+      worldSaved: value as WorldSaved,
+      sequenceTested: false,
+    });
+    expect(lines[0], value).toBeTruthy();
+    expect(lines[0]).not.toMatch(/^fiche\./);
   },
   AgentUpdateStepDto: (value) => {
     // Une étape inconnue n'a volontairement pas de libellé : l'écran ne marque aucune étape (« en cours »).
@@ -257,6 +273,8 @@ const NOT_SHOWN: Record<string, string> = {
     "ne s'affiche pas : sert à la règle du mot de passe (inconnu = le plus strict), testé dans simulated-reauth.test.ts et password_need",
   ProtocolDto: "dit par portLabel (testé dans services.test.ts)",
   ScopeDto: "dit par portLabel (testé dans services.test.ts)",
+  FicheStatusDto:
+    "l'état d'une fiche (publiée ou d'essai) ne s'affiche pas : la liste dit seulement « Livrée avec Hearth » (BR-FICHE-003)",
   NameStatusDto:
     "indicatif : seuls « taken » et « being_deleted » font un texte (DeployForm) ; tout autre constat, inconnu compris, ne dit rien et le serveur tranche au lancement (BR-DEPLOY-032)",
 };
