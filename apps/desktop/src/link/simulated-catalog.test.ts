@@ -65,7 +65,7 @@ describe("lire le catalogue", () => {
     const detail = await detailOf(sim, "terraria");
     expect(detail.card).toMatchObject({
       name: "Terraria",
-      version: 2,
+      version: 3,
       status: "preview",
       installable: true,
     });
@@ -226,6 +226,7 @@ describe("refuser comme l'agent, dans l'ordre", () => {
 
   it("LIMITS_REQUIRED et bornes de la machine, comme un déploiement ordinaire", async () => {
     const sim = bridge();
+    sim.deploys.setCapacity("forge", { cpus: 4, memoryBytes: 16 * GIB });
     const detail = await detailOf(sim, "terraria");
     expect(
       await refused(

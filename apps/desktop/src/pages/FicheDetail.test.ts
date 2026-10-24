@@ -10,9 +10,9 @@ const GIB = 1024 ** 3;
 const fiche = (id: string) => `/servers/forge/catalogue/${id}`;
 
 describe("les cartes de la fiche (BR-FICHE-004)", () => {
-  it("montre les neuf cartes de Terraria avec les mots de la spec, et aucune ligne « compte exigé »", async () => {
+  it("montre les huit cartes de Terraria avec les mots de la spec, et aucune ligne « compte exigé »", async () => {
     const { wrapper } = await bootCatalogue(undefined, fiche("terraria"));
-    expect(wrapper.get("[data-fiche-name]").text()).toBe("Terraria");
+    expect(wrapper.get("[data-page-title]").text()).toBe("Terraria");
     const titles = wrapper
       .findAll("[data-fiche-sheet] h2")
       .map((item) => item.text().toLowerCase());
@@ -21,7 +21,6 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
       "ports",
       "dossiers",
       "ressources",
-      "espace disque",
       "téléchargements",
       "arrêt du jeu",
       "questions",
@@ -61,6 +60,10 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
     const world = questions[0]?.text() ?? "";
     expect(world).toContain("Nom du monde");
     expect(world).toContain("La valeur proposée est Monde.");
+    // Un choix se dit par son libellé, jamais par le numéro que la fiche garde (revue UX, constat 4).
+    const choice = questions[4]?.text() ?? "";
+    expect(choice).toMatch(/La valeur proposée est (Petit|Moyen|Grand)\./);
+    expect(choice).not.toMatch(/La valeur proposée est \d/);
     expect(world).toContain("Ce réglage ne pourra plus être changé après la création du monde.");
     // Un secret n'a aucune valeur proposée, un nombre dit ses bornes, un choix dit sa liste.
     expect(questions[1]?.text()).toContain("La fiche ne propose aucune valeur.");
@@ -106,8 +109,33 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
 });
 
 describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
-  it("ne met aucun nombre sur une valeur non vérifiée, et le dit en mots", async () => {
+  it("dit une seule fois que Hearth ne connaît pas les besoins d'un jeu, sans tableau d'absences", async () => {
     const { wrapper } = await bootCatalogue(undefined, fiche("terraria"));
+    expect(wrapper.get("[data-res-none]").text()).toBe(
+      "Hearth ne connaît pas les besoins de ce jeu en processeur, en mémoire ni en espace disque.",
+    );
+    expect(wrapper.get("[data-res-server-has]").text()).toBe(
+      "Votre serveur offre 4 cœurs et 16 Go de mémoire.",
+    );
+    // Ni tableau, ni « Non vérifié » répété, ni carte Espace disque qui le redit.
+    expect(wrapper.find("[data-res-row]").exists()).toBe(false);
+    expect(wrapper.get("[data-fiche-resources]").text()).not.toContain("Non vérifié");
+    expect(wrapper.find("[data-fiche-disk]").exists()).toBe(false);
+    // Le bouton reste actif : rien n'est bloqué par une preuve manquante.
+    expect(wrapper.get("[data-fiche-install]").attributes("aria-disabled")).not.toBe("true");
+    wrapper.unmount();
+  });
+
+  it("ne met aucun nombre sur une valeur non vérifiée quand une autre est connue, et le dit en mots", async () => {
+    const { wrapper } = await bootCatalogue((bridge) => {
+      const detail = bridge.catalog.get("terraria");
+      if (!detail) throw new Error("fiche absente");
+      detail.resources.disk = {
+        installBytes: 2 * GIB,
+        evidence: { kind: "publisher", url: "https://example.org/disque" },
+      };
+      bridge.catalog.put(detail);
+    }, fiche("terraria"));
     const memory = wrapper.get('[data-res-row="memory"]');
     expect(memory.get("[data-res-min]").text()).toBe("Non vérifié");
     expect(memory.get("[data-res-recommended]").text()).toBe("Non vérifié");
@@ -120,7 +148,7 @@ describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
     expect(verdicts).toContain("Processeur nécessaire : non vérifié.");
     // Aucun verdict de couverture sur un chiffre qu'on n'a pas.
     expect(wrapper.find("[data-res-cover]").exists()).toBe(false);
-    expect(wrapper.get("[data-fiche-disk]").text()).toContain("Espace nécessaire : non vérifié");
+    expect(wrapper.get("[data-fiche-disk]").text()).toContain("2 Go nécessaires");
     // Le bouton reste actif : rien n'est bloqué par une preuve manquante.
     expect(wrapper.get("[data-fiche-install]").attributes("aria-disabled")).not.toBe("true");
     wrapper.unmount();

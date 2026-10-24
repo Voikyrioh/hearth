@@ -3,6 +3,7 @@ import { afterEach, beforeEach, vi } from "vitest";
 import App from "@/App.vue";
 import { CHECK_DELAY_MS } from "@/composables/useDeployForm";
 import type { SimulatedLinkBridge } from "@/link";
+import { GIB } from "@/resources";
 import { useDeployFormStore } from "@/stores/deployForm";
 import { useServiceOpsStore } from "@/stores/serviceOps";
 import { useServiceRightsStore } from "@/stores/serviceRights";
@@ -49,6 +50,9 @@ export async function boot(
   ctx.bridge.services.seed(server, [
     { key: "h_db", name: "base", origin: "hearth", state: "running" },
   ]);
+  // Les pages se testent sur une petite machine (4 cœurs, 16 Go) ; la machine d'exemple du simulateur est celle du
+  // tableau de bord (16 cœurs, 64 Go).
+  ctx.bridge.deploys.setCapacity(server, { cpus: 4, memoryBytes: 16 * GIB });
   setup?.(ctx.bridge);
   await ctx.router.push(path);
   await ctx.router.isReady();

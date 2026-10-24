@@ -382,7 +382,7 @@ describe("CreateAccountDialog", () => {
     typeInto(field("Confirme le mot de passe"), GOOD);
     await flushPromises();
     await confirmDialog("Créer", "Mauvais-Mot-De-Passe-1");
-    expect(text()).toContain("Mot de passe actuel incorrect.");
+    expect(text()).toContain("Mot de passe incorrect.");
     expect(wrapper.emitted("close")).toBeUndefined();
     expect(reauthField()?.value).toBe("");
     // Le curseur revient dans la confirmation vidée : le prochain geste est de la retaper.
@@ -438,7 +438,7 @@ describe("PasswordDialog", () => {
     await flushPromises();
     button("Changer le mot de passe")?.click();
     await flushPromises();
-    expect(text()).toContain("Mot de passe actuel incorrect.");
+    expect(text()).toContain("Mot de passe incorrect.");
     expect(wrapper.emitted("close")).toBeUndefined();
     // C18 : seul le mot de passe de confirmation est vidé ; le nouveau mot de passe est gardé.
     expect(reauthField()?.value).toBe("");

@@ -6,6 +6,7 @@ import {
   type ServiceOperationEvent,
   SimulatedLinkBridge,
 } from "@/link";
+import { DISK_USED_PERCENT } from "./simulated-machine";
 
 // L'agent simulé juge un déploiement COMME LE VRAI (`application/deployments.rs`, `domain/services/{deploy,ports}.rs`) :
 // même ordre de refus, mêmes constats de ports, mêmes bornes. Si ce fichier passait avec un simulateur plus indulgent
@@ -129,6 +130,7 @@ describe("accepter un déploiement", () => {
 describe("valider comme l'agent (ordre : forme, deux au plus, nom, ports, disque)", () => {
   it("refuse chaque champ avec son code, jamais sa valeur", async () => {
     const sim = bridge();
+    sim.deploys.setCapacity("forge", { cpus: 4, memoryBytes: 16 * GIB });
     const cases: [Partial<DeployRequest>, string, string][] = [
       [{ name: "a" }, "name", "bad_format"],
       [{ name: "web server" }, "name", "bad_format"],
@@ -367,7 +369,7 @@ describe("la consultation (POST /deployments/check)", () => {
       name: "ok",
       invalidFields: [],
       ports: [],
-      disk: { freeBytes: 200 * GIB, low: false },
+      disk: { freeBytes: 590 * GIB, low: false },
       imagePresent: true,
     });
     expect(JSON.stringify(sim.deploys.checks)).not.toMatch(/value|command|env/);
@@ -514,12 +516,35 @@ describe("la suite de l'opération et l'annulation (BR-DEPLOY-016, 019)", () => 
     ]);
   });
 
+  it("la machine simulée donne les mêmes chiffres que le tableau de bord (revue UX 2026-10-24, constat 3)", async () => {
+    const sim = bridge();
+    const machine = sim.machine.machineOf("forge");
+    const capacity = await sim.readEngineCapacity("forge");
+    expect(capacity?.cpus).toBe(machine.cpu.logicalCores);
+    expect(capacity?.memoryBytes).toBe(machine.memoryTotalBytes);
+    // L'espace libre du disque des images est celui du premier disque du tableau de bord (la part naturelle prise).
+    const answer = await sim.checkDeployment("forge", {
+      name: "web",
+      image: "nginx",
+      tag: null,
+      ports: [],
+    });
+    expect(answer.disk?.freeBytes).toBe(
+      Math.round(((machine.disks[0]?.totalBytes ?? 0) * (100 - DISK_USED_PERCENT)) / 100),
+    );
+    // Un autre serveur, une autre machine : le boîtier « salon » n'a que 4 processeurs et 16 Gio.
+    const salon = await sim.readEngineCapacity("salon");
+    expect(salon?.cpus).toBe(4);
+    expect(salon?.memoryBytes).toBe(16 * GIB);
+  });
+
   it("les bornes de la machine se lisent comme l'agent les donne ; illisibles : null", async () => {
     const sim = bridge();
+    // La machine d'exemple de « forge » est celle du tableau de bord : 16 cœurs, 64 Gio.
     expect(await sim.readEngineCapacity("forge")).toEqual({
-      cpus: 4,
-      memoryBytes: 16 * GIB,
-      reserveBytes: GIB,
+      cpus: 16,
+      memoryBytes: 64 * GIB,
+      reserveBytes: Math.floor((64 * GIB) / 20),
       committedMemoryBytes: 0,
     });
     sim.deploys.setCapacity("forge", { cpus: 8, memoryBytes: 64 * GIB }, 2 * GIB);

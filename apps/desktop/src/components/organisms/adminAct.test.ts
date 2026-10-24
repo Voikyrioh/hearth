@@ -60,6 +60,24 @@ describe("AdminActDialog", () => {
     wrapper.unmount();
   });
 
+  it("says in the dialog which password the simulator expects, and why the button is inactive (revue UX, constats 1 et 13)", async () => {
+    const { wrapper } = await open();
+    await vi.dynamicImportSettled();
+    await flushPromises();
+    // Le pont simulé annonce le mot de passe de son compte : sans lui, la revue ne peut rien lancer.
+    expect(document.querySelector("[data-dev-password]")?.textContent).toContain("Correct-Horse-9");
+    // Rien n'est tapé : la phrase dit ce qui retient le bouton.
+    expect(document.querySelector("[data-dialog-reason]")?.textContent?.trim()).toBe(
+      "Saisissez votre mot de passe pour continuer.",
+    );
+    expect(dialogButton("Fermer")?.getAttribute("aria-disabled")).toBe("true");
+    typeInto(reauthField(), OWN);
+    await flushPromises();
+    expect(document.querySelector("[data-dialog-reason]")).toBeNull();
+    expect(dialogButton("Fermer")?.getAttribute("aria-disabled")).not.toBe("true");
+    wrapper.unmount();
+  });
+
   it("puts the cursor in the password field when the act has no field of its own", async () => {
     const ctx = await startedApp();
     const wrapper = mount(AdminActDialog, {
@@ -99,7 +117,7 @@ describe("AdminActDialog", () => {
     await flushPromises();
     dialogButton("Fermer")?.click();
     await flushPromises();
-    expect(text()).toContain("Mot de passe actuel incorrect.");
+    expect(text()).toContain("Mot de passe incorrect.");
     expect(wrapper.emitted("close")).toBeUndefined();
     for (let attempt = 0; attempt < 5; attempt++) {
       typeInto(reauthField(), "Faux-Mot-De-Passe-1");

@@ -34,17 +34,18 @@ defineEmits<{ suggest: [port: number] }>();
   <div v-if="verdict.error && verdict.suggested !== null" class="notes">
     <Callout tone="info" inline data-port-suggested>
       {{ t("deploy.portSuggested", { port: verdict.suggested }) }}
-      <template #actions>
-        <HButton
-          variant="secondary"
-          size="sm"
-          data-port-use
-          @click="$emit('suggest', verdict.suggested as number)"
-        >
-          {{ t("deploy.portUseSuggested", { port: verdict.suggested }) }}
-        </HButton>
-      </template>
     </Callout>
+    <!-- Hors de l'encart : sur son fond teinté le bord du bouton disparaissait (revue UX 2026-10-24, constat 12). -->
+    <div class="notes__use">
+      <HButton
+        variant="secondary"
+        size="sm"
+        data-port-use
+        @click="$emit('suggest', verdict.suggested as number)"
+      >
+        {{ t("deploy.portUseSuggested", { port: verdict.suggested }) }}
+      </HButton>
+    </div>
   </div>
 </template>
 

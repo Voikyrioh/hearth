@@ -197,3 +197,18 @@ export function memoryNotices(
   }
   return notices;
 }
+
+/**
+ * Hearth ne connaît AUCUN besoin de ce jeu : ni minimum ni recommandé de processeur, de mémoire ou d'espace disque n'a de
+ * preuve. La fiche le dit alors une seule fois, au lieu d'un tableau d'absences (revue UX 2026-10-24, constat 19).
+ */
+export function noFigureAtAll(detail: FicheDetail): boolean {
+  const { cpu, memory, disk } = detail.resources;
+  return (
+    proven(cpu.minMillis, cpu.evidence) === null &&
+    proven(cpu.recommendedMillis, cpu.evidence) === null &&
+    proven(memory.minBytes, memory.evidence) === null &&
+    proven(memory.recommendedBytes, memory.evidence) === null &&
+    proven(disk.installBytes, disk.evidence) === null
+  );
+}

@@ -27,7 +27,7 @@ Une fiche déclare le processeur, la mémoire et l'espace disque qu'elle demande
 
 ## Cas limites
 - La règle « le Catalogue ne montre une fiche que si sa mémoire minimale et son disque ont une preuve » est la règle de PUBLICATION (ADR-0053, HRT-114) : une fiche `unmeasured` reste `preview`. Toute fiche est embarquée dans le binaire, `preview` comprise (la publication n'est pas bloquée par une fiche en cours de preuve) ; une fiche `preview` n'est jamais PROPOSÉE : `domain::catalog::embedded::keep_offered`, la seule porte du catalogue vers l'application, ne garde que les fiches `published` (sauf construction d'essai, HRT-101) (test `the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_digest`). `cargo xtask catalog-check` tourne dans la CI à chaque PR ; son option `--release` (refuser toute fiche `preview`) n'est branchée sur aucune publication aujourd'hui.
-- Une valeur sans preuve n'a aucun nombre à l'écran : la cellule dit « Non vérifié ».
+- Une valeur sans preuve n'a aucun nombre à l'écran : la cellule dit « Non vérifié ». Quand AUCUN chiffre de la fiche n'a de preuve, le client ne montre pas de tableau d'absences : une phrase (« Hearth ne connaît pas les besoins de ce jeu en processeur, en mémoire ni en espace disque. », `fiche/fit.ts::noFigureAtAll`) et la carte « Espace disque » disparaît.
 
 ## Règles liées
 - BR-FICHE-007, BR-FICHE-010, BR-RES-038

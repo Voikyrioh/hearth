@@ -17,6 +17,7 @@ import { useEngineCapacity } from "@/composables/useEngineCapacity";
 import { useFicheDetail } from "@/composables/useFicheDetail";
 import { useFicheLinks } from "@/composables/useFicheLinks";
 import { usePageData } from "@/composables/usePageData";
+import { usePageTitle } from "@/composables/usePageTitle";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { deployDoor } from "@/deploy/availability";
 import { minimumVerdicts, tooSmall } from "@/fiche/fit";
@@ -50,6 +51,8 @@ watch(
 const { detail, phase, reload } = useFicheDetail(serverId, ficheId, () => isConnected.value);
 const agentVersion = useAgentVersion(serverId);
 usePageData(() => detail.value !== null);
+// Un seul titre, celui du jeu (revue UX 2026-10-24, constat 17) : l'en-tête le porte, la page ne le répète pas.
+usePageTitle(() => (detail.value ? safeText(detail.value.card.name) : null));
 
 const entry = computed(() => (server.value ? services.of(server.value.id) : undefined));
 const engine = computed(() => entry.value?.engine ?? null);
@@ -138,7 +141,6 @@ const delivered = computed(() =>
     <template v-else>
       <header class="fiche__head">
         <div class="fiche__title">
-          <h2 class="fiche__name" data-fiche-name>{{ safeText(detail.card.name) }}</h2>
           <p class="fiche__summary">{{ safeText(detail.card.summary) }}</p>
           <p class="fiche__delivered" data-fiche-delivered>{{ delivered }}</p>
         </div>
@@ -239,14 +241,6 @@ const delivered = computed(() =>
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
-}
-
-.fiche__name {
-  margin: 0;
-  font-family: var(--font-title);
-  font-size: var(--fs-h1);
-  font-weight: var(--fw-semibold);
-  overflow-wrap: anywhere;
 }
 
 .fiche__summary {
