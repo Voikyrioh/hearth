@@ -90,6 +90,14 @@ pub trait Harness: Send + Sync {
     fn scratch_dir(&self) -> String;
 }
 
+/// Une variable d'environnement du décor : lue, rognée, `None` si absente ou vide.
+pub fn env_value(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
 /// La variable sentinelle : ni son nom ni sa valeur ne doivent ressortir d'un `Debug`. Le nom est lu
 /// (détail d'un service), la valeur seulement par `env`.
 pub const SENTINEL_NAME: &str = "HEARTH_CONTRACT_SECRET";
@@ -789,10 +797,15 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
     // aucun pourcentage pour un vrai téléchargement. Ces statistiques sont consignées, jamais exigées.
     eprintln!("récupération : {events} évènements, {bytes_done} octets, progression {percents:?}");
     assert!(events > 0, "le flux de récupération n'a rien rapporté");
-    let expected_layer = std::env::var("HEARTH_TEST_PULL_LAYER")
-        .ok()
-        .map(|layer| layer.trim().to_owned())
-        .filter(|layer| !layer.is_empty());
+    // Dépôt autre que celui par défaut (la CI pose `HEARTH_TEST_PULL_REPO`) : la couche attendue est OBLIGATOIRE,
+    // sans quoi le test repasserait au vert sans rien prouver.
+    let expected_layer = env_value("HEARTH_TEST_PULL_LAYER");
+    if env_value("HEARTH_TEST_PULL_REPO").is_some() {
+        assert!(
+            expected_layer.is_some(),
+            "HEARTH_TEST_PULL_REPO est posé : HEARTH_TEST_PULL_LAYER (diff_id de la couche propre) est obligatoire"
+        );
+    }
     if let Some(layer) = &expected_layer {
         let layers = harness
             .image_layers(&image)

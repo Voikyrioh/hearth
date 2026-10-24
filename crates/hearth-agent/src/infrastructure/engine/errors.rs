@@ -66,7 +66,8 @@ pub fn translate_pull(error: &Error) -> EngineError {
 /// dont les textes sont ceux de la distribution (`manifest unknown`, `name unknown`). Les textes du registre
 /// public (`pull access denied`, `repository does not exist`) ne sont plus confirmés par la suite bloquante :
 /// l'étape non bloquante « Textes d'erreur du registre public » du job `engine` de la CI les relit chez ECR
-/// (`continue-on-error`) ; si elle devient rouge, relire cette table.
+/// (`continue-on-error`) ; si elle devient rouge, relire cette table. `name unknown` (`ImageNotFound`) y est
+/// déjà, couvert par le test unitaire de la table plus bas.
 fn pull_text(message: &str) -> Option<EngineError> {
     let text = message.to_lowercase();
     let has = |needles: &[&str]| needles.iter().any(|needle| text.contains(needle));

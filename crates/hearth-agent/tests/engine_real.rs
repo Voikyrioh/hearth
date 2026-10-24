@@ -38,10 +38,7 @@ const PREFIX: &str = "hearth-contract";
 /// cache, HRT-168) pour qu'aucun quota public ne frappe en pleine suite. Ce que le test prouve ne change pas :
 /// un vrai téléchargement par le moteur, depuis un vrai registre.
 fn pull_repo() -> String {
-    std::env::var("HEARTH_TEST_PULL_REPO")
-        .ok()
-        .map(|repo| repo.trim().to_owned())
-        .filter(|repo| !repo.is_empty())
+    engine_contract::env_value("HEARTH_TEST_PULL_REPO")
         .unwrap_or_else(|| "public.ecr.aws/docker/library".to_owned())
 }
 
@@ -164,16 +161,10 @@ impl Harness for RealHarness {
         if !output.status.success() {
             return None;
         }
-        let text = String::from_utf8_lossy(&output.stdout);
-        let layers = text
-            .trim()
-            .trim_start_matches('[')
-            .trim_end_matches(']')
-            .split(',')
-            .map(|layer| layer.trim().trim_matches('"').to_owned())
-            .filter(|layer| !layer.is_empty())
-            .collect();
-        Some(layers)
+        // `null` (rien de lisible) donne `None`, jamais une liste d'un texte « null ».
+        serde_json::from_slice::<Option<Vec<String>>>(&output.stdout)
+            .ok()
+            .flatten()
     }
 
     fn missing_image(&self) -> String {

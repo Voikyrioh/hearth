@@ -10,16 +10,13 @@
 # Pour chaque image : démon, sinon archive `docker save` du dossier de cache, sinon téléchargement par
 # empreinte chez ECR puis, en repli, chez Docker Hub. Un registre en échec est dit comme tel
 # (« REGISTRE ... » avec sa dernière erreur réelle), jamais comme un défaut du code testé.
-# Usage : test-image.sh <dossier-du-cache>. Ne change qu'avec l'image : le cache a pour clé le hash de ce fichier.
+# Usage : test-image.sh <dossier-du-cache>. Les empreintes sont dans `test-image.digests` : le cache a pour clé le hash de CE fichier-là.
 set -euo pipefail
 
 DIR="${1:?dossier du cache}"
 SOURCES=("public.ecr.aws/docker/library" "docker.io/library")
-# nom local | dépôt | empreinte de l'index multi-architecture (relevée le 2026-10-24)
-IMAGES=(
-  "public.ecr.aws/docker/library/busybox:1.36|busybox|sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
-  "public.ecr.aws/docker/library/registry:2|registry|sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
-)
+# nom local | dépôt | empreinte : `test-image.digests` (son hachage est la clé du cache).
+mapfile -t IMAGES < <(grep -v '^#' "$(dirname "$0")/test-image.digests" | grep -v '^$')
 TRANSIENT='toomanyrequests|too many requests|rate exceeded|rate limit|bad gateway|service unavailable|gateway timeout|tls handshake timeout|i/o timeout|context deadline exceeded|connection reset|connection refused|unexpected eof|temporary failure in name resolution'
 
 save_archive() {
@@ -102,6 +99,8 @@ curl -fsS http://localhost:5000/v2/ >/dev/null || { echo "::error::registre loca
 # --- Couche propre ajoutée DIRECTEMENT dans le registre local, par son API HTTP -------------------------------
 # Le démon ne voit jamais cette couche (ni son blob dans son magasin de contenu, qu'un `docker build` + `rmi`
 # laisse en place avec le magasin containerd) : le « pull » du contrat télécharge donc forcément de vrais octets.
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
 REG="http://localhost:5000"
 REPO="busybox"
 TAGNAME="1.36"
@@ -119,16 +118,16 @@ http() {
 
 # push_blob <étape> <fichier> <digest> : POST puis PUT ?digest=.
 push_blob() {
-  local step="$1" file="$2" digest="$3" loc sep
-  loc="$(curl -sS -D - -o /dev/null -X POST "$REG/v2/$REPO/blobs/uploads/" | awk 'tolower($1)=="location:"{print $2}' | tr -d '\r')"
+  local step="$1" file="$2" digest="$3" loc sep code
+  curl -sS -D "$work/post.hdr" -o /dev/null -X POST "$REG/v2/$REPO/blobs/uploads/" || fail "$step" "curl a échoué (POST)"
+  code="$(awk 'NR==1{print $2}' "$work/post.hdr")"
+  [ "$code" = "202" ] || fail "$step" "code HTTP $code au POST (attendu 202)"
+  loc="$(awk 'tolower($1)=="location:"{print $2}' "$work/post.hdr" | tr -d '\r')"
   [ -n "$loc" ] || fail "$step" "pas d'adresse d'envoi (Location) en réponse au POST"
   case "$loc" in http*) ;; *) loc="$REG$loc";; esac
   case "$loc" in *\?*) sep="&";; *) sep="?";; esac
-  http "$step" "201" /tmp/hearth-put.out -X PUT -H 'Content-Type: application/octet-stream' --data-binary "@$file" "$loc${sep}digest=$digest"
+  http "$step" "201" "$work/put.out" -X PUT -H 'Content-Type: application/octet-stream' --data-binary "@$file" "$loc${sep}digest=$digest"
 }
-
-work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
 
 # 1. L'image épinglée (inchangée) dans le registre local ; le démon n'en garde que son tag d'origine.
 docker tag "public.ecr.aws/docker/library/busybox:1.36" "localhost:5000/$REPO:$TAGNAME"
@@ -136,18 +135,18 @@ docker push --quiet "localhost:5000/$REPO:$TAGNAME" >/dev/null
 docker rmi "localhost:5000/$REPO:$TAGNAME" >/dev/null
 
 # 2. Son manifeste (celui de linux/amd64 si c'est un index) et sa config.
-http "lire le manifeste" "200" "$work/m0.json" -H "Accept: $ACCEPT" "$REG/v2/$REPO/manifests/$TAGNAME"
-kind="$(jq -r '.mediaType // empty' "$work/m0.json")"
+http "lire le manifeste" "200" "$work/m0.json" -D "$work/m0.hdr" -H "Accept: $ACCEPT" "$REG/v2/$REPO/manifests/$TAGNAME"
+kind="$(awk 'tolower($1)=="content-type:"{print $2}' "$work/m0.hdr" | tr -d '\r;')"
 case "$kind" in
   *index*|*manifest.list*)
     sub="$(jq -r '[.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64")][0].digest // empty' "$work/m0.json")"
     [ -n "$sub" ] || fail "choisir linux/amd64" "aucun manifeste linux/amd64 dans l'index"
-    http "lire le manifeste amd64" "200" "$work/m.json" -H "Accept: $ACCEPT" "$REG/v2/$REPO/manifests/$sub"
+    http "lire le manifeste amd64" "200" "$work/m.json" -D "$work/m.hdr" -H "Accept: $ACCEPT" "$REG/v2/$REPO/manifests/$sub"
+    kind="$(awk 'tolower($1)=="content-type:"{print $2}' "$work/m.hdr" | tr -d '\r;')"
     ;;
   *) cp "$work/m0.json" "$work/m.json" ;;
 esac
-kind="$(jq -r '.mediaType // empty' "$work/m.json")"
-[ -n "$kind" ] || fail "type du manifeste" "mediaType absent"
+[ -n "$kind" ] || fail "type du manifeste" "Content-Type absent"
 cfg_digest="$(jq -r '.config.digest' "$work/m.json")"
 http "lire la config" "200" "$work/cfg.json" -L "$REG/v2/$REPO/blobs/$cfg_digest"
 
@@ -172,7 +171,7 @@ cfg2_size="$(stat -c %s "$work/cfg2.json")"
 push_blob "envoyer la config" "$work/cfg2.json" "$cfg2_digest"
 jq -c --arg cd "$cfg2_digest" --argjson cs "$cfg2_size" --arg ld "$layer_digest" --argjson ls "$layer_size" --arg lt "$layer_type" \
   '.config.digest = $cd | .config.size = $cs | .layers += [{"mediaType":$lt,"size":$ls,"digest":$ld}]' "$work/m.json" > "$work/m2.json" || fail "manifeste" "jq a échoué"
-http "envoyer le manifeste" "201" /tmp/hearth-put.out -X PUT -H "Content-Type: $kind" --data-binary "@$work/m2.json" "$REG/v2/$REPO/manifests/$TAGNAME"
+http "envoyer le manifeste" "201" "$work/put.out" -X PUT -H "Content-Type: $kind" --data-binary "@$work/m2.json" "$REG/v2/$REPO/manifests/$TAGNAME"
 # Le diff_id de la couche propre : le contrat vérifie qu'elle est dans l'image récupérée par le moteur.
 if [ -n "${GITHUB_ENV:-}" ]; then echo "HEARTH_TEST_PULL_LAYER=$diff_id" >> "$GITHUB_ENV"; fi
 echo "registre local prêt : localhost:5000/$REPO:$TAGNAME (couche propre de 6 Mo posée dans le registre, jamais vue du démon)"

@@ -201,8 +201,10 @@ jobs:
         continue-on-error: true
         run: |
           out="$(docker pull public.ecr.aws/docker/library/hearth-contract-nope:1 2>&1 || true)"; echo "$out"
+          if printf '%s' "$out" | grep -Eiq 'toomanyrequests|rate exceeded|data limit exceeded'; then echo "::notice::registre public limité : textes d'erreur non confirmés cette fois"; exit 0; fi
           printf '%s' "$out" | grep -Eiq 'pull access denied|repository does not exist' || { echo "::warning::texte inattendu (nom inconnu) : mettre à jour la table de translate_pull"; exit 1; }
           out="$(docker pull public.ecr.aws/docker/library/busybox:hearth-no-such-tag 2>&1 || true)"; echo "$out"
+          if printf '%s' "$out" | grep -Eiq 'toomanyrequests|rate exceeded|data limit exceeded'; then echo "::notice::registre public limité : textes d'erreur non confirmés cette fois"; exit 0; fi
           printf '%s' "$out" | grep -Eiq 'manifest unknown|not found' || { echo "::warning::texte inattendu (version inconnue) : mettre à jour la table de translate_pull"; exit 1; }
       # HRT-68 (BR-DEPLOY-021) : un service créé par Hearth (`unless-stopped`) revient quand le démon du runner
       # redémarre (`sudo systemctl restart docker`), sauf celui qu'on a arrêté à la main.
