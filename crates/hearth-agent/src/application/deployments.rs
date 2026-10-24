@@ -1227,13 +1227,21 @@ impl Deployments {
             self.forget_spec(&job.key).await;
             self.remove_folders(job).await;
         }
-        // FIX:01M5NYA5W781YW5NFQ7W1JGR98 L'entrée du journal d'activité est écrite AVANT d'annoncer l'issue :
-        // qui lit l'opération terminée relit un journal complet.
-        self.record(job, &finish).await;
-        // La ligne « Déploiement en cours » part AVANT la clôture : qui lit l'issue ne la voit plus dans la liste.
+        // FIX:01M5NYA5W781YW5NFQ7W1JGR98 Trois temps : la transition est persistée sans annonce, la ligne du
+        // journal d'activité n'est écrite que si elle est acceptée (une annulation arrivée entre-temps la
+        // refuse), puis l'issue est annoncée : qui la lit relit un journal complet.
+        let closed = self
+            .ops
+            .finish_quietly(&job.id, finish.status, finish.cause)
+            .await;
+        match closed {
+            Ok(()) => self.record(job, &finish).await,
+            Err(ref error) => tracing::error!(%error, "déploiement non clos dans le journal"),
+        }
+        // La ligne « Déploiement en cours » part AVANT l'annonce : qui lit l'issue ne la voit plus dans la liste.
         self.registry.end_deploying(&job.key);
-        if let Err(error) = self.ops.finish(&job.id, finish.status, finish.cause).await {
-            tracing::error!(%error, "déploiement non clos dans le journal");
+        if closed.is_ok() {
+            self.ops.announce(&job.id).await;
         }
         // La trace dit l'opération, jamais le service, l'image ni une variable.
         tracing::info!(

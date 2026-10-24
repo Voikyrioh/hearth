@@ -744,7 +744,13 @@ impl ServiceLifecycle {
     /// Clôt l'opération, la consigne au journal d'activité et aux traces, puis lance la surveillance qui suit.
     /// La trace dit l'opération, jamais le service : sa clé porte le nom d'une unité (`u_`).
     async fn settle(self: &Arc<Self>, job: &Job, finish: Finish, took: Duration) {
-        if let Err(error) = self.ops.finish(&job.id, finish.status, finish.cause).await {
+        // FIX:01M5NYA5W781YW5NFQ7W1JGR98 Transition persistée sans annonce, ligne du journal d'activité si elle
+        // est acceptée, puis annonce : qui lit l'issue relit un journal complet.
+        let closed = self
+            .ops
+            .finish_quietly(&job.id, finish.status, finish.cause)
+            .await;
+        if let Err(error) = &closed {
             tracing::error!(%error, "action de service non close dans le journal");
         }
         tracing::info!(
@@ -756,7 +762,10 @@ impl ServiceLifecycle {
             duration_ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
             "action de cycle de vie terminée"
         );
-        self.record(job, finish.status, finish.cause).await;
+        if closed.is_ok() {
+            self.record(job, finish.status, finish.cause).await;
+            self.ops.announce(&job.id).await;
+        }
         if let Some(watch) = finish.watch {
             self.watch_later(job, watch);
         }
@@ -843,7 +852,8 @@ impl ServiceLifecycle {
                 continue;
             };
             // Une cause n'en remplace pas une autre : la surveillance ne dit rien d'une action forcée.
-            match self.ops.annotate(id, cause).await {
+            // FIX:01M5NYA5W781YW5NFQ7W1JGR98 Cause posée sans annonce, ligne du journal, puis annonce.
+            match self.ops.annotate_quietly(id, cause).await {
                 Ok(true) => {
                     if let Some(service) = ClientName::parse(name) {
                         self.sink
@@ -858,6 +868,7 @@ impl ServiceLifecycle {
                             )
                             .await;
                     }
+                    self.ops.announce(id).await;
                 }
                 Ok(false) => {}
                 Err(error) => tracing::warn!(%error, "constat de surveillance non noté"),

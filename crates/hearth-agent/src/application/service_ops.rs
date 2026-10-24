@@ -549,18 +549,44 @@ impl ServiceOps {
     /// Pose, après coup, une cause sur une réussite qui n'en a pas (HRT-64, BR-LIFE-005, BR-LIFE-011) et
     /// prévient les abonnés. `false` : rien n'a changé.
     pub async fn annotate(&self, id: &str, cause: Cause) -> Result<bool, OpError> {
-        let written = self
-            .journal
-            .annotate_cause(id, cause, self.clock.now())
-            .await?;
+        let written = self.annotate_quietly(id, cause).await?;
         if written {
             self.publish(id).await;
         }
         Ok(written)
     }
 
+    /// Comme [`Self::annotate`], mais SANS prévenir les abonnés : l'appelant écrit d'abord la ligne du journal
+    /// d'activité, puis appelle [`Self::announce`] (HRT-101). `false` : rien n'a changé, rien à annoncer.
+    pub async fn annotate_quietly(&self, id: &str, cause: Cause) -> Result<bool, OpError> {
+        Ok(self
+            .journal
+            .annotate_cause(id, cause, self.clock.now())
+            .await?)
+    }
+
+    /// Annonce aux abonnés l'état courant d'une opération déjà persistée (après [`Self::finish_quietly`] ou
+    /// [`Self::annotate_quietly`]).
+    pub async fn announce(&self, id: &str) {
+        self.publish(id).await;
+    }
+
     /// Clôt l'opération dans un statut terminal et rend ses verrous.
     pub async fn finish(
+        &self,
+        id: &str,
+        to: OpStatus,
+        cause: Option<Cause>,
+    ) -> Result<(), OpError> {
+        self.finish_quietly(id, to, cause).await?;
+        self.publish(id).await;
+        Ok(())
+    }
+
+    /// Comme [`Self::finish`], mais la transition est seulement persistée (et les verrous rendus) : l'issue
+    /// n'est pas annoncée. L'appelant écrit la ligne du journal d'activité, puis appelle [`Self::announce`] :
+    /// qui lit l'issue relit un journal complet (HRT-101). Une transition refusée n'annonce rien.
+    pub async fn finish_quietly(
         &self,
         id: &str,
         to: OpStatus,
@@ -577,7 +603,7 @@ impl ServiceOps {
         if !op.status.can_become(to) {
             return Err(OpError::IllegalTransition);
         }
-        self.move_to(id, op.status, to, cause).await
+        self.persist_move(id, op.status, to, cause).await
     }
 
     /// Demande une décision au compte : `running` → `awaiting_decision` avec les choix offerts.
@@ -684,6 +710,19 @@ impl ServiceOps {
         to: OpStatus,
         cause: Option<Cause>,
     ) -> Result<(), OpError> {
+        self.persist_move(id, from, to, cause).await?;
+        self.publish(id).await;
+        Ok(())
+    }
+
+    /// La transition persistée et les verrous rendus, sans annonce.
+    async fn persist_move(
+        &self,
+        id: &str,
+        from: OpStatus,
+        to: OpStatus,
+        cause: Option<Cause>,
+    ) -> Result<(), OpError> {
         if !from.can_become(to) {
             return Err(OpError::IllegalTransition);
         }
@@ -693,7 +732,6 @@ impl ServiceOps {
         if to.is_terminal() {
             self.locks.with(|table| table.release_all_of(id));
         }
-        self.publish(id).await;
         Ok(())
     }
 
