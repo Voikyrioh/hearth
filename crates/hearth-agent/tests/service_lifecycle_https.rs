@@ -729,14 +729,18 @@ async fn a_service_that_stops_right_after_its_start_is_noted_on_the_finished_act
         assert!(started.elapsed() < Duration::from_secs(5), "{operation:?}");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let journal = b.journal().await;
-    assert!(
-        journal
-            .iter()
-            .any(|row| row.1 == "failed"
-                && row.3.as_deref() == Some("arrêté juste après le démarrage")),
-        "{journal:?}"
-    );
+    // FIX:01M5NYA5W781YW5NFQ7W1JGR98 La surveillance note la cause, PUIS écrit au journal : on attend la ligne.
+    let started = Instant::now();
+    loop {
+        let journal = b.journal().await;
+        if journal.iter().any(|row| {
+            row.1 == "failed" && row.3.as_deref() == Some("arrêté juste après le démarrage")
+        }) {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(5), "{journal:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 #[tokio::test]

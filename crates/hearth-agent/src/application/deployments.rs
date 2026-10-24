@@ -1227,6 +1227,9 @@ impl Deployments {
             self.forget_spec(&job.key).await;
             self.remove_folders(job).await;
         }
+        // FIX:01M5NYA5W781YW5NFQ7W1JGR98 L'entrée du journal d'activité est écrite AVANT d'annoncer l'issue :
+        // qui lit l'opération terminée relit un journal complet.
+        self.record(job, &finish).await;
         // La ligne « Déploiement en cours » part AVANT la clôture : qui lit l'issue ne la voit plus dans la liste.
         self.registry.end_deploying(&job.key);
         if let Err(error) = self.ops.finish(&job.id, finish.status, finish.cause).await {
@@ -1240,7 +1243,6 @@ impl Deployments {
             duration_ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
             "déploiement terminé"
         );
-        self.record(job, &finish).await;
     }
 
     /// Une entrée au journal d'activité (`BR-DEPLOY-025`) : le compte, le service, l'image et la version, les
