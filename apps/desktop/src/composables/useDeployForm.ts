@@ -1,7 +1,7 @@
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { useDeployCheck } from "@/composables/useDeployCheck";
 import { useEngineCapacity } from "@/composables/useEngineCapacity";
-import { type Draft, type EnvRow, movedVersion, type PortRow } from "@/deploy/draft";
+import { type Draft, type EnvRow, isFilled, movedVersion, type PortRow } from "@/deploy/draft";
 import { type FormIssues, formIssues, readablePorts, toCheckInput } from "@/deploy/form";
 import { type PortVerdict, portVerdict } from "@/deploy/messages";
 import type { DeployProtocol } from "@/link";
@@ -29,7 +29,20 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
   // ── Les champs quittés ───────────────────────────────────────────────────────────────────────
   const touched = reactive<Record<string, boolean>>({});
   const submitted = ref(false);
+  /** Une saisie a eu lieu depuis l'ouverture du formulaire (même effacée ensuite). */
+  const started = ref(false);
+  watch(
+    () => isFilled(draft.value),
+    (filled) => {
+      if (filled) started.value = true;
+    },
+    { immediate: true, flush: "sync" },
+  );
   function touch(key: string): void {
+    // Un formulaire vierge ne se plaint de rien en quittant un champ : l'erreur « requis » qui apparaîtrait sous le nom
+    // décalerait les boutons sous le clic en cours (« Ajouter un port » perdu au premier essai). Elle viendra à la
+    // première saisie ou à « Déployer ».
+    if (!started.value) return;
     touched[key] = true;
   }
   function touchAll(): void {
@@ -41,6 +54,7 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
   }
   function resetTouched(): void {
     submitted.value = false;
+    started.value = isFilled(draft.value);
     for (const key of Object.keys(touched)) delete touched[key];
   }
 

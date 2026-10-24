@@ -7,3 +7,4 @@ Une ressource à régler (HRT-146, BR-RES-004) : un curseur discret (`input[type
 - Props : `kind` (`memory` | `cpu`), `stops` (crans permis, octets ou millicœurs), `modelValue` (`number | null`), `disabled`
 - Événements et slots : `update:modelValue` ; slot `hint` (phrases sous le curseur)
 - Notes : Ne connaît ni la machine ni la fiche : les crans viennent de `resources/scale.ts`. Tests : `components/organisms/resourceSliders.test.ts`, `resources/resources.test.ts`.
+- Revue UX du 2026-10-24 (constat 23) : le champ de valeur exacte s'appelle « Valeur exacte » (une ligne, le titre « Mémoire » ou « Processeur » est juste au-dessus).

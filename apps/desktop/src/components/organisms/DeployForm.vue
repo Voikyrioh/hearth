@@ -141,6 +141,7 @@ defineExpose({ focusField });
           :model-value="draft.image"
           :label="t('deploy.imageLabel')"
           :placeholder="t('deploy.imagePlaceholder')"
+          :help="t('deploy.imageHelp')"
           :error="imageError"
           mono
           @update:model-value="draft.image = $event"

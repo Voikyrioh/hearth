@@ -10,14 +10,15 @@ import type { FicheCard } from "@/link";
 // {version} » et « Voir la fiche ». Rien d'autre : pas d'illustration (aucun visuel sans droit d'usage établi), pas
 // de bouton « Installer » (un seul chemin, depuis la fiche), pas de mention de compte (BR-FICHE-004). Un jeu sans
 // serveur pour ce système est atténué et le dit. Les textes viennent de la fiche : ils sont montrés tels quels, sans
-// jamais être interprétés.
+// jamais être interprétés. Toute la carte ouvre la fiche (revue UX 2026-10-24, constat 21) ; « Voir la fiche » reste le
+// point d'entrée du clavier.
 const props = defineProps<{
   card: FicheCard;
   /** La version de l'agent qui livre la fiche ; `null` tant qu'elle n'est pas connue. */
   agentVersion: string | null;
 }>();
 
-defineEmits<{ open: [] }>();
+const emit = defineEmits<{ open: [] }>();
 
 const name = computed(() => safeText(props.card.name));
 const delivered = computed(() =>
@@ -28,7 +29,12 @@ const delivered = computed(() =>
 </script>
 
 <template>
-  <article :class="['fcard', { 'fcard--dim': !card.installable }]" data-fiche-card :data-fiche="card.id">
+  <article
+    :class="['fcard', { 'fcard--dim': !card.installable }]"
+    data-fiche-card
+    :data-fiche="card.id"
+    @click="emit('open')"
+  >
     <div class="fcard__text">
       <h2 class="fcard__name">{{ name }}</h2>
       <p class="fcard__summary">{{ safeText(card.summary) }}</p>
@@ -44,7 +50,7 @@ const delivered = computed(() =>
       variant="secondary"
       data-fiche-open
       :aria-label="t('catalogue.seeLabel', { name })"
-      @click="$emit('open')"
+      @click.stop="emit('open')"
     >
       {{ t("catalogue.see") }}
     </HButton>
@@ -61,6 +67,11 @@ const delivered = computed(() =>
   border-radius: var(--radius-card);
   background: var(--card);
   box-shadow: var(--card-edge);
+  cursor: pointer;
+}
+
+.fcard:hover {
+  background: var(--card-2);
 }
 
 .fcard--dim .fcard__text {

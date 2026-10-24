@@ -53,7 +53,7 @@ describe("la page (BR-FICHE-014, 015)", () => {
   it("s'ouvre sur « Réponses » avec le nom proposé par la fiche et les valeurs que la fiche propose", async () => {
     const { wrapper, router } = await bootCatalogue(undefined, installPath("terraria"));
     expect(router.currentRoute.value.name).toBe("fiche-install");
-    expect(wrapper.get("[data-install-title]").text()).toBe("Installer Terraria");
+    expect(wrapper.get("[data-page-title]").text()).toBe("Installer Terraria");
     expect(wrapper.get(".nav__item.router-link-active").text()).toBe("Catalogue");
     const steps = wrapper.findAll(".trail__step").map((item) => item.text());
     expect(steps[0]).toContain("Réponses");
@@ -106,12 +106,14 @@ describe("la page (BR-FICHE-014, 015)", () => {
     expect(frozen[0]).toContain(
       "Ce réglage ne pourra plus être changé après la création du monde.",
     );
-    expect(wrapper.get('[data-question="world_name"]').text()).toContain(
-      "Lettres, chiffres, tirets et soulignés seulement.",
-    );
-    expect(wrapper.get('[data-question="max_players"]').text()).toContain(
-      "Le nombre est compris entre 1 et 255.",
-    );
+    // Le jeu de caractères et les bornes sont dits UNE fois : par le client, d'après la donnée ; la fiche ne les redit
+    // pas dans son aide (revue UX, constat 18).
+    const worldHelp = wrapper.get('[data-question="world_name"]').text();
+    expect(worldHelp.match(/lettres, chiffres/gi)).toHaveLength(1);
+    expect(worldHelp).toContain("Lettres, chiffres, tirets et soulignés seulement.");
+    const playersHelp = wrapper.get('[data-question="max_players"]').text();
+    expect(playersHelp).toContain("Le nombre est compris entre 1 et 255.");
+    expect(playersHelp).not.toContain("de 1 à 255");
     wrapper.unmount();
   });
 
@@ -144,7 +146,7 @@ describe("les défauts de forme, jugés sur la fiche", () => {
     expect(wrapper.get('[data-question="world_name"]').text()).not.toContain("ne sait pas lire");
     await questionInput(wrapper, "world_name").trigger("blur");
     expect(wrapper.get('[data-question="world_name"]').text()).toContain(
-      "Ce texte contient un caractère que ce jeu ne sait pas lire :  ",
+      "Ce texte contient un caractère que ce jeu ne sait pas lire : l'espace. Essayez « Mon_monde ».",
     );
     expect(next(wrapper).attributes("aria-disabled")).toBe("true");
     expect(reasonText(wrapper)).toBe("Corrigez les champs signalés pour continuer.");
@@ -425,7 +427,7 @@ describe("lancer, suivre, terminer (BR-FICHE-013, 027, 034)", () => {
     expect(received).toMatchObject({
       name: "mon-terraria",
       fiche: "terraria",
-      version: 2,
+      version: 3,
       variant: null,
       agreements: [],
       ports: [{ id: "game", hostPort: 7777 }],
@@ -706,7 +708,32 @@ describe("le contrat de licence (BR-FICHE-026, 058)", () => {
   });
 });
 
+describe("l'arrivée sur la page (revue UX 2026-10-24, constat 16)", () => {
+  it("met le curseur dans le nom du service, premier champ, comme le déploiement", async () => {
+    const { wrapper } = await bootCatalogue(undefined, installPath("terraria"));
+    await settle();
+    expect(document.activeElement).toBe(wrapper.get('[data-field="name"] input').element);
+    wrapper.unmount();
+  });
+});
+
 describe("« Installer avec les valeurs proposées » (BR-FICHE-039)", () => {
+  it("ramène à la fiche, d'où l'on vient, quand on ferme le récapitulatif sans rien avoir saisi (revue UX, constat 20)", async () => {
+    const { wrapper, router } = await bootCatalogue(
+      undefined,
+      installPath("terraria", "?proposees=1"),
+    );
+    await settle();
+    expect(dialogText()).toContain("Vérifiez avant de lancer");
+    const back = [...document.querySelectorAll<HTMLElement>("dialog button")].find(
+      (button) => button.textContent?.trim() === "Retour",
+    );
+    back?.click();
+    await settle();
+    expect(router.currentRoute.value.name).toBe("fiche");
+    wrapper.unmount();
+  });
+
   it("ouvre aussitôt la fenêtre « Vérifiez avant de lancer » quand tout est valable", async () => {
     const { wrapper } = await bootCatalogue(undefined, installPath("terraria", "?proposees=1"));
     await settle();

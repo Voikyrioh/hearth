@@ -1,8 +1,8 @@
 {
   "fiche": {
-    "digest": "445855f4c44590913b08656a3a2fd5af8b8e43e90c7348d72182e0338b85dee5",
+    "digest": "15cae650aa3b49c2deccffa3a1f1b5be26543051a372cb613479599b14302f2b",
     "id": "terraria",
-    "version": 2
+    "version": 3
   },
   "settings": [
     {
@@ -13,7 +13,7 @@
         "charset": "file_stem",
         "choices": [],
         "frozen_after_creation": true,
-        "help": "Le nom du monde que le jeu crée au premier lancement. Il nomme aussi le fichier du monde : lettres, chiffres, tiret et souligné seulement. Il ne peut plus changer une fois le monde créé.",
+        "help": "Le nom du monde que le jeu crée au premier lancement. Il nomme aussi le fichier du monde. Il ne peut plus changer une fois le monde créé.",
         "id": "world_name",
         "kind": "text",
         "label": "Nom du monde",
@@ -125,7 +125,7 @@
       "question": {
         "choices": [],
         "frozen_after_creation": false,
-        "help": "Combien de joueurs peuvent être connectés en même temps, de 1 à 255. Plus il y en a, plus le serveur travaille : surveillez l'onglet Ressources.",
+        "help": "Combien de joueurs peuvent être connectés en même temps. Plus il y en a, plus le serveur travaille : surveillez la mémoire et le processeur du service.",
         "id": "max_players",
         "kind": "int",
         "label": "Nombre de joueurs",
@@ -425,7 +425,7 @@
           }
         ],
         "frozen_after_creation": false,
-        "help": "La priorité que le système donne au programme du serveur. Son effet sous Linux, dans un service, n'est pas vérifié : pour limiter le serveur, utilisez plutôt les limites de l'onglet Ressources.",
+        "help": "La priorité que le système donne au programme du serveur. Son effet sous Linux, dans un service, n'est pas vérifié : pour limiter le serveur, utilisez plutôt les limites de mémoire et de processeur du service.",
         "id": "priority",
         "kind": "choice",
         "label": "Priorité du serveur",

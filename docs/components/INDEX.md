@@ -88,6 +88,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`ServerEditForm`](./ServerEditForm.md) — Modification d'un serveur (nom, couleur, adresse).
 - [`ServerRow`](./ServerRow.md) — Ligne du carnet de serveurs.
 - [`DevLinkPanel`](./DevLinkPanel.md) — Panneau de simulation (développement seulement).
+- [`DevPasswordHint`](./DevPasswordHint.md) — Mot de passe du compte simulé sous le champ de confirmation (développement seulement).
 - [`DevActionPanel`](./DevActionPanel.md) — Bouton d'action de développement (`useServerAction`, `needs-link`).
 - [`AccountTable`](./AccountTable.md) — Tableau des comptes et actions de ligne.
 - [`AccountDetailDialog`](./AccountDetailDialog.md) — Détail d'un compte en lecture seule (droit de gérer les services).

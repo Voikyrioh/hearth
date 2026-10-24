@@ -13,6 +13,7 @@ import { formatCpu, formatMemory } from "@/resources";
 import { formatSize } from "@/serviceOps/messages";
 import type { AnswerIssue } from "./answers";
 import type { AttentionPoint } from "./attention";
+import { characterName } from "./character";
 import type { Coverage, DiskVerdict, Lack, MemoryNotice, MinimumVerdict } from "./fit";
 import { type ProofKind, proofOf } from "./proof";
 
@@ -82,6 +83,19 @@ export function folderRoleText(role: string): string {
   return t(FOLDER_ROLES[role as keyof typeof FOLDER_ROLES] ?? "fiche.folderRoleOther");
 }
 
+/**
+ * Une valeur de question telle qu'on la dit : un choix par son libellé (« Maître »), un oui-non par « Oui » ou « Non »,
+ * jamais par le numéro ou le mot que la fiche garde en interne (revue UX 2026-10-24, constat 4). Une valeur qui n'est
+ * aucun des choix se dit telle quelle.
+ */
+export function valueLabel(question: FicheQuestion, value: string): string {
+  if (question.kind === "bool") {
+    return value === question.choices[0]?.value ? t("fiche.yes") : t("fiche.no");
+  }
+  const choice = question.choices.find((item) => item.value === value);
+  return safeText(choice ? choice.label : value);
+}
+
 /** Le genre d'une question en mots (le champ lui-même se rend d'après le genre, pas d'après ce texte). */
 export function kindText(kind: QuestionKind): string {
   return t(`fiche.kind.${kind}` as MessageKey);
@@ -106,6 +120,16 @@ export function charsetHint(question: FicheQuestion): string | null {
   return null;
 }
 
+// FIX:01M5PYVP4V48YGH36AYS43Q31V
+/** Le caractère refusé dit en mots, puis la correction si on en connaît une (constat 5 de la revue UX du 24/10). */
+function charsetText(character: string | null, suggestion: string | null): string {
+  if (character === null) return t("fiche.answerIssue.charsetBare");
+  const head = t("fiche.answerIssue.charset", { name: characterName(character) });
+  return suggestion === null
+    ? head
+    : `${head} ${t("fiche.answerIssue.charsetSuggest", { suggestion: safeText(suggestion) })}`;
+}
+
 /** La phrase d'un défaut de réponse. Le caractère refusé est cité, jamais la valeur. */
 export function answerIssueText(issue: AnswerIssue): string {
   switch (issue.code) {
@@ -118,9 +142,7 @@ export function answerIssueText(issue: AnswerIssue): string {
     case "multiline":
       return t("fiche.answerIssue.multiline");
     case "charset":
-      return issue.character === null
-        ? t("fiche.answerIssue.charsetBare")
-        : t("fiche.answerIssue.charset", { character: issue.character });
+      return charsetText(issue.character, issue.suggestion ?? null);
     case "not_integer":
       return t("fiche.answerIssue.notInteger");
     case "out_of_range":
@@ -318,11 +340,7 @@ export function ficheRefusalText(
           ? t("fiche.refusals.answerUnknown")
           : t("fiche.refusals.answer", { label: safeText(label) });
       if (refused.reason === "charset") {
-        const detailText =
-          refused.character === null
-            ? t("fiche.answerIssue.charsetBare")
-            : t("fiche.answerIssue.charset", { character: refused.character });
-        return `${head} ${detailText}`;
+        return `${head} ${charsetText(refused.character, null)}`;
       }
       return `${head} ${t(SETTING_REASONS[refused.reason] ?? "fiche.refusals.other")}`;
     }

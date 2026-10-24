@@ -127,6 +127,8 @@ export function toSetting(item: WireSetting): FicheSetting {
 
 /** L'empreinte de la fiche de la fixture : celle de `GET /catalog/terraria` de la construction qui l'a générée. */
 export const TERRARIA_DIGEST = fixture.fiche.digest;
+/** La version de la fiche de la fixture. */
+export const TERRARIA_VERSION = fixture.fiche.version;
 export const TERRARIA_THEMES: FicheTheme[] = fixture.themes.map((theme) => ({ ...theme }));
 export const TERRARIA_SETTINGS: FicheSetting[] = fixture.settings.map(toSetting);
 

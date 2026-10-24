@@ -112,9 +112,9 @@ describe("ResourceSliders (HRT-146)", () => {
 
   it("says Hearth has no figure for an application without a card, and what it proposes", () => {
     const wrapper = open();
-    expect(wrapper.text()).toContain("Hearth n'a pas de chiffre pour ce programme.");
+    expect(wrapper.text()).not.toContain("n'a pas de chiffre pour ce programme");
     expect(wrapper.text()).toContain(
-      "Hearth propose 2 Go parce qu'il ne connaît pas cette application.",
+      "Hearth ne connaît pas cette application et propose 2 Go. Montez ce chiffre si elle en demande plus.",
     );
   });
 

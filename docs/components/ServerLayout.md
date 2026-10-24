@@ -12,3 +12,4 @@ Gabarit d'un serveur (`/servers/:id`) : `ServerNav` à gauche ; à droite `AppHe
 - HRT-26 : pose, sous le bandeau hors ligne et HORS de la surface périmée, `AttackModeBanner` (mode actif ou suspendu) puis `SecurityAlertBanner` (alerte), et rend l'unique `AttackModeDialog` (état `security.dialog`). Le dernier état connu reste affiché quand le lien tombe (« Dernier état connu à {heure} »).
 - HRT-42 : la colonne de contenu est bornée à `--page-max` (1 760 px) et alignée à gauche. FIX:01M4EDC0FVT0ZHGASFEMWX7066. Décision de Claude, à confirmer par Voiky (conception grand écran, décisions 3 à 6).
 - Seconde passe (D3) : sur Comptes, la colonne entière (en-tête compris) est bornée à `--table-max`. FIX:01M4EHYNXY72JB4KW0994J85AB.
+- Revue UX du 2026-10-24 (constat 17) : `providePageTitle()` donne à la page le moyen de dire le titre de l'en-tête (`usePageTitle`) ; sans elle, le titre de la route (`meta.title`).

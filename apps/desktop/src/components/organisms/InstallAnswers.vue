@@ -68,6 +68,12 @@ const hasOptional = (port: FichePort): boolean =>
   draft.value?.optionalPorts.includes(port.id) ?? false;
 
 defineExpose({
+  /** Met le curseur dans le nom du service, premier champ de la page. */
+  focusName(): void {
+    document
+      .querySelector<HTMLInputElement>('[data-install-answers] [data-field="name"] input')
+      ?.focus();
+  },
   /** Met le curseur sur le champ d'une question (un refus de l'agent la désigne). */
   focusQuestion(id: string): HTMLElement | null {
     const root = document.querySelector<HTMLElement>(`[data-question="${CSS.escape(id)}"]`);

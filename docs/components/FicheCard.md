@@ -7,3 +7,4 @@ Une fiche dans la liste du Catalogue (HRT-102, BR-FICHE-003) : le nom du jeu, un
 - Props : `card` (`FicheCard`), `agentVersion` (`string | null` : sans version, « Livrée avec Hearth »)
 - Événements et slots : `open`
 - Notes : Posé par `pages/Catalogue.vue`. Tests : `pages/Catalogue.test.ts`.
+- Revue UX du 2026-10-24 (constat 21) : toute la carte ouvre la fiche (curseur main, fond au survol) ; « Voir la fiche » reste le point d'entrée du clavier et ne déclenche pas l'ouverture deux fois.

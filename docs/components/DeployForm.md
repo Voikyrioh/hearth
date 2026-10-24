@@ -7,3 +7,4 @@ Le formulaire « Déployer un service » (HRT-69, BR-DEPLOY-002 à 009, 014, 031
 - Props : `form` (`DeployFormState`), `refusal`, `reason` (`{ text, fixable }`), `busy`
 - Événements : `submit`. Expose `focusField(field)`.
 - Notes : posé par `pages/DeployService.vue`. Tests : `pages/DeployService.test.ts`, `e2e/hrt69-deploy.spec.ts`.
+- Revue UX du 2026-10-24 (constat 22) : le champ Image montre l'exemple court « nginx » et explique le nom complet en aide dessous (« registre/organisation/nom », registre et organisation facultatifs).

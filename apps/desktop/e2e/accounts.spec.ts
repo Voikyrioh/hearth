@@ -301,7 +301,7 @@ test("section personnelle des réglages : tous les rôles changent leur mot de p
   await dialog(page).getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);
   await dialog(page).getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Changer le mot de passe" }).click();
-  await expect(dialog(page).getByText("Mot de passe actuel incorrect.")).toBeVisible();
+  await expect(dialog(page).getByText("Mot de passe incorrect.")).toBeVisible();
   await expect(dialog(page).getByLabel("Ancien mot de passe")).toHaveValue("");
   await dialog(page).getByLabel("Ancien mot de passe").fill("Correct-Horse-9");
   await dialog(page).getByLabel("Nouveau mot de passe", { exact: true }).fill(GOOD);

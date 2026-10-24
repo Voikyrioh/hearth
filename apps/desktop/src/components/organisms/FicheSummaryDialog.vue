@@ -24,6 +24,7 @@ import {
   proofLabel,
   registryText,
   stopTexts,
+  valueLabel,
 } from "@/fiche/messages";
 import { forVariant, publishedPorts, readableHostPorts } from "@/fiche/ports";
 import { proofOf } from "@/fiche/proof";
@@ -112,14 +113,7 @@ function answerOf(question: FicheQuestion, proposed: boolean): { text: string; p
     return { text: value === "" ? t("fiche.sumEmptyAnswer") : t("fiche.secretMask"), proposed };
   }
   if (value === "") return { text: t("fiche.sumEmptyAnswer"), proposed };
-  if (question.kind === "bool") {
-    return {
-      text: value === question.choices[0]?.value ? t("fiche.yes") : t("fiche.no"),
-      proposed,
-    };
-  }
-  const choice = question.choices.find((item) => item.value === value);
-  return { text: safeText(choice ? choice.label : value), proposed };
+  return { text: valueLabel(question, value), proposed };
 }
 const changed = computed(() => changedAnswers(props.questions, props.draft.answers));
 const changedMore = computed(() => changedExtras(props.extras ?? [], props.draft.answers));

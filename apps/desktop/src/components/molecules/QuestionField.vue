@@ -43,6 +43,7 @@ const emit = defineEmits<{
 const label = computed(() => safeText(props.question.label));
 const help = computed(() => {
   const parts = [safeText(props.question.help)];
+  // Le jeu de caractères et les bornes viennent de la donnée de la question : l'aide de la fiche ne les redit pas.
   const hint = charsetHint(props.question) ?? boundsText(props.question);
   if (hint) parts.push(hint);
   if (props.question.secret) parts.push(t("fiche.secretHint"));
