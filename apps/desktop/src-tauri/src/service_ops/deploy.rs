@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use super::deploy_dto::{
     CancelOutcome, CancelRefusal, DeployCheckDto, DeployCheckInputDto, DeployFieldDto,
     DeployOutcome, DeployProtocolDto, DeployRefusal, DeployRequestDto, EngineCapacityDto,
-    PortStatusDto,
+    FicheLackDto, PortStatusDto,
 };
 use super::dto::OperationDto;
 use crate::link_dto::{InvalidField, LinkFailure};
@@ -112,15 +112,10 @@ fn reason_code(details: &Value) -> String {
         .unwrap_or_else(|| "invalid".to_owned())
 }
 
-/// Un identifiant de fiche, de question ou de contrat : minuscules, chiffres, tiret et tiret bas, court.
-/// Tout autre texte n'est pas un identifiant et n'est jamais répété.
+/// Un identifiant de fiche, de question ou de contrat, tel que la liaison le définit ; tout autre texte n'est jamais
+/// répété.
 fn stable_id(text: &str) -> Option<String> {
-    let valid = !text.is_empty()
-        && text.len() <= 64
-        && text
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-');
-    valid.then(|| text.to_owned())
+    hearth_link::is_fiche_id(text).then(|| text.to_owned())
 }
 
 /// Les contrats nommés dans un refus : au plus ce que la fiche peut en porter.
@@ -272,7 +267,11 @@ pub fn interpret_deploy(status: u16, body: &Value) -> Result<DeployOutcome, Link
         ) {
             (Some(lack @ ("cpu" | "memory")), Some(needed), Some(has)) => {
                 refused(DeployRefusal::HostTooSmall {
-                    lack: lack.to_owned(),
+                    lack: if lack == "cpu" {
+                        FicheLackDto::Cpu
+                    } else {
+                        FicheLackDto::Memory
+                    },
                     needed: needed as f64,
                     has: has as f64,
                 })

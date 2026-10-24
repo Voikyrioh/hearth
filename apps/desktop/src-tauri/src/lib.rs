@@ -6,6 +6,7 @@ pub mod accounts;
 pub mod agent_update;
 pub mod alerts;
 pub mod audit;
+pub mod browser;
 mod commands;
 pub mod dashboard;
 pub mod devices;

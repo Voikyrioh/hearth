@@ -281,10 +281,10 @@ export const commands = {
 	/**
 	 *  Ouvre dans le navigateur de l'utilisateur une adresse que la FICHE porte (le contrat de licence, le site où créer un
 	 *  jeton de serveur, la source d'un chiffre de l'éditeur). L'adresse n'est jamais fournie par la page : la coquille relit
-	 *  la fiche chez l'agent et ne retient qu'une adresse `https` sans identifiant (`catalog::link_of`). Hearth ne
-	 *  contacte jamais cette adresse lui-même. `kind` : `agreement`, `token` ou `evidence`.
+	 *  la fiche chez l'agent et ne retient qu'une adresse que la garde de `browser` accepte. Hearth ne contacte jamais cette
+	 *  adresse lui-même.
 	 */
-	openFicheLink: (serverId: string, fiche: string, kind: string, key: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("open_fiche_link", { serverId, fiche, kind, key })),
+	openFicheLink: (serverId: string, fiche: string, kind: FicheLinkKind, key: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("open_fiche_link", { serverId, fiche, kind, key })),
 };
 
 /* Types */
@@ -833,7 +833,7 @@ export type DeployRefusal = { kind: "wrong_password" } | { kind: "password_requi
  */
 { kind: "answer_refused"; id: string | null; reason: string; character: string | null } | 
 /**  La machine est trop petite pour un minimum MESURÉ (`cpu` en millicœurs, `memory` en octets). */
-{ kind: "host_too_small"; lack: string; needed: number | null; has: number | null } | 
+{ kind: "host_too_small"; lack: FicheLackDto; needed: number | null; has: number | null } | 
 /**  L'espace libre est sous le besoin mesuré de l'installation : aucune case ne permet de passer outre. */
 { kind: "no_space_to_install"; neededBytes: number | null; freeBytes: number | null; missingBytes: number | null } | { kind: "other" };
 
@@ -985,6 +985,9 @@ export type FicheCardDto = {
 	installable: boolean,
 };
 
+/**  Le jeu de caractères d'un texte. */
+export type FicheCharsetDto = "line" | "file_stem" | "arg_safe" | "unknown";
+
 export type FicheChoiceDto = {
 	value: string,
 	label: string,
@@ -1048,6 +1051,7 @@ export type FicheFolderDto = {
 	role: string,
 	target: string,
 	backup: boolean,
+	onlyVariants: string[],
 };
 
 export type FicheImageDto = {
@@ -1079,6 +1083,18 @@ export type FicheInstallRequestDto = {
 	accept: DeployAcceptDto,
 };
 
+/**  Ce qui manque à la machine pour un minimum MESURÉ : le processeur (millicœurs) ou la mémoire (octets). */
+export type FicheLackDto = "cpu" | "memory";
+
+/**  Quelle adresse de la fiche s'ouvre (`open_fiche_link`) : jamais l'adresse elle-même. */
+export type FicheLinkKind = 
+/**  Le contrat de licence, par l'identifiant du contrat. */
+"agreement" | 
+/**  Le site où créer un jeton de serveur, par l'identifiant de la question. */
+"token" | 
+/**  La source d'un chiffre de l'éditeur : `cpu`, `memory` ou `disk`. */
+"evidence";
+
 export type FicheMemoryNeedDto = {
 	minBytes: number | null,
 	recommendedBytes: number | null,
@@ -1101,7 +1117,12 @@ export type FichePortDto = {
 	/**  `always`, `optional` ou `never`. */
 	publish: string,
 	defaultHost: number | null,
+	mapping: FichePortMappingDto,
+	onlyVariants: string[],
 };
+
+/**  Comment le port du serveur se relie au port du service. */
+export type FichePortMappingDto = "nat" | "same_number" | "unknown";
 
 /**  Une question d'installation, avec ce qu'il faut pour la poser sans rien inventer. */
 export type FicheQuestionDto = {
@@ -1116,11 +1137,11 @@ export type FicheQuestionDto = {
 	max: number | null,
 	minLen: number | null,
 	maxLen: number | null,
-	charset: string | null,
+	charset: FicheCharsetDto | null,
 	frozenAfterCreation: boolean,
 	variants: string[],
 	/**  `game_password`, `admin_password` ou `server_token` pour un secret. */
-	secretKind: string | null,
+	secretKind: FicheSecretKindDto | null,
 	obtainUrl: string | null,
 };
 
@@ -1137,6 +1158,9 @@ export type FicheResourcesDto = {
 	memory: FicheMemoryNeedDto,
 	disk: FicheDiskNeedDto,
 };
+
+/**  Le genre d'un secret. */
+export type FicheSecretKindDto = "game_password" | "admin_password" | "server_token" | "unknown";
 
 export type FicheStatusDto = "published" | "preview" | "unknown";
 

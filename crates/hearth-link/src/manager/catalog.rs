@@ -15,15 +15,20 @@ const CATALOG_PATH: &str = "/catalog";
 /// Longueur maximale de l'identifiant d'une fiche (comme `MAX_FICHE_TOKEN_CHARS` du fil).
 const FICHE_ID_MAX_LEN: usize = 64;
 
-/// Le chemin du détail d'une fiche. L'identifiant d'une fiche est un mot court : minuscules, chiffres, tiret et
-/// souligné ; tout autre texte n'est pas un identifiant et ne part pas.
-pub fn fiche_path(id: &str) -> Option<String> {
-    let valid = !id.is_empty()
+/// Un identifiant (de fiche, de question, de contrat) est un mot court : minuscules, chiffres, tiret et souligné ;
+/// tout autre texte n'est pas un identifiant, ne part pas et n'est jamais répété. UNE seule définition, pour la
+/// liaison et pour la coquille.
+pub fn is_fiche_id(id: &str) -> bool {
+    !id.is_empty()
         && id.len() <= FICHE_ID_MAX_LEN
         && id
             .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_');
-    valid.then(|| format!("{CATALOG_PATH}/{id}"))
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+}
+
+/// Le chemin du détail d'une fiche, ou `None` si l'identifiant n'en est pas un.
+pub fn fiche_path(id: &str) -> Option<String> {
+    is_fiche_id(id).then(|| format!("{CATALOG_PATH}/{id}"))
 }
 
 fn parse<T: DeserializeOwned>(body: serde_json::Value, what: &str) -> Result<T, LinkError> {
@@ -45,7 +50,7 @@ impl LinkManager {
     /// `Rejected(Some(FicheUnknown))`. Un identifiant qui n'en est pas un : `InvalidInput`, rien ne part.
     pub async fn read_fiche(&self, id: &ServerId, fiche: &str) -> Result<FicheDetail, LinkError> {
         let path =
-            fiche_path(fiche).ok_or(LinkError::InvalidInput(crate::error::InputField::Name))?;
+            fiche_path(fiche).ok_or(LinkError::InvalidInput(crate::error::InputField::Fiche))?;
         let (target, token) = self.credentials(id)?;
         let body = self.typed_get(&target, &token, path).await?;
         parse(body, "fiche")

@@ -17,6 +17,8 @@ pub enum InputField {
     Fingerprint,
     /// Un filtre de lecture refusé (journal d'activité).
     Filter,
+    /// L'identifiant d'une fiche du catalogue qui n'en est pas un (HRT-102).
+    Fiche,
 }
 
 /// La raison d'un refus d'adoption ou de relâche (`details.reason`). Tolérant : toute valeur inconnue est

@@ -8,9 +8,10 @@
 //!   jeton). `Debug` n'en montre que le nombre ; elle traverse la coquille sans être gardée ni tracée.
 
 use hearth_proto::api::catalog::{
-    AgreementView, CatalogView, CpuNeed, DiskNeed, DownloadView, EvidenceView, FicheCard,
-    FicheDetail, FicheStatus, FirstStartView, FolderView, ImageView, ImposedView, MemoryNeed,
-    PortView, QuestionKind, QuestionView, ResourcesView, StopView, VariantView, WorldSavedView,
+    AgreementView, CatalogView, CharsetView, CpuNeed, DiskNeed, DownloadView, EvidenceView,
+    FicheCard, FicheDetail, FicheStatus, FirstStartView, FolderView, ImageView, ImposedView,
+    MemoryNeed, PortMappingView, PortView, QuestionKind, QuestionView, ResourcesView,
+    SecretKindView, StopView, VariantView, WorldSavedView,
 };
 use hearth_proto::api::deploy::{
     DeployAccept, DeployResources, DeploySource, DeploySpec, FicheAnswer, FichePort,
@@ -142,6 +143,81 @@ pub struct FichePortDto {
     /// `always`, `optional` ou `never`.
     pub publish: String,
     pub default_host: Option<u16>,
+    pub mapping: FichePortMappingDto,
+    pub only_variants: Vec<String>,
+}
+
+/// Comment le port du serveur se relie au port du service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FichePortMappingDto {
+    Nat,
+    SameNumber,
+    Unknown,
+}
+
+impl From<PortMappingView> for FichePortMappingDto {
+    fn from(mapping: PortMappingView) -> Self {
+        match mapping {
+            PortMappingView::Nat => Self::Nat,
+            PortMappingView::SameNumber => Self::SameNumber,
+            PortMappingView::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// Le jeu de caractères d'un texte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FicheCharsetDto {
+    Line,
+    FileStem,
+    ArgSafe,
+    Unknown,
+}
+
+impl From<CharsetView> for FicheCharsetDto {
+    fn from(charset: CharsetView) -> Self {
+        match charset {
+            CharsetView::Line => Self::Line,
+            CharsetView::FileStem => Self::FileStem,
+            CharsetView::ArgSafe => Self::ArgSafe,
+            CharsetView::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// Le genre d'un secret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FicheSecretKindDto {
+    GamePassword,
+    AdminPassword,
+    ServerToken,
+    Unknown,
+}
+
+impl From<SecretKindView> for FicheSecretKindDto {
+    fn from(kind: SecretKindView) -> Self {
+        match kind {
+            SecretKindView::GamePassword => Self::GamePassword,
+            SecretKindView::AdminPassword => Self::AdminPassword,
+            SecretKindView::ServerToken => Self::ServerToken,
+            SecretKindView::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// Quelle adresse de la fiche s'ouvre (`open_fiche_link`) : jamais l'adresse elle-même.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FicheLinkKind {
+    /// Le contrat de licence, par l'identifiant du contrat.
+    Agreement,
+    /// Le site où créer un jeton de serveur, par l'identifiant de la question.
+    Token,
+    /// La source d'un chiffre de l'éditeur : `cpu`, `memory` ou `disk`.
+    Evidence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
@@ -151,6 +227,7 @@ pub struct FicheFolderDto {
     pub role: String,
     pub target: String,
     pub backup: bool,
+    pub only_variants: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
@@ -212,11 +289,11 @@ pub struct FicheQuestionDto {
     pub max: Option<f64>,
     pub min_len: Option<u32>,
     pub max_len: Option<u32>,
-    pub charset: Option<String>,
+    pub charset: Option<FicheCharsetDto>,
     pub frozen_after_creation: bool,
     pub variants: Vec<String>,
     /// `game_password`, `admin_password` ou `server_token` pour un secret.
-    pub secret_kind: Option<String>,
+    pub secret_kind: Option<FicheSecretKindDto>,
     pub obtain_url: Option<String>,
 }
 
@@ -259,10 +336,10 @@ impl From<&QuestionView> for FicheQuestionDto {
             max: max.map(|value| value as f64),
             min_len: *min_len,
             max_len: *max_len,
-            charset: charset.clone(),
+            charset: charset.map(Into::into),
             frozen_after_creation: *frozen_after_creation,
             variants: variants.clone(),
-            secret_kind: secret_kind.clone(),
+            secret_kind: secret_kind.map(Into::into),
             obtain_url: obtain_url.clone(),
         }
     }
@@ -571,6 +648,8 @@ fn port(view: &PortView) -> FichePortDto {
         role,
         publish,
         default_host,
+        mapping,
+        only_variants,
     } = view;
     FichePortDto {
         id: id.clone(),
@@ -579,6 +658,8 @@ fn port(view: &PortView) -> FichePortDto {
         role: role.clone(),
         publish: publish.clone(),
         default_host: *default_host,
+        mapping: (*mapping).into(),
+        only_variants: only_variants.clone(),
     }
 }
 
@@ -588,12 +669,14 @@ fn folder(view: &FolderView) -> FicheFolderDto {
         role,
         target,
         backup,
+        only_variants,
     } = view;
     FicheFolderDto {
         id: id.clone(),
         role: role.clone(),
         target: target.clone(),
         backup: *backup,
+        only_variants: only_variants.clone(),
     }
 }
 

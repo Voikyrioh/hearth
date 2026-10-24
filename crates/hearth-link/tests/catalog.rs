@@ -53,7 +53,7 @@ async fn an_identifier_that_is_not_one_never_leaves() {
     for bad in ["", "../hello", "a/b", "A", "a b"] {
         let refused = world.manager.read_fiche(&world.id, bad).await;
         assert!(
-            matches!(refused, Err(LinkError::InvalidInput(InputField::Name))),
+            matches!(refused, Err(LinkError::InvalidInput(InputField::Fiche))),
             "{bad}: {refused:?}"
         );
     }

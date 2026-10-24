@@ -9,9 +9,12 @@ use hearth_link::{ActionOutcome, LinkError, LinkManager};
 use hearth_proto::api::catalog::{EvidenceView, FicheDetail};
 use hearth_proto::error::ErrorCode;
 
-use super::catalog_dto::{CatalogDto, FicheDetailDto, FicheInstallRequestDto, FicheReadDto};
+use super::catalog_dto::{
+    CatalogDto, FicheDetailDto, FicheInstallRequestDto, FicheLinkKind, FicheReadDto,
+};
 use super::deploy::interpret_deploy;
 use super::deploy_dto::DeployOutcome;
+use crate::browser::is_safe_https_url;
 use crate::link_dto::LinkFailure;
 
 /// Les fiches que cet agent propose (`GET /catalog`) : une lecture, ouverte à tout compte.
@@ -54,38 +57,22 @@ pub async fn install(
     }
 }
 
-/// Une adresse que l'interface peut faire ouvrir dans le navigateur de l'utilisateur : `https`, un nom de domaine, aucun
-/// identifiant dans l'adresse, uniquement des caractères sans effet sur la ligne de commande de l'explorateur.
-pub fn is_safe_https_url(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("https://") else {
-        return false;
-    };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    url.len() <= 2048
-        && !authority.is_empty()
-        && !authority.contains('@')
-        && authority.contains('.')
-        && url
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-._~:/?#=&%+!,;".contains(&b))
-}
-
 /// L'adresse qu'une fiche porte pour ce lien : le contrat d'un contrat (`agreement`, par son identifiant), le site où
 /// créer un jeton (`token`, par l'identifiant de la question) ou la source d'un chiffre de l'éditeur (`evidence` :
 /// `cpu`, `memory` ou `disk`). L'adresse vient de la fiche lue chez l'agent, JAMAIS de la WebView.
-pub fn link_of(detail: &FicheDetail, kind: &str, key: &str) -> Option<String> {
+pub fn link_of(detail: &FicheDetail, kind: FicheLinkKind, key: &str) -> Option<String> {
     let url = match kind {
-        "agreement" => detail
+        FicheLinkKind::Agreement => detail
             .agreements
             .iter()
             .find(|agreement| agreement.id == key)
             .map(|agreement| agreement.url.clone()),
-        "token" => detail
+        FicheLinkKind::Token => detail
             .questions
             .iter()
             .find(|question| question.id == key)
             .and_then(|question| question.obtain_url.clone()),
-        "evidence" => {
+        FicheLinkKind::Evidence => {
             let evidence = match key {
                 "cpu" => &detail.resources.cpu.evidence,
                 "memory" => &detail.resources.memory.evidence,
@@ -97,7 +84,6 @@ pub fn link_of(detail: &FicheDetail, kind: &str, key: &str) -> Option<String> {
                 _ => None,
             }
         }
-        _ => None,
     }?;
     is_safe_https_url(&url).then_some(url)
 }
@@ -108,7 +94,7 @@ pub async fn link(
     manager: &LinkManager,
     id: &ServerId,
     fiche: &str,
-    kind: &str,
+    kind: FicheLinkKind,
     key: &str,
 ) -> Result<Option<String>, LinkFailure> {
     let detail = manager.read_fiche(id, fiche).await?;
@@ -119,7 +105,9 @@ pub async fn link(
 mod tests {
     use super::*;
     use crate::service_ops::catalog_dto::{FicheAnswerDto, FicheEvidenceDto, FichePortChoiceDto};
-    use crate::service_ops::deploy_dto::{DeployAcceptDto, DeployRefusal, DeployResourcesDto};
+    use crate::service_ops::deploy_dto::{
+        DeployAcceptDto, DeployRefusal, DeployResourcesDto, FicheLackDto,
+    };
     use hearth_proto::api::catalog::FicheDetail;
     use hearth_proto::api::deploy::DeploySource;
     use serde_json::{Value, json};
@@ -204,54 +192,26 @@ mod tests {
     }
 
     #[test]
-    fn only_a_plain_https_address_with_a_domain_ever_opens() {
-        assert!(is_safe_https_url("https://example.org/licence"));
-        assert!(is_safe_https_url(
-            "https://store.example.org/jetons?lang=fr#haut"
-        ));
-        for bad in [
-            "http://example.org/licence",
-            "https://",
-            "https:///x",
-            "https://user:pass@example.org/",
-            "https://localhost/x",
-            "https://example.org/a b",
-            "https://example.org/\"x",
-            "https://example.org/^calc",
-            "file:///c:/windows/system32/calc.exe",
-            "ftp://example.org/x",
-            "javascript:alert(1)",
-        ] {
-            assert!(!is_safe_https_url(bad), "{bad}");
-        }
-        assert!(!is_safe_https_url(&format!(
-            "https://example.org/{}",
-            "a".repeat(2100)
-        )));
-    }
-
-    #[test]
     fn a_link_comes_from_the_fiche_the_agent_sent_never_from_the_page() {
         let mut body = terraria();
         body["agreements"] = json!([{ "id": "eula", "title": "Contrat", "url": "https://example.org/eula", "sentence": "s" }]);
         body["questions"][1]["obtain_url"] = json!("https://example.org/jetons");
         let detail: FicheDetail = serde_json::from_value(body).unwrap();
         assert_eq!(
-            link_of(&detail, "agreement", "eula").as_deref(),
+            link_of(&detail, FicheLinkKind::Agreement, "eula").as_deref(),
             Some("https://example.org/eula")
         );
         assert_eq!(
-            link_of(&detail, "token", "password").as_deref(),
+            link_of(&detail, FicheLinkKind::Token, "password").as_deref(),
             Some("https://example.org/jetons")
         );
         assert_eq!(
-            link_of(&detail, "evidence", "disk").as_deref(),
+            link_of(&detail, FicheLinkKind::Evidence, "disk").as_deref(),
             Some("https://example.org/size")
         );
-        // Ni un contrat inconnu, ni une preuve sans adresse, ni un genre inconnu n'ouvrent quoi que ce soit.
-        assert_eq!(link_of(&detail, "agreement", "other"), None);
-        assert_eq!(link_of(&detail, "evidence", "memory"), None);
-        assert_eq!(link_of(&detail, "anything", "eula"), None);
+        // Ni un contrat inconnu ni une preuve sans adresse n'ouvrent quoi que ce soit.
+        assert_eq!(link_of(&detail, FicheLinkKind::Agreement, "other"), None);
+        assert_eq!(link_of(&detail, FicheLinkKind::Evidence, "memory"), None);
     }
 
     #[test]
@@ -321,7 +281,7 @@ mod tests {
                 )
             ),
             DeployRefusal::HostTooSmall {
-                lack: "memory".into(),
+                lack: FicheLackDto::Memory,
                 needed: 4_294_967_296.0,
                 has: 2_147_483_648.0,
             }

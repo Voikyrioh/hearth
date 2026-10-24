@@ -402,7 +402,7 @@ const EXPECTED: &[(&str, &str)] = &[
     ),
     (
         "openFicheLink",
-        "serverId: string, fiche: string, kind: string, key: string",
+        "serverId: string, fiche: string, kind: FicheLinkKind, key: string",
     ),
 ];
 

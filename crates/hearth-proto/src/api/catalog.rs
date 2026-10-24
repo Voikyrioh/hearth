@@ -98,6 +98,47 @@ pub struct PortView {
     pub publish: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_host: Option<u16>,
+    /// Comment le port du serveur et celui du service se suivent (HRT-102).
+    #[serde(default)]
+    pub mapping: PortMappingView,
+    /// Les variantes pour lesquelles le port existe ; vide : toutes.
+    #[serde(default)]
+    pub only_variants: Vec<String>,
+}
+
+/// Comment le port du serveur se relie au port du service.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PortMappingView {
+    /// Le port du service est fixe, seul celui du serveur change.
+    #[default]
+    Nat,
+    /// Le jeu annonce son port : service et serveur portent le même nombre.
+    SameNumber,
+    #[serde(other)]
+    Unknown,
+}
+
+/// Le jeu de caractères d'un texte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CharsetView {
+    Line,
+    FileStem,
+    ArgSafe,
+    #[serde(other)]
+    Unknown,
+}
+
+/// Le genre d'un secret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SecretKindView {
+    GamePassword,
+    AdminPassword,
+    ServerToken,
+    #[serde(other)]
+    Unknown,
 }
 
 /// Un dossier géré que la fiche demande (jamais un chemin du serveur).
@@ -108,6 +149,9 @@ pub struct FolderView {
     /// Le chemin DANS le service.
     pub target: String,
     pub backup: bool,
+    /// Les variantes pour lesquelles le dossier existe ; vide : toutes.
+    #[serde(default)]
+    pub only_variants: Vec<String>,
 }
 
 /// Un contrat à accepter avant l'installation (BR-FICHE-058).
@@ -172,18 +216,18 @@ pub struct QuestionView {
     pub min_len: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_len: Option<u32>,
-    /// Jeu de caractères d'un texte : `line`, `file_stem` ou `arg_safe`.
+    /// Jeu de caractères d'un texte.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub charset: Option<String>,
+    pub charset: Option<CharsetView>,
     /// « Ne pourra plus être changé après la création du monde ».
     #[serde(default)]
     pub frozen_after_creation: bool,
     /// Les variantes pour lesquelles la question existe ; vide : toutes.
     #[serde(default)]
     pub variants: Vec<String>,
-    /// Le genre d'un secret : `game_password`, `admin_password` ou `server_token` ; absent pour un autre genre.
+    /// Le genre d'un secret ; absent pour une question qui n'en est pas un.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub secret_kind: Option<String>,
+    pub secret_kind: Option<SecretKindView>,
     /// L'adresse où l'utilisateur crée un jeton de serveur (genre `secret` d'un jeton).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub obtain_url: Option<String>,

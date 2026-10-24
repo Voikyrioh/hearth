@@ -394,6 +394,14 @@ impl From<&EngineCapacity> for EngineCapacityDto {
     }
 }
 
+/// Ce qui manque à la machine pour un minimum MESURÉ : le processeur (millicœurs) ou la mémoire (octets).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FicheLackDto {
+    Cpu,
+    Memory,
+}
+
 /// Pourquoi l'agent a refusé le déploiement, avant tout geste (rien n'est créé). Des CODES, jamais un texte.
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -445,7 +453,7 @@ pub enum DeployRefusal {
     },
     /// La machine est trop petite pour un minimum MESURÉ (`cpu` en millicœurs, `memory` en octets).
     HostTooSmall {
-        lack: String,
+        lack: FicheLackDto,
         needed: f64,
         has: f64,
     },

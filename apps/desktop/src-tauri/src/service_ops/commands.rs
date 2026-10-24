@@ -11,7 +11,7 @@ use hearth_link::domain::server::ServerId;
 use tauri::State;
 
 use super::catalog;
-use super::catalog_dto::{CatalogDto, FicheInstallRequestDto, FicheReadDto};
+use super::catalog_dto::{CatalogDto, FicheInstallRequestDto, FicheLinkKind, FicheReadDto};
 use super::deploy;
 use super::deploy_dto::{
     CancelOutcome, DeployCheckDto, DeployCheckInputDto, DeployOutcome, DeployRequestDto,
@@ -219,24 +219,20 @@ pub async fn install_fiche(
 
 /// Ouvre dans le navigateur de l'utilisateur une adresse que la FICHE porte (le contrat de licence, le site où créer un
 /// jeton de serveur, la source d'un chiffre de l'éditeur). L'adresse n'est jamais fournie par la page : la coquille relit
-/// la fiche chez l'agent et ne retient qu'une adresse `https` sans identifiant (`catalog::link_of`). Hearth ne
-/// contacte jamais cette adresse lui-même. `kind` : `agreement`, `token` ou `evidence`.
+/// la fiche chez l'agent et ne retient qu'une adresse que la garde de `browser` accepte. Hearth ne contacte jamais cette
+/// adresse lui-même.
 #[tauri::command]
 #[specta::specta]
 pub async fn open_fiche_link(
     link: Runtime_<'_>,
     server_id: String,
     fiche: String,
-    kind: String,
+    kind: FicheLinkKind,
     key: String,
 ) -> Result<(), LinkFailure> {
     let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
-    let Some(url) = catalog::link(link.manager(), &id, &fiche, &kind, &key).await? else {
-        return Err(LinkFailure::Internal);
-    };
-    std::process::Command::new("explorer")
-        .arg(url)
-        .spawn()
-        .map(drop)
-        .map_err(|_| LinkFailure::Internal)
+    match catalog::link(link.manager(), &id, &fiche, kind, &key).await? {
+        Some(url) if crate::browser::open_in_browser(&url) => Ok(()),
+        _ => Err(LinkFailure::Internal),
+    }
 }

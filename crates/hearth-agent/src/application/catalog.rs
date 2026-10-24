@@ -6,10 +6,10 @@
 //! d'essai (`include_preview`). Le catalogue ne rend jamais un secret : une fiche n'en contient aucun.
 
 use hearth_proto::api::catalog::{
-    AgreementView, CatalogView, ChoiceView, CpuNeed, DiskNeed, DownloadView, EvidenceView,
-    FicheCard, FicheDetail, FicheStatus, FirstStartView, FolderView, ImageView, ImposedView,
-    MemoryNeed, PortView, QuestionKind, QuestionView, RefusedFiche, ResourcesView, StopView,
-    VariantView, WorldSavedView,
+    AgreementView, CatalogView, CharsetView, ChoiceView, CpuNeed, DiskNeed, DownloadView,
+    EvidenceView, FicheCard, FicheDetail, FicheStatus, FirstStartView, FolderView, ImageView,
+    ImposedView, MemoryNeed, PortMappingView, PortView, QuestionKind, QuestionView, RefusedFiche,
+    ResourcesView, SecretKindView, StopView, VariantView, WorldSavedView,
 };
 
 use crate::application::ports::AuditSink;
@@ -17,8 +17,8 @@ use crate::domain::audit::{Actor, AuditAction, ClientName, Outcome, Reason, Targ
 use crate::domain::catalog::embedded;
 use crate::domain::catalog::loading::model::{Fiche, ValueSpec};
 use crate::domain::catalog::loading::schema::fiche::{
-    Evidence, FolderRole, PlainEvidence, Platform, PortRole, Proof, Protocol, Publish, Status,
-    WorldSaved,
+    Evidence, FolderRole, PlainEvidence, Platform, PortMapping, PortRole, Proof, Protocol, Publish,
+    Status, WorldSaved,
 };
 use crate::domain::catalog::loading::schema::settings::{Level, SecretKind};
 
@@ -199,6 +199,11 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
                 role: port_role(p.role).to_owned(),
                 publish: publish(p.publish).to_owned(),
                 default_host: p.default_host,
+                mapping: match p.mapping {
+                    PortMapping::Nat => PortMappingView::Nat,
+                    PortMapping::SameNumber => PortMappingView::SameNumber,
+                },
+                only_variants: p.only_variants.clone().unwrap_or_default(),
             })
             .collect::<Vec<_>>()
             .into(),
@@ -210,6 +215,7 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
                 role: folder_role(f.role).to_owned(),
                 target: f.target.clone(),
                 backup: f.backup,
+                only_variants: f.only_variants.clone().unwrap_or_default(),
             })
             .collect::<Vec<_>>()
             .into(),
@@ -334,14 +340,11 @@ fn question(setting: &crate::domain::catalog::loading::model::Setting) -> Questi
             view.kind = QuestionKind::Text;
             view.min_len = u32::try_from(*min_len).ok();
             view.max_len = u32::try_from(*max_len).ok();
-            view.charset = Some(
-                match charset {
-                    Charset::Line => "line",
-                    Charset::FileStem => "file_stem",
-                    Charset::ArgSafe => "arg_safe",
-                }
-                .to_owned(),
-            );
+            view.charset = Some(match charset {
+                Charset::Line => CharsetView::Line,
+                Charset::FileStem => CharsetView::FileStem,
+                Charset::ArgSafe => CharsetView::ArgSafe,
+            });
         }
         ValueSpec::Secret {
             kind,
@@ -349,14 +352,11 @@ fn question(setting: &crate::domain::catalog::loading::model::Setting) -> Questi
             max_len,
             obtain_url,
         } => {
-            view.secret_kind = Some(
-                match kind {
-                    SecretKind::GamePassword => "game_password",
-                    SecretKind::AdminPassword => "admin_password",
-                    SecretKind::ServerToken => "server_token",
-                }
-                .to_owned(),
-            );
+            view.secret_kind = Some(match kind {
+                SecretKind::GamePassword => SecretKindView::GamePassword,
+                SecretKind::AdminPassword => SecretKindView::AdminPassword,
+                SecretKind::ServerToken => SecretKindView::ServerToken,
+            });
             view.kind = QuestionKind::Secret;
             view.secret = true;
             view.proposed = None;
@@ -476,7 +476,7 @@ mod tests {
             .iter()
             .find(|q| q.id == "world_name")
             .unwrap();
-        assert_eq!(name.charset.as_deref(), Some("file_stem"));
+        assert_eq!(name.charset, Some(CharsetView::FileStem));
         assert_eq!(name.max_len, Some(100));
         assert!(terraria.questions.len() <= 8);
         // Le premier démarrage, l'arrêt et ce que la fiche impose sont dits par la fiche.
@@ -485,6 +485,25 @@ mod tests {
         let stop = terraria.stop.as_ref().unwrap();
         assert_eq!(stop.world_saved, WorldSavedView::BySequence);
         assert!(!stop.sequence_tested, "la suite n'a pas été essayée");
+        // Chaque port dit comment il se relie au port du serveur et pour quelles variantes il existe.
+        assert!(
+            terraria
+                .ports
+                .iter()
+                .all(|port| port.mapping == PortMappingView::Nat)
+        );
+        assert!(
+            terraria
+                .ports
+                .iter()
+                .all(|port| port.only_variants.is_empty())
+        );
+        assert!(
+            terraria
+                .folders
+                .iter()
+                .all(|folder| folder.only_variants.is_empty())
+        );
         assert!(!terraria.imposed.is_empty());
         assert!(
             terraria
