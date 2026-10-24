@@ -785,6 +785,35 @@ async fn an_action_whose_journal_entry_cannot_be_written_is_closed_without_it_an
     assert_eq!(operation.status, OperationStatus::Succeeded);
 }
 
+/// Un nom qui ne s'identifie pas dans le journal d'activité pose quand même la cause de la surveillance, sans
+/// entrée (HRT-101).
+#[tokio::test]
+async fn a_service_whose_name_cannot_be_journaled_still_gets_the_watch_cause_without_an_entry() {
+    let b = bench().await;
+    let (key, id) = publish(&b, "\u{200b}\u{200b}", RunState::Exited).await;
+    let accepted = b.accepted("start", &key).await;
+    let operation = b.finished(&accepted.action_id).await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+    b.engine.update(&id, |c| {
+        c.run_state = RunState::Exited;
+        c.exit_code = Some(1);
+    });
+    let started = Instant::now();
+    loop {
+        let operation = b.operation(&accepted.action_id).await;
+        if operation.cause == Some(OperationCause::StoppedRightAfterStart) {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(5), "{operation:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let journal = b.journal().await;
+    assert!(
+        journal.iter().all(|row| row.1 != "failed"),
+        "aucune entrée pour un nom illisible : {journal:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_service_that_comes_back_alone_after_a_stop_is_told_and_one_that_stays_stopped_is_not() {
     let b = bench().await;

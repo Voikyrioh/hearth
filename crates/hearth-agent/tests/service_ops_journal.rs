@@ -6,6 +6,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/audit.rs"]
+mod audit;
+
 #[path = "support/tmp.rs"]
 mod tmp;
 
@@ -92,31 +95,6 @@ struct Env {
     ops: ServiceOps,
 }
 
-/// Le magasin et la diffusion du journal d'activité qu'une clôture écrit dans sa transaction.
-fn audit_parts(
-    db: &Database,
-    clock: Arc<dyn hearth_agent::application::ports::Clock>,
-) -> (
-    Arc<dyn hearth_agent::application::ports::Store>,
-    Arc<hearth_agent::application::audit::AuditTrail>,
-) {
-    let store: Arc<dyn hearth_agent::application::ports::Store> = Arc::new(
-        hearth_agent::infrastructure::sqlite::SqliteStore::new(db.pool().clone()),
-    );
-    let maintenance = Arc::new(
-        hearth_agent::application::maintenance::MaintenanceService::new(store.clone(), clock),
-    );
-    let feed: Arc<dyn hearth_agent::application::ports::AuditFeed> =
-        Arc::new(hearth_agent::infrastructure::audit_feed::BroadcastAuditFeed::new());
-    (
-        store,
-        Arc::new(hearth_agent::application::audit::AuditTrail::new(
-            feed,
-            maintenance,
-        )),
-    )
-}
-
 /// Un événement quelconque pour les constats posés après coup.
 fn a_draft() -> hearth_agent::application::service_ops::AuditDraft {
     hearth_agent::application::service_ops::AuditDraft {
@@ -134,7 +112,7 @@ fn ops_over(
     objects: Arc<dyn CreatedObjects>,
 ) -> (Arc<SqliteOpJournal>, ServiceOps) {
     let journal = Arc::new(SqliteOpJournal::new(db.pool().clone()));
-    let (store, trail) = audit_parts(db, clock.clone());
+    let (store, trail) = audit::audit_parts(db, clock.clone());
     let ops = ServiceOps::new(
         journal.clone() as Arc<dyn OpJournal>,
         Arc::new(OpLocks::new()),
@@ -1252,7 +1230,7 @@ async fn forced_is_noted_while_running_and_a_cause_is_added_once_to_a_success_on
     // Une opération qui court n'est pas une réussite : aucune cause après coup.
     assert!(
         !env.ops
-            .annotate_with(&id, Cause::RestartedByHost, a_draft())
+            .annotate_with(&id, Cause::RestartedByHost, Some(a_draft()))
             .await
             .unwrap()
     );
@@ -1263,7 +1241,7 @@ async fn forced_is_noted_while_running_and_a_cause_is_added_once_to_a_success_on
     // Une réussite qui a déjà sa cause (arrêt forcé) garde la sienne.
     assert!(
         !env.ops
-            .annotate_with(&id, Cause::RestartedByHost, a_draft())
+            .annotate_with(&id, Cause::RestartedByHost, Some(a_draft()))
             .await
             .unwrap()
     );
@@ -1278,7 +1256,7 @@ async fn forced_is_noted_while_running_and_a_cause_is_added_once_to_a_success_on
         .unwrap();
     assert!(
         env.ops
-            .annotate_with(&plain, Cause::RestartedByHost, a_draft())
+            .annotate_with(&plain, Cause::RestartedByHost, Some(a_draft()))
             .await
             .unwrap()
     );
@@ -1288,7 +1266,7 @@ async fn forced_is_noted_while_running_and_a_cause_is_added_once_to_a_success_on
     // Une cause n'en remplace jamais une autre.
     assert!(
         !env.ops
-            .annotate_with(&plain, Cause::StoppedRightAfterStart, a_draft())
+            .annotate_with(&plain, Cause::StoppedRightAfterStart, Some(a_draft()))
             .await
             .unwrap()
     );
@@ -1305,7 +1283,7 @@ async fn forced_is_noted_while_running_and_a_cause_is_added_once_to_a_success_on
         .unwrap();
     assert!(
         !env.ops
-            .annotate_with(&failed, Cause::RestartedByHost, a_draft())
+            .annotate_with(&failed, Cause::RestartedByHost, Some(a_draft()))
             .await
             .unwrap()
     );

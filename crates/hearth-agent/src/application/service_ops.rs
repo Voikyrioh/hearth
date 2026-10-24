@@ -581,12 +581,12 @@ impl ServiceOps {
     /// prévient les abonnés. La cause et l'entrée du journal d'activité de ce constat sont écrites dans UNE
     /// transaction, puis l'état est annoncé (flux et projection) : `GET /operations/...` lit le journal des
     /// opérations et ne voit la cause qu'avec son entrée (HRT-101). `false` : rien n'a changé, aucune entrée
-    /// n'est écrite.
+    /// n'est écrite. Sans entrée (`None`) : la cause seule, par le même chemin.
     pub async fn annotate_with(
         &self,
         id: &str,
         cause: Cause,
-        draft: AuditDraft,
+        draft: Option<AuditDraft>,
     ) -> Result<bool, OpError> {
         let now = self.clock.now();
         let mut tx = self.store.begin().await?;
@@ -594,7 +594,9 @@ impl ServiceOps {
             return Ok(false);
         }
         let mut pending = Pending::default();
-        pending.record(&mut *tx, draft.event(now)).await?;
+        if let Some(draft) = &draft {
+            pending.record(&mut *tx, draft.event(now)).await?;
+        }
         tx.commit().await?;
         pending.publish(&self.trail);
         self.publish(id).await;
@@ -635,7 +637,7 @@ impl ServiceOps {
                 tracing::error!(
                     %error,
                     operation = id,
-                    "entrée du journal d'activité non écrite : l'opération est close sans elle"
+                    "clôture en échec (entrée du journal d'activité ou transition) : nouvelle tentative sans entrée"
                 );
                 self.close(id, to, cause, None).await
             }

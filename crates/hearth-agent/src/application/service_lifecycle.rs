@@ -850,10 +850,8 @@ impl ServiceLifecycle {
             // Une cause n'en remplace pas une autre : la surveillance ne dit rien d'une action forcée.
             // FIX:01M5NYA5W781YW5NFQ7W1JGR98 La cause et son entrée du journal d'activité sont écrites dans
             // UNE transaction, puis annoncées.
-            let Some(service) = ClientName::parse(name) else {
-                return;
-            };
-            let draft = AuditDraft {
+            // Un nom qui ne se parse pas pose quand même la cause, sans entrée au journal d'activité.
+            let draft = ClientName::parse(name).map(|service| AuditDraft {
                 actor,
                 action: kind.audit_action(),
                 target: Target::ServiceLifecycle {
@@ -861,7 +859,13 @@ impl ServiceLifecycle {
                     note: LifecycleNote::Plain,
                 },
                 outcome: Outcome::Failed(reason_of(cause)),
-            };
+            });
+            if draft.is_none() {
+                tracing::warn!(
+                    operation = id,
+                    "constat de surveillance noté sans entrée au journal : le nom du service ne s'identifie pas"
+                );
+            }
             if let Err(error) = self.ops.annotate_with(id, cause, draft).await {
                 tracing::warn!(%error, "constat de surveillance non noté");
             }
