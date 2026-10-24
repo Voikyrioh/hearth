@@ -6,6 +6,7 @@ import {
   type ServiceOperationEvent,
   SimulatedLinkBridge,
 } from "@/link";
+import { DISK_USED_PERCENT } from "./simulated-machine";
 
 // L'agent simulé juge un déploiement COMME LE VRAI (`application/deployments.rs`, `domain/services/{deploy,ports}.rs`) :
 // même ordre de refus, mêmes constats de ports, mêmes bornes. Si ce fichier passait avec un simulateur plus indulgent
@@ -521,7 +522,7 @@ describe("la suite de l'opération et l'annulation (BR-DEPLOY-016, 019)", () => 
     const capacity = await sim.readEngineCapacity("forge");
     expect(capacity?.cpus).toBe(machine.cpu.logicalCores);
     expect(capacity?.memoryBytes).toBe(machine.memoryTotalBytes);
-    // L'espace libre du disque des images est celui du premier disque du tableau de bord (41 % pris).
+    // L'espace libre du disque des images est celui du premier disque du tableau de bord (la part naturelle prise).
     const answer = await sim.checkDeployment("forge", {
       name: "web",
       image: "nginx",
@@ -529,7 +530,7 @@ describe("la suite de l'opération et l'annulation (BR-DEPLOY-016, 019)", () => 
       ports: [],
     });
     expect(answer.disk?.freeBytes).toBe(
-      Math.round(((machine.disks[0]?.totalBytes ?? 0) * 59) / 100),
+      Math.round(((machine.disks[0]?.totalBytes ?? 0) * (100 - DISK_USED_PERCENT)) / 100),
     );
     // Un autre serveur, une autre machine : le boîtier « salon » n'a que 4 processeurs et 16 Gio.
     const salon = await sim.readEngineCapacity("salon");

@@ -1185,12 +1185,12 @@ export class SimulatedLinkBridge implements LinkBridge {
     );
   }
 
-  /** Mot de passe actuel de l'utilisateur de ce serveur (celui que la confirmation compare). */
   /** Le mot de passe que ce simulateur attend pour le compte connecté (affiché par `DevPasswordHint`, jamais livré). */
   simulatedPassword(serverId: string): string {
     return this.own(serverId);
   }
 
+  /** Mot de passe actuel de l'utilisateur de ce serveur (celui que la confirmation compare). */
   private own(serverId: string): string {
     return this.ownPasswords.get(serverId) ?? "Correct-Horse-9";
   }

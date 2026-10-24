@@ -14,6 +14,8 @@ const HISTORY_CAP = 300;
 
 /** Mesure qu'un test ou le panneau de développement peut pousser dans un niveau d'alerte. */
 export type Pinnable = "cpu" | "mem" | "disk" | "gpuMem" | "gpuTemp" | "temp";
+/** Part du premier disque prise au naturel (le niveau « normal » d'un disque piloté). */
+export const DISK_USED_PERCENT = 41;
 
 /**
  * Valeur représentative de chaque niveau, par mesure. Ce ne sont PAS les seuils (qui vivent dans
@@ -24,7 +26,7 @@ export type Pinnable = "cpu" | "mem" | "disk" | "gpuMem" | "gpuTemp" | "temp";
 const PINNED_VALUE: Record<Pinnable, Record<Level, number>> = {
   cpu: { normal: 25, attention: 88, critical: 97 },
   mem: { normal: 30, attention: 88, critical: 97 },
-  disk: { normal: 41, attention: 88, critical: 97 },
+  disk: { normal: DISK_USED_PERCENT, attention: 88, critical: 97 },
   gpuMem: { normal: 30, attention: 88, critical: 97 },
   gpuTemp: { normal: 52, attention: 83, critical: 93 },
   temp: { normal: 48, attention: 83, critical: 93 },
@@ -255,7 +257,7 @@ export class SimulatedMachine {
     const track = this.track(serverId);
     const machine = track.machine;
     const first = machine.disks[0];
-    const usedPercent = this.value(track, "disk", 41);
+    const usedPercent = this.value(track, "disk", DISK_USED_PERCENT);
     return {
       cpus: machine.cpu.logicalCores,
       memoryBytes: machine.memoryTotalBytes,
@@ -306,7 +308,8 @@ export class SimulatedMachine {
         mount: disk.mount,
         totalBytes: disk.totalBytes,
         usedBytes: Math.round(
-          (disk.totalBytes * (disk === first ? this.value(track, "disk", 41) : 18)) / 100,
+          (disk.totalBytes * (disk === first ? this.value(track, "disk", DISK_USED_PERCENT) : 18)) /
+            100,
         ),
       })),
       net: {

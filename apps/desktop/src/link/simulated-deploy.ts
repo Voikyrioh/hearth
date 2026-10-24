@@ -67,6 +67,11 @@ export interface ReceivedDeploy {
   request: DeployRequest;
 }
 
+/** La réserve du système et de Hearth : le plus grand de 1 Gio et de 5 % de la mémoire (comme `hearth_proto`). */
+function reserveOf(memoryBytes: number): number {
+  return Math.max(GIB, Math.floor(memoryBytes / 20));
+}
+
 export class SimulatedDeploys {
   /** Les demandes ACCEPTÉES, dans l'ordre (de quoi vérifier ce qui part ; le vrai agent ne garde aucun secret en clair). */
   readonly received: ReceivedDeploy[] = [];
@@ -92,7 +97,7 @@ export class SimulatedDeploys {
     private readonly services: SimulatedServices,
     private readonly ops: SimulatedServiceOps,
     private readonly now: () => number,
-    /** La machine du serveur (la même que celle du tableau de bord) ; sans elle, 4 processeurs, 16 Gio et 200 Gio libres. */
+    /** La machine du serveur (la même que celle du tableau de bord) ; sans elle (bridge nu), 4 processeurs, 16 Gio et 200 Gio libres. */
     private readonly hostOf: (
       serverId: string,
     ) => { cpus: number; memoryBytes: number; freeDiskBytes: number } | null = () => null,
@@ -130,7 +135,7 @@ export class SimulatedDeploys {
   }
 
   /**
-   * Les bornes de la machine. `null` rétablit les valeurs d'origine (4 processeurs, 16 Gio) ; un objet les remplace.
+   * Les bornes de la machine. `null` rétablit celles de la machine du serveur (`hostOf`) ; un objet les remplace.
    * La forme est celle de `GET /engine/capacity`.
    */
   setCapacity(
@@ -142,9 +147,12 @@ export class SimulatedDeploys {
       this.capacities.delete(serverId);
       return;
     }
-    const reserve = Math.max(GIB, Math.floor(host.memoryBytes / 20));
     this.capacities.set(serverId, {
-      host: { cpus: host.cpus, memory_bytes: host.memoryBytes, reserve_bytes: reserve },
+      host: {
+        cpus: host.cpus,
+        memory_bytes: host.memoryBytes,
+        reserve_bytes: reserveOf(host.memoryBytes),
+      },
       committed: {
         memory: {
           managed_running: committedMemoryBytes,
@@ -159,12 +167,13 @@ export class SimulatedDeploys {
   /** `GET /engine/capacity`, lu comme le lit la coquille. */
   capacity(serverId: string): EngineCapacity | null {
     if (this.failCapacity) throw new Error("capacité illisible");
+    // FIX:01M5PYVP4WVBS6H4Q6M1QW4DQG
     const host = this.hostOf(serverId) ?? { cpus: 4, memoryBytes: 16 * GIB };
     const wire = this.capacities.get(serverId) ?? {
       host: {
         cpus: host.cpus,
         memory_bytes: host.memoryBytes,
-        reserve_bytes: Math.max(GIB, Math.floor(host.memoryBytes / 20)),
+        reserve_bytes: reserveOf(host.memoryBytes),
       },
       committed: {
         memory: { managed_running: 0, unmanaged_running: 0, managed_all: 0, unmanaged_all: 0 },
