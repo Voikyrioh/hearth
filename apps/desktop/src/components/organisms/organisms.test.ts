@@ -126,24 +126,26 @@ describe("ServerNav", () => {
     return mount(ServerNav, { props: { server }, global: ctx.global });
   }
 
-  it("shows the name, the address in a monospace face and the five entries for an administrator, Services second", async () => {
+  it("shows the name, the address in a monospace face and the six entries for an administrator, Services second and Catalogue third", async () => {
     const wrapper = await nav("admin");
     expect(wrapper.get(".side__name").text()).toBe("forge");
     expect(wrapper.get(".side__address").text()).toBe("192.168.1.120");
     expect(wrapper.findAll(".nav__item").map((a) => a.text())).toEqual([
       "Tableau de bord",
       "Services",
+      "Catalogue",
       "Comptes",
       "Journal d'activité",
       "Sécurité",
     ]);
   });
 
-  it("hides Comptes and Journal d'activité, but keeps Services and Sécurité, for a read-only role", async () => {
+  it("hides Comptes and Journal d'activité, but keeps Services, Catalogue and Sécurité, for a read-only role", async () => {
     const wrapper = await nav("readonly");
     expect(wrapper.findAll(".nav__item").map((a) => a.text())).toEqual([
       "Tableau de bord",
       "Services",
+      "Catalogue",
       "Sécurité",
     ]);
   });

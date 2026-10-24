@@ -13,15 +13,18 @@ import ServerLayout from "@/layouts/ServerLayout.vue";
 import Accounts from "@/pages/Accounts.vue";
 import AddServer from "@/pages/AddServer.vue";
 import Audit from "@/pages/Audit.vue";
+import Catalogue from "@/pages/Catalogue.vue";
 import Dashboard from "@/pages/Dashboard.vue";
 import DeployService from "@/pages/DeployService.vue";
+import FicheDetail from "@/pages/FicheDetail.vue";
+import InstallFromFiche from "@/pages/InstallFromFiche.vue";
 import Security from "@/pages/Security.vue";
 import Servers from "@/pages/Servers.vue";
 import Services from "@/pages/Services.vue";
 import Settings from "@/pages/Settings.vue";
 import Welcome from "@/pages/Welcome.vue";
 import { useServersStore } from "@/stores/servers";
-import { deployRouteGuard } from "./deployGuard";
+import { deployRouteGuard, ficheInstallGuard } from "./deployGuard";
 
 declare module "vue-router" {
   interface RouteMeta {
@@ -36,7 +39,7 @@ declare module "vue-router" {
 
 /**
  * Routes : `/welcome` (aucun serveur), `/servers/new` (assistant d'ajout), `/servers` (carnet),
- * `/servers/:id/{dashboard,services,services/deployer,accounts,audit,security}` dans le gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
+ * `/servers/:id/{dashboard,services,services/deployer,catalogue,catalogue/:fiche,catalogue/:fiche/installer,accounts,audit,security}` dans le gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
  * serveur ou l'accueil. Historique par hachage (l'application est servie depuis des fichiers).
  */
 export function createAppRouter(history: RouterHistory = createWebHashHistory()): Router {
@@ -73,6 +76,27 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
             component: DeployService,
             meta: { title: "pages.deployService" },
             beforeEnter: deployRouteGuard,
+          },
+          {
+            // Le Catalogue des serveurs de jeu (HRT-102) : lisible de tous les comptes, jamais gardé.
+            path: "catalogue",
+            name: "catalogue",
+            component: Catalogue,
+            meta: { title: "pages.catalogue" },
+          },
+          {
+            path: "catalogue/:fiche",
+            name: "fiche",
+            component: FicheDetail,
+            meta: { title: "pages.ficheDetail" },
+          },
+          {
+            // Installer depuis une fiche : la route est gardée comme le formulaire de déploiement.
+            path: "catalogue/:fiche/installer",
+            name: "fiche-install",
+            component: InstallFromFiche,
+            meta: { title: "pages.installFiche" },
+            beforeEnter: ficheInstallGuard,
           },
           {
             path: "accounts",
