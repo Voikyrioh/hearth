@@ -98,15 +98,79 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 curl -fsS http://localhost:5000/v2/ >/dev/null || { echo "::error::registre local localhost:5000 injoignable (défaut de la préparation, pas du code testé)"; exit 1; }
-# L'image du registre local porte UNE COUCHE PROPRE (6 Mo incompressibles) que le démon n'a pas : après le
-# push on la retire du démon (image et couche), pour que le « pull » du contrat télécharge de vrais octets
-# (progression, abandon) au lieu de répondre « Already exists ».
-build="$(mktemp -d)"
-printf 'FROM public.ecr.aws/docker/library/busybox:1.36\nRUN head -c 6000000 /dev/urandom > /hearth-layer\n' > "$build/Dockerfile"
-docker build --quiet --tag localhost:5000/busybox:1.36 "$build" >/dev/null
-docker push --quiet localhost:5000/busybox:1.36 >/dev/null
-docker rmi localhost:5000/busybox:1.36 >/dev/null
-docker builder prune --force >/dev/null 2>&1 || true
-docker image prune --force >/dev/null 2>&1 || true
-rm -rf "$build"
-echo "registre local prêt : localhost:5000/busybox:1.36 (couche propre de 6 Mo, absente du démon)"
+
+# --- Couche propre ajoutée DIRECTEMENT dans le registre local, par son API HTTP -------------------------------
+# Le démon ne voit jamais cette couche (ni son blob dans son magasin de contenu, qu'un `docker build` + `rmi`
+# laisse en place avec le magasin containerd) : le « pull » du contrat télécharge donc forcément de vrais octets.
+REG="http://localhost:5000"
+REPO="busybox"
+TAGNAME="1.36"
+ACCEPT='application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json'
+
+fail() { echo "::error::registre local, étape « $1 » : $2 (défaut de la préparation des tests, pas du code testé)"; exit 1; }
+
+# http <étape> <code attendu> <fichier de sortie> <curl args...> : échoue en disant le code reçu.
+http() {
+  local step="$1" want="$2" out="$3"; shift 3
+  local code
+  code="$(curl -sS -o "$out" -w '%{http_code}' "$@")" || fail "$step" "curl a échoué"
+  case " $want " in *" $code "*) ;; *) fail "$step" "code HTTP $code (attendu $want) : $(head -c 300 "$out" | tr '\n' ' ')";; esac
+}
+
+# push_blob <étape> <fichier> <digest> : POST puis PUT ?digest=.
+push_blob() {
+  local step="$1" file="$2" digest="$3" loc sep
+  loc="$(curl -sS -D - -o /dev/null -X POST "$REG/v2/$REPO/blobs/uploads/" | awk 'tolower($1)=="location:"{print $2}' | tr -d '\r')"
+  [ -n "$loc" ] || fail "$step" "pas d'adresse d'envoi (Location) en réponse au POST"
+  case "$loc" in http*) ;; *) loc="$REG$loc";; esac
+  case "$loc" in *\?*) sep="&";; *) sep="?";; esac
+  http "$step" "201" /tmp/hearth-put.out -X PUT -H 'Content-Type: application/octet-stream' --data-binary "@$file" "$loc${sep}digest=$digest"
+}
+
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+# 1. L'image épinglée (inchangée) dans le registre local ; le démon n'en garde que son tag d'origine.
+docker tag "public.ecr.aws/docker/library/busybox:1.36" "localhost:5000/$REPO:$TAGNAME"
+docker push --quiet "localhost:5000/$REPO:$TAGNAME" >/dev/null
+docker rmi "localhost:5000/$REPO:$TAGNAME" >/dev/null
+
+# 2. Son manifeste (celui de linux/amd64 si c'est un index) et sa config.
+http "lire le manifeste" "200" "$work/m0.json" -H "Accept: $ACCEPT" "$REG/v2/$REPO/manifests/$TAGNAME"
+kind="$(jq -r '.mediaType // empty' "$work/m0.json")"
+case "$kind" in
+  *index*|*manifest.list*)
+    sub="$(jq -r '[.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64")][0].digest // empty' "$work/m0.json")"
+    [ -n "$sub" ] || fail "choisir linux/amd64" "aucun manifeste linux/amd64 dans l'index"
+    http "lire le manifeste amd64" "200" "$work/m.json" -H "Accept: $ACCEPT" "$REG/v2/$REPO/manifests/$sub"
+    ;;
+  *) cp "$work/m0.json" "$work/m.json" ;;
+esac
+kind="$(jq -r '.mediaType // empty' "$work/m.json")"
+[ -n "$kind" ] || fail "type du manifeste" "mediaType absent"
+cfg_digest="$(jq -r '.config.digest' "$work/m.json")"
+http "lire la config" "200" "$work/cfg.json" -L "$REG/v2/$REPO/blobs/$cfg_digest"
+
+# 3. La couche : 6 Mo aléatoires (incompressibles), tar puis gzip ; empreintes du tar (diff_id) et du gzip.
+mkdir "$work/layer"
+head -c 6000000 /dev/urandom > "$work/layer/hearth-layer"
+tar -C "$work/layer" -cf "$work/layer.tar" hearth-layer || fail "tar" "échec"
+diff_id="sha256:$(sha256sum "$work/layer.tar" | cut -d' ' -f1)"
+gzip -n -c "$work/layer.tar" > "$work/layer.tgz" || fail "gzip" "échec"
+layer_digest="sha256:$(sha256sum "$work/layer.tgz" | cut -d' ' -f1)"
+layer_size="$(stat -c %s "$work/layer.tgz")"
+case "$kind" in
+  *docker*) layer_type="application/vnd.docker.image.rootfs.diff.tar.gzip" ;;
+  *) layer_type="application/vnd.oci.image.layer.v1.tar+gzip" ;;
+esac
+push_blob "envoyer la couche" "$work/layer.tgz" "$layer_digest"
+
+# 4. La config avec la couche en plus, puis le manifeste ; le tag 1.36 du registre local pointe dessus.
+jq -c --arg d "$diff_id" '.rootfs.diff_ids += [$d] | .history = ((.history // []) + [{"created_by":"hearth ci: couche de test (HRT-168)"}])' "$work/cfg.json" > "$work/cfg2.json" || fail "config" "jq a échoué"
+cfg2_digest="sha256:$(sha256sum "$work/cfg2.json" | cut -d' ' -f1)"
+cfg2_size="$(stat -c %s "$work/cfg2.json")"
+push_blob "envoyer la config" "$work/cfg2.json" "$cfg2_digest"
+jq -c --arg cd "$cfg2_digest" --argjson cs "$cfg2_size" --arg ld "$layer_digest" --argjson ls "$layer_size" --arg lt "$layer_type" \
+  '.config.digest = $cd | .config.size = $cs | .layers += [{"mediaType":$lt,"size":$ls,"digest":$ld}]' "$work/m.json" > "$work/m2.json" || fail "manifeste" "jq a échoué"
+http "envoyer le manifeste" "201" /tmp/hearth-put.out -X PUT -H "Content-Type: $kind" --data-binary "@$work/m2.json" "$REG/v2/$REPO/manifests/$TAGNAME"
+echo "registre local prêt : localhost:5000/$REPO:$TAGNAME (couche propre de 6 Mo posée dans le registre, jamais vue du démon)"

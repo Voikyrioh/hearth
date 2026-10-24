@@ -775,12 +775,18 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
             percents.push(percent);
         }
     }
-    // Preuve d'un vrai téléchargement : l'image était ABSENTE du moteur (vérifié plus haut), seul le registre
-    // la porte, le flux a rapporté des évènements, et elle est présente ensuite. Les octets reçus et les
-    // pourcentages ne sont PAS garantis par un vrai moteur (couche de quelques Mo récupérée d'un registre local
-    // en un seul évènement, ou blob déjà connu du magasin de contenu) : ils sont consignés, pas exigés.
+    // Preuve d'un vrai téléchargement : l'image était ABSENTE du moteur (vérifié plus haut) et l'une de ses
+    // couches n'existe que dans le registre (la CI la pose dans le registre local, jamais dans le démon,
+    // HRT-168) : des octets sont donc reçus. Sans cette garantie (registre public), l'image absente puis
+    // présente reste la preuve et les octets ne sont pas exigés.
     eprintln!("récupération : {events} évènements, {bytes_done} octets, progression {percents:?}");
     assert!(events > 0, "le flux de récupération n'a rien rapporté");
+    if std::env::var("HEARTH_TEST_PULL_REPO").is_ok_and(|repo| !repo.trim().is_empty()) {
+        assert!(
+            bytes_done > 0 && !percents.is_empty(),
+            "la couche propre du registre local doit être téléchargée : {events} évènements, {bytes_done} octets, {percents:?}"
+        );
+    }
     assert!(
         percents.windows(2).all(|pair| pair[0] <= pair[1]),
         "la progression ne recule jamais : {percents:?}"
