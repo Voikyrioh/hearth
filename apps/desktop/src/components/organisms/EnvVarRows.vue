@@ -57,6 +57,7 @@ function valueError(row: EnvRow): string | undefined {
         :key="row.id"
         :row="row"
         :first="index === 0"
+        :position="index + 1"
         :name-error="nameError(row)"
         :value-error="valueError(row)"
         @update:name="$emit('update', row.id, { name: $event })"

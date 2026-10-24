@@ -44,7 +44,7 @@ const STATE_KEYS = {
       </span>
       <div v-if="step.bar" class="steps__bar">
         <HMeter
-          :ratio="step.bar.ratio === null ? null : Math.min(1, Math.max(0, step.bar.ratio))"
+          :ratio="step.bar.ratio"
           :indeterminate="step.bar.ratio === null"
           :label="step.label"
         />

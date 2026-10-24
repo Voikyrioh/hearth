@@ -2,6 +2,7 @@ import { safeText } from "@/audit/text";
 import { type MessageKey, t } from "@/i18n";
 import type {
   CancelRefusal,
+  DeployCheck,
   DeployField,
   DeployRefusal,
   EngineState,
@@ -160,6 +161,33 @@ export function occupantText(status: PortCheck["status"], holder: string | null)
   return t("deploy.occupantUnknown");
 }
 
+/**
+ * Ce qui empêche de lancer, d'après un constat du serveur : un nom pris ou en cours d'effacement, un port tenu. UNE
+ * seule règle (BR-DEPLOY-008) : le pied du formulaire, la revérification au clic et le récapitulatif la partagent.
+ * `null` : rien ne bloque (un port réservé par un service arrêté se coche dans le récapitulatif).
+ */
+export function checkBlocker(check: DeployCheck): { text: string; field: DeployField } | null {
+  if (check.name === "taken") return { text: t("deploy.nameTaken"), field: "name" };
+  if (check.name === "being_deleted") {
+    return { text: t("deploy.nameBeingDeleted"), field: "name" };
+  }
+  for (const port of check.ports) {
+    if (portVerdict(port).error === null) continue;
+    return {
+      text: refusalText({
+        kind: "port_in_use",
+        port: port.hostPort,
+        protocol: port.protocol,
+        status: port.status,
+        holder: port.holder,
+        suggested: port.suggested,
+      }),
+      field: "ports",
+    };
+  }
+  return null;
+}
+
 /** Le champ du formulaire qu'un refus désigne, `null` : un refus qui ne vise aucun champ. */
 export function refusalField(refusal: DeployRefusal): DeployField | null {
   switch (refusal.kind) {
@@ -183,7 +211,12 @@ export function isFieldRefusal(refusal: DeployRefusal): boolean {
 }
 
 /** La phrase d'un refus de l'agent (rien n'a été créé). */
-export function refusalText(refusal: DeployRefusal, engineState?: EngineState | null): string {
+export function refusalText(
+  refused: DeployRefusal | { kind: string },
+  engineState?: EngineState | null,
+): string {
+  // Un code que ce client ne connaît pas tombe dans `default` : le refus générique, jamais une phrase inventée.
+  const refusal = refused as DeployRefusal;
   switch (refusal.kind) {
     case "name_taken":
       return t("deploy.nameTaken");

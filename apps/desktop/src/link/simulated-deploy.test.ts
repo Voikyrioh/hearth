@@ -133,9 +133,14 @@ describe("valider comme l'agent (ordre : forme, deux au plus, nom, ports, disque
       [{ name: "a" }, "name", "bad_format"],
       [{ name: "web server" }, "name", "bad_format"],
       [{ image: "Nginx" }, "image", "bad_format"],
-      [{ image: "nginx@sha256:abc" }, "image", "bad_format"],
+      [{ image: "" }, "image", "empty"],
+      [{ image: "nginx@sha256:abc" }, "image", "digest_unsupported"],
+      [{ image: `${"a".repeat(300)}` }, "image", "too_long"],
       [{ tag: "bad tag" }, "tag", "bad_format"],
-      [{ image: "nginx:1.27", tag: "1.28" }, "tag", "bad_format"],
+      [{ image: "nginx:1.27", tag: "1.28" }, "tag", "conflict"],
+      // Le conflit de version est jugé AVANT le format de l'image (ordre de `ImageRef::parse`).
+      [{ image: "Nginx:1.27", tag: "1.28" }, "tag", "conflict"],
+      [{ tag: "a".repeat(129) }, "tag", "bad_format"],
       [{ env: [{ name: "1A", value: "v" }] }, "env", "bad_name"],
       [{ env: [{ name: "A", value: "x\ny" }] }, "env", "bad_value"],
       [
@@ -410,9 +415,27 @@ describe("la suite de l'opération et l'annulation (BR-DEPLOY-016, 019)", () => 
     const sim = bridge();
     const first = await started(sim);
     sim.deploys.progress("forge", first.operationId, 10);
+    const seen: string[] = [];
+    void sim.onServiceOperations((event) => {
+      if (event.kind === "upsert") seen.push(event.operation.status);
+    });
     const done = await sim.cancelServiceOperation("forge", first.operationId, PASSWORD);
-    expect(done).toMatchObject({ kind: "done", operation: { status: "cancelled" } });
+    // Comme l'agent : l'opération PASSE PAR « cancelling », son exécuteur la clôt ensuite « cancelled ».
+    expect(done).toMatchObject({ kind: "done", operation: { status: "cancelling" } });
+    expect(sim.services.find("forge", first.serviceKey)?.state).toBe("deploying");
+    // Idempotent : une seconde demande pendant l'annulation répond la même chose.
+    expect(await sim.cancelServiceOperation("forge", first.operationId, PASSWORD)).toMatchObject({
+      kind: "done",
+      operation: { status: "cancelling" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(seen).toEqual(["running", "cancelling", "cancelled"]);
     expect(sim.services.find("forge", first.serviceKey)).toBeUndefined();
+    // Annulée PAR UN COMPTE : même issue ; annulée pour une autre cause (délai dépassé) : plus annulable.
+    expect(await sim.cancelServiceOperation("forge", first.operationId, PASSWORD)).toMatchObject({
+      kind: "done",
+      operation: { status: "cancelled", cause: "cancelled_by_account" },
+    });
 
     const second = await sim.deployService("forge", request({ name: "deux" }), PASSWORD);
     if (second.kind !== "accepted") throw new Error("refusé");
@@ -424,6 +447,16 @@ describe("la suite de l'opération et l'annulation (BR-DEPLOY-016, 019)", () => 
     expect(await sim.cancelServiceOperation("forge", "inconnue", PASSWORD)).toEqual({
       kind: "refused",
       refusal: { kind: "not_found" },
+    });
+  });
+
+  it("une opération annulée pour une autre cause qu'un compte n'est plus annulable", async () => {
+    const sim = bridge();
+    const operation = sim.serviceOps.accept("forge", { key: "h_x", kind: "deploy" });
+    sim.serviceOps.finish("forge", operation.id, "cancelled", "decision_expired");
+    expect(await sim.cancelServiceOperation("forge", operation.id, PASSWORD)).toEqual({
+      kind: "refused",
+      refusal: { kind: "not_cancellable" },
     });
   });
 

@@ -217,6 +217,12 @@ describe("la commande de lancement (BR-DEPLOY-014), sans interpréteur", () => {
     expect(splitCommand("y".repeat(MAX_COMMAND_ARG_CHARS + 1))).toEqual({ issue: "args" });
   });
 
+  it("U+FEFF n'est pas une espace pour l'agent (char::is_whitespace), U+00A0 en est une", () => {
+    expect(args("a﻿b c")).toEqual(["a﻿b", "c"]);
+    expect(args("a b")).toEqual(["a", "b"]);
+    expect(args("a　b")).toEqual(["a", "b"]);
+  });
+
   it("une commande vide ou faite d'espaces est la commande de l'image : pas un défaut", () => {
     expect(commandIssue("")).toBeNull();
     expect(commandIssue("   ")).toBeNull();
@@ -355,7 +361,7 @@ describe("les constats du serveur sur un port (BR-DEPLOY-008, 009)", () => {
       suggested: 81,
     });
     const hidden = portVerdict(port({ status: "held_by_unmanaged", holder: "conteneur-secret" }));
-    expect(hidden.error).toBe("Port tenu par un conteneur créé hors de Hearth");
+    expect(hidden.error).toBe("Ce port est tenu par un conteneur créé hors de Hearth.");
     expect(JSON.stringify(hidden)).not.toContain("conteneur-secret");
     expect(portVerdict(port({ status: "held_by_program", holder: "sshd" })).error).toBe(
       "Ce port est occupé sur le serveur par « sshd »",
@@ -558,13 +564,13 @@ describe("le bouton « Déployer un service » et la route (BR-DEPLOY-001, 027, 
     expect(deployDoor({ engine: "stopped", gate: allowed })).toEqual({
       kind: "disabled",
       byRights: false,
-      reason: "Indisponible : le moteur de conteneurs est arrêté.",
+      reason: "Le déploiement est indisponible : le moteur de conteneurs est arrêté.",
     });
     expect(deployDoor({ engine: "access_denied", gate: allowed })).toMatchObject({
-      reason: "Indisponible : l'agent n'a pas le droit d'utiliser le moteur.",
+      reason: "Le déploiement est indisponible : l'agent n'a pas le droit d'utiliser le moteur.",
     });
     expect(deployDoor({ engine: "unresponsive", gate: allowed })).toMatchObject({
-      reason: "Indisponible : le moteur de conteneurs ne répond pas.",
+      reason: "Le déploiement est indisponible : le moteur de conteneurs ne répond pas.",
     });
     expect(deployDoor({ engine: "ready", gate: allowed })).toEqual({ kind: "open" });
   });
@@ -596,10 +602,10 @@ describe("le bouton « Déployer un service » et la route (BR-DEPLOY-001, 027, 
         door: {
           kind: "disabled",
           byRights: false,
-          reason: "Indisponible : le moteur de conteneurs est arrêté.",
+          reason: "Le déploiement est indisponible : le moteur de conteneurs est arrêté.",
         },
       })?.text,
-    ).toBe("Indisponible : le moteur de conteneurs est arrêté.");
+    ).toBe("Le déploiement est indisponible : le moteur de conteneurs est arrêté.");
     expect(submitReason({ ...base, rightsLost: true })?.text).toBe(
       "Vous n'avez plus le droit de gérer les services de ce serveur.",
     );

@@ -16,6 +16,7 @@ import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { deployDoor, submitReason } from "@/deploy/availability";
 import { isFilled } from "@/deploy/draft";
+import { checkBlocker } from "@/deploy/messages";
 import { t } from "@/i18n";
 import type { DeployField } from "@/link";
 import { resourcesIssue } from "@/resources";
@@ -75,11 +76,7 @@ const flow = useDeployFlow({
 const linkReason = useNeedsLink(() => true);
 const serverBlocks = computed(() => {
   const answer = form.check.value;
-  if (!answer) return false;
-  if (answer.name === "taken" || answer.name === "being_deleted") return true;
-  return answer.ports.some(
-    (port) => port.status !== "free" && port.status !== "reserved_by_stopped",
-  );
+  return answer !== null && checkBlocker(answer) !== null;
 });
 const resourcesBad = computed(() =>
   form.capacity.value === null

@@ -11,19 +11,21 @@ import {
   tagIssue,
 } from "@/deploy/rules";
 import { type EngineCapacity, engineCapacityFromWire, GIB } from "@/resources";
-import type {
-  CancelOutcome,
-  DeployCheck,
-  DeployCheckInput,
-  DeployField,
-  DeployOutcome,
-  DeployPort,
-  DeployProtocol,
-  DeployRefusal,
-  DeployRequest,
-  NameStatus,
-  PortCheck,
-  PortStatus,
+import {
+  type CancelOutcome,
+  DEPLOY_STEPS,
+  type DeployCheck,
+  type DeployCheckInput,
+  type DeployField,
+  type DeployOutcome,
+  type DeployPort,
+  type DeployProtocol,
+  type DeployRefusal,
+  type DeployRequest,
+  type DeployStep,
+  type NameStatus,
+  type PortCheck,
+  type PortStatus,
 } from "./deploy";
 import { toOperation } from "./serviceOps";
 import type { SimulatedServiceOps } from "./simulated-service-ops";
@@ -45,10 +47,6 @@ import type { SimulatedServices } from "./simulated-services";
 const LOW_DISK_BYTES = 10 * GIB;
 const MIN_CPU_MILLIS = 250;
 const MIN_MEMORY_BYTES = 128 * 1024 * 1024;
-
-/** Les étapes du plan d'un déploiement (`op_plan` de l'agent). */
-export const DEPLOY_STEPS = ["check", "pull", "create", "start", "watch"] as const;
-export type DeployStep = (typeof DEPLOY_STEPS)[number];
 
 interface Listener {
   program: string | null;
@@ -314,8 +312,16 @@ export class SimulatedDeploys {
       reason,
     });
     if (nameIssue(request.name) !== null) return invalid("name", "bad_format");
-    if (imageIssue(request.image) !== null) return invalid("image", "bad_format");
-    if (tagIssue(request.tag ?? "", request.image) !== null) return invalid("tag", "bad_format");
+    // L'ordre de `ImageRef::parse` : image vide, empreinte, deux versions différentes, image trop longue ou mal
+    // formée, puis version mal formée (même une version trop longue est « bad_format »).
+    const image = imageIssue(request.image);
+    if (image === "required") return invalid("image", "empty");
+    if (image === "digest") return invalid("image", "digest_unsupported");
+    const tag = tagIssue(request.tag ?? "", request.image);
+    if (tag === "conflict") return invalid("tag", "conflict");
+    if (image === "too_long") return invalid("image", "too_long");
+    if (image === "format") return invalid("image", "bad_format");
+    if (tag !== null) return invalid("tag", "bad_format");
     if (request.env.length > MAX_ENV_VARS) return invalid("env", "too_many");
     const names = new Set<string>();
     for (const variable of request.env) {
@@ -529,17 +535,30 @@ export class SimulatedDeploys {
     this.cancels.push({ serverId, opId });
     const dto = this.ops.of(serverId).find((item) => item.id === opId);
     if (!dto) return { kind: "refused", refusal: { kind: "not_found" } };
-    if (dto.status === "cancelled" || dto.status === "cancelling") {
+    // Idempotent : une opération que l'on annule déjà, ou déjà annulée PAR UN COMPTE, répond la même issue.
+    if (
+      dto.status === "cancelling" ||
+      (dto.status === "cancelled" && dto.cause === "cancelled_by_account")
+    ) {
       return { kind: "done", operation: toOperation(dto) };
     }
-    if (dto.status === "succeeded" || dto.status === "failed" || dto.status === "interrupted") {
+    if (
+      dto.status === "cancelled" ||
+      dto.status === "succeeded" ||
+      dto.status === "failed" ||
+      dto.status === "interrupted"
+    ) {
       return { kind: "refused", refusal: { kind: "not_cancellable" } };
     }
     if (!dto.cancellable) return { kind: "refused", refusal: { kind: "too_late" } };
+    // Comme l'agent : l'opération passe par « cancelling », puis son exécuteur la clôt « cancelled ».
+    this.ops.update(serverId, opId, { status: "cancelling", cancellable: false });
     const held = this.held.get(serverId)?.get(opId);
-    if (held) this.services.remove(serverId, held.key);
-    this.ops.finish(serverId, opId, "cancelled", "cancelled_by_account");
-    this.release(serverId, opId);
+    setTimeout(() => {
+      if (held) this.services.remove(serverId, held.key);
+      this.ops.finish(serverId, opId, "cancelled", "cancelled_by_account");
+      this.release(serverId, opId);
+    }, 0);
     const after = this.ops.of(serverId).find((item) => item.id === opId) ?? dto;
     return { kind: "done", operation: toOperation(after) };
   }

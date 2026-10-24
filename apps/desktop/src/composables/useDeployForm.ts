@@ -150,6 +150,14 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
       logUiError(error, "deploy:capacity");
     }
   }
+  // Un autre serveur a d'autres bornes (et d'autres constats) : rien de l'ancien ne reste.
+  watch(serverId, () => {
+    capacityTicket += 1;
+    capacity.value = null;
+    capacityFailed.value = false;
+    check.value = null;
+    checkSent.value = null;
+  });
   watch(
     [serverId, enabled],
     ([, on]) => {

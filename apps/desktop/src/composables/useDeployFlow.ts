@@ -5,12 +5,14 @@ import type { ActReport } from "@/composables/useReauth";
 import { useServerAction } from "@/composables/useServerAction";
 import { toRequest } from "@/deploy/form";
 import {
+  checkBlocker,
   failureField,
   failureText,
   isFieldRefusal,
   refusalField,
   refusalText,
 } from "@/deploy/messages";
+import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
 import {
   type DeployCheck,
@@ -23,6 +25,16 @@ import {
 import { useServiceOpsStore } from "@/stores/serviceOps";
 import { useServicesStore } from "@/stores/services";
 import { useToastsStore } from "@/stores/toasts";
+
+/**
+ * Les deux actes (lancer, annuler) rouvrent le champ du mot de passe, sans notification d'erreur, quand l'état de
+ * confiance a changé entre la lecture et l'envoi (élévation expirée, HRT-194) : même parcours que `useLifecycleActions`.
+ */
+const OPTIONS = {
+  unknownMessage: "deploy.unknownResult",
+  forbiddenMessage: "rights.refused",
+  passwordMissingIsRefusal: true,
+} as const;
 
 /** Le refus du serveur montré en tête du formulaire, et le champ qu'il désigne (BR-DEPLOY-032). */
 export interface FormRefusal {
@@ -68,8 +80,8 @@ export function useDeployFlow(options: {
 
   const summaryOpen = ref(false);
   const summaryCheck = ref<DeployCheck | null>(null);
-  /** `undefined` : rien n'est exigé ; sinon l'espace libre que le serveur a dit (`null` : sans chiffre). */
-  const forceLowDisk = ref<number | null | undefined>(undefined);
+  /** `null` : rien n'est exigé ; sinon le manque de place que le serveur vient de dire (`freeBytes` : `null` sans chiffre). */
+  const forceLowDisk = ref<{ freeBytes: number | null } | null>(null);
   const opening = ref(false);
   const refusal = ref<FormRefusal | null>(null);
   const launch = ref<Launch | null>(null);
@@ -86,32 +98,7 @@ export function useDeployFlow(options: {
       .then(() => options.focusField(field));
   }
 
-  const spaceRefusal = (r: DeployRefusal) => (r.kind === "no_space" ? r.freeBytes : undefined);
-
   // ── 1. Le récapitulatif ──────────────────────────────────────────────────────────────────────
-
-  /** Ce que la consultation fraîche interdit, ou `null` : le serveur d'aujourd'hui est d'accord avec le formulaire. */
-  function blockingOf(check: DeployCheck): FormRefusal | null {
-    if (check.name === "taken") return { text: t("deploy.nameTaken"), field: "name" };
-    if (check.name === "being_deleted") {
-      return { text: t("deploy.nameBeingDeleted"), field: "name" };
-    }
-    for (const port of check.ports) {
-      if (port.status === "free" || port.status === "reserved_by_stopped") continue;
-      return {
-        text: refusalText({
-          kind: "port_in_use",
-          port: port.hostPort,
-          protocol: port.protocol,
-          status: port.status,
-          holder: port.holder,
-          suggested: port.suggested,
-        }),
-        field: "ports",
-      };
-    }
-    return null;
-  }
 
   async function openSummary(): Promise<void> {
     if (opening.value || summaryOpen.value) return;
@@ -119,10 +106,10 @@ export function useDeployFlow(options: {
     if (form.issues.value.any) return;
     opening.value = true;
     refusal.value = null;
-    forceLowDisk.value = undefined;
+    forceLowDisk.value = null;
     try {
       const fresh = await form.refreshCheck();
-      const blocking = fresh ? blockingOf(fresh) : null;
+      const blocking = fresh ? checkBlocker(fresh) : null;
       if (blocking) {
         refusal.value = blocking;
         if (blocking.field) focusLater(blocking.field);
@@ -146,11 +133,15 @@ export function useDeployFlow(options: {
     accept: { reservedPorts: boolean; lowDisk: boolean },
   ): Promise<ActReport> {
     const request = toRequest(form.draft.value, accept);
-    if (!request) return { kind: "failed" };
+    if (!request) {
+      // Le formulaire ne devrait pas pouvoir arriver ici (le bouton est inactif) : on le dit au journal, pas en silence.
+      logUiError(new Error("déploiement sans demande valable"), "deploy:request");
+      return { kind: "failed" };
+    }
     const id = serverId();
     const result = await action.run(
       () => getLinkBridge().deployService(id, request, adminPassword),
-      { unknownMessage: "deploy.unknownResult", forbiddenMessage: "rights.refused" },
+      OPTIONS,
     );
     if (!result) {
       if (action.passwordMissing.value) {
@@ -180,8 +171,7 @@ export function useDeployFlow(options: {
 
   /** Un refus de l'agent : celui qui vise un champ ferme la fenêtre et y ramène ; les autres se disent dans la fenêtre. */
   function settleRefusal(refused: DeployRefusal): ActReport {
-    const free = spaceRefusal(refused);
-    if (free !== undefined) forceLowDisk.value = free;
+    if (refused.kind === "no_space") forceLowDisk.value = { freeBytes: refused.freeBytes };
     if (!isFieldRefusal(refused)) return { kind: "refused", refusal: refused };
     const field = refusalField(refused);
     refusal.value = { text: refusalText(refused), field };
@@ -224,7 +214,9 @@ export function useDeployFlow(options: {
     const op = done.operation;
     const key = current.serviceKey;
     if (op.status === "succeeded" && op.cause !== "stopped_right_after_start") {
-      toasts.push({ kind: "success", message: t("deploy.success", { name: current.name }) });
+      if (!done.announced) {
+        toasts.push({ kind: "success", message: t("deploy.success", { name: current.name }) });
+      }
       settle();
       form.wipe();
       launch.value = null;
@@ -239,7 +231,7 @@ export function useDeployFlow(options: {
     }
     if (op.status === "cancelled") {
       // Rien n'a été créé : la notification le dit, le formulaire reste rempli (BR-DEPLOY-016).
-      toasts.push({ kind: "info", message: t("deploy.cancelled") });
+      if (!done.announced) toasts.push({ kind: "info", message: t("deploy.cancelled") });
       settle();
       launch.value = null;
       return;
@@ -310,7 +302,7 @@ export function useDeployFlow(options: {
     const opId = current.operationId;
     const result = await action.run(
       () => getLinkBridge().cancelServiceOperation(id, opId, adminPassword),
-      { unknownMessage: "deploy.unknownResult", forbiddenMessage: "rights.refused" },
+      OPTIONS,
     );
     if (!result) {
       if (action.passwordMissing.value) {

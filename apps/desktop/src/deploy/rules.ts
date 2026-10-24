@@ -142,6 +142,27 @@ export function parsePort(text: string): { port: number } | { issue: PortIssue }
   return { port };
 }
 
+/**
+ * `char::is_whitespace` de Rust (propriété White_Space d'Unicode) : `\s` de JavaScript y ajoute U+FEFF, que l'agent ne
+ * tient pas pour une espace.
+ */
+function isWhitespace(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0;
+  return (
+    (code >= 0x09 && code <= 0x0d) ||
+    code === 0x20 ||
+    code === 0x85 ||
+    code === 0xa0 ||
+    code === 0x1680 ||
+    (code >= 0x2000 && code <= 0x200a) ||
+    code === 0x2028 ||
+    code === 0x2029 ||
+    code === 0x202f ||
+    code === 0x205f ||
+    code === 0x3000
+  );
+}
+
 /** Un caractère de contrôle (Cc) autre que la tabulation et les retours à la ligne : l'agent le refuse. */
 function hasControl(text: string): boolean {
   for (const char of text) {
@@ -175,7 +196,7 @@ export function splitCommand(line: string): { args: string[] } | { issue: Comman
     if (char === "'" || char === '"') {
       quote = char;
       started = true;
-    } else if (/\s/.test(char)) {
+    } else if (isWhitespace(char)) {
       if (started) {
         args.push(current);
         current = "";

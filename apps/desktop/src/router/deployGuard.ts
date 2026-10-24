@@ -1,6 +1,7 @@
 import { watch } from "vue";
 import type { RouteLocationNormalized, RouteLocationRaw } from "vue-router";
 import { deployDoor, routeOpen } from "@/deploy/availability";
+import { logUiError } from "@/errors/report";
 import { type RightsState, rightsGate } from "@/services/rights";
 import { useServersStore } from "@/stores/servers";
 import { useServiceRightsStore } from "@/stores/serviceRights";
@@ -65,6 +66,12 @@ async function readRights(id: string): Promise<RightsState | undefined> {
   const store = useServiceRightsStore();
   const known = store.of(id);
   if (known && known.phase === "known") return known;
-  await store.load(id);
+  try {
+    await store.load(id);
+  } catch (error) {
+    // Un droit illisible n'ouvre rien : la liste explique, la navigation n'échoue pas en silence.
+    logUiError(error, "deploy:guard");
+    return undefined;
+  }
   return store.of(id);
 }

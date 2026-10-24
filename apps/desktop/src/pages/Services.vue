@@ -210,8 +210,6 @@ const barShown = computed(
     shown.value.kind !== "loading" &&
     !(opened.value && tab.value === "logs"),
 );
-/** Le droit manque et la raison est écrite : le bouton y est lié (`aria-describedby`). */
-const rightsReasonShown = computed(() => rightsNotice.value);
 function openDeploy() {
   if (server.value) void router.push({ name: "services-deploy", params: { id: server.value.id } });
 }
@@ -365,7 +363,7 @@ async function openDocs() {
       <div v-if="barShown" class="svc__bar">
         <DeployButton
           :door="door"
-          :rights-reason-id="rightsReasonShown ? rights.reasonId : undefined"
+          :rights-reason-id="rightsNotice ? rights.reasonId : undefined"
           @click="openDeploy"
         />
       </div>
@@ -455,7 +453,7 @@ async function openDocs() {
                 <template v-if="door.kind !== 'hidden'" #action>
                   <DeployButton
                     :door="door"
-                    :rights-reason-id="rightsReasonShown ? rights.reasonId : undefined"
+                    :rights-reason-id="rightsNotice ? rights.reasonId : undefined"
                     @click="openDeploy"
                   />
                 </template>
@@ -494,7 +492,7 @@ async function openDocs() {
           <template v-if="door.kind !== 'hidden'" #action>
             <DeployButton
               :door="door"
-              :rights-reason-id="rightsReasonShown ? rights.reasonId : undefined"
+              :rights-reason-id="rightsNotice ? rights.reasonId : undefined"
               @click="openDeploy"
             />
           </template>

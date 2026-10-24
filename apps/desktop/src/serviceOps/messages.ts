@@ -122,8 +122,12 @@ export function operationTitle(
 
 /** Le texte de l'étape en cours, ou `null` (étape absente ou inconnue : jamais le code lui-même). */
 export function stepText(operation: ServiceOperation): string | null {
-  if (operation.step === null) return null;
-  const key = STEP_KEYS[operation.step];
+  return operation.step === null ? null : stepName(operation.step);
+}
+
+/** Le texte d'une étape par son code, ou `null` si ce client ne la connaît pas. */
+export function stepName(step: string): string | null {
+  const key = STEP_KEYS[step];
   return key ? t(key) : null;
 }
 

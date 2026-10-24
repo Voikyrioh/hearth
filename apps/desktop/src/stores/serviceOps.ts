@@ -19,6 +19,13 @@ export const SERVICE_OPS_RETRY_MS = 5000;
 /** Garde-fou : les numéros de changement retenus pour écarter un rejeu ne grossissent jamais sans limite. */
 const MAX_REMEMBERED = 1000;
 
+/** L'issue d'une opération qu'une fenêtre suit ; `announced` : une notification l'a déjà dite. */
+export interface FinishedOperation {
+  operation: ServiceOperation;
+  name: string;
+  announced: boolean;
+}
+
 /** Une opération suivie, avec le serveur qui la porte et l'ordre dans lequel on l'a vue. */
 export interface TrackedOperation {
   serverId: string;
@@ -54,9 +61,7 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
    * « règle » (`settle`) ; si la fenêtre se ferme avant (`release`), l'issue est annoncée comme les autres.
    */
   const watched = new Set<string>();
-  const finished = shallowReactive(
-    new Map<string, { operation: ServiceOperation; name: string }>(),
-  );
+  const finished = shallowReactive(new Map<string, FinishedOperation>());
   /**
    * Les dernières issues déjà annoncées : l'issue d'une opération rapide peut arriver avant la réponse qui permet de la
    * suivre (`watch`). Bornée, comme `announced`.
@@ -120,7 +125,7 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
     if (isFinished(operation.status)) {
       entries.delete(id);
       if (watched.has(id)) {
-        finished.set(id, { operation, name });
+        finished.set(id, { operation, name, announced: false });
         return;
       }
       recent.set(id, { operation, name });
@@ -164,14 +169,12 @@ export const useServiceOpsStore = defineStore("serviceOps", () => {
     watched.add(id);
     // L'issue est déjà arrivée (opération plus rapide que la réponse qui la désigne) : la fenêtre la reçoit.
     const past = recent.get(id);
-    if (past) finished.set(id, past);
+    // Sa notification a déjà été montrée : la fenêtre ne la répète pas (`announced`).
+    if (past) finished.set(id, { ...past, announced: true });
   }
 
   /** L'issue d'une opération suivie par une fenêtre, une fois terminée ; `undefined` tant qu'elle court. */
-  function finishedOf(
-    serverId: string,
-    opId: string,
-  ): { operation: ServiceOperation; name: string } | undefined {
+  function finishedOf(serverId: string, opId: string): FinishedOperation | undefined {
     return finished.get(tag(serverId, opId));
   }
 

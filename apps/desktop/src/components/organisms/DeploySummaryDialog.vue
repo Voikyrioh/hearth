@@ -7,9 +7,9 @@ import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import type { ActReport } from "@/composables/useReauth";
 import type { Draft } from "@/deploy/draft";
 import { shownRepository, shownVersion } from "@/deploy/form";
-import { refusalText } from "@/deploy/messages";
+import { portVerdict, refusalText } from "@/deploy/messages";
 import { t } from "@/i18n";
-import type { DeployCheck, DeployRefusal } from "@/link";
+import type { DeployCheck } from "@/link";
 import { formatCpu, formatMemory } from "@/resources";
 import { formatSize } from "@/serviceOps/messages";
 
@@ -27,8 +27,8 @@ const props = defineProps<{
   draft: Draft;
   /** Les constats frais du serveur à l'ouverture ; `null` : la consultation n'a pas pu être faite. */
   check: DeployCheck | null;
-  /** Le serveur vient de refuser faute de place : la case est exigée même si la consultation ne l'avait pas vu. */
-  forceLowDisk: number | null | undefined;
+  /** Le serveur vient de refuser faute de place (`freeBytes` : `null` s'il ne dit pas combien) : la case est exigée même si la consultation ne l'avait pas vu. */
+  forceLowDisk: { freeBytes: number | null } | null;
   perform: (
     adminPassword: string | null,
     accept: { reservedPorts: boolean; lowDisk: boolean },
@@ -56,7 +56,7 @@ const reservedPorts = computed(() => {
   return answer.ports.filter((port) => port.status === "reserved_by_stopped");
 });
 const lowDisk = computed<{ freeBytes: number | null } | null>(() => {
-  if (props.forceLowDisk !== undefined) return { freeBytes: props.forceLowDisk };
+  if (props.forceLowDisk !== null) return props.forceLowDisk;
   const disk = props.check?.disk;
   return disk?.low && !props.check?.imagePresent ? { freeBytes: disk.freeBytes } : null;
 });
@@ -90,10 +90,6 @@ function send(adminPassword: string | null): Promise<ActReport> {
     lowDisk: diskOk.value,
   });
 }
-
-function refusal(refused: { kind: string }): string {
-  return refusalText(refused as DeployRefusal);
-}
 </script>
 
 <template>
@@ -106,7 +102,7 @@ function refusal(refused: { kind: string }): string {
     :cancel-label="t('deploy.summaryEdit')"
     :can-submit="attentionDone"
     :perform="send"
-    :refusal-text="refusal"
+    :refusal-text="refusalText"
     wide
     @close="emit('close')"
   >
@@ -185,11 +181,7 @@ function refusal(refused: { kind: string }): string {
         <Callout tone="warn" inline>
           <template v-for="port in reservedPorts" :key="`${port.protocol}/${port.hostPort}`">
             <span class="attention__line">
-              {{
-                port.holder
-                  ? t("deploy.portReserved", { name: port.holder })
-                  : t("deploy.portReservedAnon")
-              }}
+              {{ portVerdict(port).warning }}
             </span>
           </template>
         </Callout>

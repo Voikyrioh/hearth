@@ -155,6 +155,10 @@ export type CancelOutcome =
   | { kind: "refused"; refusal: CancelRefusal }
   | { kind: "unknown"; opId: string };
 
+/** Le plan d'un déploiement, dans l'ordre de l'agent (`op_plan`) : `create` est le point de non-retour (BR-DEPLOY-016). */
+export const DEPLOY_STEPS = ["check", "pull", "create", "start", "watch"] as const;
+export type DeployStep = (typeof DEPLOY_STEPS)[number];
+
 /** Les champs qu'un refus de validation peut désigner sont connus ; tout autre texte de l'agent devient `other`. */
 export const DEPLOY_FIELDS: readonly DeployField[] = [
   "name",
@@ -226,7 +230,7 @@ export function toDeployOutcome(dto: BoundDeployOutcome): DeployOutcome {
     case "unknown":
       return { kind: "unknown", opId: dto.opId };
     case "refused":
-      return { kind: "refused", refusal: dto.refusal as DeployRefusal };
+      return { kind: "refused", refusal: dto.refusal };
   }
 }
 

@@ -18,7 +18,7 @@ const env = (patch: Partial<EnvRow> = {}): EnvRow => ({
 
 describe("EnvVarRow", () => {
   it("masque la valeur d'un nom qui évoque un secret, la montre sinon, et l'utilisateur décide", async () => {
-    const secret = mount(EnvVarRow, { props: { row: env() } });
+    const secret = mount(EnvVarRow, { props: { row: env(), position: 1 } });
     const value = () => secret.findAll("input")[1];
     expect(value()?.attributes("type")).toBe("password");
     expect(secret.get("[data-env-toggle]").attributes("aria-label")).toBe("Afficher la valeur");
@@ -28,24 +28,27 @@ describe("EnvVarRow", () => {
     await secret.setProps({ row: env({ reveal: true }) });
     expect(value()?.attributes("type")).toBe("text");
     expect(secret.get("[data-env-toggle]").attributes("aria-label")).toBe("Masquer la valeur");
-    const plain = mount(EnvVarRow, { props: { row: env({ name: "PORT", value: "80" }) } });
+    const plain = mount(EnvVarRow, {
+      props: { row: env({ name: "PORT", value: "80" }), position: 1 },
+    });
     expect(plain.findAll("input")[1]?.attributes("type")).toBe("text");
   });
 
   it("n'écrit les libellés que sur la première rangée et nomme le bouton de retrait", () => {
-    const first = mount(EnvVarRow, { props: { row: env(), first: true } });
+    const first = mount(EnvVarRow, { props: { row: env(), first: true, position: 1 } });
     expect(first.findAll("label.sr-only")).toHaveLength(0);
-    const next = mount(EnvVarRow, { props: { row: env({ id: 2, name: "TZ" }) } });
+    const next = mount(EnvVarRow, { props: { row: env({ id: 2, name: "TZ" }), position: 2 } });
     expect(next.findAll("label.sr-only")).toHaveLength(2);
-    expect(next.get("[data-env-remove]").attributes("aria-label")).toBe("Retirer la variable TZ");
-    const bare = mount(EnvVarRow, { props: { row: env({ name: "" }) } });
-    expect(bare.get("[data-env-remove]").attributes("aria-label")).toBe("Retirer cette variable");
+    // Le nom d'une variable est un secret : il ne va pas dans un nom accessible, seul le rang.
+    expect(next.get("[data-env-remove]").attributes("aria-label")).toBe("Retirer la variable 2");
+    expect(next.html()).not.toContain('aria-label="Retirer la variable TZ');
   });
 
   it("émet nom, valeur, retrait et sortie de champ ; montre les défauts qu'on lui donne", async () => {
     const wrapper = mount(EnvVarRow, {
       props: {
         row: env(),
+        position: 1,
         nameError: "Cette variable est déjà définie",
         valueError: "La valeur doit tenir sur une seule ligne",
       },
@@ -103,7 +106,7 @@ describe("PortMappingRow", () => {
     });
     expect(wrapper.get('[role="alert"]').text()).toBe("Ce port est pris par le service « web »");
     expect(wrapper.get("[data-port-suggested]").text()).toContain(
-      "Port libre le plus proche : 8081",
+      "Le port libre le plus proche est le 8081",
     );
     await wrapper.get("[data-port-use]").trigger("click");
     expect(wrapper.emitted("suggest")).toEqual([[8081]]);

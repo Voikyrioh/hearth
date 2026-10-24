@@ -9,3 +9,4 @@ Fenêtre de formulaire : `<dialog>` natif ouvert par `showModal()` (piège à fo
 - Notes : Le parent vide ses mots de passe après chaque envoi. Utilisée par `CreateAccountDialog`, `PasswordDialog`, `OwnAccountCard`. Test : `accounts.test.ts`.
 - HRT-40 : prop `hideSubmit` (aucun bouton d'action : l'action est impossible).
 - HRT-69 : `wide` (640 px, jeton `--wide-dialog-width`) pour un récapitulatif qui défile, titre et boutons collants.
+- HRT-69 : slot `actions` (remplace les boutons par défaut : une progression n'a ni envoi ni annulation à elle), `submitLabel` facultatif, attributs de l'appelant (`data-…`) posés sur le `<dialog>`.

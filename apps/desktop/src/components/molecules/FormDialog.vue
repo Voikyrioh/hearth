@@ -3,6 +3,9 @@ import { nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import { t } from "@/i18n";
 
+// Les attributs de l'appelant (`data-…`) vont sur le `<dialog>`, pas sur la racine téléportée (HRT-69).
+defineOptions({ inheritAttrs: false });
+
 // Fenêtre de formulaire (création de compte, mot de passe) : élément `<dialog>` natif ouvert par
 // `showModal()` (piège à focus, reste de la page inerte, Échap), téléporté dans `body`. Le premier
 // champ reçoit le focus à l'ouverture ; à la fermeture le focus revient à l'élément qui l'avait
@@ -13,7 +16,7 @@ const props = withDefaults(
   defineProps<{
     open: boolean;
     title: string;
-    submitLabel: string;
+    submitLabel?: string;
     canSubmit?: boolean;
     busy?: boolean;
     error?: string;
@@ -25,6 +28,7 @@ const props = withDefaults(
     wide?: boolean;
   }>(),
   {
+    submitLabel: undefined,
     canSubmit: true,
     busy: false,
     error: undefined,
@@ -87,6 +91,7 @@ function onNativeClose() {
   <Teleport to="body">
     <dialog
       v-if="open"
+      v-bind="$attrs"
       ref="dialog"
       :class="['dialog', { 'dialog--wide': wide }]"
       :aria-labelledby="titleId"
@@ -102,19 +107,22 @@ function onNativeClose() {
         </div>
         <p v-if="error" class="dialog__error" role="alert">{{ error }}</p>
         <div class="dialog__actions">
-          <HButton variant="secondary" :disabled="busy" @click="cancel">
-            {{ cancelLabel ?? t("common.cancel") }}
-          </HButton>
-          <HButton
-            v-if="!hideSubmit"
-            type="submit"
-            :variant="destructive ? 'danger' : 'primary'"
-            :solid="destructive"
-            :disabled="!canSubmit"
-            :busy="busy"
-          >
-            {{ submitLabel }}
-          </HButton>
+          <!-- `actions` remplace les deux boutons par défaut (une progression n'a ni envoi ni annulation à elle). -->
+          <slot name="actions">
+            <HButton variant="secondary" :disabled="busy" @click="cancel">
+              {{ cancelLabel ?? t("common.cancel") }}
+            </HButton>
+            <HButton
+              v-if="!hideSubmit"
+              type="submit"
+              :variant="destructive ? 'danger' : 'primary'"
+              :solid="destructive"
+              :disabled="!canSubmit"
+              :busy="busy"
+            >
+              {{ submitLabel }}
+            </HButton>
+          </slot>
         </div>
       </form>
     </dialog>

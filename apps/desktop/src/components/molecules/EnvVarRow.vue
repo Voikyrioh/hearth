@@ -17,6 +17,8 @@ defineProps<{
   valueError?: string;
   /** Première rangée : porte les libellés visibles. */
   first?: boolean;
+  /** Rang (à partir de 1) du bouton « Retirer » : le NOM de la variable est un secret, il ne va pas dans un nom accessible. */
+  position: number;
 }>();
 
 defineEmits<{
@@ -71,7 +73,7 @@ defineEmits<{
       variant="ghost"
       size="sm"
       data-env-remove
-      :aria-label="row.name === '' ? t('deploy.envRemoveBare') : t('deploy.envRemove', { name: row.name })"
+      :aria-label="t('deploy.envRemove', { n: position })"
       @click="$emit('remove')"
     >
       <HIcon name="close" size="sm" />

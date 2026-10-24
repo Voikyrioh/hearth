@@ -1,5 +1,5 @@
 import { flushPromises, type VueWrapper } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SimulatedLinkBridge } from "@/link";
 import { useDeployFormStore } from "@/stores/deployForm";
 import { useServiceRightsStore } from "@/stores/serviceRights";
@@ -17,11 +17,14 @@ import {
   type,
   useDeployTestClock,
 } from "@/test/deploy";
+import { mountContext } from "@/test/mount";
 
 // Déployer une image depuis le client (HRT-69, BR-DEPLOY-001 à 009, 014 à 016, 020, 027 à 031, 033) : le formulaire,
 // sa route et son bouton, sur le pont simulé dont l'agent juge comme le vrai. Le récapitulatif, la progression et
 // l'abandon sont dans `DeployFlow.test.ts`.
 useDeployTestClock();
+
+const GIB = 1024 ** 3;
 
 describe("la route (BR-DEPLOY-001, 027)", () => {
   it("s'ouvre pour un compte qui a le droit, moteur prêt, avec le focus sur « Nom du service »", async () => {
@@ -84,7 +87,33 @@ describe("la route (BR-DEPLOY-001, 027)", () => {
     await fillMinimum(wrapper);
     expect(field(wrapper, "name").element.value).toBe("web");
     expect(submit(wrapper).attributes("aria-disabled")).toBe("true");
-    expect(reason(wrapper)).toBe("Indisponible : le moteur de conteneurs est arrêté.");
+    expect(reason(wrapper)).toBe(
+      "Le déploiement est indisponible : le moteur de conteneurs est arrêté.",
+    );
+    wrapper.unmount();
+  });
+});
+
+describe("la garde et les bornes de la machine", () => {
+  it("un droit illisible renvoie vers la liste au lieu de faire échouer la navigation", async () => {
+    const ctx = await mountContext();
+    ctx.bridge.services.seed("forge", [{ key: "h_db", name: "base", origin: "hearth" }]);
+    vi.spyOn(useServiceRightsStore(), "load").mockRejectedValue(new Error("illisible"));
+    await ctx.router.push("/servers/forge/services/deployer");
+    await settle();
+    expect(ctx.router.currentRoute.value.name).toBe("services");
+  });
+
+  it("changer de serveur relit les bornes de la machine : celles de l'ancien ne restent pas", async () => {
+    const { wrapper, bridge, router } = await boot((sim) => {
+      sim.services.seed("salon", [{ key: "h_x", name: "x", origin: "hearth" }]);
+      sim.deploys.setCapacity("salon", { cpus: 2, memoryBytes: 4 * GIB });
+    });
+    expect(bridge.calls.filter((call) => call === "engine capacity")).toHaveLength(1);
+    await router.push("/servers/salon/services/deployer");
+    await settle();
+    expect(bridge.calls.filter((call) => call === "engine capacity")).toHaveLength(2);
+    expect(wrapper.get("[data-resources]").text()).toContain("2 cœurs");
     wrapper.unmount();
   });
 });
@@ -147,7 +176,9 @@ describe("le bouton de la section Services (BR-DEPLOY-001, BR-GRANT-014)", () =>
       bridge.services.setEngine("forge", { state: "stopped" }),
     );
     expect(wrapper.get("[data-deploy-open]").attributes("aria-disabled")).toBe("true");
-    expect(wrapper.text()).toContain("Indisponible : le moteur de conteneurs est arrêté.");
+    expect(wrapper.text()).toContain(
+      "Le déploiement est indisponible : le moteur de conteneurs est arrêté.",
+    );
     wrapper.unmount();
   });
 });
@@ -412,7 +443,9 @@ describe("les ports (BR-DEPLOY-007 à 009, 031)", () => {
     await fillMinimum(wrapper);
     const row = await addPort(wrapper, "8080");
     expect(row?.text()).toContain("Ce port est pris par le service « up »");
-    expect(row?.get("[data-port-suggested]").text()).toContain("Port libre le plus proche : 8081");
+    expect(row?.get("[data-port-suggested]").text()).toContain(
+      "Le port libre le plus proche est le 8081",
+    );
     expect(submit(wrapper).attributes("aria-disabled")).toBe("true");
     await row?.get("[data-port-use]").trigger("click");
     await settle();
@@ -434,7 +467,7 @@ describe("les ports (BR-DEPLOY-007 à 009, 031)", () => {
       ]);
     });
     const row = await addPort(wrapper, "9000");
-    expect(row?.text()).toContain("Port tenu par un conteneur créé hors de Hearth");
+    expect(row?.text()).toContain("Ce port est tenu par un conteneur créé hors de Hearth.");
     expect(wrapper.text()).not.toContain("conteneur-secret");
     const agent = await addPort(wrapper, "7443");
     expect(agent?.text()).toContain("Ce port est utilisé par Hearth lui-même.");

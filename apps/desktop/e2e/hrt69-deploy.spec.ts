@@ -158,7 +158,7 @@ test("refus de validation : nom, port tenu par un service et proposition du port
   await page.getByLabel("Port du service").fill("80");
   const row = page.locator("[data-port-row]");
   await expect(row).toContainText("Ce port est pris par le service « base »");
-  await expect(row).toContainText("Port libre le plus proche : 8081");
+  await expect(row).toContainText("Le port libre le plus proche est le 8081");
   const submit = page.locator("[data-deploy-submit]");
   await expect(submit).toHaveAttribute("aria-disabled", "true");
   await expect(page.locator("[data-deploy-reason]")).toHaveText(

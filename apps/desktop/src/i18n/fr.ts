@@ -1434,9 +1434,10 @@ export const fr = {
     counter: "{n} sur {max}",
     limitReached: "Limite atteinte",
     // Pourquoi le bouton « Déployer un service » est inactif (BR-ENGINE-014, BR-GRANT-014).
-    engineStopped: "Indisponible : le moteur de conteneurs est arrêté.",
-    engineDenied: "Indisponible : l'agent n'a pas le droit d'utiliser le moteur.",
-    engineUnresponsive: "Indisponible : le moteur de conteneurs ne répond pas.",
+    engineStopped: "Le déploiement est indisponible : le moteur de conteneurs est arrêté.",
+    engineDenied:
+      "Le déploiement est indisponible : l'agent n'a pas le droit d'utiliser le moteur.",
+    engineUnresponsive: "Le déploiement est indisponible : le moteur de conteneurs ne répond pas.",
     engineNotReady: "Indisponible tant que le moteur de conteneurs n'est pas prêt.",
     fixFields: "Corrigez les champs signalés pour continuer.",
     // Hors spec : le formulaire est vide, aucun champ n'est encore signalé.
@@ -1484,8 +1485,7 @@ export const fr = {
     envValueLabel: "Valeur",
     envShow: "Afficher la valeur",
     envHide: "Masquer la valeur",
-    envRemove: "Retirer la variable {name}",
-    envRemoveBare: "Retirer cette variable",
+    envRemove: "Retirer la variable {n}",
     envAdd: "Ajouter une variable",
     envNameRequired: "Le nom de la variable est requis",
     envNameFormat:
@@ -1509,7 +1509,7 @@ export const fr = {
     portDuplicate: "Ce port est déjà utilisé plus haut dans le formulaire",
     portAgent: "Ce port est utilisé par Hearth lui-même.",
     portService: "Ce port est pris par le service « {name} »",
-    portUnmanaged: "Port tenu par un conteneur créé hors de Hearth",
+    portUnmanaged: "Ce port est tenu par un conteneur créé hors de Hearth.",
     portProgram: "Ce port est occupé sur le serveur",
     portProgramBy: "Ce port est occupé sur le serveur par « {program} »",
     portReserved:
@@ -1518,7 +1518,7 @@ export const fr = {
       "Ce port est réservé par un service arrêté. Vous pouvez continuer, mais ce service ne pourra pas démarrer tant que le vôtre tourne.",
     portPrivileged:
       "Les ports sous 1024 sont réservés aux programmes du système : vérifiez que c'est voulu.",
-    portSuggested: "Port libre le plus proche : {port}",
+    portSuggested: "Le port libre le plus proche est le {port}.",
     portUseSuggested: "Utiliser le port {port}",
     portChecking: "Vérification du port…",
     portToConfirm: "À confirmer au lancement",
@@ -1583,7 +1583,8 @@ export const fr = {
     summaryCommandCustom: "Commande personnalisée",
     summaryCommandImage: "Commande de l'image",
     summaryRestart: "Redémarrage",
-    restartText: "Redémarre tout seul après un redémarrage du serveur, sauf si vous l'avez arrêté.",
+    restartText:
+      "Le service redémarre tout seul après un redémarrage du serveur, sauf si vous l'avez arrêté.",
     summaryResources: "Ressources",
     summaryResourcesText: "Mémoire : {memory}. Processeur : {cpu}.",
     attentionTitle: "Points d'attention",
@@ -1593,7 +1594,7 @@ export const fr = {
       "Il reste {space} libres sur le disque du serveur. Une image peut prendre plusieurs gigaoctets : la récupération échoue si le disque se remplit.",
     lowDiskUnknown:
       "Le serveur manque de place pour récupérer l'image. Une image peut prendre plusieurs gigaoctets : la récupération échoue si le disque se remplit.",
-    imagePresent: "Image déjà présente sur le serveur : utilisée telle quelle.",
+    imagePresent: "L'image est déjà présente sur le serveur : elle est utilisée telle quelle.",
     imagePresentLatest: "Si une version plus récente existe, elle n'est pas récupérée.",
     summaryAttentionNeeded: "Validez les points d'attention pour continuer.",
     summaryEdit: "Modifier",

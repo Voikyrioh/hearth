@@ -1,6 +1,6 @@
 import { flushPromises, type VueWrapper } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
-import type { SimulatedLinkBridge } from "@/link";
+import { describe, expect, it, vi } from "vitest";
+import { LinkCommandError, type SimulatedLinkBridge } from "@/link";
 import { useDeployFormStore } from "@/stores/deployForm";
 import { confirmDialog, dialogButton, OWN, reauthField, typeInto } from "@/test/confirm";
 import {
@@ -86,7 +86,7 @@ describe("le récapitulatif (BR-DEPLOY-015, 031)", () => {
       "Commande personnalisée",
     );
     expect(document.querySelector("[data-sum-restart]")?.textContent).toBe(
-      "Redémarre tout seul après un redémarrage du serveur, sauf si vous l'avez arrêté.",
+      "Le service redémarre tout seul après un redémarrage du serveur, sauf si vous l'avez arrêté.",
     );
     expect(document.querySelector("[data-sum-resources]")?.textContent).toBe(
       "Mémoire : 2 Go. Processeur : 4 cœurs.",
@@ -148,7 +148,7 @@ describe("le récapitulatif (BR-DEPLOY-015, 031)", () => {
     await fillMinimum(wrapper);
     await openSummary(wrapper);
     expect(document.querySelector("[data-sum-present]")?.textContent).toContain(
-      "Image déjà présente sur le serveur : utilisée telle quelle.",
+      "L'image est déjà présente sur le serveur : elle est utilisée telle quelle.",
     );
     expect(document.querySelector("[data-sum-present]")?.textContent).toContain(
       "Si une version plus récente existe, elle n'est pas récupérée.",
@@ -390,10 +390,30 @@ describe("le lancement et la progression (BR-DEPLOY-016)", () => {
       return outcome;
     };
     await launch(wrapper);
-    expect(
-      toasts().filter((message) => message === "Le service web est en marche."),
-    ).not.toHaveLength(0);
+    // Dite une seule fois : la notification est déjà montrée, la fenêtre ne la répète pas.
+    expect(toasts()).toEqual(["Le service web est en marche."]);
     expect(router.currentRoute.value.name).toBe("services");
+    wrapper.unmount();
+  });
+});
+
+describe("l'état de confiance change entre la lecture et l'envoi", () => {
+  it("rouvre le champ du mot de passe sans notification d'erreur, la saisie reste", async () => {
+    const { wrapper, bridge } = await boot();
+    await fillAll(wrapper);
+    await openSummary(wrapper);
+    // La ceinture de la liaison : l'acte part sans mot de passe alors que l'agent en demande un.
+    vi.spyOn(bridge, "deployService").mockRejectedValue(
+      new LinkCommandError({ kind: "invalid_input", field: "credentials" }),
+    );
+    typeInto(reauthField(), OWN);
+    await flushPromises();
+    dialogButton("Déployer le service")?.click();
+    await settle();
+    expect(toasts()).toEqual([]);
+    expect(document.querySelector("dialog[open] [data-reauth-notice]")).not.toBeNull();
+    expect(document.querySelector("dialog[open]")).not.toBeNull();
+    expect(field(wrapper, "name").element.value).toBe("web");
     wrapper.unmount();
   });
 });
