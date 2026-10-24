@@ -95,6 +95,12 @@ enum Spec {
         key: String,
         body: Value,
     },
+    /// Supprimer ce service (HRT-85) : la clé du service et les deux cases sont signées ; jamais le nom retapé.
+    DeleteService {
+        key: String,
+        erase_data: bool,
+        erase_backups: bool,
+    },
 }
 
 fn role_wire(role: RoleName) -> &'static str {
@@ -153,6 +159,15 @@ impl Spec {
                 key.as_str().into(),
                 &serde_json::from_value(body.clone()).expect("corps des réglages"),
             ),
+            Self::DeleteService {
+                key,
+                erase_data,
+                erase_backups,
+            } => AdminAct::ServiceDelete {
+                target: key.as_str().into(),
+                data: *erase_data,
+                backups: *erase_backups,
+            },
         }
     }
 
@@ -230,6 +245,15 @@ impl Spec {
                 Method::PUT,
                 format!("/services/{key}/settings"),
                 body.clone(),
+            ),
+            Self::DeleteService {
+                key,
+                erase_data,
+                erase_backups,
+            } => (
+                Method::DELETE,
+                format!("/services/{key}"),
+                json!({ "erase_data": erase_data, "erase_backups": erase_backups }),
             ),
         }
     }
@@ -363,6 +387,28 @@ impl Spec {
                     changed(&|b| b["effect"] = json!("none")),
                 ]
             }
+            // La clé du service et chacune des deux cases sont signées ; le nom retapé ne l'est pas.
+            Self::DeleteService {
+                key,
+                erase_data,
+                erase_backups,
+            } => vec![
+                Self::DeleteService {
+                    key: "h_01JZ0000000000000000000098".into(),
+                    erase_data: *erase_data,
+                    erase_backups: *erase_backups,
+                },
+                Self::DeleteService {
+                    key: key.clone(),
+                    erase_data: !erase_data,
+                    erase_backups: *erase_backups,
+                },
+                Self::DeleteService {
+                    key: key.clone(),
+                    erase_data: *erase_data,
+                    erase_backups: !erase_backups,
+                },
+            ],
             // L'identifiant ET le choix sont signés : changer l'un ou l'autre est un autre acte.
             Self::Decide { target, choice } => vec![
                 Self::Decide {
@@ -574,6 +620,64 @@ impl Bench {
                         "name": format!("deploye-{n}"), "image": "nginx",
                         "resources": { "cpu_millis": 500, "memory_bytes": 134_217_728_u64 }
                     }),
+                }
+            }
+            ActKind::ServiceDelete => {
+                // Un service créé par Hearth, déployé puis arrivé en marche ; sans case cochée, rien à retaper.
+                self.env.grant_services("marie").await;
+                self.engine.have_image("nginx:latest");
+                let n = self
+                    .services
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let deployed = self
+                    .act(
+                        &self.marie,
+                        &Spec::Deploy {
+                            body: json!({
+                                "name": format!("a-supprimer-{n}"), "image": "nginx",
+                                "resources": { "cpu_millis": 500, "memory_bytes": 134_217_728_u64 }
+                            }),
+                        },
+                        PASSWORD,
+                    )
+                    .await;
+                let key = deployed.body["service_key"]
+                    .as_str()
+                    .expect("clé du service déployé")
+                    .to_owned();
+                let parsed = hearth_agent::domain::services::ServiceKey::parse(&key).unwrap();
+                let started = std::time::Instant::now();
+                loop {
+                    let running = self
+                        .state
+                        .services
+                        .lifecycle_target(&parsed)
+                        .is_some_and(|t| {
+                            t.state == hearth_agent::domain::services::ServiceStateKind::Running
+                        });
+                    // Le déploiement est FINI dans le journal (la surveillance de fin comprise), pas seulement en marche.
+                    let unfinished: i64 = sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM service_ops
+                         WHERE service_key = ?
+                           AND status NOT IN ('succeeded', 'failed', 'cancelled', 'rolled_back', 'interrupted')",
+                    )
+                    .bind(&key)
+                    .fetch_one(self.env.db.pool())
+                    .await
+                    .unwrap();
+                    if running && unfinished == 0 {
+                        break;
+                    }
+                    assert!(
+                        started.elapsed() < std::time::Duration::from_secs(10),
+                        "le service à supprimer n'arrive pas en marche"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                }
+                Spec::DeleteService {
+                    key,
+                    erase_data: false,
+                    erase_backups: false,
                 }
             }
             ActKind::GameSettingsSave => {
@@ -815,6 +919,7 @@ async fn every_admin_act_with_a_valid_confirmation_succeeds_and_leaves_one_succe
                 | ActKind::ServiceStop
                 | ActKind::ServiceRestart
                 | ActKind::ServiceDeploy
+                | ActKind::ServiceDelete
         ) {
             // Démarrer, arrêter, redémarrer répondent `202` (HRT-64), comme déployer (HRT-68) : leur entrée
             // réussie est écrite à la fin de l'action, à l'arrière-plan.
@@ -915,6 +1020,27 @@ async fn a_proof_for_another_act_target_account_session_or_replayed_is_refused_a
         let member = b.member(who, &spec, PASSWORD).await;
         let first = b.send(who, &spec, Some(member.clone()), current).await;
         assert!(first.status.is_success(), "{kind:?} : {:?}", first.body);
+        // Une suppression répond `202` et finit à l'arrière-plan : la base de comparaison est prise une fois finie.
+        if kind == ActKind::ServiceDelete {
+            let started = std::time::Instant::now();
+            loop {
+                let unfinished: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM service_ops
+                     WHERE status NOT IN ('succeeded', 'failed', 'cancelled', 'rolled_back', 'interrupted')",
+                )
+                .fetch_one(b.env.db.pool())
+                .await
+                .unwrap();
+                if unfinished == 0 {
+                    break;
+                }
+                assert!(
+                    started.elapsed() < std::time::Duration::from_secs(10),
+                    "la suppression ne finit pas"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        }
         let before = b.snapshot().await;
         let verifications = b.env.hasher.verifications();
         let replay = b.send(who, &spec, Some(member), current).await;
@@ -2332,8 +2458,8 @@ async fn a_decision_with_a_choice_this_version_does_not_know_is_refused_before_a
     assert_eq!(b.env.hasher.verifications(), verifications);
 }
 
-/// Un acte déclaré sans route (HRT-144 : déployer, supprimer, sauvegarder, supprimer une sauvegarde, régler un
-/// jeu ; démarrer, arrêter et redémarrer ont leur route depuis HRT-64 et sont dans la matrice générique) n'a AUCUNE voie : ni route, ni lecture de corps par la couche
+/// Un acte déclaré sans route (HRT-144 : sauvegarder, supprimer une sauvegarde ; démarrer, arrêter et redémarrer
+/// ont leur route depuis HRT-64, supprimer un service depuis HRT-85, et sont dans la matrice générique) n'a AUCUNE voie : ni route, ni lecture de corps par la couche
 /// générique, et une preuve valide signée pour lui n'est acceptée par aucune route existante, ne confirme
 /// rien et ne change rien.
 #[tokio::test]
@@ -2343,14 +2469,6 @@ async fn the_acts_declared_without_a_route_are_accepted_by_no_route_and_confirm_
     b.env.grant_services("marie").await;
     let key = "c_0123abcd";
     let declared: Vec<(ActKind, AdminAct<'_>)> = vec![
-        (
-            ActKind::ServiceDelete,
-            AdminAct::ServiceDelete {
-                target: key.into(),
-                data: true,
-                backups: true,
-            },
-        ),
         (
             ActKind::BackupCreate,
             AdminAct::BackupCreate {
@@ -2381,7 +2499,6 @@ async fn the_acts_declared_without_a_route_are_accepted_by_no_route_and_confirm_
     // Des chemins où un lot futur mettrait ces gestes : rien n'y répond tant qu'il n'existe pas.
     let candidates = [
         (Method::POST, "/services"),
-        (Method::DELETE, "/services/c_0123abcd"),
         (Method::PUT, "/services/c_0123abcd"),
         (Method::PATCH, "/services/c_0123abcd"),
         (Method::POST, "/services/c_0123abcd/backups"),

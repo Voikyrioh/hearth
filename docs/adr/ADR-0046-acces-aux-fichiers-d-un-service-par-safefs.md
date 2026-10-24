@@ -23,7 +23,7 @@ L'agent est root. Le contenu du dossier de données d'un service est écrit par 
 4. **Jugé avant d'être ouvert, même objet vérifié et utilisé** : un fichier à lire est d'abord DÉSIGNÉ sans être ouvert (`openat(parent, nom, O_PATH | O_NOFOLLOW)`, `fstat`) : sur un périphérique, c'est l'ouverture elle-même qui agit (un chien de garde s'arme, une bande se rembobine), l'agent étant root. Un tube, un socket, un périphérique, un lien : classés, jamais ouverts. Un fichier ordinaire est ensuite rouvert par `/proc/self/fd/<n>`, qui mène au même objet que le descripteur (aucun nom du dossier relu), et son identité (périphérique, inode) est revérifiée.
 5. **Fichier à plusieurs noms** : lu, supprimable, jamais modifié.
 6. **Écriture atomique** : fichier d'attente du même dossier (création exclusive, sans suivre de lien), propriétaire et droits posés sur le descripteur avant la première donnée, `fsync`, `renameat`, `fsync` du dossier. Jamais de bit setuid, setgid ni sticky (`Perms` les refuse).
-7. **Suppression par descripteurs** (`unlinkat` relatif au parent ouvert) ; un lien est retiré comme lien ; aucun point de montage franchi ; la racine d'un service ne se retire que par `SafeFs::remove_service_root`.
+7. **Suppression par descripteurs** (`unlinkat` relatif au parent ouvert) ; un lien est retiré comme lien ; aucun point de montage franchi ; la racine d'un service ne se retire que par `SafeFs::remove_service_root` (tout) ou `SafeFs::remove_empty_service_root` (si elle est vide). **Amendé 2026-10-24 (HRT-85)** : la suppression d'un service passe par `ServiceRoot::erase_tree` (noms lus par lots de 1 024, fil créé pour le geste à priorité processeur basse, suivi qui peut demander l'arrêt, décompte de ce qui reste, BR-DEL-030) ; tout geste de retrait partage le même parcours.
 8. **Racines de confiance** : le dossier de données, `services/` et `<clé>/` appartiennent à l'utilisateur effectif de l'agent et ne sont inscriptibles ni par le groupe ni par les autres, sinon `UnsafeRoot`.
 
 ## Version
@@ -60,7 +60,7 @@ Pages de manuel `openat(2)` (`O_NOFOLLOW`, `O_DIRECTORY`, `O_PATH`), `proc(5)` (
 - Entre le contrôle d'un fichier existant et le renommage, le service peut encore écrire l'ancien contenu : la course est dite, pas fermée.
 - Un jeu qui range ses données derrière des liens n'est pas parcourable à travers eux.
 - Hors Linux, `FsError::Unsupported`. La lecture exige `/proc` monté (réouverture par `/proc/self/fd`) ; sans lui, `FsError::Io`.
-- `remove_tree` et `remove_service_root` lisent tous les noms d'un dossier avant d'effacer : mémoire proportionnelle au plus grand dossier (suivi HRT-179).
+- La faible priorité d'un effacement est un « nice » de 19 sur un fil dédié, pas la classe d'entrée-sortie `idle` : `ioprio_set` n'est pas exposé par `rustix` et `libc` est interdit avec `unsafe`. Le noyau en déduit la priorité d'entrée-sortie des ordonnanceurs qui la lisent ; l'effet est à mesurer sur le serveur réel.
 
 ## Alternatives rejetées
 

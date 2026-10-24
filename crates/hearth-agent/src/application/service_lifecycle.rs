@@ -1179,7 +1179,8 @@ pub(crate) fn reason_of(cause: Cause) -> Reason {
         | Cause::StateUnknown
         | Cause::DecisionExpired
         | Cause::DecidedByAccount
-        | Cause::ForcedStop => Reason::Internal,
+        | Cause::ForcedStop
+        | Cause::DataNotErased => Reason::Internal,
     }
 }
 

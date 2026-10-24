@@ -222,6 +222,13 @@ impl ServiceSpecs {
         )))
     }
 
+    /// La partie NON secrète de la révision courante (nom, image, ports, montages, limites), sans ouvrir ni
+    /// descelle le moindre secret : de quoi savoir quels dossiers un service monte (HRT-85). `None` si le service
+    /// n'a pas de description.
+    pub async fn body(&self, key: &ServiceKey) -> Result<Option<SpecBody>, SpecServiceError> {
+        Ok(self.repo.current(key).await?.map(|stored| stored.body))
+    }
+
     /// Le service qui porte ce nom (déjà replié) dans sa révision courante (HRT-68, BR-DEPLOY-004).
     pub async fn holder_of_name(
         &self,

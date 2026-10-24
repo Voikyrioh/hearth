@@ -35,6 +35,7 @@ use hearth_proto::api::reauth::{
     Reauth, ReauthMode, SetReauthRequest, lenient_reauth, reauth_refusal,
 };
 use hearth_proto::api::security::SetAttackModeRequest;
+use hearth_proto::api::service_delete::DeleteRequest;
 use hearth_proto::api::service_ops::{OperationChoice, OperationDecision};
 use hearth_proto::api::services::AdoptRequest;
 use hearth_proto::api::update::AgentUpdateRequest;
@@ -88,6 +89,9 @@ enum Parsed {
     /// identifiants, l'origine et l'effet sont signés (`AdminAct::game_settings_save`, la fonction de la liaison
     /// cliente) ; jamais une valeur.
     Settings(Box<SaveSettingsRequest>),
+    /// Supprimer un service (HRT-85) : la clé du chemin est la cible, les deux cases du corps sont les paramètres
+    /// signés (`BR-DEL-012`). Le nom retapé n'est pas signé : le cas d'usage le compare à celui qu'il connaît.
+    Delete(DeleteRequest),
     /// Acte dont la cible est dans le chemin et dont aucun paramètre ne vient du corps.
     TargetOnly,
 }
@@ -176,8 +180,16 @@ impl Parsed {
                             .all(|choice| choice.choice != DriftResolution::Unknown)
                 })
                 .map(|request| Self::Settings(Box::new(request))),
+            // Supprimer : un corps dont une case n'est pas un booléen est illisible, jamais un acte signé avec une
+            // case décochée par défaut.
+            ActKind::ServiceDelete => {
+                if bytes.iter().all(u8::is_ascii_whitespace) {
+                    return Some(Self::Delete(DeleteRequest::default()));
+                }
+                serde_json::from_slice(bytes).ok().map(Self::Delete)
+            }
             // Déclarés pour les tranches suivantes : aucune route ne les porte, donc aucun corps à lire.
-            ActKind::ServiceDelete | ActKind::BackupCreate | ActKind::BackupDelete => None,
+            ActKind::BackupCreate | ActKind::BackupDelete => None,
         }
     }
 
@@ -231,6 +243,11 @@ impl Parsed {
             (Self::Settings(request), _) => {
                 AdminAct::game_settings_save(std::borrow::Cow::Borrowed(id), request)
             }
+            (Self::Delete(request), _) => AdminAct::ServiceDelete {
+                target: id.into(),
+                data: request.erase_data,
+                backups: request.erase_backups,
+            },
             (Self::Decide(request), _) => AdminAct::OperationDecide {
                 target: id,
                 choice: request.choice,

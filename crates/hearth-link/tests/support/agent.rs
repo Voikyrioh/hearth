@@ -443,6 +443,7 @@ impl TestAgent {
                     ),
                     free_space: Arc::new(hearth_agent::infrastructure::install::SystemHost),
                     deploy: hearth_agent::application::deployments::DeployTimings::production(),
+                    delete: hearth_agent::application::delete::DeleteTimings::production(),
                     safe_fs: None,
                     catalog: hearth_agent::app::CatalogParts::production(),
                 },

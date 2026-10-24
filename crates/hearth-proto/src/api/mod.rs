@@ -17,6 +17,7 @@ pub mod metrics;
 pub mod operations;
 pub mod reauth;
 pub mod security;
+pub mod service_delete;
 pub mod service_logs;
 pub mod service_ops;
 pub mod service_spec;

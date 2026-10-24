@@ -151,6 +151,7 @@ pub enum OperationCauseDto {
     PlatformMismatch,
     DiskFull,
     NameTaken,
+    DataNotErased,
     Unknown,
 }
 
@@ -184,6 +185,7 @@ impl From<OperationCause> for OperationCauseDto {
             OperationCause::PlatformMismatch => Self::PlatformMismatch,
             OperationCause::DiskFull => Self::DiskFull,
             OperationCause::NameTaken => Self::NameTaken,
+            OperationCause::DataNotErased => Self::DataNotErased,
             OperationCause::Unknown => Self::Unknown,
         }
     }

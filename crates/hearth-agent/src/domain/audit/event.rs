@@ -258,6 +258,13 @@ pub enum Target {
         password_changed: bool,
         raw_file: bool,
     },
+    /// Un service supprimé, réussi ou non (HRT-85, BR-DEL-029) : le nom du service et ce que la suppression a fait
+    /// de plus que le retirer (liste fermée, des NOMBRES). **Jamais un chemin** (ni du serveur ni de la racine de
+    /// données de Hearth), un nom de fichier, une variable ou une commande : le type n'a pas de champ pour eux.
+    ServiceDelete {
+        service: ClientName,
+        note: DeleteNote,
+    },
     /// Une fiche visée par une demande refusée avant de connaître le service (fiche inconnue, empreinte
     /// changée, contrat non accepté...) : son identifiant, nettoyé et borné.
     Fiche(ClientName),
@@ -266,6 +273,43 @@ pub enum Target {
         dir: ClientName,
         invariant: ClientName,
     },
+}
+
+/// Ce que la suppression d'un service a fait de plus que le retirer (BR-DEL-029) : des nombres seulement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DeleteNote {
+    /// Les dossiers gérés par Hearth effacés (la case « données » était cochée).
+    pub erased: Option<ErasedData>,
+    /// Le service ne s'est pas arrêté dans son délai : il a été coupé de force (BR-DEL-013).
+    pub forced_stop: bool,
+    /// Le nombre d'éléments qui n'ont pas pu être effacés (BR-DEL-016) ; la suppression reste « Réussi ».
+    pub left: u64,
+}
+
+/// Les données effacées d'un service supprimé : le nombre de dossiers gérés et leur taille totale mesurée avant
+/// l'effacement (BR-DEL-029).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ErasedData {
+    pub folders: u32,
+    pub bytes: u64,
+    /// La mesure a été coupée : la taille est « au moins » (BR-DEL-009).
+    pub partial: bool,
+}
+
+impl ErasedData {
+    fn size_text(&self) -> String {
+        let mebibytes = self.bytes / (1024 * 1024);
+        let size = if mebibytes == 0 {
+            "moins de 1 Mio".to_owned()
+        } else {
+            format!("{mebibytes} Mio")
+        };
+        if self.partial {
+            format!("plus de {size}")
+        } else {
+            size
+        }
+    }
 }
 
 /// Ce qu'une issue de démarrage, d'arrêt ou de redémarrage a de particulier (texte fixe).
@@ -488,6 +532,24 @@ impl Target {
                 }
                 Some(text)
             }
+            Self::ServiceDelete { service, note } => {
+                let mut text = format!("service {}", service.as_str());
+                if let Some(erased) = &note.erased {
+                    text.push_str(&format!(
+                        ", données effacées ({} dossier{}, {})",
+                        erased.folders,
+                        if erased.folders > 1 { "s" } else { "" },
+                        erased.size_text()
+                    ));
+                }
+                if note.forced_stop {
+                    text.push_str(", arrêt forcé");
+                }
+                if note.left > 0 {
+                    text.push_str(&format!(", données non effacées ({})", note.left));
+                }
+                Some(text)
+            }
             Self::Fiche(fiche) => Some(format!("fiche {}", fiche.as_str())),
             Self::FicheRefused { dir, invariant } => {
                 Some(format!("fiche {} ({})", dir.as_str(), invariant.as_str()))
@@ -658,6 +720,8 @@ pub enum Reason {
     AgreementRequired,
     /// Installer depuis une fiche : la fiche ne se traduit pas en description valable (fiche refusée).
     FicheRefused,
+    /// Supprimer (HRT-85, BR-DEL-002) : Hearth ne supprime jamais un service créé hors de Hearth, même adopté.
+    ServiceAdopted,
 }
 
 impl Reason {
@@ -741,6 +805,7 @@ impl Reason {
             Self::FicheChanged => "fiche changée depuis l'affichage".to_owned(),
             Self::AgreementRequired => "contrat non accepté".to_owned(),
             Self::FicheRefused => "fiche refusée".to_owned(),
+            Self::ServiceAdopted => "service adopté".to_owned(),
         }
     }
 }
@@ -1352,5 +1417,56 @@ mod tests {
         assert_eq!(record.origin_addr, None);
         assert_eq!(record.reason, None);
         assert_eq!(record.origin_text(), "ligne de commande du serveur");
+    }
+}
+
+#[cfg(test)]
+mod delete_tests {
+    use super::*;
+
+    fn note(erased: Option<ErasedData>, forced_stop: bool, left: u64) -> String {
+        Target::ServiceDelete {
+            service: ClientName::parse("terraria").expect("nom"),
+            note: DeleteNote {
+                erased,
+                forced_stop,
+                left,
+            },
+        }
+        .text()
+        .expect("texte")
+    }
+
+    #[test]
+    fn a_plain_deletion_says_only_the_service() {
+        assert_eq!(note(None, false, 0), "service terraria");
+    }
+
+    #[test]
+    fn the_mentions_are_numbers_and_fixed_words_never_a_path() {
+        let erased = |folders, bytes, partial| {
+            Some(ErasedData {
+                folders,
+                bytes,
+                partial,
+            })
+        };
+        assert_eq!(
+            note(erased(2, 5 * 1024 * 1024, false), false, 0),
+            "service terraria, données effacées (2 dossiers, 5 Mio)"
+        );
+        assert_eq!(
+            note(erased(1, 10, false), true, 3),
+            "service terraria, données effacées (1 dossier, moins de 1 Mio), arrêt forcé, données non effacées (3)"
+        );
+        assert_eq!(
+            note(erased(1, 2 * 1024 * 1024, true), false, 0),
+            "service terraria, données effacées (1 dossier, plus de 2 Mio)"
+        );
+    }
+
+    #[test]
+    fn refusing_an_adopted_service_has_its_own_reason() {
+        assert_eq!(Reason::ServiceAdopted.text(), "service adopté");
     }
 }

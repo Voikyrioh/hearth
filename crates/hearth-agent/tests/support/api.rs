@@ -73,6 +73,8 @@ pub struct DeployRig {
     pub free_space: Arc<super::fake_host::FakeFreeSpace>,
     pub safe_fs: Arc<super::fake_safe_fs::FakeSafeFs>,
     pub timings: hearth_agent::application::deployments::DeployTimings,
+    /// Les délais d'une suppression de service (HRT-85).
+    pub delete: hearth_agent::application::delete::DeleteTimings,
 }
 
 impl DeployRig {
@@ -87,6 +89,7 @@ impl DeployRig {
                 watch: std::time::Duration::from_millis(300),
                 poll: std::time::Duration::from_millis(20),
             },
+            delete: super::engine::fast_delete(),
         }
     }
 }
@@ -188,6 +191,26 @@ fn state_over_rig(
         env.audit_sink.clone(),
         env.clock.clone(),
     );
+    let phases =
+        hearth_agent::application::game_phase::GamePhases::new(engine.clone(), env.clock.clone());
+    let service_deletion = hearth_agent::application::delete::ServiceDeletion::new(
+        services.clone(),
+        ops.clone(),
+        specs.clone(),
+        engine.clone(),
+        repo.clone(),
+        Arc::new(
+            hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(env.db.pool().clone()),
+        ),
+        rig.safe_fs.clone(),
+        Arc::new(hearth_agent::infrastructure::host::paths::SystemHostPaths),
+        phases.clone(),
+        env.clock.clone(),
+        hearth_agent::application::delete::DeleteContext {
+            services_root: "/var/lib/hearth/services".into(),
+            timings: rig.delete,
+        },
+    );
     let deployments = hearth_agent::application::deployments::Deployments::new(
         services.clone(),
         ops.clone(),
@@ -208,7 +231,7 @@ fn state_over_rig(
         },
         Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         Arc::new(super::fake_random::FakeRandom::counting_from(0)),
-        hearth_agent::application::game_phase::GamePhases::new(engine.clone(), env.clock.clone()),
+        phases,
     );
     let service_lifecycle = hearth_agent::application::service_lifecycle::ServiceLifecycle::new(
         services.clone(),
@@ -236,6 +259,7 @@ fn state_over_rig(
         service_ops,
         service_lifecycle,
         deployments,
+        service_deletion,
         game_settings,
         catalog: Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         hello: Arc::new(HelloService::new(
