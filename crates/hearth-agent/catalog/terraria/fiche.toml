@@ -6,7 +6,7 @@
 
 format = 2
 id = "terraria"
-version = 1
+version = 2
 family = "terraria"
 name = "Terraria"
 summary = "Le serveur officiel de Terraria, sans mod."
@@ -127,6 +127,11 @@ carried_by_world = ["world_size", "difficulty", "seed"]
 
 [worlds.backups]
 dated_copies = true                       # « <monde>.wld.<date> », forme de copie datée observée sur une installation de référence
+
+[[not_exposed]]
+key = "banlist"
+channel = "config"
+why = "Chemin du fichier des bannis : où le jeu l'écrit dans le conteneur, et s'il survit à une recréation du service, n'est pas vérifié. Laissé au défaut du jeu."
 
 [[not_exposed]]
 key = "-ip"

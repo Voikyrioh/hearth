@@ -1,7 +1,7 @@
 # Réglages de Terraria : thèmes et catalogue (HRT-113, enrichi par HRT-108). Les 36 réglages de l'inventaire sont tous
-# classés : réglable (27 du fichier et 2 d'arguments), imposé avec sa raison (4 du fichier : world_file, world_path,
-# port, upnp), ou écarté avec sa raison (3 d'arguments, dans fiche.toml, [[not_exposed]]). Les 31 réglages du fichier
-# `serverconfig.txt` de l'inventaire sont tous exposés, `banlist` et `priority` compris.
+# classés : réglable (26 du fichier et 2 d'arguments), imposé avec sa raison (4 du fichier : world_file, world_path,
+# port, upnp), ou écarté avec sa raison (`banlist` du fichier et 3 d'arguments, dans fiche.toml, [[not_exposed]]).
+# Version 2 de la fiche : `priority` s'ajoute au catalogue de la version 1.
 #
 # Libellés et aides : en vouvoiement (copie de Hearth), en mots simples, sans jargon. Une valeur par défaut « non
 # vérifiée » n'est PAS écrite ici : le réglage ne propose rien et Hearth n'écrit pas la ligne (« non écrit » est une
@@ -157,21 +157,6 @@ max = 255
 proposed = "8"                            # valeur observée sur une installation réelle ; défaut du jeu contradictoire (8 ou 16) : non écrit comme défaut
 change = "anytime"
 source = "partial"                        # T07
-
-[[setting]]
-id = "banlist"
-key = "banlist"
-channel = "config"
-theme = "players"
-level = "advanced"
-label = "Fichier des joueurs bannis"
-help = "Le fichier où le jeu garde la liste des joueurs bannis. Hearth ne sait pas encore s'il survit quand le service est recréé : sauvegardez-le avec le monde si cette liste compte pour vous."
-type = "text"
-charset = "line"
-max_len = 200
-game_default = "banlist.txt"
-change = "anytime"
-source = "partial"                        # T11 : défaut « banlist.txt » ; où le jeu l'écrit dans le conteneur : non vérifié
 
 # ---- Monde ----
 

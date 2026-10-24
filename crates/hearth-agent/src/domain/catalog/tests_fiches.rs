@@ -1529,20 +1529,24 @@ fn the_terraria_catalog_speaks_to_the_user_in_vous_and_every_text_stays_within_i
         );
         assert!(setting.help.chars().count() <= 300, "{} : aide", setting.id);
     }
-    // Les 31 réglages du fichier de l'inventaire sont tous exposés : 29 réglages du fichier plus les 2 d'arguments
-    // réglables ; seuls trois arguments sont écartés.
+    // Les 31 réglages du fichier de l'inventaire sont classés : 30 exposés (dont 4 imposés), `banlist` écarté (son
+    // emplacement dans le conteneur n'est pas vérifié) ; deux arguments réglables, trois écartés.
     let in_file = terraria
         .settings
         .iter()
         .filter(|s| s.channel == "config")
         .count();
-    assert_eq!(in_file, 31);
+    assert_eq!(in_file, 30);
     assert!(
         terraria
             .file
             .not_exposed
             .iter()
-            .all(|n| n.channel == "args")
+            .all(|n| n.channel == "args" || n.key == "banlist")
+    );
+    assert_eq!(
+        terraria.file.version, 2,
+        "le contenu a changé depuis la version 1"
     );
     // Un entier dit ses bornes quand l'inventaire les donne ; un réglage à valeurs fermées dit chacune.
     let max_players = terraria.setting("max_players").expect("max_players");
@@ -1659,7 +1663,7 @@ fn the_terraria_fiche_classes_each_of_the_36_settings_of_the_inventory() {
     }
     assert_eq!(
         (adjustable, imposed, dropped),
-        (29, 4, 3),
+        (28, 4, 4),
         "réglables, imposés, écartés"
     );
     assert_eq!(adjustable + imposed + dropped, 36);

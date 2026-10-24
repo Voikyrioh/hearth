@@ -32,7 +32,7 @@ Chaque réglage porte un identifiant Hearth stable, le nom du jeu, un canal (`en
 
 ## Cas limites
 - Les 15 permissions du mode Voyage de Terraria sont exposées sans défaut : l'inventaire n'en a lu aucun.
-- Terraria expose les 31 réglages de son fichier (HRT-108 : `banlist` et `priority` ne sont plus écartés), plus deux arguments ; seuls `-ip`, `-steam` et `-lobby` sont écartés, avec leur raison. Libellés et aides en vouvoiement, bornes et listes de valeurs là où l'inventaire les donne, aucune version d'existence ni défaut inventé (`crates/hearth-agent/src/domain/catalog/tests_fiches.rs::the_terraria_catalog_speaks_to_the_user_in_vous_and_every_text_stays_within_its_bounds`).
+- Terraria, version 2 de la fiche (HRT-108 : `priority` s'ajoute), expose 30 des 31 réglages de son fichier plus deux arguments ; `banlist` (emplacement dans le conteneur non vérifié) et les arguments `-ip`, `-steam`, `-lobby` sont écartés, avec leur raison. Libellés et aides en vouvoiement, bornes et listes de valeurs là où l'inventaire les donne, aucune version d'existence ni défaut inventé (`crates/hearth-agent/src/domain/catalog/tests_fiches.rs::the_terraria_catalog_speaks_to_the_user_in_vous_and_every_text_stays_within_its_bounds`).
 
 ## Règles liées
 - BR-FICHE-038, BR-FICHE-047, BR-FICHE-049

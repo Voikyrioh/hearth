@@ -77,7 +77,7 @@ pub async fn terraria_service_with(env: &Env, fs: &FakeSafeFs, n: u32, file: &[u
         cpu_millis: Some(1000),
         memory_bytes: Some(1 << 30),
         settings: SpecSettings::default(),
-        fiche: Some(SpecFiche::new("terraria", 1, digest)),
+        fiche: Some(SpecFiche::new("terraria", 2, digest)),
     };
     specs_of(env)
         .save(&key, None, body, &SpecSecrets::default(), "marie")
