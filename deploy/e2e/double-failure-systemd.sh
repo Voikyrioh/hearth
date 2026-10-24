@@ -37,6 +37,7 @@ die() {
 
 cleanup() {
     status=$?
+    report_exit "$status"
     systemctl stop "$UNIT_SUP" >/dev/null 2>&1 || true
     systemctl reset-failed "$UNIT_SUP" >/dev/null 2>&1 || true
     if [ -x "$INSTALLED" ]; then
@@ -145,8 +146,8 @@ wait_for "le binaire déposé est installé et le contrôle commence" 30 phase_i
 [ "$(sha_of "$INSTALLED")" = "$(sha_of "$WORK/crash")" ] || die "l'échange n'a pas eu lieu"
 hello_version >/dev/null 2>&1 && die "le binaire qui plante ne devrait pas répondre"
 SUP_PID=$(systemctl show "$UNIT_SUP" -p MainPID --value)
-# FIX:01M5P0Q7C3N8T5W2R9XK4D6HJE : par le pid, `systemctl kill` sortant en erreur sur le cgroup (EIO) au hasard.
-kill -KILL "$SUP_PID"
+# FIX:01M5P0Q7C3N8T5W2R9XK4D6HJE : par le pid (jamais 0), `systemctl kill` sortant en erreur sur le cgroup (EIO) au hasard.
+kill_main "$UNIT_SUP" || die "le superviseur n'a pas de processus principal à tuer (pid vu : '$SUP_PID')"
 ok "superviseur tué (SIGKILL, pid $SUP_PID) après l'échange, pendant le contrôle : le nouveau binaire ne démarre pas"
 wait_for "systemd relance le superviseur (reprise)" 20 sh -c "[ \"\$(journalctl -u $UNIT_SUP --since \"$START\" --no-pager | grep -c 'reprise du superviseur')\" -ge 1 ]"
 ok "systemd a relancé le superviseur, qui a repris son marqueur"
@@ -239,7 +240,7 @@ n=0
 while [ "$n" -lt 2 ]; do
     n=$((n + 1))
     # FIX:01M5P0Q7C3N8T5W2R9XK4D6HJE
-    kill -KILL "$(systemctl show "$UNIT_SUP" -p MainPID --value)"
+    kill_main "$UNIT_SUP" || die "mort $n : le superviseur n'a pas de processus principal à tuer"
     systemctl restart hearth-agent
     wait_for "reprise $n par systemd" 30 sh -c "[ \"\$(journalctl -u $UNIT_SUP --since \"$START\" --no-pager | grep -c 'reprise du superviseur')\" -ge $n ]"
     ok "mort $n du superviseur, agent redémarré dans la fenêtre de relance, reprise $n par systemd"

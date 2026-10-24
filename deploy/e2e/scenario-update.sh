@@ -32,27 +32,10 @@ die() {
     exit 1
 }
 
-# Une sortie par `set -e` (commande en échec hors de `die`) ne doit pas être muette : le journal dit pourquoi.
 DIED=0
-trap 'rc=$?; if [ "$rc" -ne 0 ] && [ "$DIED" -ne 1 ]; then echo "ECHEC - sortie inattendue (code $rc), journal :" >&2; journalctl -u hearth-agent -u hearth-agent-update --no-pager 2>/dev/null | tail -n 40 >&2 || true; fi' EXIT
-
-# SIGKILL au processus principal d'une unité, par son pid. `systemctl kill` parcourt AUSSI le cgroup et peut sortir
-# en erreur (« Failed to send signal SIGKILL to auxiliary processes: Input/output error ») quand un fil du processus
-# disparaît pendant le parcours, même si le processus principal a bien reçu le signal : le script (set -e) tombait alors
-# au hasard sur le runner. On vise le pid et on réessaie si l'unité n'a pas encore de processus principal.
-kill_main() {
-    tries=0
-    while [ "$tries" -lt 10 ]; do
-        pid=$(systemctl show -p MainPID --value "$1" 2>/dev/null || echo 0)
-        if [ -n "$pid" ] && [ "$pid" != 0 ] && kill -KILL "$pid" 2>/dev/null; then
-            echo "kill -KILL $pid ($1)"
-            return 0
-        fi
-        sleep 0.2
-        tries=$((tries + 1))
-    done
-    return 1
-}
+# shellcheck source=lib.sh
+. /deploy/e2e/lib.sh
+trap 'report_exit $?' EXIT
 
 run() {
     status=0

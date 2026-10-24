@@ -17,6 +17,7 @@ pub fn run() -> Result<(), String> {
         "style",
         "-x",
         "/mnt/install.sh",
+        "/mnt/e2e/lib.sh",
         "/mnt/e2e/scenario.sh",
         "/mnt/e2e/scenario-update.sh",
         "/mnt/e2e/double-failure-systemd.sh",
