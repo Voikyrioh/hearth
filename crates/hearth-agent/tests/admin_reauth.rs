@@ -355,6 +355,10 @@ impl Spec {
                             .unwrap()
                             .push(json!({ "id": "seed", "action": "unset" }));
                     }),
+                    // Un choix d'écart est signé : un acte signé sans lui ne couvre pas un `keep_mine`.
+                    changed(&|b| {
+                        b["drift_choices"] = json!([{ "id": "motd", "choice": "keep_mine" }]);
+                    }),
                     changed(&|b| b["origin"] = json!("import")),
                     changed(&|b| b["effect"] = json!("none")),
                 ]

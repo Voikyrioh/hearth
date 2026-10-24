@@ -162,6 +162,24 @@ impl ActKind {
     }
 }
 
+/// Le nombre d'éléments et l'empreinte SHA-256 de leurs textes triés (ordre des octets), chacun précédé de sa longueur
+/// sur deux octets. Source unique de l'empreinte de l'adoption (clés) et de l'enregistrement des réglages (identifiants).
+fn sorted_digest<'k>(items: impl IntoIterator<Item = &'k str>) -> (u32, [u8; FINGERPRINT_LEN]) {
+    use sha2::{Digest, Sha256};
+    let mut sorted: Vec<&str> = items.into_iter().collect();
+    sorted.sort_unstable();
+    let mut hasher = Sha256::new();
+    for item in &sorted {
+        let length = u16::try_from(item.len()).unwrap_or(u16::MAX);
+        hasher.update(length.to_be_bytes());
+        hasher.update(&item.as_bytes()[..usize::from(length)]);
+    }
+    (
+        u32::try_from(sorted.len()).unwrap_or(u32::MAX),
+        hasher.finalize().into(),
+    )
+}
+
 /// Taille de l'empreinte des clés d'une adoption (SHA-256).
 pub const FINGERPRINT_LEN: usize = 32;
 
@@ -298,19 +316,8 @@ impl AdminAct<'_> {
     /// leurs clés triées (ordre des octets), chacune précédée de sa longueur sur deux octets. Source unique
     /// pour l'agent (qui reconstruit l'acte depuis le corps) et la liaison cliente (qui le signe).
     pub fn services_adopt<'k>(keys: impl IntoIterator<Item = &'k str>) -> Self {
-        use sha2::{Digest, Sha256};
-        let mut sorted: Vec<&str> = keys.into_iter().collect();
-        sorted.sort_unstable();
-        let mut hasher = Sha256::new();
-        for key in &sorted {
-            let length = u16::try_from(key.len()).unwrap_or(u16::MAX);
-            hasher.update(length.to_be_bytes());
-            hasher.update(&key.as_bytes()[..usize::from(length)]);
-        }
-        Self::ServicesAdopt {
-            count: u32::try_from(sorted.len()).unwrap_or(u32::MAX),
-            fingerprint: hasher.finalize().into(),
-        }
+        let (count, fingerprint) = sorted_digest(keys);
+        Self::ServicesAdopt { count, fingerprint }
     }
 
     /// L'acte d'enregistrement des réglages d'un jeu (HRT-108, `0x1E`) : la révision de base, le NOMBRE de
@@ -322,21 +329,25 @@ impl AdminAct<'_> {
         target: Cow<'a, str>,
         request: &crate::api::game_settings::SaveSettingsRequest,
     ) -> AdminAct<'a> {
-        use sha2::{Digest, Sha256};
+        use crate::api::game_settings::DriftResolution;
         let mut ids: Vec<String> = request.changes.iter().map(|c| c.id.clone()).collect();
         ids.extend(request.others.iter().map(|o| format!("other:{}", o.key)));
-        ids.sort_unstable();
-        let mut hasher = Sha256::new();
-        for id in &ids {
-            let length = u16::try_from(id.len()).unwrap_or(u16::MAX);
-            hasher.update(length.to_be_bytes());
-            hasher.update(&id.as_bytes()[..usize::from(length)]);
-        }
+        // Un choix d'écart change ce que l'acte fait au fichier (`keep_mine` le réécrit) : il est signé avec le
+        // réglage qu'il vise.
+        ids.extend(request.drift_choices.iter().map(|c| {
+            let word = match c.choice {
+                DriftResolution::KeepFile => "file",
+                DriftResolution::KeepMine => "mine",
+                DriftResolution::Unknown => "unknown",
+            };
+            format!("{word}:{}", c.id)
+        }));
+        let (changes, ids_digest) = sorted_digest(ids.iter().map(String::as_str));
         AdminAct::GameSettingsSave {
             target,
             base_rev: request.base_rev,
-            changes: u32::try_from(ids.len()).unwrap_or(u32::MAX),
-            ids_digest: hasher.finalize().into(),
+            changes,
+            ids_digest,
             origin: request.origin.as_str(),
             effect: request.effect.as_str(),
         }
@@ -1133,6 +1144,17 @@ mod tests {
         let mut moved = request(vec![change("motd", "un"), change("password", "deux")], "a");
         moved.base_rev = 5;
         assert_ne!(a, AdminAct::game_settings_save(key.into(), &moved));
+        // Un choix d'écart est signé : un acte à zéro changement ne couvre pas un `keep_mine`.
+        let mut with_choice = request(vec![], "a");
+        let none = AdminAct::game_settings_save(key.into(), &with_choice);
+        with_choice.drift_choices = vec![crate::api::game_settings::DriftChoice {
+            id: "motd".into(),
+            choice: crate::api::game_settings::DriftResolution::KeepMine,
+        }];
+        let mine = AdminAct::game_settings_save(key.into(), &with_choice);
+        assert_ne!(none, mine);
+        with_choice.drift_choices[0].choice = crate::api::game_settings::DriftResolution::KeepFile;
+        assert_ne!(mine, AdminAct::game_settings_save(key.into(), &with_choice));
         let mut effect = request(vec![change("motd", "un"), change("password", "deux")], "a");
         effect.effect = SettingEffect::Recreate;
         assert_ne!(a, AdminAct::game_settings_save(key.into(), &effect));
