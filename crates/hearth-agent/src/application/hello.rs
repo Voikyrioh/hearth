@@ -4,6 +4,7 @@
 //! (`hearth_proto::api::hello::HelloResponse`) est faite par `entrypoint/http`.
 
 use hearth_proto::api::deploy::CAPABILITY_SERVICE_DEPLOY;
+use hearth_proto::api::game_settings::CAPABILITY_GAME_SETTINGS;
 use hearth_proto::api::service_logs::CAPABILITY_SERVICE_LOGS;
 use hearth_proto::api::service_ops::CAPABILITY_CATALOG;
 use hearth_proto::api::service_ops::CAPABILITY_SERVICE_OPS;
@@ -61,6 +62,8 @@ impl HelloService {
                     CAPABILITY_SERVICE_DEPLOY,
                     // Le catalogue des fiches de serveurs de jeu (HRT-101) : `GET /catalog` et `GET /catalog/{id}`.
                     CAPABILITY_CATALOG,
+                    // Les réglages d'un serveur de jeu (HRT-108) : lire, analyser un texte collé, enregistrer.
+                    CAPABILITY_GAME_SETTINGS,
                 ],
             },
         }
@@ -115,7 +118,8 @@ mod tests {
                 "service-adoption",
                 "service-ops",
                 "service-deploy",
-                "catalog"
+                "catalog",
+                "game-settings"
             ]
         );
     }

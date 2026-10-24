@@ -17,6 +17,7 @@ catalog/
 │   ├── invariants.rs → I1 à I9 : `check_bounds`, `check_fiche_file`, `check_cross`, `check_url`, `check_derive`
 │   └── ids_lock.rs   → `ids.lock` : un identifiant ne disparaît pas par oubli, ne change pas de clé sans `rename`, n'est pas réutilisé
 ├── formats/          → `kv_lines` et `xml_properties`, écrits à la main : lecture et retouche SANS PERTE d'un fichier de réglages (identité, localité, refus plutôt que perte). `contract.rs` : la suite de contrat unique passée par les deux formats
+├── settings_io.rs    → plan d'un enregistrement dans le fichier du jeu (écart à trancher réglage par réglage, retouche sans perte, rien d'écrit si rien ne change), analyse d'un texte collé (HRT-108)
 ├── settings_state.rs → trois états d'un réglage (valeur, proposée, non écrit), validation d'un changement, effet DÉDUIT du canal, écart avec le fichier, réglages imposés défaits
 ├── stop_plan.rs      → plan d'arrêt borné ; un élément `untested` n'est jamais exécuté ni cru
 ├── translate.rs      → fiche + variante + réponses + secrets + contrats donnent un `ServiceSpecDraft` ; interface du validateur du déploiement ordinaire (`DeploymentValidator`, implémentée par `domain::services::deploy::OrdinaryDeployment`, branchée par `domain::services::from_fiche`, HRT-101)
@@ -25,6 +26,6 @@ catalog/
 └── embedded.rs       → la table des fiches embarquées, engendrée par `build.rs` (`include!` de `OUT_DIR`) ; `keep_offered(fiches, include_preview)` (la seule porte, appelée par `CatalogService`) : les fiches `published`, plus les `preview` dans une construction d'essai (`HEARTH_PREVIEW_FICHES`, HRT-101)
 ```
 
-Tests : `test_support.rs` (une fiche minimale et une fiche riche, dont les fiches piégées sont dérivées d'UNE modification), `tests_fiches.rs` (format fermé, I1 à I9, cohérence, Terraria, `ids.lock`), `tests_state.rs` (réglages, écart, arrêt), `tests_translate.rs` (traduction et test de propriété à graine fixe), `architecture_guard.rs`.
+Tests : `test_support.rs` (une fiche minimale et une fiche riche, dont les fiches piégées sont dérivées d'UNE modification), `tests_fiches.rs` (format fermé, I1 à I9, cohérence, Terraria, `ids.lock`), `tests_state.rs` (réglages, écart, arrêt), `tests_io.rs` (enregistrement et import : rien d'inconnu ne se perd, écart, secret absent des traces), `tests_translate.rs` (traduction et test de propriété à graine fixe), `architecture_guard.rs`.
 
 Règles : BR-FICHE-005 à 011, 028, 037, 038, 046 à 049, 056 ; BR-RES-031 à 033, 038 ; BR-JEU-002, 038, 039, 040.

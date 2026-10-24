@@ -9,6 +9,7 @@ pub mod elevation;
 pub mod fiche_install;
 pub mod folders;
 pub mod game_phase;
+pub mod game_settings;
 pub mod hello;
 pub mod install;
 pub mod maintenance;

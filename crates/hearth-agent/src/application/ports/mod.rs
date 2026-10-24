@@ -14,6 +14,7 @@ mod clock;
 mod container_engine;
 mod device_repo;
 mod fingerprint;
+mod game_settings_repo;
 mod gpu_probe;
 mod host_environment;
 mod host_folders;
@@ -62,6 +63,7 @@ pub use container_engine::{
 };
 pub use device_repo::{DeviceRepo, DeviceTx};
 pub use fingerprint::{FingerprintSecretError, FingerprintSecretStore, RequestFingerprinter};
+pub use game_settings_repo::{GameSettingsRepo, NewSettings, SettingsStoreError, StoredSettings};
 pub use gpu_probe::GpuProbe;
 pub use host_environment::{HostDescription, HostEnvironment};
 pub use host_folders::HostFolders;

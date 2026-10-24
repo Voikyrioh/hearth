@@ -44,6 +44,15 @@ impl SettingsState {
         }
     }
 
+    /// Un état relu de la description du service (HRT-108).
+    pub fn from_slots(slots: BTreeMap<String, Slot>) -> Self {
+        Self { slots }
+    }
+
+    pub fn set_slot(&mut self, id: &str, slot: Slot) {
+        self.slots.insert(id.to_owned(), slot);
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, &Slot)> {
         self.slots.iter().map(|(k, v)| (k.as_str(), v))
     }
@@ -594,23 +603,41 @@ pub fn drift(
             });
         }
     }
-    let known = |key: &str| {
-        fiche
-            .settings
-            .iter()
-            .any(|s| s.channel == channel && s.key == key)
-            || fiche
-                .retired
-                .iter()
-                .any(|r| r.channel == channel && r.key == key)
-    };
     let mut extras: Vec<String> = Vec::new();
     for (key, _) in entries {
-        if !known(key) && !extras.contains(key) {
+        if !is_known_key(fiche, channel, key) && !extras.contains(key) {
             extras.push(key.clone());
         }
     }
     (drifts, extras)
+}
+
+/// La fiche connaît-elle cette clé du fichier d'un canal ? Un réglage, un réglage retiré ou un réglage écarté
+/// (`[[not_exposed]]`) : une telle ligne n'est jamais un « autre réglage », elle n'est ni montrée comme telle ni
+/// écrite par ce chemin. Prédicat unique de l'écart, de l'import et de l'enregistrement.
+pub fn is_known_key(fiche: &Fiche, channel: &str, key: &str) -> bool {
+    fiche
+        .settings
+        .iter()
+        .any(|s| s.channel == channel && s.key == key)
+        || fiche
+            .retired
+            .iter()
+            .any(|r| r.channel == channel && r.key == key)
+        || fiche
+            .file
+            .not_exposed
+            .iter()
+            .any(|n| n.channel == channel && n.key == key)
+}
+
+/// Le nom d'un réglage que la fiche ne connaît pas ressemble-t-il à un secret ? Sa valeur n'est alors jamais montrée
+/// (BR-FICHE-047) : le nom contient PASS (donc PASSWORD), SECRET, TOKEN ou KEY, sans tenir compte de la casse.
+pub fn looks_secret(key: &str) -> bool {
+    let upper = key.to_ascii_uppercase();
+    ["PASS", "SECRET", "TOKEN", "KEY"]
+        .iter()
+        .any(|word| upper.contains(word))
 }
 
 /// Réglages imposés que le fichier a défaits (aucune écriture : le repère `imposed_broken` du service).

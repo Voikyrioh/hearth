@@ -526,7 +526,7 @@ fn drift_compares_the_state_to_the_file_and_lists_unknown_lines_without_touching
         ("secure", "0"),
         ("motd", "Salut"),
         ("custom_mod_setting", "42"),
-        ("banlist", "bans.txt"),
+        ("serveradmin_file", "admins.xml"),
     ]
     .iter()
     .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
@@ -540,7 +540,10 @@ fn drift_compares_the_state_to_the_file_and_lists_unknown_lines_without_touching
     );
     assert_eq!(
         extras,
-        vec!["custom_mod_setting".to_owned(), "banlist".to_owned()],
+        vec![
+            "custom_mod_setting".to_owned(),
+            "serveradmin_file".to_owned()
+        ],
         "le fichier gagne : ces lignes ne sont jamais perdues"
     );
     // Une ligne que Hearth ne veut pas écrite mais que le fichier porte est aussi un écart.
@@ -607,7 +610,7 @@ fn applying_edits_to_the_game_file_keeps_every_unknown_line_through_every_gestur
     let fiche = terraria();
     let channel = fiche.channel("config").expect("canal");
     let format = format_for(channel).expect("format");
-    let original: &[u8] = "# Réglages\r\nunknown_mod_setting=42\r\n#secure=1\r\nmotd=Ancien\r\nbanlist=bans.txt\r\nlast=x".as_bytes();
+    let original: &[u8] = "# Réglages\r\nunknown_mod_setting=42\r\n#secure=1\r\nmotd=Ancien\r\nserveradmin_file=admins.xml\r\nlast=x".as_bytes();
     let mut doc = format.parse(original).expect("lisible");
     let state = install_state(&fiche, &[], false);
     let ctx = installed(None);
@@ -641,7 +644,7 @@ fn applying_edits_to_the_game_file_keeps_every_unknown_line_through_every_gestur
         "# Réglages\r\n",
         "unknown_mod_setting=42\r\n",
         "#secure=1\r\n",
-        "banlist=bans.txt\r\n",
+        "serveradmin_file=admins.xml\r\n",
         "last=x",
     ] {
         assert!(text.contains(kept), "{kept:?} a disparu : {text:?}");

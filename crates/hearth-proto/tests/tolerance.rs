@@ -30,6 +30,9 @@ use hearth_proto::api::catalog::{EvidenceView, FicheStatus};
 use hearth_proto::api::deploy::{
     DeployPlace, DeployProtocol, DeploySource, MountStatus, NameStatus, PortStatus,
 };
+use hearth_proto::api::game_settings::{
+    ChangeAction, DriftResolution, FileState, ImportState, SaveOrigin, SettingEffect, ValueState,
+};
 use hearth_proto::api::metrics::HistoryWindow;
 use hearth_proto::api::operations::OperationStatus as HttpOperationStatus;
 use hearth_proto::api::reauth::ReauthMode;
@@ -155,6 +158,21 @@ fn enums() -> Vec<Entry> {
         ),
         entry!("api/service_ops.rs::StepStateView", Tolerant, StepStateView),
         entry!("api/service_spec.rs::DriftView", Tolerant, DriftView),
+        entry!("api/game_settings.rs::ChangeAction", Tolerant, ChangeAction),
+        entry!(
+            "api/game_settings.rs::DriftResolution",
+            Tolerant,
+            DriftResolution
+        ),
+        entry!("api/game_settings.rs::FileState", Tolerant, FileState),
+        entry!("api/game_settings.rs::ImportState", Tolerant, ImportState),
+        entry!("api/game_settings.rs::SaveOrigin", Tolerant, SaveOrigin),
+        entry!(
+            "api/game_settings.rs::SettingEffect",
+            Tolerant,
+            SettingEffect
+        ),
+        entry!("api/game_settings.rs::ValueState", Tolerant, ValueState),
         entry!("api/catalog.rs::FicheStatus", Tolerant, FicheStatus),
         entry!("api/catalog.rs::EvidenceView", Tolerant, EvidenceView),
         entry!("api/deploy.rs::NameStatus", Tolerant, NameStatus),
