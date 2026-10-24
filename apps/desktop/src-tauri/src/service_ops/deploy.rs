@@ -112,6 +112,20 @@ fn reason_code(details: &Value) -> String {
         .unwrap_or_else(|| "invalid".to_owned())
 }
 
+/// Un identifiant de fiche, de question ou de contrat : minuscules, chiffres, tiret et tiret bas, court.
+/// Tout autre texte n'est pas un identifiant et n'est jamais répété.
+fn stable_id(text: &str) -> Option<String> {
+    let valid = !text.is_empty()
+        && text.len() <= 64
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-');
+    valid.then(|| text.to_owned())
+}
+
+/// Les contrats nommés dans un refus : au plus ce que la fiche peut en porter.
+const MAX_REFUSED_IDS: usize = 4;
+
 fn number<T: TryFrom<u64>>(details: &Value, key: &str) -> Option<T> {
     details
         .get(key)
@@ -202,9 +216,69 @@ pub fn interpret_deploy(status: u16, body: &Value) -> Result<DeployOutcome, Link
             None => refused(DeployRefusal::Other),
         },
         ErrorCode::DeployLimit => refused(DeployRefusal::DeployLimit),
-        ErrorCode::NoSpace => refused(DeployRefusal::NoSpace {
-            free_bytes: number::<u64>(details, "free_bytes").map(|bytes| bytes as f64),
+        ErrorCode::NoSpace => {
+            let install = details.get("reason").and_then(Value::as_str) == Some("install");
+            match (
+                install,
+                number::<u64>(details, "needed_bytes"),
+                number::<u64>(details, "free_bytes"),
+                number::<u64>(details, "missing_bytes"),
+            ) {
+                (true, Some(needed), Some(free), Some(missing)) => {
+                    refused(DeployRefusal::NoSpaceToInstall {
+                        needed_bytes: needed as f64,
+                        free_bytes: free as f64,
+                        missing_bytes: missing as f64,
+                    })
+                }
+                _ => refused(DeployRefusal::NoSpace {
+                    free_bytes: number::<u64>(details, "free_bytes").map(|bytes| bytes as f64),
+                }),
+            }
+        }
+        // Installer depuis une fiche (HRT-102) : des refus typés par leur code, jamais par leur texte.
+        ErrorCode::FicheUnknown => refused(DeployRefusal::FicheUnknown),
+        ErrorCode::FicheChanged => refused(DeployRefusal::FicheChanged),
+        ErrorCode::AgreementRequired => refused(DeployRefusal::AgreementRequired {
+            ids: details
+                .get("ids")
+                .and_then(Value::as_array)
+                .map(|ids| {
+                    ids.iter()
+                        .filter_map(Value::as_str)
+                        .filter_map(stable_id)
+                        .take(MAX_REFUSED_IDS)
+                        .collect()
+                })
+                .unwrap_or_default(),
         }),
+        ErrorCode::SettingRefused => refused(DeployRefusal::AnswerRefused {
+            id: details
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(stable_id),
+            reason: reason_code(details),
+            // Au plus UN caractère : jamais la valeur reçue.
+            character: details
+                .get("char")
+                .and_then(Value::as_str)
+                .and_then(|text| text.chars().next())
+                .map(String::from),
+        }),
+        ErrorCode::HostTooSmall => match (
+            details.get("lack").and_then(Value::as_str),
+            number::<u64>(details, "needed"),
+            number::<u64>(details, "has"),
+        ) {
+            (Some(lack @ ("cpu" | "memory")), Some(needed), Some(has)) => {
+                refused(DeployRefusal::HostTooSmall {
+                    lack: lack.to_owned(),
+                    needed: needed as f64,
+                    has: has as f64,
+                })
+            }
+            _ => refused(DeployRefusal::Other),
+        },
         _ => refused(DeployRefusal::Other),
     }
 }

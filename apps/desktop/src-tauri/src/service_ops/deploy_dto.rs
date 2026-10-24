@@ -428,6 +428,36 @@ pub enum DeployRefusal {
         #[serde(rename = "freeBytes")]
         free_bytes: Option<f64>,
     },
+    /// Installer depuis une fiche (HRT-102) : la fiche n'est pas proposée par cet agent.
+    FicheUnknown,
+    /// La fiche n'est plus celle que le client a lue (version ou empreinte).
+    FicheChanged,
+    /// Des contrats de la fiche ne sont pas acceptés (identifiants).
+    AgreementRequired {
+        ids: Vec<String>,
+    },
+    /// Une réponse est refusée : la question (si c'est une de la fiche), la raison (code stable) et au plus UN
+    /// caractère refusé, jamais la valeur.
+    AnswerRefused {
+        id: Option<String>,
+        reason: String,
+        character: Option<String>,
+    },
+    /// La machine est trop petite pour un minimum MESURÉ (`cpu` en millicœurs, `memory` en octets).
+    HostTooSmall {
+        lack: String,
+        needed: f64,
+        has: f64,
+    },
+    /// L'espace libre est sous le besoin mesuré de l'installation : aucune case ne permet de passer outre.
+    NoSpaceToInstall {
+        #[serde(rename = "neededBytes")]
+        needed_bytes: f64,
+        #[serde(rename = "freeBytes")]
+        free_bytes: f64,
+        #[serde(rename = "missingBytes")]
+        missing_bytes: f64,
+    },
     Other,
 }
 

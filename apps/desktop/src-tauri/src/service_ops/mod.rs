@@ -8,6 +8,8 @@
 //! confirmé, jamais rejoué.
 
 pub mod book;
+pub mod catalog;
+pub mod catalog_dto;
 pub mod commands;
 pub mod deploy;
 pub mod deploy_dto;
