@@ -98,12 +98,8 @@ impl ActKind {
     /// en la retirant d'ici. Tant qu'un acte est ici, aucune route ne le porte, aucune requête ne peut le
     /// produire, et le test de `ROUTES` le sait. `0x13` (`ServiceUpdate`), `0x15` à `0x18`, `0x1A` et `0x1C`
     /// sont réservés par la conception et ne sont pas encore déclarés.
-    pub const DECLARED_WITHOUT_ROUTE: [ActKind; 4] = [
-        Self::ServiceDelete,
-        Self::BackupCreate,
-        Self::BackupDelete,
-        Self::GameSettingsSave,
-    ];
+    pub const DECLARED_WITHOUT_ROUTE: [ActKind; 3] =
+        [Self::ServiceDelete, Self::BackupCreate, Self::BackupDelete];
 
     /// L'octet du code de l'acte dans le message signé. `0x09` est réservé (jamais utilisé : le retrait
     /// d'un poste garde l'usage `0x04`).
@@ -314,6 +310,35 @@ impl AdminAct<'_> {
         Self::ServicesAdopt {
             count: u32::try_from(sorted.len()).unwrap_or(u32::MAX),
             fingerprint: hasher.finalize().into(),
+        }
+    }
+
+    /// L'acte d'enregistrement des réglages d'un jeu (HRT-108, `0x1E`) : la révision de base, le NOMBRE de
+    /// changements (réglages de la fiche et réglages inconnus), l'empreinte SHA-256 de leurs IDENTIFIANTS triés
+    /// (chacun précédé de sa longueur sur deux octets, ceux d'un réglage inconnu préfixés de `other:`), l'origine
+    /// et l'effet. **Jamais une valeur.** Source unique pour l'agent (qui reconstruit l'acte depuis le corps) et
+    /// la liaison cliente (qui le signe).
+    pub fn game_settings_save<'a>(
+        target: Cow<'a, str>,
+        request: &crate::api::game_settings::SaveSettingsRequest,
+    ) -> AdminAct<'a> {
+        use sha2::{Digest, Sha256};
+        let mut ids: Vec<String> = request.changes.iter().map(|c| c.id.clone()).collect();
+        ids.extend(request.others.iter().map(|o| format!("other:{}", o.key)));
+        ids.sort_unstable();
+        let mut hasher = Sha256::new();
+        for id in &ids {
+            let length = u16::try_from(id.len()).unwrap_or(u16::MAX);
+            hasher.update(length.to_be_bytes());
+            hasher.update(&id.as_bytes()[..usize::from(length)]);
+        }
+        AdminAct::GameSettingsSave {
+            target,
+            base_rev: request.base_rev,
+            changes: u32::try_from(ids.len()).unwrap_or(u32::MAX),
+            ids_digest: hasher.finalize().into(),
+            origin: request.origin.as_str(),
+            effect: request.effect.as_str(),
         }
     }
 }
@@ -738,6 +763,14 @@ pub const ROUTES: &[RouteAct] = &[
         kinds: &[ActKind::ServiceRestart],
         contract: Contract::Reauth,
     },
+    // Enregistrer les réglages d'un serveur de jeu (HRT-108, ADR-0051, BR-FICHE-048) : la clé du service est la
+    // cible signée ; couvert par l'élévation.
+    RouteAct {
+        method: "PUT",
+        pattern: "/services/{key}/settings",
+        kinds: &[ActKind::GameSettingsSave],
+        contract: Contract::Reauth,
+    },
     // Le suivi des opérations de service (HRT-144, ADR-0045) : annuler, décider.
     RouteAct {
         method: "DELETE",
@@ -828,14 +861,14 @@ mod tests {
             // Une route ET une seule, ou « déclaré, route à venir » : jamais les deux, jamais aucun.
             assert_eq!(routed + waiting, 1, "{kind:?}");
         }
-        // Vingt-deux actes en 0x05 : dix-huit ont leur route (dont deux pour le mode attaque), quatre sont
-        // déclarés pour les tranches suivantes ; dix-sept routes d'acte (dont le retrait d'un poste, sous son
+        // Vingt-deux actes en 0x05 : dix-neuf ont leur route (dont deux pour le mode attaque), trois sont
+        // déclarés pour les tranches suivantes ; dix-huit routes d'acte (dont le retrait d'un poste, sous son
         // contrat) en plus du réglage de fréquence.
-        assert_eq!(in_routes.len(), 18);
-        assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 4);
+        assert_eq!(in_routes.len(), 19);
+        assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 3);
         assert_eq!(
             ROUTES.iter().filter(|r| r.pattern != "/me/reauth").count(),
-            17
+            18
         );
     }
 
@@ -1048,6 +1081,61 @@ mod tests {
         assert_eq!(settings.code(), 0x1E);
         assert_eq!(settings.params().len(), 5);
         assert!(covered_by_elevation(&settings));
+    }
+
+    #[test]
+    fn a_settings_save_signs_the_identifiers_never_a_value() {
+        use crate::api::game_settings::{
+            ChangeAction, OtherChange, SaveOrigin, SaveSettingsRequest, SettingChange,
+            SettingEffect,
+        };
+        let change = |id: &str, value: &str| SettingChange {
+            id: id.into(),
+            action: ChangeAction::Set,
+            value: Some(value.into()),
+        };
+        let request = |changes: Vec<SettingChange>, value: &str| SaveSettingsRequest {
+            base_rev: 4,
+            file_stamp: None,
+            origin: SaveOrigin::Form,
+            effect: SettingEffect::Restart,
+            changes,
+            others: vec![OtherChange {
+                key: "mod_x".into(),
+                remove: false,
+                value: Some(value.into()),
+            }],
+            drift_choices: Vec::new(),
+            import_text: None,
+        };
+        let key = "h_01J9ZY0G3Q8M2K6W4T7V5N1B9D";
+        let a = AdminAct::game_settings_save(
+            key.into(),
+            &request(vec![change("motd", "un"), change("password", "deux")], "a"),
+        );
+        // L'ordre et les valeurs ne changent pas l'acte : seuls les identifiants comptent.
+        let b = AdminAct::game_settings_save(
+            key.into(),
+            &request(
+                vec![change("password", "XXXX"), change("motd", "YYYY")],
+                "b",
+            ),
+        );
+        assert_eq!(a, b);
+        assert_eq!(a.kind(), ActKind::GameSettingsSave);
+        assert_eq!(a.params()[1], b"3".to_vec(), "deux réglages et un inconnu");
+        // Un autre identifiant, une autre révision, un autre effet : un autre acte.
+        let c = AdminAct::game_settings_save(
+            key.into(),
+            &request(vec![change("password", "x"), change("seed", "y")], "a"),
+        );
+        assert_ne!(a, c);
+        let mut moved = request(vec![change("motd", "un"), change("password", "deux")], "a");
+        moved.base_rev = 5;
+        assert_ne!(a, AdminAct::game_settings_save(key.into(), &moved));
+        let mut effect = request(vec![change("motd", "un"), change("password", "deux")], "a");
+        effect.effect = SettingEffect::Recreate;
+        assert_ne!(a, AdminAct::game_settings_save(key.into(), &effect));
     }
 
     #[test]

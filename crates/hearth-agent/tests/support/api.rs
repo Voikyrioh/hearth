@@ -171,6 +171,19 @@ fn state_over_rig(
         )),
         env.clock.clone(),
     ));
+    let game_settings = hearth_agent::application::game_settings::GameSettings::new(
+        Arc::new(hearth_agent::application::catalog::CatalogService::embedded(true)),
+        specs.clone(),
+        Arc::new(
+            hearth_agent::infrastructure::sqlite::SqliteGameSettingsRepo::new(
+                env.db.pool().clone(),
+            ),
+        ),
+        rig.safe_fs.clone(),
+        ops.locks().clone(),
+        env.audit_sink.clone(),
+        env.clock.clone(),
+    );
     let deployments = hearth_agent::application::deployments::Deployments::new(
         services.clone(),
         ops.clone(),
@@ -221,6 +234,7 @@ fn state_over_rig(
         service_ops,
         service_lifecycle,
         deployments,
+        game_settings,
         catalog: Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         hello: Arc::new(HelloService::new(
             InstallId::from_bytes([3; 16]),

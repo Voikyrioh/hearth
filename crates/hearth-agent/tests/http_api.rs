@@ -10,7 +10,7 @@ use axum::http::{Method, StatusCode};
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::entrypoint::http::{Access, ENDPOINTS};
 use serde_json::json;
-use support::api::{Api, state_with_engine};
+use support::api::Api;
 use support::fake_engine::{FakeEngine, container};
 use support::{PASSWORD, env};
 
@@ -1415,12 +1415,16 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     }
     // L'image du déploiement est déjà sur le serveur (HRT-68) : rien à récupérer, le déploiement réussit.
     engine.have_image("nginx:latest");
-    let state = state_with_engine(
+    let deploy_rig = support::api::DeployRig::new();
+    let state = support::api::state_with_deploy(
         &env,
         support::update::Rig::new(&env, false, false).service,
         engine,
+        &deploy_rig,
     )
     .await;
+    // Un serveur de jeu installé depuis la fiche de Terraria, dont on enregistre les réglages (HRT-108).
+    let game_key = support::game::terraria_service(&env, &deploy_rig.safe_fs, 1).await;
     // Deux opérations de service dans le journal (HRT-144) : une qu'on annulera, une qui attend une décision.
     let (cancel_op, decide_op) = {
         use hearth_agent::application::service_ops::AcceptRequest;
@@ -1700,6 +1704,19 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                     Method::POST,
                     &format!("/operations/services/{decide_op}/decision"),
                     json!({ "choice": "continue" }),
+                )
+                .await
+            }
+            // Enregistrer les réglages d'un serveur de jeu (HRT-108) : `200`, et UNE entrée réussie.
+            ("PUT", "/services/{key}/settings") => {
+                api.act(
+                    &marie,
+                    Method::PUT,
+                    &format!("/services/{}/settings", game_key.as_str()),
+                    json!({
+                        "base_rev": 0, "origin": "form", "effect": "restart",
+                        "changes": [{ "id": "motd", "action": "set", "value": "Bonjour" }]
+                    }),
                 )
                 .await
             }

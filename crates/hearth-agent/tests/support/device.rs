@@ -326,6 +326,15 @@ pub fn act_of<'a>(
         ("POST", ["deployments"]) => hearth_proto::admin_act::AdminAct::service_deploy(
             &serde_json::from_value(body.clone()).expect("corps du déploiement"),
         ),
+        // Enregistrer les réglages d'un jeu (HRT-108) : la clé du chemin et les identifiants du corps, jamais une valeur.
+        ("PUT", ["services", key, "settings"]) => {
+            hearth_proto::admin_act::AdminAct::game_settings_save(
+                hearth_proto::admin_act::decode_segment(key)
+                    .unwrap_or_else(|| (*key).to_owned())
+                    .into(),
+                &serde_json::from_value(body.clone()).expect("corps des réglages"),
+            )
+        }
         // Annuler et décider une opération de service (HRT-144) : l'identifiant du chemin, le choix du corps.
         ("DELETE", ["operations", "services", id]) => AdminAct::OperationCancel { target: id },
         ("POST", ["operations", "services", id, "decision"]) => AdminAct::OperationDecide {

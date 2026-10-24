@@ -227,7 +227,7 @@ impl Doc {
 }
 
 /// Interface commune. Chaque format est du code de l'agent, une énumération fermée.
-pub trait ConfigFormat {
+pub trait ConfigFormat: Send + Sync {
     fn parse(&self, bytes: &[u8]) -> Result<Doc, Unreadable>;
     /// Retouche la valeur de la dernière entrée de `key`, ou ajoute une ligne en fin de fichier.
     fn set(&self, doc: &mut Doc, key: &str, value: &str) -> Result<(), Refused>;

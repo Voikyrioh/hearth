@@ -16,6 +16,7 @@ use hearth_proto::admin_act::{
 };
 use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::deploy::DeploySpec;
+use hearth_proto::api::game_settings::SaveSettingsRequest;
 use hearth_proto::api::reauth::ReauthMode;
 use hearth_proto::api::service_ops::OperationChoice;
 use serde_json::Value;
@@ -201,12 +202,19 @@ fn build<'a>(
                 serde_json::from_value(body.cloned().ok_or(Unreadable)?).map_err(|_| Unreadable)?;
             AdminAct::service_deploy(&spec)
         }
+        // Enregistrer les réglages d'un jeu (HRT-108, ADR-0051) : la clé du service vient du chemin ; la révision de
+        // base, le nombre de changements, l'empreinte de leurs identifiants, l'origine et l'effet, du corps. Jamais
+        // une valeur (une seule fonction, partagée avec l'agent : `AdminAct::game_settings_save`).
+        ActKind::GameSettingsSave => {
+            let request: SaveSettingsRequest =
+                serde_json::from_value(body.cloned().ok_or(Unreadable)?).map_err(|_| Unreadable)?;
+            AdminAct::game_settings_save(id, &request)
+        }
         // Déclarés pour les tranches suivantes, sans route dans `ROUTES` : aucune requête ne peut les viser
         // (`route_of` ne lit que `ROUTES`). Le lot qui ajoute leur route écrit ici comment les reconstruire.
-        ActKind::ServiceDelete
-        | ActKind::BackupCreate
-        | ActKind::BackupDelete
-        | ActKind::GameSettingsSave => return Err(Unreadable),
+        ActKind::ServiceDelete | ActKind::BackupCreate | ActKind::BackupDelete => {
+            return Err(Unreadable);
+        }
     })
 }
 
@@ -250,6 +258,10 @@ mod tests {
             "/me/reauth" => json!({ "password": "each" }),
             "/services/adopt" => json!({ "keys": ["c_0123abcd", "u_docker-x.service"] }),
             "/operations/services/{id}/decision" => json!({ "choice": "keep" }),
+            "/services/{key}/settings" => json!({
+                "base_rev": 2, "origin": "form", "effect": "restart",
+                "changes": [{ "id": "motd", "action": "set", "value": "Salut" }]
+            }),
             "/deployments" => {
                 json!({ "name": "web", "image": "nginx", "env": [{ "name": "A", "value": "v" }] })
             }

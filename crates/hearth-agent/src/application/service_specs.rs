@@ -102,6 +102,11 @@ impl ServiceSpecs {
         Self { repo, vault, clock }
     }
 
+    /// Le coffre de la clé de scellement (HRT-108 : les secrets de réglage changés sont scellés avec lui).
+    pub fn vault(&self) -> &Arc<SecretVault> {
+        &self.vault
+    }
+
     /// Écrit la révision suivante de la description de `key` (la première si `expected_rev` est `None`).
     /// Rend son numéro. `expected_rev` est la révision courante que l'appelant a lue : si une autre
     /// modification est passée entre-temps, `Conflict` (BR-EDIT-024).

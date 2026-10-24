@@ -19,12 +19,16 @@ Chaque réglage porte un identifiant Hearth stable, le nom du jeu, un canal (`en
 - `crates/hearth-agent/src/domain/catalog/settings_state.rs::{resolve_install, initial_state, apply_changes, effect_of}`
 - `crates/hearth-agent/catalog/terraria/settings.toml`
 
+- `crates/hearth-agent/src/application/game_settings.rs::GameSettings::view` (HRT-108 : les trois états d'un réglage rendus au client, jamais la valeur d'un secret)
+
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_state.rs::not_written_is_a_value_distinct_from_the_default_of_the_game`
 - `crates/hearth-agent/src/domain/catalog/tests_state.rs::the_effect_of_a_change_is_deduced_from_the_channel_never_declared`
 - `crates/hearth-agent/src/domain/catalog/tests_state.rs::reset_puts_the_proposed_value_back_or_removes_the_line_when_nothing_is_proposed`
 - `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::the_terraria_fiche_classes_each_of_the_36_settings_of_the_inventory`
 - `crates/hearth-agent/src/domain/catalog/tests_translate.rs::terraria_with_the_proposed_values_writes_only_what_is_known_and_sends_no_order`
+
+- `crates/hearth-agent/tests/game_settings_https.rs::reading_shows_the_installed_values_the_file_state_and_never_the_password`
 
 ## Cas limites
 - Les 15 permissions du mode Voyage de Terraria sont exposées sans défaut : l'inventaire n'en a lu aucun.

@@ -206,12 +206,14 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::DeployLimit // trop de déploiements à la fois
         | ErrorCode::DecisionNotOffered // choix absent de ceux que l'opération offre
         | ErrorCode::SettingsConflict // réglages changés depuis leur lecture
+        | ErrorCode::SettingsFileChanged // fichier de réglages réécrit depuis sa lecture
         | ErrorCode::RecreateNotAvailable => Some(Outcome::Failed(Reason::Conflict)), // recréer n'est pas encore possible
         // Données refusées par une règle de validation.
         ErrorCode::PlanSettingRefused // réglage de fiche hors plan
         | ErrorCode::PathRefused // chemin hors règle
         | ErrorCode::FolderRefused // dossier refusé
         | ErrorCode::LimitsRequired // limites obligatoires absentes
+        | ErrorCode::SettingsFileUnreadable // fichier de réglages que le format ne sait pas découper
         | ErrorCode::SettingRefused => Some(Outcome::Failed(Reason::Validation)), // valeur de réglage refusée
         // Ressource inexistante.
         ErrorCode::ServiceNotFound // service inconnu

@@ -16,7 +16,7 @@ use hearth_proto::api::accounts::RoleName;
 use hearth_proto::api::reauth::ReauthMode;
 use hearth_proto::api::service_ops::OperationChoice;
 use serde_json::{Value, json};
-use support::api::{Api, Reply, state_with_engine};
+use support::api::{Api, Reply};
 use support::device::{DeviceKey, device_login_body, login_token, reauth_member};
 use support::fake_engine::{FakeEngine, container};
 use support::update::Rig;
@@ -89,6 +89,12 @@ enum Spec {
     Deploy {
         body: Value,
     },
+    /// Enregistrer les réglages de ce serveur de jeu (HRT-108) : la révision de base, le nombre de changements,
+    /// l'empreinte de leurs identifiants, l'origine et l'effet sont signés ; jamais une valeur.
+    Settings {
+        key: String,
+        body: Value,
+    },
 }
 
 fn role_wire(role: RoleName) -> &'static str {
@@ -142,6 +148,10 @@ impl Spec {
             },
             Self::Deploy { body } => AdminAct::service_deploy(
                 &serde_json::from_value(body.clone()).expect("corps du déploiement"),
+            ),
+            Self::Settings { key, body } => AdminAct::game_settings_save(
+                key.as_str().into(),
+                &serde_json::from_value(body.clone()).expect("corps des réglages"),
             ),
         }
     }
@@ -216,6 +226,11 @@ impl Spec {
                 json!({ "choice": choice.as_str() }),
             ),
             Self::Deploy { body } => (Method::POST, "/deployments".into(), body.clone()),
+            Self::Settings { key, body } => (
+                Method::PUT,
+                format!("/services/{key}/settings"),
+                body.clone(),
+            ),
         }
     }
 
@@ -318,6 +333,32 @@ impl Spec {
                     changed(&|b| b["command"] = json!("run")),
                 ]
             }
+            // La cible, la révision, un identifiant de plus, l'origine et l'effet sont signés ; jamais une valeur.
+            Self::Settings { key, body } => {
+                let changed = |change: &dyn Fn(&mut Value)| {
+                    let mut other = body.clone();
+                    change(&mut other);
+                    Self::Settings {
+                        key: key.clone(),
+                        body: other,
+                    }
+                };
+                vec![
+                    Self::Settings {
+                        key: "h_01JZ0000000000000000000098".into(),
+                        body: body.clone(),
+                    },
+                    changed(&|b| b["base_rev"] = json!(9)),
+                    changed(&|b| {
+                        b["changes"]
+                            .as_array_mut()
+                            .unwrap()
+                            .push(json!({ "id": "seed", "action": "unset" }));
+                    }),
+                    changed(&|b| b["origin"] = json!("import")),
+                    changed(&|b| b["effect"] = json!("none")),
+                ]
+            }
             // L'identifiant ET le choix sont signés : changer l'un ou l'autre est un autre acte.
             Self::Decide { target, choice } => vec![
                 Self::Decide {
@@ -374,6 +415,7 @@ impl Actor {
 }
 
 struct Bench {
+    deploy: support::api::DeployRig,
     env: Env,
     api: Api,
     /// Le faux moteur du registre des services (prêt, sans conteneur au départ).
@@ -398,12 +440,15 @@ async fn bench() -> Bench {
     let env = env().await;
     let rig = Rig::new(&env, true, true);
     let engine = std::sync::Arc::new(FakeEngine::new());
-    let state = state_with_engine(&env, rig.service.clone(), engine.clone()).await;
+    let deploy = support::api::DeployRig::new();
+    let state =
+        support::api::state_with_deploy(&env, rig.service.clone(), engine.clone(), &deploy).await;
     let api = Api::from_state(state.clone());
     let marie = actor(&env, &api, "marie", Role::Admin).await;
     let carl = actor(&env, &api, "carl", Role::ReadOnly).await;
     let paul = actor(&env, &api, "paul", Role::ReadOnly).await;
     Bench {
+        deploy,
         env,
         api,
         engine,
@@ -527,10 +572,32 @@ impl Bench {
                     }),
                 }
             }
+            ActKind::GameSettingsSave => {
+                self.env.grant_services("marie").await;
+                let key = self.game_service().await;
+                Spec::Settings {
+                    key,
+                    body: json!({
+                        "base_rev": 0, "origin": "form", "effect": "restart",
+                        "changes": [{ "id": "motd", "action": "set", "value": "Bonjour" }]
+                    }),
+                }
+            }
             other => {
                 panic!("{other:?} : pas de scénario dans la matrice générique (voir generic_kinds)")
             }
         }
+    }
+
+    /// Un serveur de jeu installé depuis la fiche de Terraria, avec son fichier de réglages vide (HRT-108).
+    async fn game_service(&self) -> String {
+        let n = self
+            .services
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        support::game::terraria_service(&self.env, &self.deploy.safe_fs, n)
+            .await
+            .as_str()
+            .to_owned()
     }
 
     /// Une opération de déploiement en cours sur un service neuf de Hearth (visible de tous), annulable
@@ -2284,17 +2351,6 @@ async fn the_acts_declared_without_a_route_are_accepted_by_no_route_and_confirm_
             ActKind::BackupDelete,
             AdminAct::BackupDelete { target: "01BK" },
         ),
-        (
-            ActKind::GameSettingsSave,
-            AdminAct::GameSettingsSave {
-                target: key.into(),
-                base_rev: 1,
-                changes: 1,
-                ids_digest: [3; 32],
-                origin: "form",
-                effect: "none",
-            },
-        ),
     ];
     assert_eq!(declared.len(), ActKind::DECLARED_WITHOUT_ROUTE.len());
     for kind in ActKind::DECLARED_WITHOUT_ROUTE {
@@ -2319,7 +2375,6 @@ async fn the_acts_declared_without_a_route_are_accepted_by_no_route_and_confirm_
         (Method::POST, "/services/c_0123abcd/backups"),
         (Method::POST, "/backups"),
         (Method::DELETE, "/backups/01BK"),
-        (Method::PUT, "/services/c_0123abcd/settings"),
         (Method::POST, "/operations/services"),
     ];
     let before = b.snapshot().await;

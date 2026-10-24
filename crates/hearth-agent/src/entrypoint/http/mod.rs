@@ -18,6 +18,7 @@ mod catalog;
 mod deployments;
 mod devices;
 mod error;
+mod game_settings;
 mod hello;
 mod metrics;
 mod operations;
@@ -44,6 +45,7 @@ use tracing::Level;
 use crate::application::accounts::AccountService;
 use crate::application::audit::AuditService;
 use crate::application::deployments::Deployments;
+use crate::application::game_settings::GameSettings;
 use crate::application::hello::HelloService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
@@ -93,6 +95,8 @@ pub struct AppState {
     pub deployments: Arc<Deployments>,
     /// Les fiches de serveurs de jeu que cet agent propose (HRT-101, ADR-0050).
     pub catalog: Arc<crate::application::catalog::CatalogService>,
+    /// Les réglages d'un serveur de jeu : lire, analyser un texte collé, enregistrer (HRT-108, ADR-0051).
+    pub game_settings: Arc<GameSettings>,
     pub stream: StreamContext,
     /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
     /// administrateurs par `GET /security`, sans rien de sensible.
@@ -143,6 +147,7 @@ const READ_ONLY_POSTS: &[&str] = &[
     "/sessions/challenge",
     "/engine/recheck",
     "/deployments/check",
+    "/services/{key}/settings/analyze",
 ];
 
 impl Endpoint {
@@ -422,6 +427,38 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: false,
         audit: None,
         route: || get(deployments::capacity),
+    },
+    // Les réglages d'un serveur de jeu (HRT-108, ADR-0051, BR-FICHE-037 à 053) : lire, analyser un texte collé (une
+    // consultation, rien n'est écrit, le texte est oublié) et enregistrer (acte `GameSettingsSave` `0x1E`, couvert
+    // par l'élévation). Les trois exigent le droit « gérer les services » (niveau `Services`, refus consigné).
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/settings",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        // Une consultation réservée au droit de gérer les services : seul un refus est consigné.
+        audit: Some(AuditAction::ServiceGameSettings),
+        route: || get(game_settings::view),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/services/{key}/settings/analyze",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        // Une consultation : seul un refus faute de droit est consigné, jamais un constat.
+        audit: Some(AuditAction::ServiceGameSettings),
+        route: || post(game_settings::analyze),
+    },
+    Endpoint {
+        method: Method::PUT,
+        path: "/services/{key}/settings",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceGameSettings),
+        route: || put(game_settings::save),
     },
     // Démarrer, arrêter, redémarrer un service (HRT-64, ADR-0037) : trois actes d'administration confirmés
     // (`ServiceStart` `0x0C`, `ServiceStop` `0x0D`, `ServiceRestart` `0x0E`, couverts par l'élévation),
@@ -733,7 +770,10 @@ mod tests {
                 endpoint.modifies(),
                 !matches!(
                     endpoint.path,
-                    "/sessions/challenge" | "/engine/recheck" | "/deployments/check"
+                    "/sessions/challenge"
+                        | "/engine/recheck"
+                        | "/deployments/check"
+                        | "/services/{key}/settings/analyze"
                 ),
                 "{}",
                 endpoint.path
@@ -888,6 +928,11 @@ mod tests {
         // le niveau d'accès de la route (voir `Class::ServiceStream`).
         ("GET", "/services/{key}/logs", ServiceStream),
         ("GET", "/services/{key}/env", Service),
+        // Les réglages d'un serveur de jeu (HRT-108) : le droit est exigé par le niveau ; l'analyse d'un texte collé
+        // est une consultation du même droit ; l'enregistrement est un acte confirmé (`0x1E`).
+        ("GET", "/services/{key}/settings", Service),
+        ("POST", "/services/{key}/settings/analyze", ServiceCheck),
+        ("PUT", "/services/{key}/settings", Service),
         // Adopter et relâcher (HRT-80) : le droit est exigé par le niveau, la confirmation par la table
         // des actes de `hearth-proto`. Aucune route n'adopte « tout » (BR-ADOPT-021).
         ("GET", "/services/external", Service),
@@ -1084,6 +1129,7 @@ mod tests {
                 ("DELETE", "/operations/services/{id}"),
                 ("GET", "/services/external"),
                 ("GET", "/services/{key}/env"),
+                ("GET", "/services/{key}/settings"),
                 ("POST", "/deployments"),
                 ("POST", "/operations/services/{id}/decision"),
                 ("POST", "/services/adopt"),
@@ -1091,6 +1137,7 @@ mod tests {
                 ("POST", "/services/{key}/restart"),
                 ("POST", "/services/{key}/start"),
                 ("POST", "/services/{key}/stop"),
+                ("PUT", "/services/{key}/settings"),
             ]
         );
         // Et les deux seules routes protégées de l'inventaire : le mot de passe d'autrui et la suppression.
