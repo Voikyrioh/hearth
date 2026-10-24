@@ -44,6 +44,10 @@ const props = withDefaults(
     destructive?: boolean;
     /** Le libellé du champ quand le mot de passe de confirmation a un nom propre (« Ancien mot de passe »). */
     passwordLabel?: string;
+    /** Le libellé du bouton qui quitte sans agir (« Garder le déploiement » ; « Annuler » par défaut). */
+    cancelLabel?: string;
+    /** Fenêtre large (640 px), pour un récapitulatif (HRT-69). */
+    wide?: boolean;
     /** Lance l'acte avec le mot de passe saisi (`null` : délai ouvert). */
     perform: (adminPassword: string | null) => Promise<ActReport>;
     /** Le texte d'un refus qui n'est pas celui de la confirmation ; `undefined` : la fenêtre n'en montre pas. */
@@ -54,6 +58,8 @@ const props = withDefaults(
     canSubmit: true,
     destructive: false,
     passwordLabel: undefined,
+    cancelLabel: undefined,
+    wide: false,
     refusalText: undefined,
   },
 );
@@ -209,7 +215,8 @@ async function submit() {
     :busy="sending"
     :error="error"
     :destructive="destructive"
-    :cancel-label="reauth.keyMissing.value || reauth.agentTooOld.value ? t('common.close') : undefined"
+    :cancel-label="reauth.keyMissing.value || reauth.agentTooOld.value ? t('common.close') : cancelLabel"
+    :wide="wide"
     @submit="submit"
     @cancel="emit('close')"
   >

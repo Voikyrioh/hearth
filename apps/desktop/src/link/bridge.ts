@@ -1,5 +1,13 @@
+import type { EngineCapacity } from "@/resources";
 import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
+import type {
+  CancelOutcome,
+  DeployCheck,
+  DeployCheckInput,
+  DeployOutcome,
+  DeployRequest,
+} from "./deploy";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
@@ -333,6 +341,45 @@ export interface LinkBridge {
     gesture: LifecycleGesture,
     adminPassword: string | null,
   ): Promise<LifecycleOutcome>;
+
+  // Déployer une image (HRT-69, ADR-0039, BR-DEPLOY-*) : UNE commande typée par geste. L'agent juge tout, deux fois
+  // (BR-DEPLOY-032) ; l'interface ne fait que lui poser les questions et dire ses réponses. Une VALEUR de variable, un
+  // NOM de variable et la commande de lancement sont des secrets : ils ne traversent que `deployService`.
+
+  /**
+   * Les constats du formulaire sur le nom, les ports et l'image (BR-DEPLOY-008, 009, 018) : une CONSULTATION, ni suivi ni
+   * journal (BR-DEPLOY-033), jamais un secret. Indicative : le serveur refait tout au lancement. Hors « Connecté » :
+   * échec `not_connected`. Sans le droit : `missing_services_right`.
+   */
+  checkDeployment(serverId: string, input: DeployCheckInput): Promise<DeployCheck>;
+  /**
+   * Déploie une image : un acte d'administration confirmé, JAMAIS couvert par l'élévation de cinq minutes
+   * (`adminPassword` : le mot de passe, redemandé à chaque fois, jamais gardé ; `null` seulement si l'agent n'en demande
+   * pas). L'agent répond « accepté » (`202`) : l'issue ne se lit jamais ici, elle arrive par le suivi des opérations
+   * (`onServiceOperations`). Jamais rejoué : un résultat inconnu (lien coupé avant la réponse) se lit sur le flux
+   * (BR-DEPLOY-028). Sans le droit « gérer les services » : échec `missing_services_right`.
+   */
+  deployService(
+    serverId: string,
+    request: DeployRequest,
+    adminPassword: string | null,
+  ): Promise<DeployOutcome>;
+  /**
+   * Annule une opération de service avant son point de non-retour (la récupération de l'image d'un déploiement,
+   * BR-DEPLOY-016) : un acte d'administration confirmé, couvert par l'élévation (`adminPassword` : `null` sous
+   * l'élévation). Après la création : refus `too_late`. Jamais rejoué.
+   */
+  cancelServiceOperation(
+    serverId: string,
+    opId: string,
+    adminPassword: string | null,
+  ): Promise<CancelOutcome>;
+  /**
+   * Les bornes des curseurs de ressources et la part de la machine déjà engagée (`GET /engine/capacity`,
+   * BR-DEPLOY-038) : une lecture. `null` : réponse incomplète ou illisible, rien ne se règle ni ne s'envoie sans
+   * bornes sûres. Hors « Connecté » : échec `not_connected`.
+   */
+  readEngineCapacity(serverId: string): Promise<EngineCapacity | null>;
 
   /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
   setDisplayedServer(serverId: string | null): Promise<void>;

@@ -1,4 +1,5 @@
 import { isHearthUsername } from "@/accounts/name";
+import { deployOutcome } from "@/deploy/messages";
 import { type MessageKey, t } from "@/i18n";
 import type {
   DecisionRefusal,
@@ -45,6 +46,8 @@ const SUBJECT_KEYS: Record<OperationKind, MessageKey> = {
 const STEP_KEYS: Record<string, MessageKey> = {
   check: "serviceOps.steps.check",
   pull: "serviceOps.steps.pull",
+  create: "serviceOps.steps.create",
+  watch: "serviceOps.steps.watch",
   stop: "serviceOps.steps.stop",
   stop_old: "serviceOps.steps.stopOld",
   recreate: "serviceOps.steps.recreate",
@@ -119,8 +122,12 @@ export function operationTitle(
 
 /** Le texte de l'étape en cours, ou `null` (étape absente ou inconnue : jamais le code lui-même). */
 export function stepText(operation: ServiceOperation): string | null {
-  if (operation.step === null) return null;
-  const key = STEP_KEYS[operation.step];
+  return operation.step === null ? null : stepName(operation.step);
+}
+
+/** Le texte d'une étape par son code, ou `null` si ce client ne la connaît pas. */
+export function stepName(step: string): string | null {
+  const key = STEP_KEYS[step];
   return key ? t(key) : null;
 }
 
@@ -196,7 +203,8 @@ export function outcomeOf(
 ): { message: string; tone: OutcomeTone } | null {
   const key = OUTCOME_KEYS[operation.status];
   if (!key) return null;
-  const specific = lifecycleOutcome(operation, name);
+  // Un déploiement (HRT-69) se dit par sa cause : le service est en marche, ou pourquoi rien n'a été créé.
+  const specific = deployOutcome(operation, name) ?? lifecycleOutcome(operation, name);
   if (specific) return specific;
   const tone: OutcomeTone =
     operation.status === "succeeded" ? "success" : operation.status === "failed" ? "error" : "warn";

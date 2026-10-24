@@ -308,7 +308,15 @@ describe("hors ligne (HRT-12)", () => {
       .getRoutes()
       .filter((route) => route.path.startsWith("/servers/:id/") && route.name)
       .map((route) => String(route.name));
-    expect(pages.sort()).toEqual(["accounts", "audit", "dashboard", "security", "services"]);
+    // Le formulaire de déploiement (HRT-69) est gardé par la route : sa couverture est dans `DeployService.test.ts`.
+    expect(pages.sort()).toEqual([
+      "accounts",
+      "audit",
+      "dashboard",
+      "security",
+      "services",
+      "services-deploy",
+    ]);
     wrapper.unmount();
   });
 });

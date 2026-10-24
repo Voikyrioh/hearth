@@ -72,20 +72,23 @@ describe("ouverture de la section (BR-ENGINE-001, 019)", () => {
     wrapper.unmount();
   });
 
-  it("moteur prêt sans service : « Aucun service pour l'instant », compteurs à zéro, sans invitation (le déploiement arrive plus tard)", async () => {
+  it("moteur prêt sans service : « Aucun service pour l'instant », compteurs à zéro, avec le bouton de déploiement (HRT-69)", async () => {
     const { wrapper } = await open((bridge) => bridge.services.seed("forge", []));
     expect(wrapper.get("[data-services-empty]").text()).toContain("Aucun service pour l'instant");
-    // L'état vide dit ce qu'on peut faire ensuite (HRT-137) : ce que la liste montre, et que l'installation arrive.
+    // L'état vide dit ce que la liste montre (HRT-137) ; le geste qui suit est le bouton de déploiement (HRT-69).
     expect(wrapper.get("[data-services-empty]").text()).toContain(
-      "Installer un service depuis Hearth arrive bientôt.",
+      "Hearth affiche ici les services qu'il a créés ou que vous lui avez confiés.",
+    );
+    expect(wrapper.get("[data-services-empty] [data-deploy-open]").text()).toBe(
+      "Déployer un service",
     );
     expect(wrapper.findAll("ul[aria-label] li").map((item) => item.text())).toEqual([
       "0 en marche",
       "0 arrêtés",
       "0 en erreur",
     ]);
-    expect(wrapper.text()).not.toContain("Déploie");
-    expect(wrapper.text()).not.toContain("Déployer");
+    // Un seul bouton « Déployer un service » : celui de l'état vide (un seul bouton principal par vue).
+    expect(wrapper.findAll("[data-deploy-open]")).toHaveLength(1);
     wrapper.unmount();
   });
 
@@ -108,8 +111,11 @@ describe("ouverture de la section (BR-ENGINE-001, 019)", () => {
     expect(reader.wrapper.find("[data-row-menu]").exists()).toBe(false);
     for (const wrapper of [admin.wrapper, reader.wrapper]) {
       expect(wrapper.find("[role='menu']").exists()).toBe(false);
-      expect(wrapper.text()).not.toMatch(/Démarrer|Arrêter|Redémarrer|Déployer|Ports exposés/);
+      expect(wrapper.text()).not.toMatch(/Démarrer|Arrêter|Redémarrer|Ports exposés/);
     }
+    // Le bouton de déploiement reste visible pour tous : actif avec le droit, désactivé et expliqué sans lui (BR-GRANT-014).
+    expect(admin.wrapper.get("[data-deploy-open]").attributes("aria-disabled")).toBeUndefined();
+    expect(reader.wrapper.get("[data-deploy-open]").attributes("aria-disabled")).toBe("true");
     admin.wrapper.unmount();
     reader.wrapper.unmount();
   });

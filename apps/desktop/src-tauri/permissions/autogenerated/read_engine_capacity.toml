@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-engine-capacity"
+description = "Enables the read_engine_capacity command without any pre-configured scope."
+commands.allow = ["read_engine_capacity"]
+
+[[permission]]
+identifier = "deny-read-engine-capacity"
+description = "Denies the read_engine_capacity command without any pre-configured scope."
+commands.deny = ["read_engine_capacity"]

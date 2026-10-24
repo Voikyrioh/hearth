@@ -238,6 +238,29 @@ export const commands = {
 	serviceStop: (serverId: string, key: string, adminPassword: string | null) => typedError<LifecycleOutcome, LinkFailure>(__TAURI_INVOKE("service_stop", { serverId, key, adminPassword })),
 	/**  Redémarre un service (`POST /services/{key}/restart`). */
 	serviceRestart: (serverId: string, key: string, adminPassword: string | null) => typedError<LifecycleOutcome, LinkFailure>(__TAURI_INVOKE("service_restart", { serverId, key, adminPassword })),
+	/**
+	 *  Les constats du formulaire de déploiement sur le nom, les ports et l'image (`POST /deployments/check`) : une
+	 *  CONSULTATION, ni suivi ni journal (BR-DEPLOY-033), jamais un secret. Hors « Connecté » : `NotConnected`.
+	 */
+	deployCheck: (serverId: string, input: DeployCheckInputDto) => typedError<DeployCheckDto, LinkFailure>(__TAURI_INVOKE("deploy_check", { serverId, input })),
+	/**
+	 *  Déploie une image (`POST /deployments`) : un acte d'administration confirmé, JAMAIS couvert par l'élévation
+	 *  (le mot de passe à chaque fois). L'agent répond `202` : l'issue ne se lit jamais ici, elle arrive par le suivi
+	 *  des opérations. Jamais rejoué : un résultat inconnu se lit sur le flux (BR-DEPLOY-028). La valeur d'une variable,
+	 *  son nom et la commande ne sont ni tracés ni gardés. Sans le droit « gérer les services » :
+	 *  `MissingServicesRight`.
+	 */
+	deployService: (serverId: string, deployment: DeployRequestDto, adminPassword: string | null) => typedError<DeployOutcome, LinkFailure>(__TAURI_INVOKE("deploy_service", { serverId, deployment, adminPassword })),
+	/**
+	 *  Annule une opération de service avant son point de non-retour (`DELETE /operations/services/{id}`) : un acte
+	 *  d'administration confirmé, couvert par l'élévation. Jamais rejoué.
+	 */
+	cancelServiceOperation: (serverId: string, opId: string, adminPassword: string | null) => typedError<CancelOutcome, LinkFailure>(__TAURI_INVOKE("cancel_service_operation", { serverId, opId, adminPassword })),
+	/**
+	 *  Les bornes des curseurs de ressources et la part de la machine déjà engagée (`GET /engine/capacity`,
+	 *  BR-DEPLOY-038) : une lecture.
+	 */
+	readEngineCapacity: (serverId: string) => typedError<EngineCapacityDto, LinkFailure>(__TAURI_INVOKE("read_engine_capacity", { serverId })),
 };
 
 /* Types */
@@ -356,7 +379,11 @@ export type AdminActKindDto = "account_create" | "account_role" | "account_passw
 /**  Décider d'une opération de service (HRT-84) : un acte de pilotage depuis HRT-194. */
 "operation_decide" | 
 /**  Démarrer, arrêter, redémarrer un service (HRT-65) : actes de pilotage (HRT-194, BR-LIFE-016). */
-"service_start" | "service_stop" | "service_restart";
+"service_start" | "service_stop" | "service_restart" | 
+/**  Déployer une image (HRT-69) : le mot de passe à chaque fois, jamais couvert par l'élévation. */
+"service_deploy" | 
+/**  Annuler l'opération d'un service (HRT-69) : couvert par l'élévation de cinq minutes. */
+"operation_cancel";
 
 /**  Qui a adopté un service, et quand (HRT-79). */
 export type AdoptionDto = {
@@ -634,6 +661,24 @@ export type BusyDto = {
 	since: string,
 };
 
+/**  L'issue d'une annulation. */
+export type CancelOutcome = 
+/**  L'agent a pris l'annulation : l'opération telle qu'elle est maintenant. */
+{ kind: "done"; operation: OperationDto } | { kind: "refused"; refusal: CancelRefusal } | 
+/**  Le lien est tombé avant la réponse : on ne sait pas. Jamais rejouée ; l'état arrive par le flux. */
+{ kind: "unknown"; opId: string };
+
+/**  Pourquoi l'agent a refusé l'annulation. */
+export type CancelRefusal = { kind: "wrong_password" } | { kind: "password_required" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "busy" } | 
+/**  L'opération est introuvable (purgée, ou service que le compte ne voit pas). */
+{ kind: "not_found" } | 
+/**  Le point de non-retour est passé. */
+{ kind: "too_late" } | 
+/**  L'opération n'est pas dans un statut qui s'annule (déjà finie). */
+{ kind: "not_cancellable" } | 
+/**  L'opération a changé pendant la demande : relire. */
+{ kind: "changed" } | { kind: "other" };
+
 export type CapabilitiesDto = {
 	gpu: boolean,
 	temps: boolean,
@@ -689,6 +734,81 @@ export type DecisionRefusal =
 /**  Tout autre refus. */
 { kind: "other" };
 
+/**  Les points d'attention validés dans le récapitulatif. */
+export type DeployAcceptDto = {
+	reservedPorts: boolean,
+	lowDisk: boolean,
+};
+
+/**  La réponse de la consultation. Indicative : le serveur refait tout au lancement (BR-DEPLOY-032). */
+export type DeployCheckDto = {
+	name: NameStatusDto,
+	/**  Les champs invalides, dans la liste fermée ; un nom inconnu est écarté. */
+	invalidFields: string[],
+	ports: PortCheckDto[],
+	disk: DiskCheckDto | null,
+	imagePresent: boolean,
+};
+
+/**
+ *  Ce que pose la consultation : le nom, l'image, la version et les ports. Jamais un secret. Les dossiers de
+ *  données ne sont pas dans ce ticket (HRT-70) : aucun montage n'est envoyé.
+ */
+export type DeployCheckInputDto = {
+	name: string,
+	image: string,
+	tag: string | null,
+	ports: DeployPortDto[],
+};
+
+/**  Une variable d'environnement : le nom ET la valeur sont des secrets. */
+export type DeployEnvDto = {
+	name: string,
+	value: string,
+};
+
+/**  Les champs de texte qu'une consultation ou un refus peut désigner (liste fermée de l'agent). */
+export type DeployFieldDto = "name" | "image" | "tag" | "env" | "ports" | "mounts" | "command" | "resources";
+
+/**
+ *  L'issue de l'envoi : accepté (`202`, l'opération court à l'arrière-plan), refusé, ou résultat inconnu (le
+ *  lien est tombé avant la réponse : jamais rejoué).
+ */
+export type DeployOutcome = { kind: "accepted"; operationId: string; serviceKey: string } | { kind: "refused"; refusal: DeployRefusal } | { kind: "unknown"; opId: string };
+
+/**  Une correspondance de ports d'un formulaire. */
+export type DeployPortDto = {
+	hostPort: number,
+	containerPort: number,
+	protocol: DeployProtocolDto,
+};
+
+export type DeployProtocolDto = "tcp" | "udp";
+
+/**  Pourquoi l'agent a refusé le déploiement, avant tout geste (rien n'est créé). Des CODES, jamais un texte. */
+export type DeployRefusal = { kind: "wrong_password" } | { kind: "password_required" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "busy" } | { kind: "engine_unavailable"; engine: EngineStateDto | null } | 
+/**  Une valeur du formulaire n'est pas valable : le champ et la raison (code stable de l'agent). */
+{ kind: "invalid"; field: DeployFieldDto; reason: string } | { kind: "setting_refused" } | { kind: "limits_required" } | { kind: "name_taken" } | { kind: "name_being_deleted" } | { kind: "port_in_use"; port: number; protocol: DeployProtocolDto; status: PortStatusDto; holder: string | null; suggested: number | null } | { kind: "deploy_limit" } | { kind: "no_space"; freeBytes: number | null } | { kind: "other" };
+
+/**  La demande de déploiement. */
+export type DeployRequestDto = {
+	name: string,
+	image: string,
+	tag: string | null,
+	ports: DeployPortDto[],
+	env: DeployEnvDto[],
+	/**  La ligne de commande telle que saisie (BR-DEPLOY-014), `None` : la commande de l'image. */
+	command: string | null,
+	resources: DeployResourcesDto,
+	accept: DeployAcceptDto,
+};
+
+/**  Mémoire en octets et processeur en millicœurs : obligatoires (BR-DEPLOY-038). */
+export type DeployResourcesDto = {
+	memoryBytes: number | null,
+	cpuMillis: number,
+};
+
 /**  Issue d'un retrait de poste. */
 export type DeviceRemovalOutcome = 
 /**  L'agent a retiré le poste (et fermé ses sessions). */
@@ -725,6 +845,12 @@ export type DeviceRemovalRefusal =
 /**  La session a été fermée. */
 { kind: "session_revoked" } | { kind: "other" };
 
+/**  L'espace libre là où le moteur range ses images. */
+export type DiskCheckDto = {
+	freeBytes: number | null,
+	low: boolean,
+};
+
 export type DiskInfoDto = {
 	name: string,
 	mount: string,
@@ -741,6 +867,18 @@ export type DiskSampleDto = {
 };
 
 export type DriverDto = "engine" | "supervisor" | "unknown";
+
+/**
+ *  Les bornes des curseurs de ressources et la part de la machine déjà engagée en mémoire (BR-DEPLOY-038).
+ *  Des totaux, jamais un nom de service.
+ */
+export type EngineCapacityDto = {
+	cpus: number,
+	memoryBytes: number | null,
+	reserveBytes: number | null,
+	managedRunningBytes: number | null,
+	unmanagedRunningBytes: number | null,
+};
 
 export type EngineDto = {
 	state: EngineStateDto,
@@ -1037,6 +1175,8 @@ export type MountDto = {
 
 export type MountKindDto = "folder" | "volume" | "unknown";
 
+export type NameStatusDto = "ok" | "invalid" | "taken" | "being_deleted" | "unknown";
+
 export type NetDto = {
 	upBytesPerS: number | null,
 	downBytesPerS: number | null,
@@ -1121,12 +1261,24 @@ export type PasswordNeedDto = "no" | "unless_elevated" | "yes";
 
 export type PasswordRuleDto = "required" | "min_length" | "digit" | "lowercase" | "uppercase" | "contains_username";
 
+/**  Le constat sur un port du serveur. `holder` : texte du serveur, jamais le nom d'un conteneur non adopté. */
+export type PortCheckDto = {
+	hostPort: number,
+	protocol: DeployProtocolDto,
+	status: PortStatusDto,
+	holder: string | null,
+	suggested: number | null,
+	privileged: boolean,
+};
+
 export type PortDto = {
 	hostPort: number,
 	containerPort: number,
 	protocol: ProtocolDto,
 	scope: ScopeDto,
 };
+
+export type PortStatusDto = "free" | "held_by_service" | "held_by_unmanaged" | "reserved_by_stopped" | "held_by_program" | "agent_port" | "invalid" | "unknown";
 
 /**  Première prise de contact : l'empreinte à faire confirmer. */
 export type ProbeDto = {

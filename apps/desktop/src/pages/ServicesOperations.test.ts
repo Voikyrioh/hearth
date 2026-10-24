@@ -173,7 +173,7 @@ describe("le retour du lien (BR-RESIL-010)", () => {
     expect(titles(wrapper)).toEqual(["Modification de minecraft", "Modification de robot-discord"]);
     // Une seule notification, celle de l'issue ; rien pour les deux opérations qui courent encore.
     expect(toasts.items.map((toast) => toast.message)).toEqual([
-      "Le déploiement de terraria a réussi.",
+      "Le service terraria est en marche.",
     ]);
     expect(bridge.serviceOps.acknowledged).toEqual([
       { serverId: "forge", ids: ["01SIMDEMO000000000000DEPL"] },

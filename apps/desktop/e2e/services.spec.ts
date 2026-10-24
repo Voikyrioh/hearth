@@ -267,12 +267,13 @@ test("aucun moteur : NixOS donne une ligne de configuration, une distribution in
   expect(await sim(page, (s) => s.services.docsOpened)).toBe(1);
 });
 
-test("moteur prêt sans service : l'état vide, sans invitation à déployer", async ({ page }) => {
+test("moteur prêt sans service : l'état vide, avec le bouton « Déployer un service » (HRT-69)", async ({
+  page,
+}) => {
   await open(page);
   await sim(page, (s) => s.services.seed("forge", []));
   await expect(page.getByRole("heading", { name: "Aucun service pour l'instant" })).toBeVisible();
-  await expect(page.getByText("Déploie ton premier service")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /Déployer/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Déployer un service" })).toHaveCount(1);
   await shoot(page, "services-vide");
 });
 
@@ -467,7 +468,9 @@ test("« Vérifier à nouveau » relance la détection ; le retour du moteur est
   await sim(page, (s) =>
     s.services.seed("forge", [{ key: "c_1", name: "web" }], { state: "unresponsive" }),
   );
-  await expect(page.getByText("Le moteur de conteneurs ne répond pas.")).toBeVisible();
+  await expect(
+    page.getByText("Le moteur de conteneurs ne répond pas.", { exact: true }),
+  ).toBeVisible();
   await page.locator("[data-engine-recheck]").click();
   expect(await sim(page, (s) => s.calls.includes("engine recheck"))).toBe(true);
   await sim(page, (s) => s.services.setEngine("forge", { state: "ready" }));
