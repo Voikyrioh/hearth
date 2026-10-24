@@ -1,8 +1,12 @@
-# Réglages de Terraria : thèmes et catalogue (HRT-113). Les 36 réglages de l'inventaire sont tous classés :
-# réglable (25 du fichier et 2 d'arguments), imposé avec sa raison (4 du fichier : world_file, world_path,
-# port, upnp), ou écarté avec sa raison (2 du fichier et 3 d'arguments, dans fiche.toml, [[not_exposed]]).
-# Une valeur par défaut « non vérifiée » n'est PAS écrite ici : le réglage ne propose rien et Hearth n'écrit pas
-# la ligne (« non écrit » est une valeur).
+# Réglages de Terraria : thèmes et catalogue (HRT-113, enrichi par HRT-108). Les 36 réglages de l'inventaire sont tous
+# classés : réglable (27 du fichier et 2 d'arguments), imposé avec sa raison (4 du fichier : world_file, world_path,
+# port, upnp), ou écarté avec sa raison (3 d'arguments, dans fiche.toml, [[not_exposed]]). Les 31 réglages du fichier
+# `serverconfig.txt` de l'inventaire sont tous exposés, `banlist` et `priority` compris.
+#
+# Libellés et aides : en vouvoiement (copie de Hearth), en mots simples, sans jargon. Une valeur par défaut « non
+# vérifiée » n'est PAS écrite ici : le réglage ne propose rien et Hearth n'écrit pas la ligne (« non écrit » est une
+# valeur). Une borne que l'inventaire ne donne pas n'est pas posée (maximum de `npcstream`, de `-announcementboxrange`).
+# Ce que l'inventaire ne dit pas n'est pas dit : pas de version d'existence (`since`, `until`), pas de défaut inventé.
 
 [[theme]]
 id = "game"
@@ -46,6 +50,16 @@ choices = [
   { value = "2", label = "Tout le monde" },
 ]
 
+[choice_set.process_priority]
+choices = [
+  { value = "0", label = "Temps réel" },
+  { value = "1", label = "Haute" },
+  { value = "2", label = "Au-dessus de la normale" },
+  { value = "3", label = "Normale" },
+  { value = "4", label = "Sous la normale" },
+  { value = "5", label = "Repos" },
+]
+
 [[preset]]
 id = "journey"
 channel = "config"
@@ -65,7 +79,7 @@ channel = "config"
 theme = "game"
 level = "essential"
 label = "Nom du monde"
-help = "Le nom du monde que le jeu crée. Il nomme aussi son fichier."
+help = "Le nom du monde que le jeu crée au premier lancement. Il nomme aussi le fichier du monde : lettres, chiffres, tiret et souligné seulement. Il ne peut plus changer une fois le monde créé."
 type = "text"
 charset = "file_stem"                     # lettres, chiffres, tiret, souligné ; pas d'espace (nom de fichier)
 max_len = 100
@@ -80,7 +94,7 @@ channel = "config"
 theme = "game"
 level = "essential"
 label = "Mot de passe du serveur"
-help = "Ce que tes joueurs tapent pour entrer. Vide : tout le monde peut entrer."
+help = "Ce que vos joueurs tapent pour entrer sur le serveur. Laissez vide pour que tout le monde puisse entrer. Hearth ne l'affiche jamais."
 type = "secret"
 secret_kind = "game_password"
 max_len = 100
@@ -95,7 +109,7 @@ channel = "config"
 theme = "game"
 level = "essential"
 label = "Message d'accueil"
-help = "Le message montré à chaque joueur qui arrive."
+help = "Le message que chaque joueur voit en arrivant sur le serveur. Laissez vide pour n'afficher aucun message."
 type = "text"
 charset = "line"
 max_len = 100
@@ -110,7 +124,7 @@ channel = "config"
 theme = "game"
 level = "common"
 label = "Langue du serveur"
-help = "La langue des messages du serveur."
+help = "La langue utilisée par le serveur, parmi celles que le jeu propose. Si le fichier porte une autre valeur, Hearth la garde telle quelle tant que vous ne la changez pas."
 type = "choice"
 choices = [
   { value = "en-US", label = "Anglais" },
@@ -136,13 +150,28 @@ channel = "config"
 theme = "players"
 level = "essential"
 label = "Nombre de joueurs"
-help = "Combien de joueurs peuvent être connectés en même temps."
+help = "Combien de joueurs peuvent être connectés en même temps, de 1 à 255. Plus il y en a, plus le serveur travaille : surveillez l'onglet Ressources."
 type = "int"
 min = 1
 max = 255
 proposed = "8"                            # valeur observée sur une installation réelle ; défaut du jeu contradictoire (8 ou 16) : non écrit comme défaut
 change = "anytime"
 source = "partial"                        # T07
+
+[[setting]]
+id = "banlist"
+key = "banlist"
+channel = "config"
+theme = "players"
+level = "advanced"
+label = "Fichier des joueurs bannis"
+help = "Le fichier où le jeu garde la liste des joueurs bannis. Hearth ne sait pas encore s'il survit quand le service est recréé : sauvegardez-le avec le monde si cette liste compte pour vous."
+type = "text"
+charset = "line"
+max_len = 200
+game_default = "banlist.txt"
+change = "anytime"
+source = "partial"                        # T11 : défaut « banlist.txt » ; où le jeu l'écrit dans le conteneur : non vérifié
 
 # ---- Monde ----
 
@@ -153,7 +182,7 @@ channel = "config"
 theme = "world"
 level = "essential"
 label = "Taille du monde"
-help = "La taille du monde que le jeu crée s'il n'existe pas encore."
+help = "La taille du monde que le jeu crée s'il n'existe pas encore : petit, moyen ou grand. Elle est gravée dans le monde et ne change plus ensuite. Sans cette ligne, le jeu ne crée aucun monde."
 type = "choice"
 choices = [
   { value = "1", label = "Petit" },
@@ -171,7 +200,7 @@ channel = "config"
 theme = "world"
 level = "essential"
 label = "Difficulté"
-help = "La difficulté du monde créé. Elle est gravée dans le monde."
+help = "La difficulté du monde créé : classique, expert, maître ou voyage. Elle est gravée dans le monde et ne change plus ensuite. Les réglages du mode Voyage ne servent que dans un monde de difficulté « Voyage »."
 type = "choice"
 choices = [
   { value = "0", label = "Classique" },
@@ -190,7 +219,7 @@ channel = "config"
 theme = "world"
 level = "common"
 label = "Graine du monde"
-help = "Un texte qui décide de la forme du monde créé."
+help = "Un texte qui sert à générer le monde créé. Laissez vide pour ne rien imposer. Elle est gravée dans le monde et ne change plus ensuite."
 type = "text"
 charset = "line"
 max_len = 100
@@ -204,7 +233,7 @@ channel = "config"
 theme = "world"
 level = "advanced"
 label = "Fichier du monde"
-help = "Le fichier que le jeu charge. Hearth le déduit du nom du monde."
+help = "Le fichier du monde que le jeu charge au démarrage. Hearth le déduit du nom du monde : vous ne pouvez pas le modifier."
 type = "text"
 charset = "line"
 max_len = 200
@@ -219,7 +248,7 @@ channel = "config"
 theme = "world"
 level = "advanced"
 label = "Dossier des mondes"
-help = "Le dossier où le jeu range ses mondes."
+help = "Le dossier où le jeu range ses mondes. C'est le dossier que Hearth garde et sauvegarde : vous ne pouvez pas le modifier."
 type = "text"
 charset = "line"
 max_len = 200
@@ -236,7 +265,7 @@ channel = "config"
 theme = "network"
 level = "advanced"
 label = "Port d'écoute dans le service"
-help = "Le port sur lequel le jeu écoute à l'intérieur du service. Le port de tes joueurs se règle dans « Modifier »."
+help = "Le port sur lequel le jeu écoute à l'intérieur du service. Le port que vos joueurs utilisent se règle dans « Modifier ». Hearth le garde relié à ce dernier : vous ne pouvez pas le modifier ici."
 type = "int"
 min = 1024
 max = 65535
@@ -252,12 +281,12 @@ channel = "config"
 theme = "network"
 level = "advanced"
 label = "Ouverture automatique des ports (UPnP)"
-help = "Demande à la box d'ouvrir les ports toute seule."
+help = "Demande à votre box d'ouvrir les ports toute seule. Hearth n'ouvre jamais de port sur votre box : ce réglage reste désactivé et vous ne pouvez pas le modifier."
 type = "bool"
 on = "1"
 off = "0"
 change = "anytime"
-imposed = { value = "0", why = "Hearth n'ouvre jamais de port sur ta box, et un service ne le fait pas non plus." }
+imposed = { value = "0", why = "Hearth n'ouvre jamais de port sur votre box, et un service ne le fait pas non plus." }
 source = "partial"                        # T14
 
 # ---- Triche et sécurité ----
@@ -269,7 +298,7 @@ channel = "config"
 theme = "anticheat"
 level = "common"
 label = "Protection contre la triche"
-help = "Le jeu exclut un joueur dont il juge le comportement anormal. Peut exclure à tort un joueur honnête."
+help = "Le jeu exclut un joueur dont il juge le comportement anormal. Elle peut exclure à tort un joueur honnête : désactivez-la si cela vous arrive."
 type = "bool"
 on = "1"
 off = "0"
@@ -285,7 +314,7 @@ arg = { flag = "-disableannouncementbox", form = "flag_if_true" }
 theme = "anticheat"
 level = "advanced"
 label = "Couper les boîtes d'annonce"
-help = "Empêche les boîtes d'annonce posées par les joueurs d'envoyer des messages."
+help = "Empêche les boîtes d'annonce posées par les joueurs d'envoyer des messages. Ce réglage est transmis au jeu à sa création : le service doit être recréé pour qu'il s'applique."
 type = "bool"
 on = "1"
 off = "0"
@@ -300,7 +329,7 @@ arg = { flag = "-announcementboxrange", form = "flag_value" }
 theme = "anticheat"
 level = "advanced"
 label = "Portée des boîtes d'annonce"
-help = "Jusqu'où une boîte d'annonce est lue, en pixels. -1 : tout le serveur."
+help = "Jusqu'où une boîte d'annonce est lue, en pixels. -1 : tout le serveur. Ce réglage est transmis au jeu à sa création : le service doit être recréé pour qu'il s'applique."
 type = "int"
 min = -1                                  # maximum non vérifié : aucun n'est posé
 change = "anytime"
@@ -315,116 +344,130 @@ channel = "config"
 theme = "performance"
 level = "advanced"
 label = "Fluidité des ennemis"
-help = "Réduit les saccades des ennemis, au prix de plus de bande passante."
+help = "Réduit les saccades des ennemis chez vos joueurs, au prix de plus de bande passante. La valeur va de 0 à 60 et au-delà."
 type = "int"
 min = 0                                   # « 0 à 60 et plus » : maximum non vérifié
 game_default = "60"
 change = "anytime"
 source = "verified"                       # T15
 
-# ---- Mode Voyage (15 réglages, T17 à T31) ----
+[[setting]]
+id = "priority"
+key = "priority"
+channel = "config"
+theme = "performance"
+level = "advanced"
+label = "Priorité du serveur"
+help = "La priorité que le système donne au programme du serveur. Son effet sous Linux, dans un service, n'est pas vérifié : pour limiter le serveur, utilisez plutôt les limites de l'onglet Ressources."
+type = "choice"
+choice_set = "process_priority"
+game_default = "1"
+change = "anytime"
+source = "partial"                        # T16 : défaut 1 ; effet sous Linux non vérifié
+
+# ---- Mode Voyage (15 réglages, T17 à T31) : ils ne servent que dans un monde de difficulté « Voyage » ----
 
 [[setting]]
 id = "journey_time_freeze"
 key = "journeypermission_time_setfrozen"
 label = "Figer le temps"
-help = "Qui peut arrêter l'écoulement du temps."
+help = "Qui peut arrêter l'écoulement du temps. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_time_dawn"
 key = "journeypermission_time_setdawn"
 label = "Passer à l'aube"
-help = "Qui peut mettre l'heure à l'aube."
+help = "Qui peut mettre l'heure à l'aube. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_time_noon"
 key = "journeypermission_time_setnoon"
 label = "Passer à midi"
-help = "Qui peut mettre l'heure à midi."
+help = "Qui peut mettre l'heure à midi. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_time_dusk"
 key = "journeypermission_time_setdusk"
 label = "Passer au crépuscule"
-help = "Qui peut mettre l'heure au crépuscule."
+help = "Qui peut mettre l'heure au crépuscule. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_time_midnight"
 key = "journeypermission_time_setmidnight"
 label = "Passer à minuit"
-help = "Qui peut mettre l'heure à minuit."
+help = "Qui peut mettre l'heure à minuit. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_time_speed"
 key = "journeypermission_time_setspeed"
 label = "Vitesse du temps"
-help = "Qui peut accélérer ou ralentir le temps."
+help = "Qui peut accélérer ou ralentir le temps. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_godmode"
 key = "journeypermission_godmode"
 label = "Invincibilité"
-help = "Qui peut se rendre invincible."
+help = "Qui peut se rendre invincible. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_wind_strength"
 key = "journeypermission_wind_setstrength"
 label = "Force du vent"
-help = "Qui peut régler la force du vent."
+help = "Qui peut régler la force du vent. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_wind_freeze"
 key = "journeypermission_wind_setfrozen"
 label = "Figer le vent"
-help = "Qui peut figer le vent."
+help = "Qui peut figer le vent. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_rain_strength"
 key = "journeypermission_rain_setstrength"
 label = "Force de la pluie"
-help = "Qui peut régler la force de la pluie."
+help = "Qui peut régler la force de la pluie. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_rain_freeze"
 key = "journeypermission_rain_setfrozen"
 label = "Figer la pluie"
-help = "Qui peut figer la pluie."
+help = "Qui peut figer la pluie. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_placement_range"
 key = "journeypermission_increaseplacementrange"
 label = "Portée de pose allongée"
-help = "Qui peut poser des blocs de plus loin."
+help = "Qui peut poser des blocs de plus loin. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_difficulty"
 key = "journeypermission_setdifficulty"
 label = "Changer la difficulté"
-help = "Qui peut changer la difficulté en cours de partie."
+help = "Qui peut changer la difficulté en cours de partie. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_biome_spread"
 key = "journeypermission_biomespread_setfrozen"
 label = "Figer l'extension des biomes"
-help = "Qui peut empêcher les biomes de s'étendre."
+help = "Qui peut empêcher les biomes de s'étendre. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"
 
 [[setting]]
 id = "journey_spawn_rate"
 key = "journeypermission_setspawnrate"
 label = "Fréquence des ennemis"
-help = "Qui peut régler la fréquence d'apparition des ennemis."
+help = "Qui peut régler la fréquence d'apparition des ennemis. Ne sert que dans un monde de difficulté « Voyage »."
 preset = "journey"

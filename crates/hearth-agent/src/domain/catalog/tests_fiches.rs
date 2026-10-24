@@ -1498,6 +1498,82 @@ fn the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_d
 }
 
 #[test]
+fn the_terraria_catalog_speaks_to_the_user_in_vous_and_every_text_stays_within_its_bounds() {
+    let (fiches, _) = load_all();
+    let terraria = fiches
+        .iter()
+        .find(|f| f.id() == "terraria")
+        .expect("terraria");
+    // Copie de Hearth : vouvoiement, jamais le tutoiement ni le tiret cadratin.
+    let forbidden = ["tu", "te", "toi", "ton", "ta", "tes", "tien", "tiens"];
+    for setting in &terraria.settings {
+        for (what, text) in [("libellé", &setting.label), ("aide", &setting.help)] {
+            assert!(!text.is_empty(), "{} : {what} vide", setting.id);
+            assert!(
+                !text.contains('\u{2014}'),
+                "{} : tiret cadratin dans {what}",
+                setting.id
+            );
+            for word in text.split(|c: char| !c.is_alphabetic()) {
+                assert!(
+                    !forbidden.contains(&word.to_lowercase().as_str()),
+                    "{} : « {word} » (tutoiement) dans {what} : {text}",
+                    setting.id
+                );
+            }
+        }
+        assert!(
+            setting.label.chars().count() <= 80,
+            "{} : libellé",
+            setting.id
+        );
+        assert!(setting.help.chars().count() <= 300, "{} : aide", setting.id);
+    }
+    // Les 31 réglages du fichier de l'inventaire sont tous exposés : 29 réglages du fichier plus les 2 d'arguments
+    // réglables ; seuls trois arguments sont écartés.
+    let in_file = terraria
+        .settings
+        .iter()
+        .filter(|s| s.channel == "config")
+        .count();
+    assert_eq!(in_file, 31);
+    assert!(
+        terraria
+            .file
+            .not_exposed
+            .iter()
+            .all(|n| n.channel == "args")
+    );
+    // Un entier dit ses bornes quand l'inventaire les donne ; un réglage à valeurs fermées dit chacune.
+    let max_players = terraria.setting("max_players").expect("max_players");
+    assert!(matches!(
+        &max_players.spec,
+        super::loading::model::ValueSpec::Int {
+            min: Some(1),
+            max: Some(255)
+        }
+    ));
+    for id in [
+        "priority",
+        "difficulty",
+        "world_size",
+        "language",
+        "journey_godmode",
+    ] {
+        let setting = terraria.setting(id).expect(id);
+        assert!(
+            matches!(
+                &setting.spec,
+                super::loading::model::ValueSpec::Choice { choices } if choices.len() >= 3
+            ),
+            "{id}"
+        );
+    }
+    // Aucune version d'existence inventée : l'inventaire n'en donne aucune.
+    assert!(terraria.settings.iter().all(|s| s.versions.is_none()));
+}
+
+#[test]
 fn the_terraria_fiche_classes_each_of_the_36_settings_of_the_inventory() {
     let (fiches, _) = load_all();
     let terraria = fiches
@@ -1583,7 +1659,7 @@ fn the_terraria_fiche_classes_each_of_the_36_settings_of_the_inventory() {
     }
     assert_eq!(
         (adjustable, imposed, dropped),
-        (27, 4, 5),
+        (29, 4, 3),
         "réglables, imposés, écartés"
     );
     assert_eq!(adjustable + imposed + dropped, 36);

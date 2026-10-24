@@ -143,12 +143,3 @@ key = "-lobby"
 channel = "args"
 why = "Sans effet sans -steam."
 
-[[not_exposed]]
-key = "banlist"
-channel = "config"
-why = "Chemin du fichier des bannis : où le jeu l'écrit dans le conteneur n'est pas vérifié. Laissé au défaut du jeu."
-
-[[not_exposed]]
-key = "priority"
-channel = "config"
-why = "Priorité du processus : effet sous Linux non vérifié ; les ressources se règlent dans l'onglet Ressources."
