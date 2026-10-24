@@ -152,7 +152,13 @@ impl Harness for RealHarness {
 
     async fn image_layers(&self, image: &str) -> Option<Vec<String>> {
         let output = Command::new("docker")
-            .args(["image", "inspect", "--format", "{{json .RootFS.Layers}}", image])
+            .args([
+                "image",
+                "inspect",
+                "--format",
+                "{{json .RootFS.Layers}}",
+                image,
+            ])
             .output()
             .ok()?;
         if !output.status.success() {
