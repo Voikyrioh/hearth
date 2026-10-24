@@ -57,6 +57,7 @@ fn spec(name: &str) -> DeploySpec {
             memory_bytes: Some(GIB),
         },
         accept: Default::default(),
+        source: None,
         extra: Default::default(),
     }
 }

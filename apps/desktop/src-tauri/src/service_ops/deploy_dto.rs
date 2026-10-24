@@ -184,6 +184,7 @@ impl DeployRequestDto {
                 reserved_ports: self.accept.reserved_ports,
                 low_disk: self.accept.low_disk,
             },
+            source: None,
             extra: std::collections::BTreeMap::new(),
         })
     }
