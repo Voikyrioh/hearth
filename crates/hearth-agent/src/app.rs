@@ -371,6 +371,18 @@ pub struct ServiceFoundations {
     pub abandoned_deploys: Vec<crate::domain::services::ServiceKey>,
 }
 
+/// La purge et la diffusion du journal d'activité au-dessus d'un magasin : l'assemblage de l'agent, celui du
+/// socle des services et les bancs d'essai montent la même chose.
+pub fn audit_trail(
+    store: &Arc<dyn Store>,
+    clock: Arc<dyn Clock>,
+    feed: Arc<dyn AuditFeed>,
+) -> (Arc<MaintenanceService>, Arc<AuditTrail>) {
+    let maintenance = Arc::new(MaintenanceService::new(store.clone(), clock));
+    let trail = Arc::new(AuditTrail::new(feed, maintenance.clone()));
+    (maintenance, trail)
+}
+
 /// Le socle SANS moteur : les opérations restées en plein geste sont classées avec l'observateur « illisible »
 /// (`UnobservedState`), donc « à vérifier » plutôt que supposées bonnes. **Pour les tests** et l'assemblage
 /// sans moteur ; l'agent démarre par [`service_foundations_observed`] avec l'observateur du vrai moteur.
@@ -380,7 +392,20 @@ pub async fn service_foundations(
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
 ) -> Result<ServiceFoundations, AppError> {
-    service_foundations_observed(data_dir, database, clock, ids, &UnobservedState).await
+    // Un journal d'activité propre au socle : personne n'en suit la diffusion dans ces assemblages.
+    let store: Arc<dyn Store> = Arc::new(SqliteStore::new(database.pool().clone()));
+    let feed: Arc<dyn AuditFeed> = Arc::new(BroadcastAuditFeed::new());
+    let (_, trail) = audit_trail(&store, clock.clone(), feed);
+    service_foundations_observed(
+        data_dir,
+        database,
+        clock,
+        ids,
+        &UnobservedState,
+        store,
+        trail,
+    )
+    .await
 }
 
 /// Où l'agent range, sous son dossier de données, ce que les opérations créent pour elles-mêmes et qu'une
@@ -404,6 +429,8 @@ pub async fn service_foundations_observed(
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
     observer: &dyn ServiceObserver,
+    store: Arc<dyn Store>,
+    trail: Arc<AuditTrail>,
 ) -> Result<ServiceFoundations, AppError> {
     let spec_repo = Arc::new(SqliteSpecRepo::new(database.pool().clone()));
     let vault = Arc::new(SecretVault::new(
@@ -435,6 +462,9 @@ pub async fn service_foundations_observed(
             (ObjectRoot::Backups, data_dir.join(BACKUPS_DIR)),
             (ObjectRoot::Staging, data_dir.join(STAGING_DIR)),
         ])),
+        // Une clôture ou un constat écrit son entrée du journal d'activité dans sa transaction.
+        store,
+        trail,
     ));
     // La reprise ne doit JAMAIS empêcher l'agent de démarrer : c'est lui qui sert à réparer le serveur.
     // Si même la liste des opérations non terminées est illisible, les fonctions de service restent
@@ -536,11 +566,7 @@ fn assemble(
     let sessions_repo = Arc::new(SqliteSessionRepo::new(pool.clone()));
     let store: Arc<dyn Store> = Arc::new(SqliteStore::new(pool.clone()));
     let feed: Arc<dyn AuditFeed> = Arc::new(BroadcastAuditFeed::new());
-    let maintenance = Arc::new(MaintenanceService::new(
-        store.clone(),
-        adapters.clock.clone(),
-    ));
-    let trail = Arc::new(AuditTrail::new(feed.clone(), maintenance.clone()));
+    let (maintenance, trail) = audit_trail(&store, adapters.clock.clone(), feed.clone());
     let recorder = Arc::new(AuditRecorder::new(
         store.clone(),
         adapters.clock.clone(),
@@ -664,12 +690,8 @@ pub fn services_right_service(
 ) -> Arc<ServicesRightService> {
     let pool = database.pool();
     let store: Arc<dyn Store> = Arc::new(SqliteStore::new(pool.clone()));
-    let maintenance = Arc::new(MaintenanceService::new(
-        store.clone(),
-        adapters.clock.clone(),
-    ));
     let feed: Arc<dyn AuditFeed> = Arc::new(BroadcastAuditFeed::new());
-    let trail = Arc::new(AuditTrail::new(feed, maintenance));
+    let (_, trail) = audit_trail(&store, adapters.clock.clone(), feed);
     Arc::new(ServicesRightService::new(
         Arc::new(SqliteAccountRepo::new(pool.clone())),
         store,
@@ -814,6 +836,8 @@ pub async fn start_engined(
         adapters.clock.clone(),
         adapters.ids.clone(),
         &observer,
+        services.store.clone(),
+        services.trail.clone(),
     )
     .await?;
     let service_ops_sweep =
@@ -865,7 +889,6 @@ pub async fn start_engined(
         container_engine.clone(),
         supervisor,
         service_repo.clone(),
-        services.audit_sink.clone(),
         adapters.clock.clone(),
         engine.lifecycle,
     );
@@ -940,7 +963,6 @@ pub async fn start_engined(
         engine.free_space,
         safe_fs,
         service_repo.clone(),
-        services.audit_sink.clone(),
         adapters.ids.clone(),
         adapters.clock.clone(),
         DeployContext {

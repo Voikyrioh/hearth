@@ -6,6 +6,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/audit.rs"]
+mod audit;
+
 #[path = "support/tmp.rs"]
 mod tmp;
 
@@ -92,6 +95,16 @@ struct Env {
     ops: ServiceOps,
 }
 
+/// Un événement quelconque pour les constats posés après coup.
+fn a_draft() -> hearth_agent::application::service_ops::AuditDraft {
+    hearth_agent::application::service_ops::AuditDraft {
+        actor: hearth_agent::domain::audit::Actor::system(),
+        action: hearth_agent::domain::audit::AuditAction::ServiceDeploy,
+        target: hearth_agent::domain::audit::Target::None,
+        outcome: hearth_agent::domain::audit::Outcome::Succeeded,
+    }
+}
+
 fn ops_over(
     db: &Database,
     clock: &Arc<TestClock>,
@@ -99,12 +112,15 @@ fn ops_over(
     objects: Arc<dyn CreatedObjects>,
 ) -> (Arc<SqliteOpJournal>, ServiceOps) {
     let journal = Arc::new(SqliteOpJournal::new(db.pool().clone()));
+    let (store, trail) = audit::audit_parts(db, clock.clone());
     let ops = ServiceOps::new(
         journal.clone() as Arc<dyn OpJournal>,
         Arc::new(OpLocks::new()),
         clock.clone(),
         ids.clone(),
         objects,
+        store,
+        trail,
     );
     (journal, ops)
 }
@@ -1212,13 +1228,23 @@ async fn forced_is_noted_while_running_and_a_cause_is_added_once_to_a_success_on
     env.ops.mark_forced(&id).await.unwrap();
     assert!(status(&env, &id).await.forced);
     // Une opération qui court n'est pas une réussite : aucune cause après coup.
-    assert!(!env.ops.annotate(&id, Cause::RestartedByHost).await.unwrap());
+    assert!(
+        !env.ops
+            .annotate_with(&id, Cause::RestartedByHost, Some(a_draft()))
+            .await
+            .unwrap()
+    );
     env.ops
         .finish(&id, OpStatus::Succeeded, Some(Cause::ForcedStop))
         .await
         .unwrap();
     // Une réussite qui a déjà sa cause (arrêt forcé) garde la sienne.
-    assert!(!env.ops.annotate(&id, Cause::RestartedByHost).await.unwrap());
+    assert!(
+        !env.ops
+            .annotate_with(&id, Cause::RestartedByHost, Some(a_draft()))
+            .await
+            .unwrap()
+    );
     assert_eq!(status(&env, &id).await.cause, Some(Cause::ForcedStop));
     // Terminée, elle ne se marque plus « forcée ».
     assert!(env.ops.mark_forced(&id).await.is_err());
@@ -1230,7 +1256,7 @@ async fn forced_is_noted_while_running_and_a_cause_is_added_once_to_a_success_on
         .unwrap();
     assert!(
         env.ops
-            .annotate(&plain, Cause::RestartedByHost)
+            .annotate_with(&plain, Cause::RestartedByHost, Some(a_draft()))
             .await
             .unwrap()
     );
@@ -1240,7 +1266,7 @@ async fn forced_is_noted_while_running_and_a_cause_is_added_once_to_a_success_on
     // Une cause n'en remplace jamais une autre.
     assert!(
         !env.ops
-            .annotate(&plain, Cause::StoppedRightAfterStart)
+            .annotate_with(&plain, Cause::StoppedRightAfterStart, Some(a_draft()))
             .await
             .unwrap()
     );
@@ -1257,7 +1283,7 @@ async fn forced_is_noted_while_running_and_a_cause_is_added_once_to_a_success_on
         .unwrap();
     assert!(
         !env.ops
-            .annotate(&failed, Cause::RestartedByHost)
+            .annotate_with(&failed, Cause::RestartedByHost, Some(a_draft()))
             .await
             .unwrap()
     );

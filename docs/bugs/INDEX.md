@@ -4,6 +4,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M5NYA5W781YW5NFQ7W1JGR98](./FIX-01M5NYA5W781YW5NFQ7W1JGR98.md) | Une opération de déploiement ou de cycle de vie était annoncée terminée avant l'écriture de son entrée au journal d'activité (HRT-101) | 2026-10-24 |
 | [FIX-01M5A5VG2H1ESNN212NNMT2PP0](./FIX-01M5A5VG2H1ESNN212NNMT2PP0.md) | Le client proposait Arrêter, Redémarrer et Démarrer sur un service créé hors de Hearth et non adopté, puis répondait « Ce service n'existe plus. » (HRT-65) | 2026-10-19 |
 | [FIX-01M5A5VH5GR2M9PF9Y1SB04D65](./FIX-01M5A5VH5GR2M9PF9Y1SB04D65.md) | L'action lancée par le compte connecté s'affichait « déjà en cours, lancée par marie » (HRT-65) | 2026-10-19 |
 | [FIX-01M5A5VJ8G6Q6FDJV9AX6ECF41](./FIX-01M5A5VJ8G6Q6FDJV9AX6ECF41.md) | Un cadre de focus blanc entourait le titre du détail après un clic ou une action (HRT-65) | 2026-10-19 |
