@@ -26,7 +26,10 @@ use std::path::{Path, PathBuf};
 use hearth_proto::admin_act::TrustLevel;
 use hearth_proto::api::accounts::{AccountInfo, RoleName};
 use hearth_proto::api::audit::{OriginKindName, OutcomeName};
-use hearth_proto::api::deploy::{DeployPlace, DeployProtocol, MountStatus, NameStatus, PortStatus};
+use hearth_proto::api::catalog::{EvidenceView, FicheStatus};
+use hearth_proto::api::deploy::{
+    DeployPlace, DeployProtocol, DeploySource, MountStatus, NameStatus, PortStatus,
+};
 use hearth_proto::api::metrics::HistoryWindow;
 use hearth_proto::api::operations::OperationStatus as HttpOperationStatus;
 use hearth_proto::api::reauth::ReauthMode;
@@ -152,6 +155,8 @@ fn enums() -> Vec<Entry> {
         ),
         entry!("api/service_ops.rs::StepStateView", Tolerant, StepStateView),
         entry!("api/service_spec.rs::DriftView", Tolerant, DriftView),
+        entry!("api/catalog.rs::FicheStatus", Tolerant, FicheStatus),
+        entry!("api/catalog.rs::EvidenceView", Tolerant, EvidenceView),
         entry!("api/deploy.rs::NameStatus", Tolerant, NameStatus),
         entry!("api/deploy.rs::PortStatus", Tolerant, PortStatus),
         entry!("api/deploy.rs::MountStatus", Tolerant, MountStatus),
@@ -187,6 +192,9 @@ fn enums() -> Vec<Entry> {
         // un inconnu est refusé au décodage, jamais remplacé par un défaut.
         entry!("api/deploy.rs::DeployProtocol", Strict, DeployProtocol),
         entry!("api/deploy.rs::DeployPlace", Strict, DeployPlace),
+        // Installer depuis une fiche (HRT-101) : la source d'un déploiement est une commande ; une source
+        // inconnue est refusée au décodage, jamais traitée comme un déploiement ordinaire.
+        entry!("api/deploy.rs::DeploySource", Strict, tagged DeploySource),
         entry!("stream.rs::ClientMessage", Strict, tagged ClientMessage),
         entry!("stream.rs::SignedAuth", Strict, tagged SignedAuth),
         entry!("api/service_logs.rs::LogsClientMessage", Strict, tagged LogsClientMessage),

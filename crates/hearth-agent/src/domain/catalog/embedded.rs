@@ -43,14 +43,49 @@ pub fn load_all() -> (Vec<Fiche>, Vec<(&'static str, FicheRefusee)>) {
     (accepted, refused)
 }
 
-/// Les fiches que l'application a le droit de PROPOSER : les fiches `published` seulement. Toute fiche est
-/// embarquée dans le binaire, `preview` comprise (la publication n'est pas bloquée par une fiche en cours de
-/// preuve), mais une fiche `preview` n'est jamais proposée ni installable : c'est la seule porte du catalogue
-/// vers l'application, une fiche `preview` n'en sort pas.
-pub fn offered() -> Vec<Fiche> {
-    load_all()
-        .0
+/// Ne garde que les fiches que l'application a le droit de PROPOSER. Toute fiche est embarquée dans le binaire,
+/// `preview` comprise (la publication n'est pas bloquée par une fiche en cours de preuve), mais une fiche `preview`
+/// n'est proposée et installable que par une construction d'essai (`include_preview`, HRT-101, BR-FICHE-002) : les
+/// fiches `published` seulement sinon. Fonction pure : la porte est un paramètre, jamais une lecture d'environnement.
+/// C'est le SEUL endroit qui applique cette porte (`CatalogService` l'appelle, les tests aussi).
+pub fn keep_offered(fiches: Vec<Fiche>, include_preview: bool) -> Vec<Fiche> {
+    fiches
         .into_iter()
-        .filter(|fiche| fiche.file.status == Status::Published)
+        .filter(|fiche| include_preview || fiche.file.status == Status::Published)
         .collect()
+}
+
+/// Les fiches embarquées proposées par une construction qui a (ou n'a pas) la porte d'essai (tests seulement :
+/// l'application passe par `CatalogService`).
+#[cfg(test)]
+pub fn offered_with(include_preview: bool) -> Vec<Fiche> {
+    keep_offered(load_all().0, include_preview)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_preview_fiche_is_offered_only_by_a_trial_build() {
+        let published: Vec<String> = offered_with(false)
+            .iter()
+            .map(|f| f.id().to_owned())
+            .collect();
+        assert!(
+            !published.iter().any(|id| id == "terraria"),
+            "une fiche preview n'est pas proposée par une publication"
+        );
+        let trial: Vec<String> = offered_with(true)
+            .iter()
+            .map(|f| f.id().to_owned())
+            .collect();
+        assert!(trial.iter().any(|id| id == "terraria"));
+        for id in &published {
+            assert!(
+                trial.contains(id),
+                "la construction d'essai ajoute, ne retire rien"
+            );
+        }
+    }
 }

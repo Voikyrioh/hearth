@@ -343,6 +343,21 @@ pub fn pull_image(host: &dyn Host, image: &str, say: &mut dyn FnMut(&str)) -> Re
     ))
 }
 
+/// Aucune fiche d'essai dans une construction de publication (HRT-101, ADR-0050) : la variable
+/// `HEARTH_PREVIEW_FICHES` ouvre le catalogue aux fiches `preview` et ne sert qu'aux constructions d'essai. Définie
+/// (même vide) dans l'environnement de `agent --release`, la construction est refusée. C'est ici, au job qui construit
+/// l'agent, que la variable est vue : le contrôle préalable (`release-preflight`) ne construit rien.
+pub fn check_preview_gate(value: Option<&std::ffi::OsStr>) -> Result<(), String> {
+    match value {
+        None => Ok(()),
+        Some(_) => Err(concat!(
+            "HEARTH_PREVIEW_FICHES est définie : une construction de publication n'embarque jamais les fiches ",
+            "d'essai. Retire la variable de l'environnement."
+        )
+        .to_owned()),
+    }
+}
+
 /// La construction de PUBLICATION (`agent --release`, HRT-173) : l'arbre doit être le commit AVANT et
 /// APRÈS, l'image est téléchargée avec reprise, et l'enregistrement de construction est obligatoire
 /// (la construction échoue si elle n'a pas pu l'écrire). Les deux étapes qui touchent le monde (`pull`,
@@ -433,6 +448,7 @@ pub fn run(args: &[String]) -> Result<PathBuf, String> {
         expect_key: Some(repo_key_line(&root)?),
     };
     if release {
+        check_preview_gate(std::env::var_os("HEARTH_PREVIEW_FICHES").as_deref())?;
         return build_release(
             &host,
             &root,
@@ -921,6 +937,16 @@ mod tests {
     impl Drop for Release {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn a_publication_build_refuses_the_trial_fiches_variable() {
+        assert!(check_preview_gate(None).is_ok());
+        for value in ["1", ""] {
+            let error = check_preview_gate(Some(std::ffi::OsStr::new(value))).unwrap_err();
+            assert!(error.contains("HEARTH_PREVIEW_FICHES"), "{error}");
+            assert!(!error.contains("  "), "{error}");
         }
     }
 

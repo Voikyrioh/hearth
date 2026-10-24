@@ -22,16 +22,20 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Extension, State};
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use hearth_proto::api::deploy::{
-    DeployAccepted, DeployCheck, DeployCheckRequest, DeploySpec, EngineCapacity, PortStatus,
+    DeployAccepted, DeployCheck, DeployCheckRequest, DeploySource, DeploySpec, EngineCapacity,
+    PortStatus,
 };
 use hearth_proto::error::{ErrorBody, ErrorCode};
 
 use super::auth::Requester;
+use super::error::TargetMark;
 use super::services::operation_key;
 use super::{ApiError, AppState};
 use crate::application::deployments::DeployError;
 use crate::application::sessions::Reauthenticated;
+use crate::domain::audit::{ClientName, Target};
 use crate::entrypoint::services_wire;
 
 fn deploy_error(error: DeployError) -> ApiError {
@@ -103,6 +107,48 @@ fn deploy_error(error: DeployError) -> ApiError {
             "Il reste peu de place sur le disque des images. Coche « Continuer malgré le manque de place » pour lancer quand même.",
             serde_json::json!({ "reason": "low_disk", "free_bytes": free_bytes }),
         )),
+        // Installer depuis une fiche (HRT-101) : des refus typés, sans jamais citer une valeur reçue.
+        DeployError::FicheUnknown => ApiError::new(
+            ErrorCode::FicheUnknown,
+            "Cette fiche n'est pas proposée par ce serveur.",
+        ),
+        DeployError::FicheChanged => ApiError::new(
+            ErrorCode::FicheChanged,
+            "Cette fiche a changé depuis son affichage. Relis-la avant d'installer.",
+        ),
+        DeployError::AgreementRequired(ids) => ApiError(ErrorBody::with_details(
+            ErrorCode::AgreementRequired,
+            "Ce serveur ne peut pas être installé sans que le contrat de licence soit accepté.",
+            serde_json::json!({ "ids": ids }),
+        )),
+        DeployError::SettingRefused {
+            id,
+            reason,
+            character,
+        } => ApiError(ErrorBody::with_details(
+            ErrorCode::SettingRefused,
+            "Une réponse n'est pas valable.",
+            serde_json::json!({ "id": id, "reason": reason, "char": character }),
+        )),
+        DeployError::HostTooSmall { lack, needed, has } => ApiError(ErrorBody::with_details(
+            ErrorCode::HostTooSmall,
+            "Ce serveur est trop petit pour ce jeu.",
+            serde_json::json!({ "lack": lack, "needed": needed, "has": has }),
+        )),
+        DeployError::NotEnoughSpace {
+            needed,
+            free,
+            missing,
+        } => ApiError(ErrorBody::with_details(
+            ErrorCode::NoSpace,
+            "Il n'y a pas assez de place pour installer ce jeu.",
+            serde_json::json!({
+                "reason": "install",
+                "needed_bytes": needed,
+                "free_bytes": free,
+                "missing_bytes": missing,
+            }),
+        )),
         DeployError::Internal(message) => {
             tracing::error!(error = %message, "déploiement refusé : erreur interne");
             ApiError::new(ErrorCode::InternalError, "Une erreur interne est survenue.")
@@ -124,6 +170,28 @@ pub async fn check(
         .map_err(deploy_error)
 }
 
+/// Une erreur de `POST /deployments` qui désigne, pour le journal d'activité, la fiche visée (id et version, jamais
+/// une réponse) quand la demande vient d'une fiche (BR-FICHE-032).
+pub struct DeployFailure(ApiError, Option<Target>);
+
+impl IntoResponse for DeployFailure {
+    fn into_response(self) -> Response {
+        let mut response = self.0.into_response();
+        if let Some(target) = self.1 {
+            response.extensions_mut().insert(TargetMark(target));
+        }
+        response
+    }
+}
+
+/// La fiche visée par la demande : son identifiant (nettoyé et borné comme un nom) et la version vue par le client.
+fn fiche_target(spec: &DeploySpec) -> Option<Target> {
+    let Some(DeploySource::Fiche { id, version, .. }) = &spec.source else {
+        return None;
+    };
+    ClientName::parse(&format!("{id} (version {version})")).map(Target::Fiche)
+}
+
 /// `POST /api/v1/deployments` (acte `ServiceDeploy` `0x0F`).
 pub async fn create(
     State(state): State<AppState>,
@@ -131,13 +199,14 @@ pub async fn create(
     Requester(actor): Requester,
     headers: HeaderMap,
     body: Result<Json<DeploySpec>, JsonRejection>,
-) -> Result<(StatusCode, Json<DeployAccepted>), ApiError> {
-    let Json(spec) = body?;
+) -> Result<(StatusCode, Json<DeployAccepted>), DeployFailure> {
+    let Json(spec) = body.map_err(|rejection| DeployFailure(rejection.into(), None))?;
+    let fiche = fiche_target(&spec);
     let accepted = state
         .deployments
         .deploy(spec, actor, &operation_key(&headers))
         .await
-        .map_err(deploy_error)?;
+        .map_err(|error| DeployFailure(deploy_error(error), fiche))?;
     Ok((StatusCode::ACCEPTED, Json(accepted)))
 }
 

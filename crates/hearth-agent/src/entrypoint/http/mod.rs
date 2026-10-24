@@ -14,6 +14,7 @@
 mod accounts;
 mod audit;
 mod auth;
+mod catalog;
 mod deployments;
 mod devices;
 mod error;
@@ -90,6 +91,8 @@ pub struct AppState {
     pub service_lifecycle: Arc<ServiceLifecycle>,
     /// Déployer une image et les bornes de la machine (HRT-68, ADR-0039).
     pub deployments: Arc<Deployments>,
+    /// Les fiches de serveurs de jeu que cet agent propose (HRT-101, ADR-0050).
+    pub catalog: Arc<crate::application::catalog::CatalogService>,
     pub stream: StreamContext,
     /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
     /// administrateurs par `GET /security`, sans rien de sensible.
@@ -390,6 +393,26 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: true,
         audit: Some(AuditAction::ServiceDeploy),
         route: || post(deployments::create),
+    },
+    // Le catalogue des fiches de serveurs de jeu (HRT-101, ADR-0050) : une consultation ouverte à tout compte
+    // authentifié, sans effet ni journal (BR-FICHE-001 à 004). Installer passe par `POST /deployments`.
+    Endpoint {
+        method: Method::GET,
+        path: "/catalog",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(catalog::list),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/catalog/{id}",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(catalog::detail),
     },
     Endpoint {
         method: Method::GET,
@@ -858,6 +881,9 @@ mod tests {
         ("POST", "/deployments", Service),
         ("POST", "/deployments/check", ServiceCheck),
         ("GET", "/engine/capacity", OpenRead),
+        // Le catalogue des fiches (HRT-101) : ouvert à tout compte authentifié, aucune écriture.
+        ("GET", "/catalog", OpenRead),
+        ("GET", "/catalog/{id}", OpenRead),
         // Journaux en direct (HRT-66, HRT-79) : le droit et l'adoption sont jugés par `may_read`, pas par
         // le niveau d'accès de la route (voir `Class::ServiceStream`).
         ("GET", "/services/{key}/logs", ServiceStream),
@@ -943,6 +969,8 @@ mod tests {
         "/adoptions",
         "/containers",
         "/operations/services",
+        // Le catalogue des fiches de serveurs de jeu (HRT-101) : ouvert à tous en lecture, jamais autre chose.
+        "/catalog",
     ];
 
     /// BR-GRANT-003 et BR-GRANT-005 : le classement est EXHAUSTIF par construction. Toute route déclarée

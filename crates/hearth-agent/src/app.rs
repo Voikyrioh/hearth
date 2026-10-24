@@ -18,9 +18,11 @@ pub use update::{Updating, run_supervisor, update_service};
 use crate::application::accounts::AccountService;
 use crate::application::attack_mode::AttackModeService;
 use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
+use crate::application::catalog::CatalogService;
 use crate::application::deployments::{DeployContext, DeployTimings, Deployments, FolderGuard};
 use crate::application::elevation::Elevations;
 use crate::application::folders::FolderFacts;
+use crate::application::game_phase::GamePhases;
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
@@ -29,8 +31,8 @@ use crate::application::ports::{
     AuditFeed, AuditSink, BootInfo, ChallengeCrypto, Clock, ContainerEngine, CryptoError,
     FingerprintSecretError, FingerprintSecretStore, FreeSpace, GpuProbe, HashError,
     HostEnvironment, HostPorts, IdGen, IdentityError, IdentityStore, InstallHost, MonotonicClock,
-    PasswordHasher, PublicIdentity, RequestFingerprinter, SafeFs, SecurityFeed, ServiceObserver,
-    ServiceSupervisor, Store, StoreError, SystemProbe, TokenGen,
+    PasswordHasher, PublicIdentity, RequestFingerprinter, SafeFs, SecretRandom, SecurityFeed,
+    ServiceObserver, ServiceSupervisor, Store, StoreError, SystemProbe, TokenGen,
 };
 use crate::application::secret_vault::{KeyStatus, SecretVault};
 use crate::application::security::SecurityService;
@@ -75,7 +77,7 @@ use crate::infrastructure::install::SystemHost;
 use crate::infrastructure::ops_observer::{
     EngineObserver, SpecRecordedContainers, UnobservedState,
 };
-use crate::infrastructure::random::OsTokenGen;
+use crate::infrastructure::random::{OsSecretRandom, OsTokenGen};
 use crate::infrastructure::sealer::RingSealerFactory;
 use crate::infrastructure::security_feed::BroadcastSecurityFeed;
 use crate::infrastructure::services_key::FileServicesKeyStore;
@@ -208,6 +210,29 @@ pub struct EngineParts {
     /// Les dossiers de données des services (HRT-145, HRT-68). `None` : le vrai, sous le dossier de données de
     /// l'agent ; les tests y posent un faux en mémoire.
     pub safe_fs: Option<Arc<dyn SafeFs>>,
+    /// Les fiches de serveurs de jeu proposées et le hasard des secrets qu'elles font tirer (HRT-101).
+    pub catalog: CatalogParts,
+}
+
+/// Ce qu'il faut au catalogue des fiches et à l'installation depuis une fiche (HRT-101, ADR-0050) : la porte de
+/// la fiche d'essai et la source des octets d'un secret tiré par l'agent.
+pub struct CatalogParts {
+    /// Les fiches `preview` sont proposées (construction d'essai seulement, `HEARTH_PREVIEW_FICHES`).
+    pub include_preview: bool,
+    pub random: Arc<dyn SecretRandom>,
+    /// Un catalogue donné (tests : fiches de fabrication) à la place des fiches embarquées.
+    pub service: Option<Arc<CatalogService>>,
+}
+
+impl CatalogParts {
+    /// La construction courante : la porte de `build_info`, le hasard du système.
+    pub fn production() -> Self {
+        Self {
+            include_preview: crate::build_info::PREVIEW_FICHES,
+            random: Arc::new(OsSecretRandom),
+            service: None,
+        }
+    }
 }
 
 impl EngineParts {
@@ -231,6 +256,7 @@ impl EngineParts {
             free_space: Arc::new(SystemHost),
             deploy: DeployTimings::production(),
             safe_fs: None,
+            catalog: CatalogParts::production(),
         }
     }
 }
@@ -887,6 +913,13 @@ pub async fn start_engined(
         host: Arc::new(SystemFolders::new()),
         facts,
     });
+    // Le catalogue des fiches : celles que cette construction propose, et les écartées, consignées une fois.
+    let catalog = engine
+        .catalog
+        .service
+        .clone()
+        .unwrap_or_else(|| Arc::new(CatalogService::embedded(engine.catalog.include_preview)));
+    catalog.record_refused(services.audit_sink.as_ref()).await;
     let deployments = Deployments::new(
         registry.clone(),
         foundations.ops.clone(),
@@ -906,6 +939,9 @@ pub async fn start_engined(
             folders,
             timings: engine.deploy,
         },
+        catalog.clone(),
+        engine.catalog.random.clone(),
+        GamePhases::new(container_engine.clone(), adapters.clock.clone()),
     );
     let service_logs = Arc::new(ServiceLogs::new(
         registry.clone(),
@@ -946,6 +982,7 @@ pub async fn start_engined(
         service_ops,
         service_lifecycle,
         deployments,
+        catalog,
         stream,
         erasure_pending: database.erasure_pending(),
     });

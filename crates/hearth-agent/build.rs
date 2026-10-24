@@ -26,6 +26,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=HEARTH_UPDATE_PUBKEY_FILE");
     println!("cargo:rerun-if-env-changed=HEARTH_AGENT_VERSION");
     println!("cargo:rerun-if-env-changed=HEARTH_UPDATE_ALLOW_LOCAL_ADDRESSES");
+    println!("cargo:rerun-if-env-changed=HEARTH_PREVIEW_FICHES");
 
     let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap_or_default());
     let source = match std::env::var_os("HEARTH_UPDATE_PUBKEY_FILE") {
@@ -51,6 +52,9 @@ fn main() {
     }
     if std::env::var_os("HEARTH_UPDATE_ALLOW_LOCAL_ADDRESSES").is_some() {
         notes.push("téléchargements vers des adresses locales permis");
+    }
+    if std::env::var_os("HEARTH_PREVIEW_FICHES").is_some() {
+        notes.push("fiches d'essai incluses");
     }
     if std::env::var_os("HEARTH_AGENT_VERSION").is_some() {
         notes.push("version imposée à la construction");

@@ -277,10 +277,18 @@ impl AdminAct<'_> {
     /// valeur, ni nom de variable, ni commande. Source unique pour l'agent (qui reconstruit l'acte depuis le
     /// corps) et la liaison cliente (qui le signe).
     pub fn service_deploy(spec: &crate::api::deploy::DeploySpec) -> AdminAct<'static> {
+        use crate::api::deploy::DeploySource;
         use crate::api::service_spec::{deploy_digest, deploy_image_ref};
+        // Une fiche (HRT-101) n'a pas d'image dans le corps : l'acte dit la fiche (`fiche:{id}`). Sa version, son
+        // empreinte, ses choix, le NOMBRE de réponses et le monde repris sont couverts par `deploy_digest` : aucun
+        // paramètre signé de plus, donc rien à afficher ni à relire ailleurs. Jamais une réponse.
+        let image = match &spec.source {
+            Some(DeploySource::Fiche { id, .. }) => format!("fiche:{id}"),
+            None => deploy_image_ref(&spec.image, spec.tag.as_deref()),
+        };
         AdminAct::ServiceDeploy {
             name: Cow::Owned(spec.name.clone()),
-            image: Cow::Owned(deploy_image_ref(&spec.image, spec.tag.as_deref())),
+            image: Cow::Owned(image),
             digest: deploy_digest(spec),
             env_count: u32::try_from(spec.env.len()).unwrap_or(u32::MAX),
             command: spec
@@ -1311,5 +1319,53 @@ mod tests {
             serde_json::to_value(TrustLevel::Alert).unwrap(),
             serde_json::json!("alert")
         );
+    }
+
+    #[test]
+    fn a_fiche_source_signs_the_fiche_and_its_choices_through_the_digest_never_an_answer() {
+        let fiche_body = |answer: &str, world: bool| -> crate::api::deploy::DeploySpec {
+            serde_json::from_value(serde_json::json!({
+                "name": "mon-terraria",
+                "resources": {"cpu_millis": 1000, "memory_bytes": 1u64 << 31},
+                "source": {"type": "fiche", "id": "terraria", "version": 2, "digest": "ab12",
+                    "answers": [{"id": "password", "value": answer}], "world_imported": world}
+            }))
+            .unwrap()
+        };
+        let act = AdminAct::service_deploy(&fiche_body("SENTINEL-ANSWER", false));
+        let AdminAct::ServiceDeploy { image, .. } = &act else {
+            panic!("acte");
+        };
+        assert_eq!(image, "fiche:terraria");
+        // Les quatre paramètres d'un déploiement ordinaire, rien de plus : la fiche, sa version, ses choix et le
+        // monde repris sont dans l'empreinte.
+        assert_eq!(act.params().len(), 4);
+        // Jamais une réponse : changer la valeur ne change rien, et aucun paramètre ne la porte.
+        let again = AdminAct::service_deploy(&fiche_body("AUTRE", false));
+        assert_eq!(act.params(), again.params());
+        assert!(
+            act.params()
+                .iter()
+                .all(|p| !String::from_utf8_lossy(p).contains("SENTINEL"))
+        );
+        // Mais le monde repris, la version et l'empreinte de la fiche changent la signature.
+        assert_ne!(
+            act.params(),
+            AdminAct::service_deploy(&fiche_body("x", true)).params()
+        );
+        let mut other_version = fiche_body("x", false);
+        if let Some(crate::api::deploy::DeploySource::Fiche { version, .. }) =
+            other_version.source.as_mut()
+        {
+            *version = 3;
+        }
+        assert_ne!(
+            act.params(),
+            AdminAct::service_deploy(&other_version).params()
+        );
+        // Un déploiement ordinaire garde ses quatre paramètres.
+        let plain: crate::api::deploy::DeploySpec =
+            serde_json::from_value(serde_json::json!({"name": "web", "image": "nginx"})).unwrap();
+        assert_eq!(AdminAct::service_deploy(&plain).params().len(), 4);
     }
 }

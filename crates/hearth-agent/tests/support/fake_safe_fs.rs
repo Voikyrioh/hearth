@@ -15,7 +15,8 @@ use hearth_agent::domain::services::ServiceKey;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Node {
     Dir,
-    File(Vec<u8>),
+    /// Le contenu, puis propriétaire (uid, gid) et droits posés à l'écriture.
+    File(Vec<u8>, (u32, u32, u32)),
 }
 
 /// `racine de service -> (chemin relatif -> noeud)`.
@@ -38,9 +39,30 @@ impl FakeSafeFs {
     /// Le contenu d'un fichier, pour les assertions d'un test.
     pub fn content(&self, key: &ServiceKey, rel: &str) -> Option<Vec<u8>> {
         match self.lock().get(key.as_str())?.get(rel)? {
-            Node::File(bytes) => Some(bytes.clone()),
+            Node::File(bytes, _) => Some(bytes.clone()),
             Node::Dir => None,
         }
+    }
+
+    /// Propriétaire (uid, gid) et droits d'un fichier écrit, pour les assertions d'un test.
+    pub fn perms_of(&self, key: &ServiceKey, rel: &str) -> Option<(u32, u32, u32)> {
+        match self.lock().get(key.as_str())?.get(rel)? {
+            Node::File(_, perms) => Some(*perms),
+            Node::Dir => None,
+        }
+    }
+
+    /// Les chemins de la racine d'un service, pour les assertions d'un test.
+    pub fn paths(&self, key: &ServiceKey) -> Vec<String> {
+        self.lock()
+            .get(key.as_str())
+            .map(|tree| tree.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Le service a-t-il une racine ?
+    pub fn has_root(&self, key: &ServiceKey) -> bool {
+        self.lock().contains_key(key.as_str())
     }
 }
 
@@ -66,7 +88,7 @@ fn parent_must_be_dir(tree: &Tree, rel: &RelPath) -> Result<(), FsError> {
         path.push_str(part);
         match tree.get(&path) {
             Some(Node::Dir) => {}
-            Some(Node::File(_)) => return Err(FsError::Blocked),
+            Some(Node::File(..)) => return Err(FsError::Blocked),
             None => return Err(FsError::NotFound),
         }
     }
@@ -112,7 +134,7 @@ impl ServiceRoot for FakeRoot {
                 path.push_str(part);
                 match tree.get(&path) {
                     Some(Node::Dir) => created = false,
-                    Some(Node::File(_)) => return Err(FsError::Blocked),
+                    Some(Node::File(..)) => return Err(FsError::Blocked),
                     None => {
                         tree.insert(path.clone(), Node::Dir);
                         created = true;
@@ -123,14 +145,18 @@ impl ServiceRoot for FakeRoot {
         })
     }
 
-    fn write_atomic(&self, rel: &RelPath, bytes: &[u8], _perms: Perms) -> Result<(), FsError> {
+    fn write_atomic(&self, rel: &RelPath, bytes: &[u8], perms: Perms) -> Result<(), FsError> {
         self.with(|tree| {
             parent_must_be_dir(tree, rel)?;
             let path = rel.to_string();
             if tree.get(&path) == Some(&Node::Dir) {
                 return Err(FsError::NotRegular);
             }
-            tree.insert(path, Node::File(bytes.to_vec()));
+            let owner = perms.owner();
+            tree.insert(
+                path,
+                Node::File(bytes.to_vec(), (owner.uid(), owner.gid(), perms.mode())),
+            );
             Ok(())
         })
     }
@@ -144,8 +170,8 @@ impl ServiceRoot for FakeRoot {
             match tree.get(&rel.to_string()) {
                 None => Err(FsError::NotFound),
                 Some(Node::Dir) => Err(FsError::NotRegular),
-                Some(Node::File(bytes)) if bytes.len() as u64 > max => Err(FsError::TooLarge),
-                Some(Node::File(bytes)) => Ok(bytes.clone()),
+                Some(Node::File(bytes, _)) if bytes.len() as u64 > max => Err(FsError::TooLarge),
+                Some(Node::File(bytes, _)) => Ok(bytes.clone()),
             }
         })
     }
@@ -167,7 +193,7 @@ impl ServiceRoot for FakeRoot {
                 .map(|(_, node)| node)
             {
                 measure.items += 1;
-                if let Node::File(bytes) = node {
+                if let Node::File(bytes, _) = node {
                     measure.bytes_on_disk += bytes.len() as u64;
                 }
             }

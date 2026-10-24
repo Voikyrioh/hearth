@@ -1759,7 +1759,12 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     {
         let path = match endpoint.path {
             "/hello" | "/me" | "/me/devices" | "/security" | "/machine" | "/metrics/history"
-            | "/agent/update" | "/agent/update/last" | "/services" => endpoint.path.to_owned(),
+            | "/agent/update" | "/agent/update/last" | "/services" | "/catalog" => {
+                endpoint.path.to_owned()
+            }
+            // Le détail d'une fiche (HRT-101) : une lecture ; ce banc ne propose aucune fiche d'essai, donc
+            // `404 FICHE_UNKNOWN` ; rien n'est écrit au journal.
+            "/catalog/{id}" => "/catalog/terraria".to_owned(),
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),
             // Lire une opération de service (HRT-144) : une lecture, aucune entrée de journal.
             "/operations/services/{id}" => "/operations/services/INCONNUE".to_owned(),

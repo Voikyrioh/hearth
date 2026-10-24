@@ -39,10 +39,13 @@ use hearth_proto::api::deploy::{
 use thiserror::Error;
 use tokio::time::Instant;
 
+use super::catalog::CatalogService;
+use super::fiche_install::{FicheInstaller, InstallAudit};
 use super::folders::{FolderFacts, check_mount_folder};
+use super::game_phase::GamePhases;
 use super::ports::{
     AuditSink, Clock, ContainerEngine, EngineError, EngineInfo, FreeSpace, HostFolders, HostPorts,
-    IdGen, Ownership, Perms, PullProgress, SafeFs, ServiceContainers,
+    IdGen, Ownership, Perms, PullProgress, SafeFs, SecretRandom, ServiceContainers,
 };
 use super::service_lifecycle::reason_of;
 use super::service_ops::{AcceptRequest, OpError, ServiceOps};
@@ -55,7 +58,8 @@ use crate::domain::ops::{Cause, OpKind, OpStatus, Refusal as LockRefusal, UndoIn
 use crate::domain::services::deploy::{
     self, ImageRef, Invalid, Machine, Refusal, ValidDeploy, op_plan, step, validate, validate_name,
 };
-use crate::domain::services::plan::PlanContext;
+use crate::domain::services::from_fiche::ProducedFile;
+use crate::domain::services::plan::{PlanContext, image_reference};
 use crate::domain::services::ports::{Listener, PortWorld, duplicates, suggest, verdict};
 use crate::domain::services::spec::{SecretsAccess, fold_name};
 use crate::domain::services::{EngineState, RunState, ServiceKey};
@@ -132,6 +136,38 @@ pub enum DeployError {
     /// L'espace libre est sous le seuil et la case n'est pas cochée (`BR-DEPLOY-018`).
     #[error("espace disque bas")]
     LowDisk { free_bytes: u64 },
+    /// La fiche n'est pas proposée par cet agent : inconnue, ou d'essai sur une construction de publication
+    /// (HRT-101, BR-FICHE-002).
+    #[error("fiche inconnue")]
+    FicheUnknown,
+    /// La fiche de l'agent n'est plus celle que le client a vue (version ou empreinte).
+    #[error("fiche changée")]
+    FicheChanged,
+    /// Un contrat de la fiche n'est pas accepté (BR-FICHE-058) : les identifiants manquants.
+    #[error("contrat non accepté")]
+    AgreementRequired(Vec<String>),
+    /// Une réponse est refusée : le réglage (s'il est connu de la fiche), la raison et au plus UN caractère,
+    /// jamais la valeur.
+    #[error("réponse refusée")]
+    SettingRefused {
+        id: Option<String>,
+        reason: &'static str,
+        character: Option<char>,
+    },
+    /// La machine est plus petite qu'un minimum MESURÉ (BR-FICHE-021).
+    #[error("machine trop petite")]
+    HostTooSmall {
+        lack: &'static str,
+        needed: u64,
+        has: u64,
+    },
+    /// L'espace libre est sous le besoin MESURÉ de l'installation (BR-FICHE-023).
+    #[error("espace insuffisant")]
+    NotEnoughSpace {
+        needed: u64,
+        free: u64,
+        missing: u64,
+    },
     #[error("erreur interne : {0}")]
     Internal(String),
 }
@@ -163,14 +199,20 @@ struct Job {
     id: String,
     key: ServiceKey,
     name: String,
-    repository: String,
-    tag: String,
     account: String,
     actor: Actor,
     host_ports: Vec<u16>,
     env_count: u32,
     custom_command: bool,
     mounts: Vec<String>,
+    /// La référence de l'image telle que le moteur la reçoit : `dépôt:version`, avec `@sha256:...` quand la
+    /// description épingle une empreinte (une fiche).
+    reference: String,
+    /// Les fichiers à produire avant la création (une fiche, BR-FICHE-024). Leur contenu peut porter un secret :
+    /// type `Secret`, jamais affiché ni tracé.
+    files: Vec<ProducedFile>,
+    /// Ce que le journal dit d'une installation depuis une fiche (BR-FICHE-032).
+    install: Option<InstallAudit>,
     /// L'ordre de création est parti (ou va partir) : passé ce point, un délai dépassé laisse un résultat
     /// INCONNU, même si le conteneur n'est pas encore consigné (le moteur peut l'avoir créé sans que l'agent
     /// ait lu sa réponse).
@@ -265,6 +307,10 @@ pub struct Deployments {
     clock: Arc<dyn Clock>,
     context: DeployContext,
     running: Arc<AtomicUsize>,
+    /// L'installation depuis une fiche (HRT-101) : juge la demande et la traduit en description ordinaire.
+    installer: FicheInstaller,
+    /// Les phases d'un serveur de jeu installé depuis une fiche (BR-FICHE-028), en mémoire.
+    phases: Arc<GamePhases>,
 }
 
 /// Les ports du serveur tels que le domaine les juge (`PortWorld`) : le moteur, les sockets en écoute, le port de
@@ -317,7 +363,11 @@ impl Deployments {
         ids: Arc<dyn IdGen>,
         clock: Arc<dyn Clock>,
         context: DeployContext,
+        catalog: Arc<CatalogService>,
+        random: Arc<dyn SecretRandom>,
+        phases: Arc<GamePhases>,
     ) -> Arc<Self> {
+        let installer = FicheInstaller::new(catalog, random, Arc::clone(&clock));
         Arc::new(Self {
             registry,
             ops,
@@ -332,6 +382,8 @@ impl Deployments {
             clock,
             context,
             running: Arc::new(AtomicUsize::new(0)),
+            installer,
+            phases,
         })
     }
 
@@ -373,18 +425,37 @@ impl Deployments {
         }
     }
 
+    /// L'espace libre sous ce chemin, lu hors de la tâche asynchrone. `None` : la mesure a échoué, jamais lue
+    /// comme « beaucoup de place » ni comme « plein ».
+    async fn free_bytes_at(&self, dir: String) -> Option<u64> {
+        let free_space = self.free_space.clone();
+        tokio::task::spawn_blocking(move || free_space.free_bytes(Path::new(&dir)))
+            .await
+            .ok()?
+            .ok()
+    }
+
     /// L'espace libre où le moteur range ses images (`BR-DEPLOY-018`).
     async fn disk(&self, info: Option<&EngineInfo>) -> Option<DiskCheck> {
         let dir = info?.storage_dir.clone()?;
-        let free_space = self.free_space.clone();
-        let free = tokio::task::spawn_blocking(move || free_space.free_bytes(Path::new(&dir)))
-            .await
-            .ok()?
-            .ok()?;
+        let free = self.free_bytes_at(dir).await?;
         Some(DiskCheck {
             free_bytes: free,
             low: free < LOW_DISK_BYTES,
         })
+    }
+
+    /// L'espace libre qu'une installation depuis une fiche oppose à son besoin (BR-FICHE-023) : le disque de la
+    /// racine de données de Hearth ET celui où le moteur range ses images ; le plus petit des deux, car l'un OU
+    /// l'autre sous le besoin refuse. Un disque illisible n'est pas jugé (jamais lu comme « beaucoup de place »
+    /// ni comme « plein »).
+    async fn install_free_space(&self, info: Option<&EngineInfo>) -> Option<u64> {
+        let images = self.disk(info).await.map(|disk| disk.free_bytes);
+        let data = self.free_bytes_at(self.context.services_root.clone()).await;
+        match (images, data) {
+            (Some(images), Some(data)) => Some(images.min(data)),
+            (images, data) => images.or(data),
+        }
     }
 
     fn ready(&self) -> Result<(), DeployError> {
@@ -581,7 +652,15 @@ impl Deployments {
     ) -> Result<DeployAccepted, DeployError> {
         self.ready()?;
         let (machine, info) = self.machine().await;
-        let valid = validate(&spec, machine).map_err(|refusal| self.refusal(&spec, refusal))?;
+        // Une fiche est traduite puis jugée comme une image à la main ; sinon le formulaire (BR-FICHE-013).
+        let (valid, files, install) = if spec.source.is_some() {
+            let free = self.install_free_space(info.as_ref()).await;
+            let prepared = self.installer.prepare(&spec, &actor, machine, free)?;
+            (prepared.valid, prepared.files, Some(prepared.audit))
+        } else {
+            let valid = validate(&spec, machine).map_err(|refusal| self.refusal(&spec, refusal))?;
+            (valid, Vec::new(), None)
+        };
 
         // Deux déploiements au plus, tous comptes confondus (BR-DEPLOY-023).
         if self.running.fetch_add(1, Ordering::SeqCst) >= MAX_CONCURRENT_DEPLOYMENTS {
@@ -598,7 +677,7 @@ impl Deployments {
         }
         self.check_ports_for(&valid).await?;
         let image = valid.image();
-        let reference = image.reference();
+        let reference = image_reference(&valid.body.image);
         if let Some(disk) = self.disk(info.as_ref()).await
             && disk.low
             && !valid.accept.low_disk
@@ -671,14 +750,15 @@ impl Deployments {
             id: id.clone(),
             key: key.clone(),
             name: valid.body.name.clone(),
-            repository: image.repository.clone(),
-            tag: image.tag.clone(),
             account,
             actor,
             host_ports: valid.body.ports.iter().map(|p| p.host_port).collect(),
             env_count: u32::try_from(valid.env_count()).unwrap_or(u32::MAX),
             custom_command: valid.has_command(),
             mounts: valid.body.mounts.iter().map(|m| m.source.clone()).collect(),
+            reference,
+            files,
+            install,
             create_sent: AtomicBool::new(false),
         };
         let shown = Shown {
@@ -816,7 +896,7 @@ impl Deployments {
         if let Err(finish) = self.begin(job, step::CHECK).await {
             return finish;
         }
-        let reference = format!("{}:{}", job.repository, job.tag);
+        let reference = job.reference.clone();
         let present = match self.engine.image_present(&reference).await {
             Ok(present) => present,
             Err(error) => {
@@ -893,6 +973,12 @@ impl Deployments {
                     "done",
                 );
                 self.registry.reread(&container).await;
+                // Un serveur de jeu installé depuis une fiche : ses phases commencent à ce lancement, le premier
+                // (BR-FICHE-028, BR-FICHE-056).
+                if let Some(install) = &job.install {
+                    self.phases
+                        .begin(&job.key, &container, install.rule.clone(), true);
+                }
             }
             Err(error) => {
                 journal(self.ops.failed(&job.id, step::START).await, "failed");
@@ -1024,6 +1110,19 @@ impl Deployments {
         let fs = self.safe_fs.clone();
         let key = job.key.clone();
         let sources = job.mounts.clone();
+        // Les fichiers produits (BR-FICHE-024) : octets, chemin, propriétaire et droits décidés par le domaine.
+        let files: Vec<ProducedBytes> = job
+            .files
+            .iter()
+            .map(|file| ProducedBytes {
+                folder: file.folder_source.clone(),
+                path: file.path.clone(),
+                uid: file.owner_uid,
+                gid: file.owner_gid,
+                mode: file.mode,
+                bytes: zeroize::Zeroizing::new(file.content.expose().as_bytes().to_vec()),
+            })
+            .collect();
         let result = tokio::task::spawn_blocking(move || -> Result<(), ()> {
             let root = fs.ensure_service_root(&key).map_err(|_| ())?;
             // Ni le propriétaire ni les droits du service ne sont ceux de l'agent : le programme du conteneur
@@ -1033,6 +1132,22 @@ impl Deployments {
             for source in sources {
                 let rel = RelPath::parse(&source).map_err(|_| ())?;
                 root.mkdir(&rel, perms).map_err(|_| ())?;
+            }
+            for file in files {
+                let rel =
+                    RelPath::parse(&format!("{}/{}", file.folder, file.path)).map_err(|_| ())?;
+                // Les dossiers intermédiaires d'un chemin imbriqué, créés comme les autres.
+                if let Some((_, parents)) = rel.split_last()
+                    && parents.len() > 1
+                {
+                    let parent = RelPath::parse(&parents.join("/")).map_err(|_| ())?;
+                    root.mkdir(&parent, perms).map_err(|_| ())?;
+                }
+                let file_perms = Ownership::new(file.uid, file.gid)
+                    .and_then(|owner| Perms::new(owner, file.mode))
+                    .ok_or(())?;
+                root.write_atomic(&rel, &file.bytes, file_perms)
+                    .map_err(|_| ())?;
             }
             Ok(())
         })
@@ -1133,7 +1248,7 @@ impl Deployments {
     async fn record(&self, job: &Job, finish: &Finish) {
         let (Some(service), Some(image)) = (
             ClientName::parse(&job.name),
-            ClientName::parse(&format!("{}:{}", job.repository, job.tag)),
+            ClientName::parse(&job.reference),
         ) else {
             return;
         };
@@ -1142,18 +1257,43 @@ impl Deployments {
             (OpStatus::Succeeded, _) => Outcome::Succeeded,
             (_, cause) => Outcome::Failed(cause.map_or(Reason::Internal, reason_of)),
         };
+        // Un serveur de jeu installé depuis une fiche : la fiche, le NOMBRE de réponses, jamais une valeur
+        // (BR-FICHE-032).
+        let target = match &job.install {
+            Some(install) => {
+                let Some(fiche) = ClientName::parse(&install.fiche) else {
+                    return;
+                };
+                Target::GameInstall {
+                    service,
+                    fiche,
+                    version: install.version,
+                    image,
+                    host_ports: job.host_ports.clone(),
+                    answers: install.answers,
+                    cpu_millis: install.cpu_millis,
+                    memory_bytes: install.memory_bytes,
+                    agreements: install
+                        .agreements
+                        .iter()
+                        .filter_map(|title| ClientName::parse(title))
+                        .collect(),
+                }
+            }
+            None => Target::ServiceDeploy {
+                service,
+                image,
+                host_ports: job.host_ports.clone(),
+                env_count: job.env_count,
+                custom_command: job.custom_command,
+                stopped_right_after_start: stopped,
+            },
+        };
         self.sink
             .record(
                 job.actor.clone(),
                 OpKind::Deploy.audit_action(),
-                Target::ServiceDeploy {
-                    service,
-                    image,
-                    host_ports: job.host_ports.clone(),
-                    env_count: job.env_count,
-                    custom_command: job.custom_command,
-                    stopped_right_after_start: stopped,
-                },
+                target,
                 outcome,
             )
             .await;
@@ -1180,6 +1320,17 @@ impl Deployments {
             _ => tracing::warn!("dossiers d'un déploiement échoué non retirés"),
         }
     }
+}
+
+/// Un fichier produit, prêt à être écrit : ses octets peuvent porter un secret, ils sont effacés après l'écriture.
+struct ProducedBytes {
+    folder: String,
+    path: String,
+    uid: u32,
+    gid: u32,
+    mode: u32,
+    /// Effacés de la mémoire quand le fichier est écrit ou abandonné, quelle que soit l'issue.
+    bytes: zeroize::Zeroizing<Vec<u8>>,
 }
 
 /// Le chemin d'un dossier dans le service, normalisé comme le domaine.

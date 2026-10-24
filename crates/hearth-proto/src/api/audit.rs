@@ -110,9 +110,13 @@ pub mod action {
     /// Une adoption tombe sans qu'aucun compte agisse : délai de confirmation écoulé, unité ou conteneur
     /// disparu (HRT-80, BR-ADOPT-017, BR-ADOPT-027). Auteur le système, cible le service par sa clé.
     pub const SERVICE_ADOPTION_LAPSED: &str = "service.adoption.lapsed";
+    /// Une fiche du catalogue a été écartée au chargement de l'agent (HRT-101, BR-FICHE-007) : une entrée par
+    /// fiche et par démarrage, auteur le système, cible la fiche et l'invariant violé (jamais un contenu).
+    /// Type d'action « Gestion des services ».
+    pub const CATALOG_FICHE_REFUSED: &str = "catalog.fiche.refused";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 48] = [
+    pub const ALL: [&str; 49] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -161,6 +165,7 @@ pub mod action {
         OPERATION_DECIDE,
         SERVICE_ADOPTION_TO_CONFIRM,
         SERVICE_ADOPTION_LAPSED,
+        CATALOG_FICHE_REFUSED,
     ];
 }
 

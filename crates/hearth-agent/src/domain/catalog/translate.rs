@@ -7,9 +7,10 @@
 //! option de sécurité, le socket du moteur, ni un chemin du serveur : un dossier est désigné par son
 //! identifiant, sa source est toujours `<racine de données>/<service>/<id>` (décidée par l'appelant).
 //!
-//! `ServiceSpecDraft` est un type minimal local : HRT-101 le remplace par le vrai `ServiceSpec` (ADR-0044) et
-//! branche alors le validateur du déploiement ordinaire (`DeploymentValidator`, ci-dessous ; son implémentation
-//! est `domain::services::deploy::OrdinaryDeployment`, HRT-68).
+//! `ServiceSpecDraft` est un type minimal local ; `domain::services::from_fiche` (HRT-101) le transforme en
+//! description durable (`SpecBody`, `SpecSecrets`) après l'avoir fait juger par le validateur du déploiement
+//! ordinaire (`DeploymentValidator`, ci-dessous ; son implémentation est
+//! `domain::services::deploy::OrdinaryDeployment`, HRT-68).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -503,16 +504,7 @@ pub fn translate(fiche: &Fiche, request: &Request<'_>) -> Result<ServiceSpecDraf
 /// Ce que le déploiement ordinaire exige d'une description. Le vrai validateur existe depuis HRT-68 :
 /// `domain::services::deploy::OrdinaryDeployment`, qui applique les MÊMES fonctions que le déploiement fait à la
 /// main (nom et version de l'image, variables, ports, dossiers, commande), pour que la description d'une fiche
-/// soit refusée par les mêmes règles. HRT-101 le branche sur la traduction ; ce fichier n'en tient aucune copie.
+/// soit refusée par les mêmes règles. HRT-101 l'a branché (`domain::services::from_fiche`) ; ce fichier n'en tient aucune copie.
 pub trait DeploymentValidator {
     fn validate(&self, spec: &ServiceSpecDraft) -> Result<(), String>;
-}
-
-/// Validateur absent : le remplaçant est `OrdinaryDeployment` (HRT-68) ; HRT-101 le branche.
-pub struct NotYetWired;
-
-impl DeploymentValidator for NotYetWired {
-    fn validate(&self, _spec: &ServiceSpecDraft) -> Result<(), String> {
-        Err("validateur du déploiement ordinaire non branché (HRT-68 / HRT-101)".into())
-    }
 }

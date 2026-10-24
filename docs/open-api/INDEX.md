@@ -4,7 +4,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 
 **Actes d'administration** (HRT-28) : les routes qui modifient (hors déconnexion et hors retrait d'un poste, qui garde son contrat) acceptent un membre `reauth` (mot de passe + preuve de clé d'usage `0x05`) ; l'agent l'EXIGE depuis HRT-30 (`GET /security` : `admin_reauth.required: true`) ; sans `reauth`, `426 INCOMPATIBLE_VERSION` « client trop ancien ». Voir [sécurité](./security.md).
 
-43 endpoints : session, postes de confiance, sécurité, comptes, mesures, services (moteur de conteneurs), audit, mises à jour.
+45 endpoints : session, postes de confiance, sécurité, comptes, mesures, services (moteur de conteneurs), audit, mises à jour.
 
 | Groupe | Méthode | Route | Rôle | Description |
 |---|---|---|---|---|
@@ -28,6 +28,8 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **Services** | POST | [`/deployments`](./services.md) | droit « gérer les services » + acte d'administration `0x0F` (mot de passe à chaque fois, jamais l'élévation) | Déploie une image en service (HRT-68, ADR-0039) : plan fermé, limites de mémoire et de processeur obligatoires, `202 { operation_id, service_key }`, issue dans l'opération ; refus synchrones typés (`NAME_TAKEN`, `PORT_IN_USE`, `LIMITS_REQUIRED`, `PLAN_SETTING_REFUSED`, `DEPLOY_LIMIT`…) |
 | **Services** | POST | [`/deployments/check`](./services.md) | droit « gérer les services » | Constats du formulaire (nom, ports, dossiers, disque, image présente), sans secret, sans écriture, non journalisée (BR-DEPLOY-033) |
 | **Services** | GET | [`/engine/capacity`](./services.md) | user+ | Bornes de la machine (processeurs, mémoire, réserve) et limites déjà engagées, en totaux (HRT-68) |
+| **Services** | GET | [`/catalog`](./catalog.md) | user+ | Les fiches de serveurs de jeu que l'agent propose (HRT-101, ADR-0050) : carte de chaque fiche, fiches écartées au chargement (dossier et invariant). Une fiche `preview` n'y est que dans une construction d'essai |
+| **Services** | GET | [`/catalog/{id}`](./catalog.md) | user+ | Détail d'une fiche : empreinte, image, ports, dossiers gérés, contrats, questions, ressources avec leur preuve (HRT-101) ; `404 FICHE_UNKNOWN` si l'agent ne la propose pas |
 | **Services** | GET | [`/services/external`](./services.md) | droit « gérer les services » | Les conteneurs non gérés que ce compte peut choisir d'adopter (HRT-80, BR-ADOPT-005, 006) : clé, nom, image, unité, état, rien d'autre ; jamais sur le flux, jamais gardée ; lecture réussie et refus consignés (`service.external.read`, sans nom, regroupés) |
 | **Services** | POST | [`/services/adopt`](./services.md) | droit « gérer les services » + acte d'administration `0x11` (mot de passe à chaque fois, jamais l'élévation) | Adopte 1 à 50 conteneurs, un résultat par clé (HRT-80, BR-ADOPT-008 à 010) ; une ligne dans la base de l'agent, rien d'écrit sur le service ; une entrée de journal par service (`service.adopt`) |
 | **Services** | POST | [`/services/{key}/release`](./services.md) | droit « gérer les services » + acte d'administration `0x12` (couvert par l'élévation) | « Ne plus gérer » (HRT-80, BR-ADOPT-013) : le service sort de la liste de tous, sans effet ni entrée si déjà relâché ; journal `service.release` |
