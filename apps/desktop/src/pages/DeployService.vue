@@ -14,6 +14,7 @@ import { useDeployForm } from "@/composables/useDeployForm";
 import { useNeedsLink } from "@/composables/useNeedsLink";
 import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
+import { useUnloadGuard } from "@/composables/useUnloadGuard";
 import { deployDoor, submitReason } from "@/deploy/availability";
 import { isFilled } from "@/deploy/draft";
 import { checkBlocker } from "@/deploy/messages";
@@ -109,6 +110,9 @@ onBeforeRouteLeave((to) => {
   abandonOpen.value = true;
   return false;
 });
+
+// Un rechargement efface la saisie sans passer par le routeur : même question qu'à « Fermer » (constat 7 de la revue UX).
+useUnloadGuard(() => !allowLeave && flow.launch.value === null && isFilled(form.draft.value));
 
 function requestClose() {
   if (isFilled(form.draft.value)) {
