@@ -592,3 +592,134 @@ async fn an_unless_stopped_service_comes_back_after_the_daemon_restarts_unless_i
     );
     remove_leftovers();
 }
+
+/// HRT-103, ADR-0052 points 4 et 6 : une ligne écrite sur l'entrée d'un conteneur créé avec son entrée ouverte
+/// arrive au programme ; après un ordre de sortie suivi AUSSITÔT de l'arrêt demandé au moteur, un service
+/// `unless-stopped` reste arrêté (le moteur le note « arrêté sur demande ») ; une ligne qui n'est pas un littéral de
+/// fiche, ou écrite à un conteneur dont l'entrée n'est pas ouverte, est refusée.
+#[tokio::test]
+#[ignore = "vrai moteur : HEARTH_TEST_ENGINE=1 cargo test -p hearth-agent --test engine_real -- --ignored"]
+async fn a_line_reaches_the_input_and_an_exit_followed_by_the_engine_stop_leaves_the_service_stopped()
+ {
+    use futures_util::StreamExt;
+    use hearth_agent::application::ports::{ContainerEngine, EngineError, LogQuery};
+    use hearth_agent::domain::secret::Secret;
+    use hearth_agent::domain::services::plan::ContainerPlan;
+    use hearth_agent::domain::services::spec::SpecRestart;
+    if !enabled() {
+        eprintln!("HEARTH_TEST_ENGINE=1 n'est pas posé : test non exécuté");
+        return;
+    }
+    image_pull::ensure(IMAGE);
+    remove_leftovers();
+    let engine = BollardEngine::unix(socket());
+    let plan = |name: &str, stdin_open: bool| ContainerPlan {
+        name: name.to_owned(),
+        image: IMAGE.to_owned(),
+        labels: std::collections::BTreeMap::new(),
+        env: vec![],
+        // Un « jeu » qui répète ce qu'il lit et sort sur « exit ».
+        command: Some(vec![
+            Secret::from("sh"),
+            Secret::from("-c"),
+            Secret::from("while read l; do echo \"got:$l\"; [ \"$l\" = exit ] && exit 0; done"),
+        ]),
+        ports: vec![],
+        binds: vec![],
+        restart: SpecRestart::UnlessStopped,
+        cpu_millis: 500,
+        memory_bytes: 64 * 1024 * 1024,
+        stdin_open,
+        stop_grace_s: Some(10),
+    };
+    let open = engine
+        .create(&plan(&format!("{PREFIX}-stdin-open"), true))
+        .await
+        .expect("créer");
+    let closed = engine
+        .create(&plan(&format!("{PREFIX}-stdin-closed"), false))
+        .await
+        .expect("créer");
+    engine.start(&open).await.expect("démarrer");
+    engine.start(&closed).await.expect("démarrer");
+
+    // Le démon accepterait l'attache d'une entrée fermée : l'adaptateur l'a vue avant et refuse. Un conteneur arrêté
+    // aussi ; un conteneur inconnu est absent.
+    let (save, exit) = terraria_orders();
+    assert_eq!(
+        engine.send_stdin_line(&closed, &save).await,
+        Err(EngineError::Refused)
+    );
+    assert_eq!(
+        engine.send_stdin_line(&"0".repeat(64), &save).await,
+        Err(EngineError::NotFound)
+    );
+
+    // Une ligne arrive au programme.
+    engine.send_stdin_line(&open, &save).await.expect("écrire");
+    let mut seen = false;
+    for _ in 0..50 {
+        let mut lines = engine.logs(
+            &open,
+            LogQuery {
+                follow: false,
+                tail: Some(50),
+                since_ms: None,
+                tty: false,
+            },
+        );
+        while let Some(Ok(line)) = lines.next().await {
+            seen |= line.text == "got:save";
+        }
+        if seen {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(seen, "le programme doit avoir lu « save »");
+
+    // L'ordre de sortie, puis AUSSITÔT l'arrêt demandé au moteur : le service reste arrêté.
+    engine.send_stdin_line(&open, &exit).await.expect("écrire");
+    engine
+        .stop(&open, Duration::from_secs(10))
+        .await
+        .expect("arrêter");
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let running = |id: &str| docker(&["inspect", "-f", "{{.State.Running}}", id]) == "true";
+    assert!(
+        !running(&open),
+        "un service dont l'arrêt a été demandé au moteur ne se relance pas"
+    );
+    remove_leftovers();
+}
+
+/// Les deux ordres de Terraria (« save », « exit »), pris dans sa fiche : un ordre ne se construit que depuis une
+/// fiche acceptée par le chargeur (`FicheLiteral`).
+fn terraria_orders() -> (
+    hearth_agent::domain::catalog::stop_plan::FicheLiteral,
+    hearth_agent::domain::catalog::stop_plan::FicheLiteral,
+) {
+    use hearth_agent::domain::catalog::stop_plan::{PlannedStep, StopPlan, stop_plan};
+    use hearth_agent::domain::catalog::{Origin, load};
+    let text = include_str!("../catalog/terraria/fiche.toml").replacen(
+        "[stop.sequence]
+status = \"untested\"",
+        "[stop.sequence]
+status = \"tested\"",
+        1,
+    );
+    let fiche = load(
+        Origin::Embedded,
+        text.as_bytes(),
+        include_bytes!("../catalog/terraria/settings.toml"),
+    )
+    .expect("fiche valide");
+    let StopPlan::Sequence { steps, .. } = stop_plan(&fiche) else {
+        panic!("une suite essayée");
+    };
+    let mut lines = steps.into_iter().filter_map(|step| match step {
+        PlannedStep::StdinLine { line, .. } => Some(line),
+        _ => None,
+    });
+    (lines.next().expect("save"), lines.next().expect("exit"))
+}

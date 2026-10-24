@@ -9,6 +9,7 @@ pub mod audit_csv;
 pub mod catalog;
 pub mod deploy;
 pub mod devices;
+pub mod game_secret;
 pub mod game_settings;
 pub mod hello;
 pub mod machine;

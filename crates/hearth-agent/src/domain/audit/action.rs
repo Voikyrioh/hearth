@@ -99,6 +99,9 @@ pub enum AuditAction {
     ServiceWorldImport,
     /// Les réglages d'un serveur de jeu sont enregistrés (HRT-108).
     ServiceGameSettings,
+    /// Un compte qui a le droit de gérer les services révèle le mot de passe d'un serveur de jeu (HRT-103,
+    /// BR-JEU-026) : jamais la valeur. Un refus faute de droit est consigné sous le même code.
+    ServiceGamePasswordReveal,
     /// Une annulation refusée ou en échec avant d'avoir lu l'opération (HRT-144) ; la réussite s'écrit sous l'action du genre.
     OperationCancel,
     /// Une décision refusée ou en échec avant d'avoir lu l'opération (HRT-144) ; la réussite s'écrit sous l'action du genre.
@@ -116,7 +119,7 @@ pub enum AuditAction {
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 49] = [
+    pub const ALL: [AuditAction; 50] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -161,6 +164,7 @@ impl AuditAction {
         Self::ServiceBackupDelete,
         Self::ServiceWorldImport,
         Self::ServiceGameSettings,
+        Self::ServiceGamePasswordReveal,
         Self::OperationCancel,
         Self::OperationDecide,
         Self::ServiceAdoptionToConfirm,
@@ -215,6 +219,7 @@ impl AuditAction {
             Self::ServiceBackupDelete => action::SERVICE_BACKUP_DELETE,
             Self::ServiceWorldImport => action::SERVICE_WORLD_IMPORT,
             Self::ServiceGameSettings => action::SERVICE_GAME_SETTINGS,
+            Self::ServiceGamePasswordReveal => action::SERVICE_GAME_PASSWORD_REVEAL,
             Self::OperationCancel => action::OPERATION_CANCEL,
             Self::OperationDecide => action::OPERATION_DECIDE,
             Self::ServiceAdoptionToConfirm => action::SERVICE_ADOPTION_TO_CONFIRM,
@@ -270,6 +275,7 @@ impl AuditAction {
             Self::ServiceBackupDelete => "Suppression d'une sauvegarde",
             Self::ServiceWorldImport => "Reprise d'un monde",
             Self::ServiceGameSettings => "Réglages d'un jeu",
+            Self::ServiceGamePasswordReveal => "Mot de passe de serveur de jeu révélé",
             Self::OperationCancel => "Annulation d'une opération",
             Self::OperationDecide => "Décision sur une opération",
             Self::ServiceAdoptionToConfirm => "Adoption à confirmer",

@@ -38,6 +38,12 @@ Trois choses atteignent le programme d'un jeu depuis Hearth : sa ligne de comman
 - Jetons séparés : `translate.rs` remplit `ServiceSpecDraft.command` (un drapeau, puis sa valeur) ; aucune chaîne de commande n'existe.
 - Console : `[remote_console]`, port de rôle `remote_console` en `publish = "never"`, secret généré par l'appelant et vérifié (24 à 64 caractères alphanumériques).
 
+## Mise en œuvre (HRT-103)
+- `ContainerEngine::send_stdin_line(id, ligne)` : attache en entrée seule (`stdout` et `stderr` non demandés), écrit la ligne et sa fin de ligne, se détache. Le port ne prend qu'un `FicheLiteral` (1 à 64 caractères ASCII imprimables), type qui ne se construit que dans `domain/catalog` depuis une fiche acceptée. L'adaptateur INSPECTE le conteneur avant d'attacher et refuse (`Refused`) s'il ne tourne pas ou si son entrée n'est pas ouverte : le démon accepterait l'attache et l'ordre partirait dans le vide. Le conteneur d'une fiche qui déclare des ordres est créé avec l'entrée ouverte, la suite soit-elle `tested` ou non (`declares_orders`) ; un service installé avant cela demande une décision (BR-JEU-007). Aucune route ne la porte (garde d'architecture).
+- `application/game_stop.rs` déroule `StopPlan::Sequence` ; la décision (`continue` / `cancel`) est celle des opérations (ADR-0045), expirant en 15 minutes ; l'arrêt du moteur suit l'ordre de sortie sans délai. Après « Arrêter quand même » sur un signe obligatoire non vu, l'ordre de sortie de la fiche est tout de même envoyé (le canal a fonctionné) ; après un ordre refusé, il ne l'est pas (choix conservateur : le compte a choisi l'arrêt du moteur, rien de plus).
+- Un service adopté, ou piloté par une unité du système, n'est jamais examiné : aucun ordre (`BR-JEU-001`).
+- Non fait ici : le signal d'arrêt de la fiche n'est pas posé à la création du conteneur (le plan fermé n'a pas ce champ) ; l'essai du canal sur la vraie image est le test `engine_real.rs` du job `engine`.
+
 ## Quand NE PAS l'appliquer / limites
 - Un texte libre (nom de serveur avec des espaces) ne passe pas par un argument : par une variable ou un fichier, ou il est `not_exposed`.
 - Un arrêt qui ne passe pas par Hearth (redémarrage du serveur) n'envoie aucun ordre (`JEU-010`).

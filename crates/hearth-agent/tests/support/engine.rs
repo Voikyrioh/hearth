@@ -91,5 +91,10 @@ pub fn fast_lifecycle() -> LifecycleTimings {
         exemption_margin: Duration::from_secs(2),
         wait_margin: Duration::from_secs(1),
         wait_floor: Duration::from_secs(1),
+        // Une « seconde de fiche » dure une milliseconde (HRT-103).
+        game: hearth_agent::application::game_stop::GameStopTimings {
+            unit: Duration::from_millis(1),
+            poll: Duration::from_millis(10),
+        },
     }
 }

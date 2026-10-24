@@ -275,6 +275,40 @@ pub enum LifecycleNote {
     Plain,
     /// Le service ne s'est pas arrêté dans son délai : il a été coupé de force (BR-LIFE-009).
     Forced,
+    /// L'arrêt ou le redémarrage d'un serveur de jeu (HRT-103, BR-JEU-032) : ce qu'il est advenu de
+    /// l'enregistrement du monde, et si l'arrêt a été forcé.
+    Game { save: SaveMention, forced: bool },
+}
+
+/// Ce qu'il est advenu de l'enregistrement du monde avant l'arrêt d'un serveur de jeu (BR-JEU-032) : une liste
+/// fermée, des textes fixes. Jamais le texte d'un ordre envoyé au jeu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveMention {
+    /// La fiche attendait un signe dans les journaux du jeu et Hearth l'a vu : « monde enregistré ».
+    Saved,
+    /// Les ordres sont partis mais rien ne le prouve (aucun signe déclaré, ou signe non vu) :
+    /// « enregistrement non confirmé ».
+    Unconfirmed,
+    /// Un ordre n'a pas pu être envoyé : « enregistrement impossible ».
+    Impossible,
+    /// Le jeu enregistre lui-même en s'arrêtant : « non nécessaire (le jeu enregistre lui-même) ».
+    NotNeeded,
+    /// Le compte a choisi « Arrêter quand même » alors que l'enregistrement n'était pas confirmé ou pas possible :
+    /// « arrêt malgré tout ».
+    StoppedAnyway,
+}
+
+impl SaveMention {
+    /// Le texte fixe de l'entrée du journal d'activité.
+    pub const fn text(self) -> &'static str {
+        match self {
+            Self::Saved => "monde enregistré",
+            Self::Unconfirmed => "enregistrement non confirmé",
+            Self::Impossible => "enregistrement impossible",
+            Self::NotNeeded => "non nécessaire (le jeu enregistre lui-même)",
+            Self::StoppedAnyway => "arrêt malgré tout",
+        }
+    }
 }
 
 /// Ce qu'un compte a fait d'une opération de service (liste fermée : le texte de l'entrée est fixe).
@@ -356,6 +390,15 @@ impl Target {
                 service,
                 note: LifecycleNote::Forced,
             } => Some(format!("service {} (arrêt forcé)", service.as_str())),
+            Self::ServiceLifecycle {
+                service,
+                note: LifecycleNote::Game { save, forced },
+            } => Some(format!(
+                "service {} ({}{})",
+                service.as_str(),
+                save.text(),
+                if *forced { ", arrêt forcé" } else { "" }
+            )),
             Self::ServiceDeploy {
                 service,
                 image,
@@ -922,6 +965,41 @@ mod tests {
         };
         assert_eq!(plain.text().unwrap(), "service terraria");
         assert_eq!(forced.text().unwrap(), "service terraria (arrêt forcé)");
+    }
+
+    #[test]
+    fn a_game_lifecycle_entry_says_what_became_of_the_world_save_and_never_an_order() {
+        // BR-JEU-032 : « monde enregistré », « enregistrement non confirmé », « enregistrement impossible »,
+        // « non nécessaire (le jeu enregistre lui-même) », puis le choix « arrêt malgré tout ».
+        let name = ClientName::parse("terraria").unwrap();
+        let text = |save, forced| {
+            Target::ServiceLifecycle {
+                service: name.clone(),
+                note: LifecycleNote::Game { save, forced },
+            }
+            .text()
+            .unwrap()
+        };
+        assert_eq!(
+            text(SaveMention::Saved, false),
+            "service terraria (monde enregistré)"
+        );
+        assert_eq!(
+            text(SaveMention::Unconfirmed, false),
+            "service terraria (enregistrement non confirmé)"
+        );
+        assert_eq!(
+            text(SaveMention::Impossible, false),
+            "service terraria (enregistrement impossible)"
+        );
+        assert_eq!(
+            text(SaveMention::NotNeeded, true),
+            "service terraria (non nécessaire (le jeu enregistre lui-même), arrêt forcé)"
+        );
+        assert_eq!(
+            text(SaveMention::StoppedAnyway, false),
+            "service terraria (arrêt malgré tout)"
+        );
     }
 
     #[test]

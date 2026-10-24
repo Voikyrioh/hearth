@@ -15,17 +15,19 @@ Enregistrer des réglages (`PUT /services/{key}/settings`) écrit le fichier du 
 
 ## Application (code)
 - `crates/hearth-agent/src/application/game_settings.rs::GameSettings::save`
-- `crates/hearth-agent/src/application/service_lifecycle.rs::ServiceLifecycle::request`
+- `crates/hearth-agent/src/application/service_lifecycle.rs::ServiceLifecycle::{request, run_game}`
 
 ## Vérification
 - `crates/hearth-agent/tests/game_settings_https.rs::saving_touches_only_the_asked_line_and_every_unknown_line_and_comment_survives`
 - `crates/hearth-agent/tests/service_lifecycle_https.rs` (la séquence d'un redémarrage ordinaire)
+- `crates/hearth-agent/tests/game_stop_https.rs::a_restart_follows_the_same_sequence_then_starts_the_container_again`
 
 ## Cas limites
-- Cet agent n'a aucune route qui enchaîne l'enregistrement et le redémarrage : l'ordre des deux gestes est celui du client.
+- Cet agent n'a aucune route qui enchaîne l'enregistrement et le redémarrage : l'ordre des deux gestes est celui du client. Le redémarrage d'un serveur de jeu déroule la suite d'arrêt de la fiche (BR-JEU-003), puis démarre le conteneur.
 
 ## Règles liées
 - BR-FICHE-042, BR-JEU-002, BR-JEU-036
 
 ## Historique
+- 2026-10-24 — le redémarrage d'un jeu déroule la suite d'arrêt (HRT-103).
 - 2026-10-24 — création (HRT-108).

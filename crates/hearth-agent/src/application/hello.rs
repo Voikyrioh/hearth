@@ -6,8 +6,8 @@
 use hearth_proto::api::deploy::CAPABILITY_SERVICE_DEPLOY;
 use hearth_proto::api::game_settings::CAPABILITY_GAME_SETTINGS;
 use hearth_proto::api::service_logs::CAPABILITY_SERVICE_LOGS;
-use hearth_proto::api::service_ops::CAPABILITY_CATALOG;
 use hearth_proto::api::service_ops::CAPABILITY_SERVICE_OPS;
+use hearth_proto::api::service_ops::{CAPABILITY_CATALOG, CAPABILITY_GAME_SERVICES};
 use hearth_proto::api::services::{
     CAPABILITY_SERVICE_ADOPTION, CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES,
 };
@@ -64,6 +64,9 @@ impl HelloService {
                     CAPABILITY_CATALOG,
                     // Les réglages d'un serveur de jeu (HRT-108) : lire, analyser un texte collé, enregistrer.
                     CAPABILITY_GAME_SETTINGS,
+                    // Un serveur de jeu au quotidien (HRT-103) : l'arrêt qui enregistre le monde (suite d'étapes de la
+                    // fiche, décision « Arrêter quand même » ou « Annuler ») et `GET /services/{key}/game-secret`.
+                    CAPABILITY_GAME_SERVICES,
                 ],
             },
         }
@@ -119,7 +122,8 @@ mod tests {
                 "service-ops",
                 "service-deploy",
                 "catalog",
-                "game-settings"
+                "game-settings",
+                "game-services"
             ]
         );
     }

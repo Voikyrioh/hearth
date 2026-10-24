@@ -10,12 +10,47 @@
 
 use super::loading::model::Fiche;
 use super::loading::schema::fiche::{Proof, Step, StepKind, StopSignal, WorldSaved};
+use super::loading::value::order_refusal;
+
+/// Un ordre écrit sur l'entrée standard d'un service : un littéral de la fiche (1 à 64 caractères ASCII imprimables,
+/// ni espace en bord, jamais une fin de ligne ni un caractère de commande : `order_refusal`). **Il ne se construit que dans `domain/catalog`**, depuis une
+/// fiche que le chargeur a acceptée : le port du moteur ne prend que ce type, donc aucun texte du client, d'une route ou
+/// d'un autre cas d'usage ne peut atteindre l'entrée d'un jeu (ADR-0052 point 4, BR-JEU-016).
+#[derive(Clone, PartialEq, Eq)]
+pub struct FicheLiteral(String);
+
+impl FicheLiteral {
+    /// `None` si le texte n'est pas un littéral de fiche. Visible dans `domain/catalog` seulement.
+    pub(super) fn parse(text: &str) -> Option<Self> {
+        // La définition d'un ordre est celle du chargeur, une seule : ce que la fiche a fait accepter est ce qui passe.
+        order_refusal(text).is_none().then(|| Self(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Le texte d'un ordre n'est jamais montré (ni tracé) : sa longueur seulement.
+impl std::fmt::Debug for FicheLiteral {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FicheLiteral({} caractères)", self.0.len())
+    }
+}
+
+/// Les tests écrivent des plans à la main.
+#[cfg(test)]
+impl From<&str> for FicheLiteral {
+    fn from(text: &str) -> Self {
+        Self::parse(text).expect("un littéral de fiche")
+    }
+}
 
 /// Une étape déroulée par l'agent. Les textes viennent de la fiche, jamais de l'utilisateur.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlannedStep {
     /// Un ordre littéral envoyé par l'entrée standard. `quits` : point de non-retour (plus d'annulation).
-    StdinLine { line: String, quits: bool },
+    StdinLine { line: FicheLiteral, quits: bool },
     /// Attendre une sous-chaîne littérale dans les journaux postérieurs à l'étape précédente.
     WaitLog {
         contains: String,
@@ -107,7 +142,7 @@ fn plan_steps(steps: &[Step]) -> Vec<PlannedStep> {
         .iter()
         .filter_map(|step| match step.kind {
             StepKind::StdinLine => Some(PlannedStep::StdinLine {
-                line: step.line.clone()?,
+                line: FicheLiteral::parse(step.line.as_deref()?)?,
                 quits: step.quits?,
             }),
             StepKind::WaitLog => Some(PlannedStep::WaitLog {
@@ -168,6 +203,22 @@ pub fn save_plan(fiche: &Fiche) -> Option<Vec<PlannedStep>> {
         return None;
     }
     Some(steps)
+}
+
+/// La fiche déclare-t-elle un ordre à écrire sur l'entrée du service (arrêt ou enregistrement), essayé ou non ? Le
+/// conteneur est alors créé avec son entrée OUVERTE : l'ouvrir plus tard exigerait de le recréer, et le jour où la
+/// suite devient `tested`, les services déjà installés devraient pouvoir la recevoir. Ouvrir l'entrée n'envoie rien :
+/// une suite `untested` n'est jamais exécutée (BR-JEU-038).
+pub fn declares_orders(fiche: &Fiche) -> bool {
+    let stop = fiche
+        .file
+        .stop
+        .sequence
+        .iter()
+        .flat_map(|sequence| sequence.step.iter());
+    let save = fiche.file.save.iter().flat_map(|save| save.step.iter());
+    stop.chain(save)
+        .any(|step| matches!(step.kind, StepKind::StdinLine))
 }
 
 /// Le signe « prêt » n'est cru que s'il est `tested`.
