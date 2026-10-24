@@ -161,7 +161,7 @@ jobs:
   # s'y exécute contre le VRAI moteur, par `bollard` sur le socket Unix. C'est ce qui empêche le faux
   # moteur et le faux démon HTTP des tests de mentir. Job indépendant : aucun autre job n'en dépend,
   # il ne peut pas casser les quatre autres. Images minuscules (`busybox`, miroir public de Docker Hub
-  # chez AWS : sa limite anonyme existe pourtant, `toomanyrequests: Rate exceeded` le 2026-10-13, d'où l'étape de téléchargement avec reprise ci-dessous). Ce job n'a jamais été exécuté avant sa première PR.
+  # chez AWS : sa limite anonyme existe pourtant, d'où le cache de l'image et le repli ci-dessous, HRT-168). Ce job n'a jamais été exécuté avant sa première PR.
   engine:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -175,33 +175,18 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Moteur du runner (version)
         run: docker version
-      # Le registre public répond parfois `toomanyrequests: Rate exceeded` à un job qui n'a rien fait de mal (trois
-      # échecs de suite le 2026-10-13). L'image des tests est téléchargée ICI, une fois pour tout le job, avec
-      # reprise (5 essais, attente 5, 10, 20, 40 s) SEULEMENT pour une limite de débit ou une panne passagère ;
-      # toute autre erreur échoue tout de suite. Les tests trouvent l'image présente et ne retéléchargent rien
-      # (`tests/support/image_pull.rs` applique la même règle si l'image manque). Même valeur que `IMAGE` de
-      # `engine_real.rs` et de `engine_supervised.rs`, ne pas changer l'une sans les autres.
-      - name: Image des tests (une fois, avec reprise)
-        env:
-          IMAGE: public.ecr.aws/docker/library/busybox:1.36
-        run: |
-          if docker image inspect "$IMAGE" >/dev/null 2>&1; then echo "image déjà présente"; exit 0; fi
-          wait=5
-          for attempt in 1 2 3 4 5; do
-            if out="$(docker pull --quiet "$IMAGE" 2>&1)"; then echo "image téléchargée (essai $attempt)"; exit 0; fi
-            echo "essai $attempt/5 : $out"
-            if ! printf '%s' "$out" | grep -Eiq 'toomanyrequests|too many requests|rate exceeded|rate limit|bad gateway|service unavailable|gateway timeout|tls handshake timeout|i/o timeout|context deadline exceeded|connection reset|connection refused|unexpected eof|temporary failure in name resolution'; then
-              echo "::error::téléchargement de $IMAGE refusé (ce n'est pas une panne passagère du registre) : $(printf '%s' "$out" | tr '\n' ' ')"
-              exit 1
-            fi
-            if [ "$attempt" -lt 5 ]; then
-              sleep "$wait"
-              wait=$((wait * 2))
-              if [ "$wait" -gt 60 ]; then wait=60; fi
-            fi
-          done
-          echo "::error::téléchargement de $IMAGE abandonné après 5 essais (limite de débit ou panne du registre, pas un défaut du code testé) : $(printf '%s' "$out" | tr '\n' ' ')"
-          exit 1
+      # HRT-168 : l'image des tests (busybox:1.36, fixée par empreinte) vient d'abord du cache de la CI
+      # (archive `docker save`, clé = image + empreinte : aucun registre sollicité), sinon d'ECR puis de
+      # Docker Hub par la même empreinte. Le quota anonyme d'ECR ne bloque plus le job (HRT-168, après
+      # `Data limit exceeded` le 2026-10-14). Un registre KO sort en `REGISTRE : ...`, jamais comme un test
+      # en échec. Même valeur que `IMAGE` de `engine_real.rs` et `engine_supervised.rs` (script jumeau).
+      - name: Image des tests en cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/test-image
+          key: engine-test-image-busybox-1.36-sha256-73aaf090f3d8
+      - name: Image des tests (cache, ECR, Docker Hub)
+        run: .github/scripts/test-image.sh "${{ runner.temp }}/test-image/busybox-1.36.tar"
       # La suite de contrat (liste, inspection, événements, journaux : fin, dernières lignes, reprise, suivi,
       # terminal, ligne géante, pilote `none` ; HRT-64 : démarrer, arrêter dans le délai et de force avec le
       # code 137, redémarrer, un port pris, un conteneur inconnu, l'arrêt d'un conteneur `--rm` ; HRT-68 :
@@ -273,33 +258,18 @@ jobs:
         with:
           toolchain: "1.95"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-      # (Même étape que dans `engine`.) Le registre public répond parfois `toomanyrequests: Rate exceeded` à un job qui n'a rien fait de mal (trois
-      # échecs de suite le 2026-10-13). L'image des tests est téléchargée ICI, une fois pour tout le job, avec
-      # reprise (5 essais, attente 5, 10, 20, 40 s) SEULEMENT pour une limite de débit ou une panne passagère ;
-      # toute autre erreur échoue tout de suite. Les tests trouvent l'image présente et ne retéléchargent rien
-      # (`tests/support/image_pull.rs` applique la même règle si l'image manque). Même valeur que `IMAGE` de
-      # `engine_real.rs` et de `engine_supervised.rs`, ne pas changer l'une sans les autres.
-      - name: Image des tests (une fois, avec reprise)
-        env:
-          IMAGE: public.ecr.aws/docker/library/busybox:1.36
-        run: |
-          if docker image inspect "$IMAGE" >/dev/null 2>&1; then echo "image déjà présente"; exit 0; fi
-          wait=5
-          for attempt in 1 2 3 4 5; do
-            if out="$(docker pull --quiet "$IMAGE" 2>&1)"; then echo "image téléchargée (essai $attempt)"; exit 0; fi
-            echo "essai $attempt/5 : $out"
-            if ! printf '%s' "$out" | grep -Eiq 'toomanyrequests|too many requests|rate exceeded|rate limit|bad gateway|service unavailable|gateway timeout|tls handshake timeout|i/o timeout|context deadline exceeded|connection reset|connection refused|unexpected eof|temporary failure in name resolution'; then
-              echo "::error::téléchargement de $IMAGE refusé (ce n'est pas une panne passagère du registre) : $(printf '%s' "$out" | tr '\n' ' ')"
-              exit 1
-            fi
-            if [ "$attempt" -lt 5 ]; then
-              sleep "$wait"
-              wait=$((wait * 2))
-              if [ "$wait" -gt 60 ]; then wait=60; fi
-            fi
-          done
-          echo "::error::téléchargement de $IMAGE abandonné après 5 essais (limite de débit ou panne du registre, pas un défaut du code testé) : $(printf '%s' "$out" | tr '\n' ' ')"
-          exit 1
+      # HRT-168 : l'image des tests (busybox:1.36, fixée par empreinte) vient d'abord du cache de la CI
+      # (archive `docker save`, clé = image + empreinte : aucun registre sollicité), sinon d'ECR puis de
+      # Docker Hub par la même empreinte. Le quota anonyme d'ECR ne bloque plus le job (HRT-168, après
+      # `Data limit exceeded` le 2026-10-14). Un registre KO sort en `REGISTRE : ...`, jamais comme un test
+      # en échec. Même valeur que `IMAGE` de `engine_real.rs` et `engine_supervised.rs` (script jumeau).
+      - name: Image des tests en cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/test-image
+          key: engine-test-image-busybox-1.36-sha256-73aaf090f3d8
+      - name: Image des tests (cache, ECR, Docker Hub)
+        run: .github/scripts/test-image.sh "${{ runner.temp }}/test-image/busybox-1.36.tar"
       - name: Débit soutenu des journaux (version longue)
         run: cargo test -p hearth-agent --test engine_real a_service_writing_a_thousand_lines_a_second -- --ignored --test-threads=1 --nocapture
       - name: Conteneurs laissés par le test
