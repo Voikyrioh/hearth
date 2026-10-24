@@ -412,9 +412,10 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Services,
         version_checked: true,
         tracked: false,
-        // Une consultation sans action de journal propre : aucun refus n'est écrit sous `service.delete` (celui d'un
-        // service adopté appartient à l'acte, pas à la fenêtre qu'on ouvre).
-        audit: None,
+        // Une consultation réservée au droit de gérer les services : seul un refus faute de droit est consigné, sous
+        // l'action de la suppression. Le refus d'un service adopté appartient à l'acte, pas à la fenêtre qu'on ouvre
+        // (le cas d'usage n'écrit rien en lisant).
+        audit: Some(AuditAction::ServiceDelete),
         route: || get(service_delete::preview),
     },
     Endpoint {
