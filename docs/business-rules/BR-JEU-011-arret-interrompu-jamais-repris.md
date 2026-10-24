@@ -17,6 +17,7 @@ L'arrêt d'un serveur de jeu qui enregistre son monde est une opération du jour
 - `crates/hearth-agent/src/domain/ops/recover.rs::recover`
 
 ## Vérification
+- `crates/hearth-agent/tests/game_stop_https.rs::a_cut_between_the_exit_order_and_the_engine_stop_leaves_the_wanted_stop_and_replays_nothing`
 - `crates/hearth-agent/src/domain/ops/recover.rs::tests::the_table_of_the_design`
 - `crates/hearth-agent/src/domain/ops/game_stop.rs::tests::a_game_stop_cut_by_an_agent_restart_is_interrupted_and_never_replayed`
 - `crates/hearth-agent/tests/game_stop_https.rs::an_agent_restart_in_the_middle_of_a_stop_interrupts_it_and_replays_nothing`

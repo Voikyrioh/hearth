@@ -20,6 +20,7 @@ use hearth_agent::application::ports::{
     ContainerEngine, EngineError, EngineEvent, EngineEvents, EngineInfo, EnvEntry, Listing,
     LogQuery, LogStream, PullStream, Unreadable,
 };
+use hearth_agent::domain::catalog::stop_plan::FicheLiteral;
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::domain::services::image::image_name;
 use hearth_agent::domain::services::logs::{LineAssembler, LogLine, LogSource};
@@ -119,6 +120,8 @@ pub struct CreatedPlan {
     pub binds: Vec<(String, String, bool)>,
     pub cpu_millis: u32,
     pub memory_bytes: u64,
+    /// L'entrée standard du conteneur est ouverte (HRT-103).
+    pub stdin_open: bool,
 }
 
 #[derive(Default)]
@@ -986,7 +989,7 @@ impl ContainerEngine for FakeEngine {
         Ok(())
     }
 
-    async fn send_stdin_line(&self, id: &str, line: &str) -> Result<(), EngineError> {
+    async fn send_stdin_line(&self, id: &str, line: &FicheLiteral) -> Result<(), EngineError> {
         let reaction = {
             let mut state = self.lock();
             if let Some(error) = state
@@ -1004,12 +1007,12 @@ impl ContainerEngine for FakeEngine {
             state
                 .script
                 .calls
-                .push(Call::Stdin(id.to_owned(), line.to_owned()));
+                .push(Call::Stdin(id.to_owned(), line.as_str().to_owned()));
             let reaction = state
                 .script
                 .on_stdin
                 .get(id)
-                .and_then(|all| all.iter().find(|r| r.line == line))
+                .and_then(|all| all.iter().find(|r| r.line == line.as_str()))
                 .cloned();
             if reaction
                 .as_ref()
@@ -1221,7 +1224,11 @@ impl ContainerEngine for FakeEngine {
                 .map(|(name, value)| (name.expose().to_owned(), value.expose().to_owned()))
                 .collect();
             state.envs.insert(id.clone(), pairs.clone());
+            if !plan.stdin_open {
+                state.script.stdin_closed.insert(id.clone());
+            }
             state.deploy.created.push(CreatedPlan {
+                stdin_open: plan.stdin_open,
                 name: plan.name.clone(),
                 image: plan.image.clone(),
                 labels: plan.labels.clone(),

@@ -493,6 +493,8 @@ async fn a_decision_left_unanswered_expires_in_15_minutes_the_service_keeps_runn
         OperationStatus::AwaitingDecision
     );
     b.env.clock.advance(time::Duration::minutes(1));
+    // L'expiration est celle du balayage des opérations, la seule (BR-JEU-006).
+    assert_eq!(b.agent.ops().sweep().await.unwrap().expired, 1);
     let operation = b.finished(&id).await;
     assert_eq!(operation.status, OperationStatus::Cancelled);
     assert_eq!(operation.cause, Some(OperationCause::DecisionExpired));
@@ -512,7 +514,9 @@ async fn an_untested_sequence_is_never_sent_the_stop_asks_for_a_decision() {
     assert!(waiting.decision.is_some());
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(b.calls(&server).is_empty(), "rien n'est envoyé ni arrêté");
-    // L'entrée standard n'a pas été ouverte pour une suite non essayée (BR-JEU-038).
+    // L'entrée du conteneur est OUVERTE (la fiche déclare des ordres : l'ouvrir plus tard exigerait de le recréer),
+    // mais rien n'y est écrit tant que la suite n'est pas essayée (BR-JEU-038).
+    assert!(b.engine.created().iter().all(|plan| plan.stdin_open));
     assert!(b.engine.stdin_lines(&server.id).is_empty());
     b.decide(&id, "continue").await;
     let operation = b.finished(&id).await;
@@ -831,4 +835,114 @@ async fn the_password_is_revealed_to_the_right_only_from_the_description_and_jou
     .await
     .unwrap();
     assert!(all.iter().all(|(row,)| !row.contains(SENTINEL)));
+}
+
+#[tokio::test]
+async fn a_server_installed_with_a_closed_input_gets_a_decision_never_an_order_sent_to_nowhere() {
+    // Un Terraria installé avant que la fiche ouvre l'entrée : l'adaptateur refuse l'ordre, la suite demande une
+    // décision, rien n'est écrit ni arrêté (BR-JEU-007).
+    let b = bench().await;
+    let server = b.install().await;
+    b.engine.close_stdin(&server.id);
+    let id = b.gesture("stop", &server).await;
+    b.until(&id, |status| status == OperationStatus::AwaitingDecision)
+        .await;
+    assert!(b.engine.stdin_lines(&server.id).is_empty());
+    assert!(b.calls(&server).is_empty());
+}
+
+#[tokio::test]
+async fn cancelling_while_the_sign_is_awaited_closes_the_operation_at_once() {
+    // Un signe obligatoire attendu 300 « secondes de fiche » de 10 ms (3 s) : l'annulation ne l'attend pas.
+    let b = bench_timed(
+        terraria("tested", |t| {
+            waits_for_sign(t).replacen("timeout_s = 30", "timeout_s = 300", 1)
+        }),
+        10,
+    )
+    .await;
+    let server = b.install().await;
+    b.plays_like_terraria(&server, false);
+    let id = b.gesture("stop", &server).await;
+    b.until(&id, |_| b.engine.stdin_lines(&server.id).len() == 1)
+        .await;
+    let started = Instant::now();
+    let cancelled = b
+        .agent
+        .confirmed(
+            &b.ada,
+            "DELETE",
+            &format!("/operations/services/{id}"),
+            json!({}),
+        )
+        .await
+        .send()
+        .await;
+    assert!(
+        cancelled.status == 200 || cancelled.status == 202,
+        "{}",
+        cancelled.text
+    );
+    let operation = b.finished_or_cancelling(&id).await;
+    assert_eq!(
+        operation.status,
+        OperationStatus::Cancelled,
+        "{operation:?}"
+    );
+    assert!(started.elapsed() < Duration::from_millis(2500));
+    assert_eq!(b.calls(&server), vec![stdin(&server, "save")]);
+}
+
+#[tokio::test]
+async fn a_cut_between_the_exit_order_and_the_engine_stop_leaves_the_wanted_stop_and_replays_nothing()
+ {
+    // BR-JEU-011 : l'agent s'arrête après l'ordre de sortie, l'arrêt voulu et l'étape `stop` sont déjà écrits.
+    let b = bench().await;
+    let server = b.install().await;
+    b.plays_like_terraria(&server, false);
+    // Le moteur ne répond jamais à l'arrêt : l'opération reste entre l'ordre et l'arrêt.
+    b.engine.make_hang_on_stop(&server.id);
+    let id = b.gesture("stop", &server).await;
+    b.until(&id, |_| b.calls(&server).contains(&stop(&server, 10)))
+        .await;
+    let intents: Vec<(String,)> = sqlx::query_as("SELECT service_key FROM service_intents")
+        .fetch_all(b.env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(intents.len(), 1, "l'arrêt voulu est en base avant l'ordre");
+    let calls = b.calls(&server);
+    // Le redémarrage de l'agent.
+    let ops = b.agent.ops();
+    let observer = hearth_agent::infrastructure::ops_observer::UnobservedState;
+    ops.recover_at_startup(&observer).await.unwrap();
+    ops.locks().with(|table| table.release_all_of(&id));
+    ops.rebuild_index().await.unwrap();
+    let operation = b.operation(&id).await;
+    assert_eq!(operation.status, OperationStatus::Interrupted);
+    assert_eq!(operation.cause, Some(OperationCause::Interrupted));
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(b.calls(&server), calls, "rien n'est rejoué ni renvoyé");
+    let steps: Vec<_> = operation.steps.iter().map(|s| s.step.as_str()).collect();
+    assert!(steps.contains(&"stop"), "{steps:?}");
+}
+
+#[tokio::test]
+async fn a_fiche_without_a_game_password_answers_200_without_one() {
+    // BR-JEU-027 : pas de mot de passe de jeu dans la fiche, pas un service inconnu.
+    let settings = TERRARIA_SETTINGS.replacen(
+        "secret_kind = \"game_password\"",
+        "secret_kind = \"admin_password\"",
+        1,
+    );
+    let text = TERRARIA_FICHE.replacen(
+        "game_updates = \"never\"",
+        &format!("digest = \"{IMAGE_DIGEST}\"\ngame_updates = \"never\""),
+        1,
+    );
+    let fiche = load(Origin::Embedded, text.as_bytes(), settings.as_bytes()).expect("valide");
+    let b = bench_with(fiche).await;
+    let server = b.install().await;
+    let reply = b.secret_as(&b.ada, server.key.as_str()).await;
+    assert_eq!(reply.status, 200, "{}", reply.text);
+    assert!(reply.body.get("password").is_none(), "{}", reply.text);
 }

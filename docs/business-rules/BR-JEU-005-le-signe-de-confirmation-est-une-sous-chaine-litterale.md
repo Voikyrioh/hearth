@@ -18,6 +18,7 @@ Si la fiche déclare un signe (étape `wait_log`), l'agent le cherche comme sous
 - `crates/hearth-agent/src/application/game_stop.rs::GameStop::wait_for_sign`
 
 ## Vérification
+- `crates/hearth-agent/tests/game_stop_https.rs::cancelling_while_the_sign_is_awaited_closes_the_operation_at_once`
 - `crates/hearth-agent/src/domain/ops/game_stop.rs::tests::the_sign_is_a_literal_in_a_line_written_since_the_order_never_an_expression`
 - `crates/hearth-agent/tests/game_stop_https.rs::the_sign_in_the_games_logs_makes_the_world_saved_before_the_exit_order`
 - `crates/hearth-agent/tests/game_stop_https.rs::a_sign_that_does_not_come_stops_nothing_and_asks_which_way_to_go`

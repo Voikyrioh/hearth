@@ -28,7 +28,7 @@ Une opération `awaiting_decision` porte les choix offerts et la date de la dema
 - `crates/hearth-agent/tests/game_stop_https.rs::a_decision_left_unanswered_expires_in_15_minutes_the_service_keeps_running`
 
 ## Cas limites
-- L'agent d'un arrêt de jeu attend la réponse sans rien arrêter ; sans réponse, l'exécuteur clôt lui-même l'opération à l'échéance (le balayage de 30 s fait la même chose, le premier arrivé l'emporte). Les textes et les boutons de la décision sont côté client (HRT-104).
+- L'agent d'un arrêt de jeu attend la réponse sans rien arrêter ; sans réponse, le balayage périodique (la seule expiration, alignée sur l'échéance de la décision) clôt l'opération, et l'attente de l'arrêt le voit comme toute clôture. Les textes et les boutons de la décision sont côté client (HRT-104).
 - Après « Arrêter quand même » sur un signe obligatoire non vu, l'ordre de sortie de la fiche est tout de même envoyé (le canal fonctionne) : BR-JEU-034.
 - `OperationCancel` après le point de non-retour répond `TOO_LATE_TO_CANCEL` (`cancel_verdict`) ; l'acte lui-même et sa route ne sont pas dans ce ticket.
 

@@ -1204,22 +1204,21 @@ impl GameSettings {
         actor: Actor,
     ) -> Result<Option<Secret>, SettingsError> {
         let loaded = self.load(key).await?;
-        let setting = loaded
-            .fiche
-            .settings
-            .iter()
-            .find(|setting| {
-                setting.imposed.is_none()
-                    && matches!(
-                        setting.spec,
-                        ValueSpec::Secret {
-                            kind: SecretKind::GamePassword,
-                            ..
-                        }
-                    )
-            })
-            .ok_or(SettingsError::NotFound)?;
-        let value = if matches!(loaded.state.slot(&setting.id), Some(Slot::Secret)) {
+        // Une fiche sans réglage `game_password` n'a pas de mot de passe de jeu : 200 sans `password` (BR-JEU-027),
+        // pas un service inconnu.
+        let setting = loaded.fiche.settings.iter().find(|setting| {
+            setting.imposed.is_none()
+                && matches!(
+                    setting.spec,
+                    ValueSpec::Secret {
+                        kind: SecretKind::GamePassword,
+                        ..
+                    }
+                )
+        });
+        let value = if let Some(setting) = setting
+            && matches!(loaded.state.slot(&setting.id), Some(Slot::Secret))
+        {
             let (secrets, _generated) = self.spec_secrets(&loaded).await?;
             secrets
                 .get(&setting.id)

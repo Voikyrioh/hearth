@@ -13,7 +13,7 @@
 use super::lifecycle::Gesture;
 use super::plan::{OpPlan, PlanError, PlannedStep, StepName};
 use crate::domain::audit::SaveMention;
-use crate::domain::catalog::stop_plan::{PlannedStep as FicheStep, StopPlan};
+use crate::domain::catalog::stop_plan::{FicheLiteral, PlannedStep as FicheStep, StopPlan};
 use crate::domain::services::logs::LogLine;
 
 /// Les étapes du plan d'une opération d'arrêt de jeu (codes stables du journal).
@@ -93,9 +93,9 @@ pub fn before_quit(steps: &[FicheStep]) -> impl Iterator<Item = &FicheStep> {
 }
 
 /// L'ordre de sortie d'une suite, s'il y en a un (la fiche le place en dernier, vérifié au chargement).
-pub fn quit_line(steps: &[FicheStep]) -> Option<&str> {
+pub fn quit_line(steps: &[FicheStep]) -> Option<&FicheLiteral> {
     steps.iter().find_map(|step| match step {
-        FicheStep::StdinLine { line, quits: true } => Some(line.as_str()),
+        FicheStep::StdinLine { line, quits: true } => Some(line),
         _ => None,
     })
 }
@@ -222,7 +222,7 @@ mod tests {
             unreachable!()
         };
         assert_eq!(before_quit(&steps).count(), 2);
-        assert_eq!(quit_line(&steps), Some("exit"));
+        assert_eq!(quit_line(&steps).map(FicheLiteral::as_str), Some("exit"));
         assert!(has_save_steps(&terraria()));
         // Une suite réduite à l'ordre de sortie n'a rien à faire avant lui.
         let only_exit = StopPlan::Sequence {

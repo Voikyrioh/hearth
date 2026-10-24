@@ -518,7 +518,7 @@ impl ServiceLifecycle {
             return Finish::failed(Cause::StepFailed);
         }
         let ordered_at = self.clock.now();
-        let ordered = self.order(job).await;
+        let ordered = self.order(job, job.gesture).await;
         match ordered {
             Ok(()) => {
                 journal(
@@ -591,12 +591,11 @@ impl ServiceLifecycle {
             op_id: &job.id,
             container_id,
             plan,
-            grace: Duration::from_secs(u64::from(job.target.grace_s)),
-            wait: self.timings.wait_for(job.target.grace_s),
         };
         let moments = Moments {
             lifecycle: self,
             job,
+            refused: std::sync::Mutex::new(None),
         };
         match game.run(&request, &moments).await {
             GameStopEnd::Stopped {
@@ -611,13 +610,10 @@ impl ServiceLifecycle {
                     "done",
                 );
                 // La preuve de l'arrêt est celle d'un ARRÊT, même quand le geste est un redémarrage : le
-                // conteneur n'est pas encore reparti.
+                // conteneur n'est pas encore reparti. `stop_was_forced` note elle-même l'arrêt forcé.
                 let forced = self
                     .stop_was_forced(job, Gesture::Stop, took, ordered_at)
                     .await;
-                if forced {
-                    journal(self.ops.mark_forced(&job.id).await, "forced");
-                }
                 if job.gesture == Gesture::Stop {
                     self.refresh(job).await;
                     return Finish::done(forced, Watch::Stopped).with_mention(mention);
@@ -633,9 +629,13 @@ impl ServiceLifecycle {
                 self.refresh(job).await;
                 Finish::failed(Cause::StepFailed)
             }
-            GameStopEnd::Failed(error) => {
+            end @ (GameStopEnd::Failed(_) | GameStopEnd::StopRefused) => {
                 journal(self.ops.failed(&job.id, game_step::STOP).await, "failed");
-                let finish = OrderFailure::from_engine(error).finish();
+                let failure = match end {
+                    GameStopEnd::Failed(error) => OrderFailure::from_engine(error),
+                    _ => moments.refusal().unwrap_or(OrderFailure::Refused),
+                };
+                let finish = failure.finish();
                 // L'ordre n'a pas eu lieu (refusé, service disparu) : rien n'a été arrêté. Un résultat inconnu
                 // garde l'arrêt voulu : l'arrêt a peut-être eu lieu.
                 if finish.status == OpStatus::Failed {
@@ -651,9 +651,6 @@ impl ServiceLifecycle {
     /// (port pris entre-temps), il reste arrêté et l'arrêt reste celui de Hearth (`BR-LIFE-012`).
     async fn start_after_stop(&self, job: &Job, forced: bool, mention: SaveMention) -> Finish {
         let key = &job.target.key;
-        let Driver::Engine { container_id } = &job.target.driver else {
-            return Finish::failed(Cause::StepFailed);
-        };
         if let Err(error) = self
             .ops
             .intent(&job.id, game_step::START, &UndoInfo::default())
@@ -663,10 +660,7 @@ impl ServiceLifecycle {
             self.refresh(job).await;
             return Finish::failed(Cause::StepFailed);
         }
-        let wait = self.timings.wait_for(job.target.grace_s);
-        let started = tokio::time::timeout(wait, self.engine.start(container_id))
-            .await
-            .unwrap_or(Err(EngineError::Timeout));
+        let started = self.order(job, Gesture::Start).await;
         match started {
             Ok(()) => {
                 journal(
@@ -680,13 +674,11 @@ impl ServiceLifecycle {
                 self.refresh(job).await;
                 Finish::done(forced, Watch::Started).with_mention(mention)
             }
-            Err(error) => {
+            Err(failure) => {
                 journal(self.ops.failed(&job.id, game_step::START).await, "failed");
                 self.exempt_starts(job);
                 self.refresh(job).await;
-                OrderFailure::from_engine(error)
-                    .finish()
-                    .with_mention(mention)
+                failure.finish().with_mention(mention)
             }
         }
     }
@@ -704,7 +696,7 @@ impl ServiceLifecycle {
         }
         self.registry
             .begin_transition(key, TransitionKind::Starting);
-        match self.order(job).await {
+        match self.order(job, job.gesture).await {
             Ok(()) => {
                 journal(
                     self.ops.done(&job.id, "start", &UndoInfo::default()).await,
@@ -738,7 +730,7 @@ impl ServiceLifecycle {
         self.registry
             .begin_transition(key, TransitionKind::Restarting);
         let ordered_at = self.clock.now();
-        match self.order(job).await {
+        match self.order(job, job.gesture).await {
             Ok(()) => {
                 journal(
                     self.ops
@@ -774,11 +766,11 @@ impl ServiceLifecycle {
     }
 
     /// Donne l'ordre au pilote du service, au plus pendant l'attente de l'action (`BR-LIFE-021`).
-    async fn order(&self, job: &Job) -> Result<(), OrderFailure> {
+    async fn order(&self, job: &Job, gesture: Gesture) -> Result<(), OrderFailure> {
         let grace = Duration::from_secs(u64::from(job.target.grace_s));
         let wait = self.timings.wait_for(job.target.grace_s);
         let work = async {
-            match (&job.target.driver, job.gesture) {
+            match (&job.target.driver, gesture) {
                 (Driver::Engine { container_id }, Gesture::Start) => self
                     .engine
                     .start(container_id)
@@ -1125,6 +1117,17 @@ impl Job {
 struct Moments<'a> {
     lifecycle: &'a ServiceLifecycle,
     job: &'a Job,
+    /// Pourquoi l'ordre d'arrêt a été refusé (gardé pour l'issue de l'opération).
+    refused: std::sync::Mutex<Option<OrderFailure>>,
+}
+
+impl Moments<'_> {
+    fn refusal(&self) -> Option<OrderFailure> {
+        *self
+            .refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 }
 
 #[async_trait]
@@ -1136,6 +1139,19 @@ impl StopMoments for Moments<'_> {
             TransitionKind::Stopping
         };
         self.lifecycle.want_stop(self.job, shown).await
+    }
+
+    async fn order_stop(&self) -> bool {
+        match self.lifecycle.order(self.job, Gesture::Stop).await {
+            Ok(()) => true,
+            Err(failure) => {
+                *self
+                    .refused
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(failure);
+                false
+            }
+        }
     }
 
     async fn stop_dropped(&self) {

@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use futures_util::Stream;
 use thiserror::Error;
 
+use crate::domain::catalog::stop_plan::FicheLiteral;
 use crate::domain::secret::Secret;
 use crate::domain::services::logs::LogLine;
 use crate::domain::services::plan::ContainerPlan;
@@ -203,14 +204,15 @@ pub trait ContainerEngine: Send + Sync {
     async fn restart(&self, id: &str, grace: Duration) -> Result<(), EngineError>;
 
     /// Écrit UNE ligne sur l'entrée standard d'un conteneur en marche (HRT-103, ADR-0052 point 4, BR-JEU-002,
-    /// BR-JEU-016) : attache l'entrée, écrit la ligne et sa fin de ligne, se détache. **Le texte est un littéral de
-    /// fiche** (64 caractères ASCII imprimables au plus, sans caractère de commande) : l'adaptateur refuse tout
-    /// autre texte (`Refused`) sans rien écrire. Aucune route ne porte cette fonction et aucun texte du client n'y
+    /// BR-JEU-016) : attache l'entrée, écrit la ligne et sa fin de ligne, se détache. **Le texte est un
+    /// [`FicheLiteral`]**, type qui ne se construit que dans `domain/catalog`. L'adaptateur INSPECTE d'abord le
+    /// conteneur et refuse (`Refused`) s'il ne tourne pas ou si son entrée n'est pas ouverte : le démon accepterait
+    /// l'attache et l'ordre partirait dans le vide. Aucune route ne porte cette fonction et aucun texte du client n'y
     /// entre ; seule la suite d'arrêt ou d'enregistrement d'un service de fiche l'appelle (`application::game_stop`).
     /// Elle n'exécute aucune commande dans le conteneur. `NotFound` si le conteneur n'existe plus ; `Refused` si
     /// le moteur refuse l'attache (conteneur arrêté, entrée non ouverte à la création) ; jamais de texte du moteur.
     /// Le texte de la ligne n'est ni tracé ni gardé.
-    async fn send_stdin_line(&self, id: &str, line: &str) -> Result<(), EngineError>;
+    async fn send_stdin_line(&self, id: &str, line: &FicheLiteral) -> Result<(), EngineError>;
 
     /// L'image `dépôt:version` est-elle déjà sur le serveur (HRT-68, BR-DEPLOY-018) ? Si oui, elle est
     /// utilisée telle quelle, sans interroger le registre.

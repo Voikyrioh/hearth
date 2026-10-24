@@ -614,23 +614,20 @@ async fn a_line_reaches_the_input_and_an_exit_followed_by_the_engine_stop_leaves
     engine.start(&open).await.expect("démarrer");
     engine.start(&closed).await.expect("démarrer");
 
-    // Un texte qui n'est pas un littéral de fiche n'est jamais écrit.
-    for refused in ["save\nexit", "", "é", &"a".repeat(65)] {
-        assert_eq!(
-            engine.send_stdin_line(&open, refused).await,
-            Err(EngineError::Refused),
-            "{refused:?}"
-        );
-    }
-    // Une entrée qui n'est pas ouverte est refusée par le moteur ; un conteneur inconnu est absent.
-    assert!(engine.send_stdin_line(&closed, "save").await.is_err());
+    // Le démon accepterait l'attache d'une entrée fermée : l'adaptateur l'a vue avant et refuse. Un conteneur arrêté
+    // aussi ; un conteneur inconnu est absent.
+    let (save, exit) = terraria_orders();
     assert_eq!(
-        engine.send_stdin_line(&"0".repeat(64), "save").await,
+        engine.send_stdin_line(&closed, &save).await,
+        Err(EngineError::Refused)
+    );
+    assert_eq!(
+        engine.send_stdin_line(&"0".repeat(64), &save).await,
         Err(EngineError::NotFound)
     );
 
     // Une ligne arrive au programme.
-    engine.send_stdin_line(&open, "save").await.expect("écrire");
+    engine.send_stdin_line(&open, &save).await.expect("écrire");
     let mut seen = false;
     for _ in 0..50 {
         let mut lines = engine.logs(
@@ -653,7 +650,7 @@ async fn a_line_reaches_the_input_and_an_exit_followed_by_the_engine_stop_leaves
     assert!(seen, "le programme doit avoir lu « save »");
 
     // L'ordre de sortie, puis AUSSITÔT l'arrêt demandé au moteur : le service reste arrêté.
-    engine.send_stdin_line(&open, "exit").await.expect("écrire");
+    engine.send_stdin_line(&open, &exit).await.expect("écrire");
     engine
         .stop(&open, Duration::from_secs(10))
         .await
@@ -665,4 +662,35 @@ async fn a_line_reaches_the_input_and_an_exit_followed_by_the_engine_stop_leaves
         "un service dont l'arrêt a été demandé au moteur ne se relance pas"
     );
     remove_leftovers();
+}
+
+/// Les deux ordres de Terraria (« save », « exit »), pris dans sa fiche : un ordre ne se construit que depuis une
+/// fiche acceptée par le chargeur (`FicheLiteral`).
+fn terraria_orders() -> (
+    hearth_agent::domain::catalog::stop_plan::FicheLiteral,
+    hearth_agent::domain::catalog::stop_plan::FicheLiteral,
+) {
+    use hearth_agent::domain::catalog::stop_plan::{PlannedStep, StopPlan, stop_plan};
+    use hearth_agent::domain::catalog::{Origin, load};
+    let text = include_str!("../catalog/terraria/fiche.toml").replacen(
+        "[stop.sequence]
+status = \"untested\"",
+        "[stop.sequence]
+status = \"tested\"",
+        1,
+    );
+    let fiche = load(
+        Origin::Embedded,
+        text.as_bytes(),
+        include_bytes!("../catalog/terraria/settings.toml"),
+    )
+    .expect("fiche valide");
+    let StopPlan::Sequence { steps, .. } = stop_plan(&fiche) else {
+        panic!("une suite essayée");
+    };
+    let mut lines = steps.into_iter().filter_map(|step| match step {
+        PlannedStep::StdinLine { line, .. } => Some(line),
+        _ => None,
+    });
+    (lines.next().expect("save"), lines.next().expect("exit"))
 }

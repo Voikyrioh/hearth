@@ -28,7 +28,7 @@ use super::settings_state::{
     InstallContext, Refusal, Resolved, ResolvedValue, SettingsState, check_rules, chosen_host_port,
     initial_state, resolve_install,
 };
-use super::stop_plan::{StopPlan, save_plan, stop_plan};
+use super::stop_plan::{StopPlan, declares_orders, stop_plan};
 
 /// Valeur d'une variable d'environnement du service.
 #[derive(Debug)]
@@ -457,7 +457,7 @@ pub fn translate(fiche: &Fiche, request: &Request<'_>) -> Result<ServiceSpecDraf
     }
 
     let stop = stop_plan(fiche);
-    let stdin_open = stop.sends_orders() || save_plan(fiche).is_some();
+    let stdin_open = declares_orders(fiche);
     let mut sealed: Vec<String> = file
         .secret
         .iter()

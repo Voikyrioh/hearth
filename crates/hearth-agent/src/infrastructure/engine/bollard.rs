@@ -44,6 +44,7 @@ use crate::application::ports::{
     ContainerEngine, EngineError, EngineEvent, EngineEvents, EngineInfo, EnvEntry, Listing,
     LogQuery, LogStream, PullStream, Unreadable,
 };
+use crate::domain::catalog::stop_plan::FicheLiteral;
 use crate::domain::ops::wait_budget;
 use crate::domain::services::plan::{ContainerPlan, hardening};
 use crate::domain::services::pull::{LayerEvent, PullTracker};
@@ -67,8 +68,6 @@ const INSPECT_CONCURRENCY: usize = 8;
 const MAX_PING_BYTES: usize = 16 * 1024;
 /// Délai d'une ligne écrite sur l'entrée d'un conteneur (attache, écriture, détache), HRT-103.
 const STDIN_TIMEOUT: Duration = Duration::from_secs(10);
-/// Longueur maximale d'un ordre de fiche envoyé par l'entrée standard (ADR-0052 point 4).
-const MAX_STDIN_LINE: usize = 64;
 
 /// Les événements qui changent ce que la liste montre. Les autres (`exec_*`, `health_status`,
 /// `attach`, `top`, `resize`…) sont du bruit pour une liste de services.
@@ -487,13 +486,6 @@ async fn probe_steps(inner: &Inner) -> EngineProbe {
     }
 }
 
-/// Un ordre de fiche : 1 à 64 caractères ASCII imprimables (l'espace compris), rien d'autre.
-fn is_fiche_literal(line: &str) -> bool {
-    !line.is_empty()
-        && line.len() <= MAX_STDIN_LINE
-        && line.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
-}
-
 #[async_trait]
 impl ContainerEngine for BollardEngine {
     async fn probe(&self) -> EngineProbe {
@@ -565,13 +557,26 @@ impl ContainerEngine for BollardEngine {
             .map_err(|error| translate(&error))
     }
 
-    async fn send_stdin_line(&self, id: &str, line: &str) -> Result<(), EngineError> {
-        // Un littéral de fiche seulement : 64 caractères ASCII imprimables au plus, jamais de fin de ligne ni de
-        // caractère de commande (ADR-0052 point 4). Refusé ICI aussi, que l'appelant l'ait vérifié ou non.
-        if !is_fiche_literal(line) {
+    async fn send_stdin_line(&self, id: &str, line: &FicheLiteral) -> Result<(), EngineError> {
+        let docker = self.inner.docker().await?;
+        // Le démon accepte l'attache d'un conteneur dont l'entrée n'est pas ouverte (il met l'entrée à nil et répond
+        // « ok ») : l'ordre partirait dans le vide. On regarde donc avant : arrêté ou entrée fermée, c'est un refus.
+        let inspected = docker
+            .inspect_container(
+                id,
+                None::<bollard::query_parameters::InspectContainerOptions>,
+            )
+            .await
+            .map_err(|error| translate(&error))?;
+        let running = inspected.state.as_ref().and_then(|state| state.running) == Some(true);
+        let open = inspected
+            .config
+            .as_ref()
+            .and_then(|config| config.open_stdin)
+            == Some(true);
+        if !running || !open {
             return Err(EngineError::Refused);
         }
-        let docker = self.inner.docker().await?;
         // Entrée seule : ni sortie ni journal ne sont demandés, rien n'est lu en retour.
         let options = AttachContainerOptionsBuilder::default()
             .stdin(true)
@@ -585,8 +590,8 @@ impl ContainerEngine for BollardEngine {
                 .attach_container(id, Some(options))
                 .await
                 .map_err(|error| translate(&error))?;
-            let mut bytes = Vec::with_capacity(line.len() + 1);
-            bytes.extend_from_slice(line.as_bytes());
+            let mut bytes = Vec::with_capacity(line.as_str().len() + 1);
+            bytes.extend_from_slice(line.as_str().as_bytes());
             bytes.push(b'\n');
             attached
                 .input
@@ -877,26 +882,6 @@ mod tests {
                 attributes: None,
             }),
             ..Default::default()
-        }
-    }
-
-    #[test]
-    fn only_a_printable_ascii_literal_of_a_fiche_is_written_to_a_container_input() {
-        // ADR-0052 point 4 : 64 caractères ASCII imprimables au plus, jamais de fin de ligne ni de commande.
-        assert!(is_fiche_literal("save"));
-        assert!(is_fiche_literal("exit"));
-        assert!(is_fiche_literal(&"a".repeat(64)));
-        assert!(!is_fiche_literal(""));
-        assert!(!is_fiche_literal(&"a".repeat(65)));
-        for refused in [
-            "save\n",
-            "save\r",
-            "sa\tve",
-            "sa\0ve",
-            "sauvegardé",
-            "\u{7f}",
-        ] {
-            assert!(!is_fiche_literal(refused), "{refused:?}");
         }
     }
 

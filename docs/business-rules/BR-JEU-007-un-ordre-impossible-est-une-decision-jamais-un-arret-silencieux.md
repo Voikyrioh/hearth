@@ -18,6 +18,7 @@ Si l'ordre ne peut pas être envoyé du tout (entrée du service non ouverte, se
 - `crates/hearth-agent/src/domain/ops/game_stop.rs::AskReason`
 
 ## Vérification
+- `crates/hearth-agent/tests/game_stop_https.rs::a_server_installed_with_a_closed_input_gets_a_decision_never_an_order_sent_to_nowhere`
 - `crates/hearth-agent/tests/game_stop_https.rs::an_order_the_game_does_not_accept_is_a_decision_and_nothing_is_stopped`
 - `crates/hearth-agent/tests/game_stop_https.rs::an_untested_sequence_is_never_sent_the_stop_asks_for_a_decision`
 

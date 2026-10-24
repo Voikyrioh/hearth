@@ -1,6 +1,6 @@
 # Un serveur de jeu au quotidien (HRT-103)
 
-Capacité `game-services` annoncée par [`GET /hello`](./hello.md). Deux choses, côté agent : l'arrêt d'un serveur de jeu qui enregistre son monde (aucune route de plus : les trois actes `start`, `stop` et `restart` de [services](./services.md) changent de déroulé pour un service créé depuis une fiche), et la révélation du mot de passe du serveur. Règles : `BR-JEU-001` à `BR-JEU-011`, `BR-JEU-016`, `BR-JEU-025` à `BR-JEU-027`, `BR-JEU-032`, `BR-JEU-034`, `BR-JEU-038`, décision ADR-0052.
+Capacité `game-services` annoncée par [`GET /hello`](./hello.md). Deux choses, côté agent : l'arrêt d'un serveur de jeu qui enregistre son monde (aucune route de plus : les trois actes `start`, `stop` et `restart` de [services](./services.md) changent de déroulé pour un service créé depuis une fiche), et la révélation du mot de passe du serveur. Règles : `BR-JEU-001`, `002`, `003`, `005` à `009`, `011`, `016`, `025` à `027`, `032`, `034`, `038`, `042`, décision ADR-0052.
 
 ## Arrêter ou redémarrer un serveur de jeu
 

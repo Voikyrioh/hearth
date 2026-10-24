@@ -37,9 +37,7 @@ use crate::domain::catalog::stop_plan::{
     DecisionReason, PlannedStep as FicheStep, Signal, StopPlan, stop_plan,
 };
 use crate::domain::ops::game_stop::{before_quit, quit_line, step};
-use crate::domain::ops::{
-    AskReason, Cause, Choice, GameStopKind, OpStatus, confirms, decision_expired,
-};
+use crate::domain::ops::{AskReason, Cause, Choice, GameStopKind, OpStatus, confirms};
 use crate::domain::services::key::ServiceKey;
 
 /// Les durées du déroulé. Les tests les raccourcissent : la fiche parle en secondes, `unit` dit combien dure une
@@ -85,6 +83,10 @@ pub trait StopMoments: Send + Sync {
     /// L'arrêt voulu n'aura pas lieu (décision « Annuler », ordre refusé suivi d'un « Annuler », expiration) :
     /// l'arrêt voulu est oublié et l'étape retirée.
     async fn stop_dropped(&self);
+
+    /// L'arrêt demandé au pilote du service, par le SEUL chemin d'ordre du cas d'usage de pilotage (délai du service,
+    /// attente bornée, issue typée). `false` : refusé ou sans réponse ; l'issue est gardée par l'appelant.
+    async fn order_stop(&self) -> bool;
 }
 
 /// Ce qu'il faut pour arrêter UN service de jeu.
@@ -93,10 +95,6 @@ pub struct StopRequest<'a> {
     pub container_id: &'a str,
     /// La suite déclarée par la fiche (jamais `ByImageOnSignal` : l'arrêt ordinaire n'en a pas besoin).
     pub plan: &'a StopPlan,
-    /// Le délai d'arrêt du service (BR-JEU-009), celui que le moteur applique.
-    pub grace: Duration,
-    /// Combien de temps attendre la réponse du moteur à l'ordre d'arrêt (BR-LIFE-021).
-    pub wait: Duration,
 }
 
 /// Comment l'arrêt s'est terminé.
@@ -114,7 +112,9 @@ pub enum GameStopEnd {
     Closed,
     /// Le journal des opérations ou l'arrêt voulu n'a pas pu être écrit : aucun ordre n'a été donné.
     NotWritten,
-    /// Le moteur a refusé ou n'a pas répondu à l'ordre d'arrêt.
+    /// L'ordre d'arrêt a été refusé ou sans réponse ([`StopMoments::order_stop`] a rendu `false`).
+    StopRefused,
+    /// Un ordre écrit sur l'entrée du service a échoué sans appel (le conteneur n'existe plus).
     Failed(EngineError),
 }
 
@@ -141,6 +141,8 @@ enum Asked {
 /// Le signe a-t-il été vu ?
 enum Sign {
     Seen,
+    /// Le compte a annulé l'opération pendant l'attente (elle est close).
+    Cancelled,
     Missing,
 }
 
@@ -247,8 +249,6 @@ impl GameStop {
         if !moments.stop_wanted().await {
             return GameStopEnd::NotWritten;
         }
-        let started = Instant::now();
-        let ordered_at = self.clock.now();
         if let Some(line) = quit
             && let Err(error) = self
                 .engine
@@ -273,19 +273,17 @@ impl GameStop {
             }
         }
         // AUSSITÔT après l'ordre de sortie : le moteur sait que l'arrêt est voulu, le service ne se relance pas.
-        let stopped = tokio::time::timeout(
-            request.wait,
-            self.engine.stop(request.container_id, request.grace),
-        )
-        .await
-        .unwrap_or(Err(EngineError::Timeout));
-        match stopped {
-            Ok(()) => GameStopEnd::Stopped {
+        // Les durées se mesurent d'ici : une décision attendue avant ne compte pas dans « l'arrêt a-t-il été forcé ».
+        let started = Instant::now();
+        let ordered_at = self.clock.now();
+        if moments.order_stop().await {
+            GameStopEnd::Stopped {
                 mention,
                 ordered_at,
                 took: started.elapsed(),
-            },
-            Err(error) => GameStopEnd::Failed(error),
+            }
+        } else {
+            GameStopEnd::StopRefused
         }
     }
 
@@ -351,6 +349,7 @@ impl GameStop {
                 } => {
                     let seen = self
                         .wait_for_sign(
+                            request.op_id,
                             request.container_id,
                             tty,
                             contains,
@@ -359,6 +358,7 @@ impl GameStop {
                         )
                         .await;
                     match seen {
+                        Sign::Cancelled => return Before::Closed,
                         Sign::Seen => signs += 1,
                         Sign::Missing if *required => {
                             journal(self.ops.failed(request.op_id, step::SAVE_WORLD).await);
@@ -387,6 +387,7 @@ impl GameStop {
     /// `timeout`. Les journaux illisibles ou un conteneur qui s'arrête valent « signe non vu ».
     async fn wait_for_sign(
         &self,
+        op_id: &str,
         container_id: &str,
         tty: bool,
         contains: &str,
@@ -403,8 +404,15 @@ impl GameStop {
             },
         );
         let deadline = Instant::now() + timeout;
+        // Le compte peut annuler pendant l'attente : l'opération est relue à chaque pas, même si le jeu écrit sans cesse.
+        let mut watch = tokio::time::interval(self.timings.poll);
         loop {
             tokio::select! {
+                _ = watch.tick() => {
+                    if self.cancelled(op_id).await {
+                        return Sign::Cancelled;
+                    }
+                }
                 item = lines.next() => match item {
                     Some(Ok(line)) => {
                         if confirms(&line, contains, since_ms) {
@@ -422,8 +430,9 @@ impl GameStop {
     // La décision
     // -----------------------------------------------------------------------------------------
 
-    /// Demande « Arrêter quand même » ou « Annuler » et attend la réponse, au plus 15 minutes (BR-JEU-006) : sans
-    /// réponse l'opération passe à « annulé », le service reste en marche, le verrou est rendu.
+    /// Demande « Arrêter quand même » ou « Annuler » et attend la réponse. L'expiration (15 minutes, BR-JEU-006) est
+    /// celle du balayage des opérations, la seule : sans réponse l'opération passe à « annulé » (`decision_expired`), le
+    /// service reste en marche, le verrou est rendu, et cette attente le voit comme toute clôture.
     async fn ask(&self, request: &StopRequest<'_>) -> Asked {
         if let Err(error) = self
             .ops
@@ -433,7 +442,6 @@ impl GameStop {
             tracing::error!(%error, "décision d'arrêt non demandée : rien n'est arrêté");
             return Asked::NotWritten;
         }
-        let since = self.clock.now();
         let mut feed = self.ops.subscribe();
         loop {
             match self.ops.snapshot(request.op_id).await {
@@ -460,19 +468,6 @@ impl GameStop {
                     tracing::error!(%error, "décision d'arrêt illisible : rien n'est arrêté");
                     return Asked::NotWritten;
                 }
-            }
-            if decision_expired(since, self.clock.now()) {
-                // Le balayage périodique fait la même chose ; le premier arrivé clôt, l'autre ne change rien.
-                journal(
-                    self.ops
-                        .finish(
-                            request.op_id,
-                            OpStatus::Cancelled,
-                            Some(Cause::DecisionExpired),
-                        )
-                        .await,
-                );
-                return Asked::Closed;
             }
             tokio::select! {
                 _ = feed.recv() => {}
