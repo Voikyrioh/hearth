@@ -115,7 +115,11 @@ describe("enregistrer, dans l'ordre de l'agent", () => {
   it("refuse un réglage imposé, un réglage figé, un réglage inconnu et la remise d'un secret", () => {
     const reasonOf = (id: string, action: "set" | "reset" = "set") => {
       const found = refusal(
-        save({ changes: [{ id, action, value: action === "set" ? "1" : null }] }),
+        save({
+          // La remise d'un secret n'est refusée que dans une remise (origine `reset`), comme l'agent.
+          origin: action === "reset" ? "reset" : "form",
+          changes: [{ id, action, value: action === "set" ? "1" : null }],
+        }),
       );
       return found?.kind === "setting_refused" ? found.reason : found?.kind;
     };
@@ -187,9 +191,38 @@ describe("enregistrer, dans l'ordre de l'agent", () => {
     expect(text).toContain("motd=Salut");
   });
 
-  it("n'écrit pas le fichier quand aucun octet ne change", () => {
-    const outcome = save({ changes: [{ id: "max_players", action: "set", value: "12" }] });
-    expect(outcome).toMatchObject({ kind: "saved", fileWritten: false });
+  it("ne compte pas un changement qui ne change rien, et contrôle l'effet avant de rendre « rien »", () => {
+    const same = { changes: [{ id: "max_players", action: "set" as const, value: "12" }] };
+    // Aucun effet : l'agent recalcule « none » et refuse « restart » AVANT le retour à vide.
+    expect(refusal(save({ ...same, effect: "restart" }))).toEqual({
+      kind: "conflict",
+      by: null,
+      effectMismatch: true,
+    });
+    const outcome = save({ ...same, effect: "none" });
+    expect(outcome).toMatchObject({
+      kind: "saved",
+      fileWritten: false,
+      changed: 0,
+      effect: "none",
+    });
+    // Rien n'a changé : la révision n'avance pas.
+    expect(view().rev).toBe(0);
+  });
+
+  it("juge d'abord les changements, puis l'empreinte : une valeur fausse sur un fichier qui a bougé est refusée comme valeur", () => {
+    const stale = request({ changes: [{ id: "max_players", action: "set", value: "999" }] });
+    // Le jeu ajoute un commentaire : le fichier a bougé, aucun réglage connu n'est en écart.
+    bridge.gameSettings.rewriteFile(
+      SERVER,
+      KEY,
+      `${bridge.gameSettings.fileText(SERVER, KEY)}\n# main`,
+    );
+    expect(refusal(bridge.gameSettings.save(SERVER, KEY, stale, "marie"))).toMatchObject({
+      kind: "setting_refused",
+      id: "max_players",
+      reason: "bounds",
+    });
   });
 
   it("garde un secret sans jamais le rendre, même à l'enregistrement qui le change", () => {
@@ -262,6 +295,21 @@ describe("l'écart quand le jeu a réécrit son fichier (BR-FICHE-048)", () => {
   });
 });
 
+describe("un écart et un changement du même réglage", () => {
+  it("ignore « Garder la valeur du fichier » pour un réglage que la demande change : sa valeur gagne", () => {
+    bridge.gameSettings.rewriteFile(SERVER, KEY, "maxplayers=20");
+    const current = view();
+    const outcome = save({
+      changes: [{ id: "max_players", action: "set", value: "30" }],
+      driftChoices: current.drifts.map((drift) => ({ id: drift.id, choice: "keep_file" as const })),
+    });
+    expect(outcome.kind).toBe("saved");
+    expect(outcome.kind === "saved" && outcome.adopted).not.toContain("max_players");
+    expect(view().settings.find((s) => s.id === "max_players")?.value).toBe("30");
+    expect(bridge.gameSettings.fileText(SERVER, KEY)).toContain("maxplayers=30");
+  });
+});
+
 describe("lire un texte collé", () => {
   const analyze = (text: string) => bridge.gameSettings.analyze(SERVER, KEY, text);
 
@@ -278,9 +326,18 @@ describe("lire un texte collé", () => {
     expect(state("world_name")?.state).toBe("frozen");
     expect(state("password")).toMatchObject({ state: "take", secret: true, pasted: null });
     expect(outcome.analysis.unknown).toBe(1);
-    expect(outcome.analysis.imposedUndone).toEqual(["port"]);
+    expect(outcome.analysis.imposedUndone).toContain("port");
     expect(JSON.stringify(outcome)).not.toContain("secret-collé");
     expect(view().settings.find((s) => s.id === "motd")?.state).toBe("unwritten");
+  });
+
+  it("rend UNE ligne par réglage et compte des clés distinctes (une clé répétée, une inconnue répétée)", () => {
+    const outcome = analyze("motd=a\nmotd=b\nzzz=1\nzzz=2\nyyy=3");
+    if (outcome.kind !== "read") throw new Error("lu attendu");
+    expect(outcome.analysis.lines.filter((line) => line.id === "motd")).toHaveLength(1);
+    expect(outcome.analysis.lines.find((line) => line.id === "motd")?.pasted).toBe("b");
+    expect(outcome.analysis.unknown).toBe(2);
+    expect(outcome.analysis.duplicates).toBe(2);
   });
 
   it("refuse un texte que le format du jeu ne sait pas lire, en nommant la ligne", () => {

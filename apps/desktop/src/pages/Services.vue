@@ -478,6 +478,7 @@ async function openDocs() {
                 :focus-title="openedByGesture"
                 :tab="tab"
                 :last-contact-at="lastContactAt"
+                :game-settings="rights.gameSettings.value"
                 @update:tab="setTab"
                 @back="closeDetail"
                 @open-other="openDetail"

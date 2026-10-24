@@ -18,7 +18,7 @@ L'effet est signé dans l'acte `GameSettingsSave` (`0x1E`) : l'agent le recalcul
 ## Application (code)
 - `crates/hearth-agent/src/domain/catalog/settings_state.rs::{effect_of, Effect}`
 - `crates/hearth-agent/src/application/game_settings.rs::GameSettings::save`
-- Client (HRT-109) : `apps/desktop/src/settings/messages.ts::effectText` (les quatre mentions), `apps/desktop/src/settings/edits.ts::heaviestEffect`, `apps/desktop/src/components/organisms/GameSettingsTab.vue` (case « Redémarrer maintenant », décochée ; la page ouvre la confirmation de `service_restart`), `apps/desktop/src/stores/gameSettingsPending.ts` (repère « À appliquer »)
+- Client (HRT-109) : `apps/desktop/src/settings/messages.ts::effectText` (les quatre mentions), `apps/desktop/src/settings/edits.ts::heaviestEffect`, `apps/desktop/src/components/organisms/GameSettingsTab.vue` (case « Redémarrer maintenant », décochée ; la page ouvre la confirmation de `service_restart`), `apps/desktop/src/stores/gameSettingsPending.ts` (repère « À appliquer », effacé par `composables/useServiceLifecycle.ts` quand un démarrage ou un redémarrage est lancé depuis le client)
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_state.rs::the_effect_of_a_change_is_deduced_from_the_channel_never_declared`

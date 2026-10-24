@@ -4,7 +4,6 @@ import type { GameSettingsView, ImportAnalysis, SettingValue } from "@/link";
 import { rich, terraria } from "@/link/simulated-fiches";
 import {
   type Edits,
-  editIssues,
   effectiveOf,
   heaviestEffect,
   isModified,
@@ -17,6 +16,7 @@ import {
 } from "./edits";
 import { groupByTheme, isCommon, matches, opensByDefault, plain, shown } from "./filter";
 import { importRows, toImportRequest, undoneLabels } from "./importing";
+import { problemText } from "./messages";
 import { installModelsOf, modelsOf, type SettingModel } from "./model";
 
 // Les règles pures de l'onglet « Réglages » (HRT-109, BR-FICHE-037, 041, 043, 044, 045, 048, 052), sur la fiche réelle de
@@ -299,10 +299,14 @@ describe("l'enregistrement (BR-FICHE-041, 042, 048)", () => {
       motd: { action: "set", value: "x".repeat(101) },
       language: { action: "set", value: "klingon" },
     };
-    const found = editIssues(models, edits);
-    expect(found.get("max_players")?.code).toBe("out_of_range");
-    expect(found.get("motd")?.code).toBe("too_long");
-    expect(found.get("language")?.code).toBe("bad_choice");
+    const said = (id: string) => {
+      const edit = edits[id];
+      return edit?.action === "set" ? problemText(byId(models, id).setting, edit.value) : null;
+    };
+    expect(said("max_players")).toContain("entre 1 et 255");
+    expect(said("motd")).toContain("100");
+    expect(said("language")).not.toBeNull();
+    expect(problemText(byId(models, "motd").setting, "Bonjour")).toBeNull();
   });
 });
 

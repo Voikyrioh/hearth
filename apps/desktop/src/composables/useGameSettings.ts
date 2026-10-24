@@ -2,7 +2,6 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import type { ActReport } from "@/composables/useReauth";
 import { useServerAction } from "@/composables/useServerAction";
 import { reportUiError } from "@/errors/report";
-import { answerIssueText } from "@/fiche/messages";
 import { t } from "@/i18n";
 import {
   type AnalyzeOutcome,
@@ -18,16 +17,14 @@ import {
   type DriftChoices,
   type Edit,
   type Edits,
-  editIssues,
-  listIssue,
   nothingToSave,
   pendingEdits,
   resettable,
   toSaveRequest,
   wipeEdits,
 } from "@/settings/edits";
-import { type Filter, isCommon, type Scope } from "@/settings/filter";
-import { listIssueText, saveRefusalText, valueText } from "@/settings/messages";
+import type { Filter, Scope } from "@/settings/filter";
+import { isSaveRefusal, problemText, saveRefusalText, valueText } from "@/settings/messages";
 import { modelsOf, proposedOf, type SettingModel } from "@/settings/model";
 import { useGameSettingsPendingStore } from "@/stores/gameSettingsPending";
 import { useToastsStore } from "@/stores/toasts";
@@ -202,22 +199,22 @@ export function useGameSettings(
     return out;
   });
   const drifts = computed(() => view.value?.drifts ?? []);
-  const issues = computed(() => {
+  /** Le défaut de forme de chaque valeur posée, par identifiant : l'enregistrement attend qu'ils soient corrigés. */
+  const problems = computed(() => {
     const found = new Map<string, string>();
-    for (const [id, issue] of editIssues(models.value, edits)) {
-      if (!submitted.value && !touched.has(id)) continue;
-      const model = models.value.find((item) => item.id === id);
-      if (!model) continue;
-      if (issue.code === "list") {
-        const edit = edits[id];
-        const bad = model && edit?.action === "set" ? listIssue(model.setting, edit.value) : null;
-        if (bad) found.set(id, listIssueText(bad, model.setting.list?.itemCharset ?? "unknown"));
-      } else found.set(id, answerIssueText(issue));
+    for (const model of models.value) {
+      const edit = edits[model.id];
+      if (edit?.action !== "set" || model.lock !== null) continue;
+      const problem = problemText(model.setting, edit.value);
+      if (problem) found.set(model.id, problem);
     }
     return found;
   });
-  /** Un défaut de forme existe, montré ou non : l'enregistrement attend qu'il soit corrigé. */
-  const invalid = computed(() => editIssues(models.value, edits).size > 0);
+  /** Ceux qu'on montre : un champ n'est pas en rouge avant d'avoir été quitté (ou la page validée). */
+  const issues = computed(
+    () => new Map([...problems.value].filter(([id]) => submitted.value || touched.has(id))),
+  );
+  const invalid = computed(() => problems.value.size > 0);
   const hasChanges = computed(
     () =>
       !nothingToSave({ changed: pending.value, others: otherChanges.value, drifts: drifts.value }),
@@ -281,15 +278,9 @@ export function useGameSettings(
   }
 
   // ── Les bandeaux ─────────────────────────────────────────────────────────────────────────────
-  const pendingApply = computed(() => {
-    const noted = pendingStore.of(serverId(), service().key);
-    if (!noted) return null;
-    // Le service a redémarré depuis l'enregistrement : les réglages sont appliqués.
-    const current = service();
-    if (current.state === "running" && current.since !== null && current.since > noted.at)
-      return null;
-    return noted;
-  });
+  // Ce qui attend un redémarrage : noté à l'enregistrement, effacé quand un démarrage ou un redémarrage est lancé depuis
+  // le client (`useServiceLifecycle`). Aucune horloge : celle de l'agent et celle de ce poste ne se comparent pas.
+  const pendingApply = computed(() => pendingStore.of(serverId(), service().key) ?? null);
   const versionKnown = computed(() =>
     models.value.some((model) => model.setting.since !== null || model.setting.until !== null),
   );
@@ -349,7 +340,7 @@ export function useGameSettings(
         message: t("gameSettings.savedAdopted", { n: outcome.adopted.length }),
       });
     }
-    pendingStore.note(serverId(), service().key, outcome.effect, Date.now());
+    pendingStore.note(serverId(), service().key, outcome.effect);
     wipe();
     await load();
     return { kind: "done" };
@@ -393,7 +384,7 @@ export function useGameSettings(
 
   /** Les messages d'un refus que la fenêtre de confirmation dit elle-même. */
   const refusalText = (refusal: { kind: string; retry_after_s?: number }) =>
-    saveRefusalText(refusal as never, labelOf);
+    isSaveRefusal(refusal) ? saveRefusalText(refusal, labelOf) : undefined;
 
   // ── Le cycle ─────────────────────────────────────────────────────────────────────────────────
   watch(
@@ -457,7 +448,6 @@ export function useGameSettings(
     reload: load,
     discard: wipe,
     busy: action.busy,
-    isCommon,
   };
 }
 

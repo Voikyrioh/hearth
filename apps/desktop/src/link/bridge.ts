@@ -415,7 +415,7 @@ export interface LinkBridge {
    */
   openFicheLink(serverId: string, ficheId: string, kind: FicheLinkKind, key: string): Promise<void>;
 
-  // Les réglages d'un serveur de jeu (HRT-109, ADR-0051, BR-FICHE-037 à 053). Les libellés, bornes et choix viennent de
+  // Les réglages d'un serveur de jeu (HRT-109, ADR-0051, BR-FICHE-037, 040 à 049, 051 à 054). Les libellés, bornes et choix viennent de
   // la fiche (`readFiche`) ; ici, les VALEURS voulues et l'état du fichier. Un secret n'est jamais rendu.
 
   /**

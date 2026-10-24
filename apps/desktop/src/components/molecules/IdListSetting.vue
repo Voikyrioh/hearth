@@ -4,8 +4,8 @@ import { safeText } from "@/audit/text";
 import HTextarea from "@/components/atoms/HTextarea.vue";
 import { t } from "@/i18n";
 import type { FicheSetting } from "@/link";
-import { listIssue, listItems, listText, listValue } from "@/settings/edits";
-import { listIssueText } from "@/settings/messages";
+import { listItems, listText, listValue } from "@/settings/edits";
+import { problemText } from "@/settings/messages";
 import Callout from "./Callout.vue";
 
 // Une liste d'identifiants (HRT-109, BR-FICHE-037) : un champ multiligne en police à chasse fixe, un
@@ -22,10 +22,7 @@ const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 
 const text = computed(() => listText(props.setting, props.modelValue));
 const count = computed(() => listItems(text.value).length);
-const issue = computed(() => {
-  const found = listIssue(props.setting, text.value);
-  return found ? listIssueText(found, props.setting.list?.itemCharset ?? "unknown") : undefined;
-});
+const issue = computed(() => problemText(props.setting, props.modelValue) ?? undefined);
 
 function update(next: string) {
   emit("update:modelValue", listValue(props.setting, next));

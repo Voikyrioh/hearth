@@ -208,6 +208,8 @@ export class SimulatedAccounts {
     return {
       known,
       granted: known && (me?.managesServices ?? false),
+      // Le pont simulé sert les réglages de jeu dès que l'agent connaît le droit (comme la fiche de référence).
+      gameSettings: known,
       account: me?.username ?? server.username.toLowerCase(),
     };
   }

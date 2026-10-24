@@ -53,7 +53,7 @@ const isOpaque = computed(() => kind.value === "opaque");
 const value = computed(() => controlValue(props.model, props.edit));
 /** Un secret défini sur le serveur, sans nouvelle saisie : il reste tel quel. */
 const secretKept = computed(
-  () => secret.value && props.model.state === "secret_set" && props.edit?.action !== "set",
+  () => secret.value && props.model.state === "secret_set" && props.edit === undefined,
 );
 const secretRemoved = computed(() => secret.value && props.edit?.action === "unset");
 const typedSecret = computed(() => (props.edit?.action === "set" ? props.edit.value : ""));
@@ -73,8 +73,11 @@ const notWritten = computed(
     props.edit === undefined &&
     !unverified.value,
 );
+// Un réglage qui attend la recréation dit déjà « Cela arrive bientôt » : sa mention d'effet serait une promesse de plus.
 const effect = computed(() =>
-  props.mode === "service" ? effectText(props.model.effect, props.model.lock === "frozen") : null,
+  props.mode === "service" && props.model.lock !== "recreate"
+    ? effectText(props.model.effect, props.model.lock === "frozen")
+    : null,
 );
 const hasProposal = computed(() => !secret.value && question.value.proposed !== null);
 const canReset = computed(() => !readOnly.value && resettable(props.model, props.edit));
@@ -166,7 +169,8 @@ function update(next: string) {
     />
     <QuestionField
       v-else
-      :question="mode === 'service' ? { ...question, frozenAfterCreation: false } : question"
+      :question="question"
+      :hide-frozen="mode === 'service'"
       :model-value="shownValue"
       :error="issue"
       :disabled="readOnly"

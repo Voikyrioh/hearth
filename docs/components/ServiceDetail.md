@@ -11,4 +11,4 @@ En-tête (nom, état, « Ce service n'existe plus. ») collé en haut du volet a
 
 HRT-67 : l'onglet « Journaux » est actif et adressable (`?onglet=journaux`) ; il remplace le détail et masque la liste (`LogViewer`). Un service adopté se lit avec le droit de gérer les services (`services/detail.ts::logsAccess`).
 
-HRT-109 : l'onglet « Réglages » (`?onglet=reglages`, `GameSettingsTab`) est deuxième après « Détail » pour un service créé par une fiche seulement ; l'agent le dit (`stores/gameSettingsPresence.ts`, BR-FICHE-054). Il masque la liste, comme les journaux, sans fixer la hauteur.
+HRT-109 : l'onglet « Réglages » (`?onglet=reglages`, `GameSettingsTab`) est deuxième après « Détail » pour un service créé par Hearth (ni adopté ni en déploiement) ; l'agent annonce la capacité `game-settings` (prop `gameSettings`), la vue n'est lue qu'à l'ouverture de l'onglet (BR-FICHE-054). Il masque la liste, comme les journaux, sans fixer la hauteur.

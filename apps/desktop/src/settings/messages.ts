@@ -1,9 +1,8 @@
 import { safeText } from "@/audit/text";
-import type { AnswerIssue } from "@/fiche/answers";
 import { answerIssueText } from "@/fiche/messages";
 import { type MessageKey, t } from "@/i18n";
-import type { ImportState, SaveRefusal, SettingEffect } from "@/link";
-import type { listIssue } from "./edits";
+import type { FicheSetting, ImportState, SaveRefusal, SettingEffect } from "@/link";
+import { listIssue, listText, valueIssue } from "./edits";
 import { isSecret, type SettingModel } from "./model";
 
 /**
@@ -63,16 +62,22 @@ export function effectText(effect: SettingEffect, frozen: boolean): string | nul
   }
 }
 
-/** Le défaut d'une valeur à saisir, en phrase. */
-export function issueText(issue: AnswerIssue | { code: "list" }): string {
-  if (issue.code === "list") return t("gameSettings.listIssue.other", { item: "" }).trim();
+/**
+ * Le défaut de forme d'une valeur saisie pour ce réglage, en phrase ; `null` : elle est permise (l'agent reste l'arbitre).
+ * UNE fonction pour l'onglet et pour l'installation : une liste d'identifiants se juge par ses identifiants, tout autre
+ * genre par les règles des questions de la fiche.
+ */
+export function problemText(setting: FicheSetting, value: string): string | null {
+  const issue = valueIssue(setting, value);
+  if (issue === null) return null;
+  if (issue.code === "list") {
+    const bad = listIssue(setting, listText(setting, value));
+    return bad ? listIssueText(bad, setting.list?.itemCharset ?? "unknown") : null;
+  }
   return answerIssueText(issue);
 }
 
-export function listIssueText(
-  issue: NonNullable<ReturnType<typeof listIssue>>,
-  charset: string,
-): string {
+function listIssueText(issue: NonNullable<ReturnType<typeof listIssue>>, charset: string): string {
   switch (issue.code) {
     case "too_many":
       return t("gameSettings.listIssue.tooMany", { max: issue.max });
@@ -104,7 +109,7 @@ const REFUSED_REASONS: Record<string, MessageKey> = {
 };
 
 /** Le refus d'un réglage mis en phrase : le libellé de la FICHE (jamais un nom venu d'ailleurs), la raison, au plus UN caractère. */
-export function settingRefusalText(
+function settingRefusalText(
   refusal: Extract<SaveRefusal, { kind: "setting_refused" }>,
   labelOf: (id: string) => string | null,
 ): string {
@@ -119,6 +124,27 @@ export function settingRefusalText(
   return label === null
     ? t("gameSettings.saveRefusals.settingUnknown", { why })
     : t("gameSettings.saveRefusals.setting", { label: safeText(label), why });
+}
+
+const SAVE_REFUSALS: ReadonlySet<string> = new Set<SaveRefusal["kind"]>([
+  "wrong_password",
+  "password_required",
+  "too_many_attempts",
+  "busy",
+  "conflict",
+  "file_changed",
+  "file_unreadable",
+  "setting_refused",
+  "recreate_not_available",
+  "operation_in_progress",
+  "service_not_found",
+  "invalid",
+  "other",
+]);
+
+/** Le refus que la fenêtre de confirmation rend est-il l'un de ceux d'un enregistrement ? (Un autre n'a pas de texte ici.) */
+export function isSaveRefusal(refusal: { kind: string }): refusal is SaveRefusal {
+  return SAVE_REFUSALS.has(refusal.kind);
 }
 
 /** Le refus d'un enregistrement, en phrase ; `undefined` : un refus de la confirmation, que la fenêtre dit elle-même. */

@@ -104,7 +104,7 @@ export function installModelsOf(
 }
 
 /** Le réglage existe pour la variante choisie (vide : toutes, BR-FICHE-060). */
-export function appliesTo(setting: FicheSetting, variant: string | null): boolean {
+function appliesTo(setting: FicheSetting, variant: string | null): boolean {
   const variants = setting.question.variants;
   return variants.length === 0 || (variant !== null && variants.includes(variant));
 }

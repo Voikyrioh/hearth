@@ -1,6 +1,6 @@
 import { GIB } from "@/resources";
 import type { FicheDetail, FicheQuestion, FicheSetting, FicheTheme } from "./catalog";
-import { TERRARIA_SETTINGS, TERRARIA_THEMES } from "./simulated-terraria-settings";
+import { TERRARIA_DIGEST, TERRARIA_SETTINGS, TERRARIA_THEMES } from "./simulated-terraria-settings";
 
 /**
  * Les fiches du pont SIMULÉ (navigateur de développement, Vitest, Playwright). Jamais livré (derrière
@@ -14,7 +14,6 @@ import { TERRARIA_SETTINGS, TERRARIA_THEMES } from "./simulated-terraria-setting
  *   Elle sert à prouver que l'écran n'a aucune règle propre à un jeu.
  */
 
-const DIGEST_TERRARIA = "7c1f0d5a9e3b24c6a8d0f1e2b3a495867c1f0d5a9e3b24c6a8d0f1e2b3a49586";
 const DIGEST_RICH = "e4b2a1c3d5f60718293a4b5c6d7e8f90e4b2a1c3d5f60718293a4b5c6d7e8f90";
 
 function question(
@@ -53,7 +52,7 @@ export function terraria(): FicheDetail {
       status: "preview",
       installable: true,
     },
-    digest: DIGEST_TERRARIA,
+    digest: TERRARIA_DIGEST,
     image: { repository: "ryshe/terraria", tag: "vanilla-1.4.5.8", digest: null },
     ownerUid: 0,
     ownerGid: 0,

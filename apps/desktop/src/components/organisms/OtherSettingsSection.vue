@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, useId } from "vue";
 import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
 import HInput from "@/components/atoms/HInput.vue";
@@ -28,6 +28,7 @@ const emit = defineEmits<{
 }>();
 
 const confirming = ref<string | null>(null);
+const titleId = useId();
 
 function confirm() {
   if (confirming.value !== null) emit("remove", confirming.value);
@@ -36,8 +37,8 @@ function confirm() {
 </script>
 
 <template>
-  <section v-if="others.length > 0" class="others" aria-labelledby="others-title" data-others>
-    <h2 id="others-title" class="others__title">{{ t("gameSettings.othersTitle") }}</h2>
+  <section v-if="others.length > 0" class="others" :aria-labelledby="titleId" data-others>
+    <h2 :id="titleId" class="others__title">{{ t("gameSettings.othersTitle") }}</h2>
     <ul class="others__list">
       <li v-for="other in others" :key="other.key" class="others__item" :data-other="other.key">
         <div class="others__head">

@@ -12,7 +12,7 @@ import {
   useDeployTestClock,
 } from "@/test/deploy";
 
-// L'onglet « Réglages » d'un service de jeu (HRT-109, BR-FICHE-037 à 053) sur le pont simulé, dont l'agent d'essai juge
+// L'onglet « Réglages » d'un service de jeu (HRT-109, BR-FICHE-037, 040 à 049, 051 à 054) sur le pont simulé, dont l'agent d'essai juge
 // comme le vrai. Terraria a la forme réelle d'une fiche : 32 réglages, 7 thèmes. Les valeurs voulues, l'état du fichier et
 // les refus viennent de l'agent ; les libellés, bornes et choix de la fiche.
 useDeployTestClock();
@@ -75,11 +75,44 @@ describe("l'onglet", () => {
     wrapper.unmount();
   });
 
-  it("n'est pas proposé pour un service ordinaire", async () => {
-    const { wrapper } = await boot(setup(), "/servers/forge/services?service=h_db");
+  it("est proposé dès que l'agent annonce les réglages de jeu, et dit « pas de réglages » d'un service ordinaire", async () => {
+    const { wrapper } = await boot(setup(), "/servers/forge/services?service=h_db&onglet=reglages");
     await settle();
-    expect(wrapper.findAll("[role=tab]").map((tab) => tab.text())).toEqual(["Détail", "Journaux"]);
+    // La liste ne dit pas qu'un service vient d'une fiche : la vue n'est lue qu'à l'ouverture de l'onglet.
+    expect(wrapper.findAll("[role=tab]").map((tab) => tab.text())).toEqual([
+      "Détail",
+      "Réglages",
+      "Journaux",
+    ]);
+    expect(wrapper.get("[data-settings-absent]").text()).toContain(
+      "Ce service n'a pas de réglages de jeu.",
+    );
     wrapper.unmount();
+  });
+
+  it("n'existe pas pour un agent qui n'annonce pas les réglages de jeu, ni pour un service adopté", async () => {
+    const { wrapper } = await boot((bridge) => {
+      setup()(bridge);
+      bridge.accounts.setRightsKnown("forge", false);
+    });
+    await settle();
+    expect(wrapper.findAll("[role=tab]").map((tab) => tab.text())).not.toContain("Réglages");
+    wrapper.unmount();
+    const adopted = await boot((bridge) => {
+      bridge.services.seed("forge", [
+        {
+          key: "c_adopte",
+          name: "ancien",
+          origin: "hearth",
+          adopted: { by: "marie", at: "2026-10-13T08:00:00Z" },
+        },
+      ]);
+    }, "/servers/forge/services?service=c_adopte");
+    await settle();
+    expect(adopted.wrapper.findAll("[role=tab]").map((tab) => tab.text())).not.toContain(
+      "Réglages",
+    );
+    adopted.wrapper.unmount();
   });
 });
 

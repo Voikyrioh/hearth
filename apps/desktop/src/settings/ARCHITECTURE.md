@@ -1,6 +1,6 @@
 # Architecture — apps/desktop/src/settings
 
-L'onglet « Réglages » d'un serveur de jeu et « Voir tous les réglages » de l'installation (HRT-109, ADR-0051, `BR-FICHE-037` à `054`). Règles PURES, sans E/S, sans Vue ni Pinia. **Aucune règle propre à un jeu** : libellés, aides, bornes, choix, thèmes, valeurs proposées sont ceux de la fiche (`GET /catalog/{id}`, champs `themes` et `settings`) ; les valeurs voulues, l'état du fichier, les écarts et les effets sont ceux de l'agent (`GET /services/{key}/settings`). Une fiche de plus ne demande aucun code client. L'état (changements en cours, mots de passe compris) vit en mémoire dans `composables/useGameSettings.ts`, jamais dans un magasin sérialisé.
+L'onglet « Réglages » d'un serveur de jeu et « Voir tous les réglages » de l'installation (HRT-109, ADR-0051, `BR-FICHE-037`, `040` à `049`, `051` à `054`). Règles PURES, sans E/S, sans Vue ni Pinia. **Aucune règle propre à un jeu** : libellés, aides, bornes, choix, thèmes, valeurs proposées sont ceux de la fiche (`GET /catalog/{id}`, champs `themes` et `settings`) ; les valeurs voulues, l'état du fichier, les écarts et les effets sont ceux de l'agent (`GET /services/{key}/settings`). Une fiche de plus ne demande aucun code client. L'état (changements en cours, mots de passe compris) vit en mémoire dans `composables/useGameSettings.ts`, jamais dans un magasin sérialisé.
 
 ```
 settings/

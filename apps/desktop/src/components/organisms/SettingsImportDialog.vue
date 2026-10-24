@@ -8,7 +8,7 @@ import HTextarea from "@/components/atoms/HTextarea.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import type { ActReport } from "@/composables/useReauth";
 import { t } from "@/i18n";
-import type { AnalyzeOutcome, ImportAnalysis, SaveRefusal, SaveSettingsRequest } from "@/link";
+import type { AnalyzeOutcome, ImportAnalysis, SaveSettingsRequest } from "@/link";
 import {
   type ImportRow,
   importChanges,
@@ -16,7 +16,7 @@ import {
   toImportRequest,
   undoneLabels,
 } from "@/settings/importing";
-import { importStateText, saveRefusalText, valueText } from "@/settings/messages";
+import { importStateText, isSaveRefusal, saveRefusalText, valueText } from "@/settings/messages";
 import { isSecret, type SettingModel } from "@/settings/model";
 import AdminActDialog from "./AdminActDialog.vue";
 
@@ -139,7 +139,7 @@ async function perform(adminPassword: string | null): Promise<ActReport> {
 }
 
 function refusalText(refusal: { kind: string; retry_after_s?: number }): string | undefined {
-  return saveRefusalText(refusal as SaveRefusal, props.labelOf);
+  return isSaveRefusal(refusal) ? saveRefusalText(refusal, props.labelOf) : undefined;
 }
 </script>
 

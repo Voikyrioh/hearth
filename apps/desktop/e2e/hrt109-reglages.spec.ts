@@ -29,7 +29,7 @@ type Sim = {
   gestures: Array<{ key: string; gesture: string }>;
 };
 
-const sim = <T>(page: Page, run: (sim: Sim, arg?: any) => T, arg?: unknown) =>
+const sim = <T>(page: Page, run: (sim: Sim, arg?: unknown) => T, arg?: unknown) =>
   page.evaluate(
     ([source, value]) => {
       const bridge = (window as unknown as { __hearthSim: Sim }).__hearthSim;
@@ -242,14 +242,16 @@ test("le fichier brut avertit, et ce qui attend la console est nommé", async ({
   await shoot(page.locator("[data-console-wait]"), page, "reglages-console");
 });
 
-test("un service ordinaire n'a pas l'onglet Réglages", async ({ page }) => {
+test("un service qui n'est pas né d'une fiche dit « pas de réglages de jeu » à l'ouverture de l'onglet", async ({
+  page,
+}) => {
   await open(page);
   await page.evaluate(() => {
-    window.location.hash = "#/servers/forge/services?service=h_robot";
+    window.location.hash = "#/servers/forge/services?service=h_robot&onglet=reglages";
   });
-  await expect(page.locator("[data-service-detail]")).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Journaux" })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "Réglages" })).toHaveCount(0);
+  await expect(page.locator("[data-settings-absent]")).toContainText(
+    "Ce service n'a pas de réglages de jeu.",
+  );
 });
 
 test("« Voir tous les réglages » dans l'installation : replié, déplié dans la page, compté au récapitulatif", async ({

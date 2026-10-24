@@ -276,7 +276,11 @@ export class SimulatedGameSettings {
     return { kind: "found", view };
   }
 
-  /** Lit un texte collé comme l'agent : un fichier de lignes `nom=valeur`, rien n'est écrit. */
+  /**
+   * Lit un texte collé comme l'agent (`analyze_import`) : un fichier de lignes `nom=valeur`, rien n'est écrit. UNE ligne
+   * par réglage de la fiche, dans l'ordre de la fiche, la dernière valeur d'une clé répétée l'emporte ; un réglage imposé a
+   * toujours sa ligne ; `unknown` compte des clés DISTINCTES que la fiche ne connaît pas, `duplicates` des clés répétées.
+   */
   analyze(serverId: string, key: string, text: string): AnalyzeOutcome {
     this.analyzed.push(text);
     const held = this.held.get(this.id(serverId, key));
@@ -285,41 +289,41 @@ export class SimulatedGameSettings {
     const parsed = this.parseText(text);
     if (parsed === null)
       return { kind: "unreadable", reason: "no_separator", line: this.badLine(text) };
-    const lines: ImportLine[] = [];
-    const seen = new Set<string>();
-    let duplicates = 0;
-    let unknown = 0;
-    const imposedUndone: string[] = [];
+    const last = new Map<string, string>();
+    const count = new Map<string, number>();
     for (const [name, value] of parsed.entries) {
-      const setting = detail.settings.find((item) => item.key === name);
-      if (!setting) {
-        unknown += 1;
+      last.set(name, value);
+      count.set(name, (count.get(name) ?? 0) + 1);
+    }
+    const file = this.fileMap(held);
+    const lines: ImportLine[] = [];
+    const imposedUndone: string[] = [];
+    for (const setting of detail.settings) {
+      if (this.catalogChannel(setting) !== "config") continue;
+      const question = setting.question;
+      const value = last.get(setting.key);
+      const secret = question.secret;
+      const base = { id: question.id, secret, pasted: secret ? null : (value ?? null) };
+      if (setting.imposedWhy !== null) {
+        if (value !== file.get(setting.key)) imposedUndone.push(question.id);
+        lines.push({ ...base, state: "imposed", reason: null });
         continue;
       }
-      const question = setting.question;
-      if (seen.has(question.id)) {
-        duplicates += 1;
-      }
-      seen.add(question.id);
-      const secret = question.secret;
-      const base = { id: question.id, secret, pasted: secret ? null : value };
-      if (setting.imposedWhy !== null) {
-        imposedUndone.push(question.id);
-        lines.push({ ...base, state: "imposed", reason: null });
-      } else if (question.frozenAfterCreation) {
+      if (value === undefined) continue;
+      if (question.frozenAfterCreation) {
         lines.push({ ...base, state: "frozen", reason: null });
-      } else {
-        const refusal = judgeValue(question, value, setting.list);
-        if (refusal) lines.push({ ...base, state: "rejected", reason: refusal.reason });
-        else if (!secret && held.wanted.get(question.id) === value) {
-          lines.push({ ...base, state: "same", reason: null });
-        } else lines.push({ ...base, state: "take", reason: null });
+        continue;
       }
+      const refusal = judgeValue(question, value, setting.list);
+      if (refusal) lines.push({ ...base, state: "rejected", reason: refusal.reason });
+      else if (!secret && held.wanted.get(question.id) === value) {
+        lines.push({ ...base, state: "same", reason: null });
+      } else lines.push({ ...base, state: "take", reason: null });
     }
-    return {
-      kind: "read",
-      analysis: { lines, unknown, duplicates, imposedUndone },
-    };
+    const known = this.knownKeys(detail);
+    const unknown = [...count.keys()].filter((name) => !known.has(name)).length;
+    const duplicates = [...count.values()].filter((n) => n > 1).length;
+    return { kind: "read", analysis: { lines, unknown, duplicates, imposedUndone } };
   }
 
   private badLine(text: string): number | null {
@@ -343,8 +347,13 @@ export class SimulatedGameSettings {
   // ── L'enregistrement (`PUT /services/{key}/settings`) ────────────────────────────────────────
 
   /**
-   * Juge un enregistrement dans l'ordre de l'agent, tous les changements ou aucun, puis l'applique en retouchant le
-   * fichier sans le réécrire. Le droit, la confirmation et le moteur ont déjà été jugés par l'appelant.
+   * Juge un enregistrement DANS L'ORDRE de `GameSettings::save` (agent), tous les changements ou aucun, puis l'applique en
+   * retouchant le fichier sans le réécrire : révision ; chaque changement (inconnu, remise d'un secret, réglage reçu par
+   * argument, forme de l'action) ; recréation ; puis, par réglage en écart, le choix (« Garder la valeur du fichier » est
+   * IGNORÉ pour un réglage que la même demande change : sa valeur gagne) ; les écarts sans choix donnent
+   * `SETTINGS_FILE_CHANGED` avant de juger les valeurs ; sinon imposé, figé, valeur ; ensuite l'empreinte du fichier,
+   * l'effet signé (contrôlé AVANT le retour « rien ne change ») et enfin l'écriture. Un changement qui ne change rien ne
+   * compte pas. Le droit, la confirmation et le moteur ont déjà été jugés par l'appelant.
    */
   save(serverId: string, key: string, request: SaveSettingsRequest, by: string): SaveOutcome {
     this.received.push({ serverId, key, request: structuredClone(request) });
@@ -358,39 +367,11 @@ export class SimulatedGameSettings {
     }
     const text = held.lines.join("\n");
     const stamp = stampOf(held.fileMissing ? "" : text);
-    if (request.fileStamp !== stamp) return refused({ kind: "file_changed", ids: [] });
-    // Les écarts attendent un choix, réglage par réglage.
-    const current = this.read(serverId, key);
-    const drifts = current.kind === "found" ? current.view.drifts : [];
-    const missing = drifts
-      .filter((drift) => !request.driftChoices.some((choice) => choice.id === drift.id))
-      .map((drift) => drift.id);
-    if (missing.length > 0) return refused({ kind: "file_changed", ids: missing });
-    const textRead = request.importText === null ? null : this.parseText(request.importText);
-    if (request.importText !== null && textRead === null) {
-      return refused({
-        kind: "file_unreadable",
-        reason: "no_separator",
-        line: this.badLine(request.importText),
-      });
-    }
+    const parsedText = request.importText === null ? null : this.parseText(request.importText);
 
-    // « Garder la valeur du fichier » est refusé quand le réglage n'accepte pas cette valeur (jugé avec le reste).
-    for (const choice of request.driftChoices) {
-      const drift = drifts.find((item) => item.id === choice.id);
-      if (choice.choice === "keep_file" && drift && !drift.fileValid) {
-        return refused({
-          kind: "setting_refused",
-          id: choice.id,
-          reason: "check",
-          character: null,
-        });
-      }
-    }
-    // Tous les changements sont jugés d'abord.
-    const next = new Map(held.wanted);
-    const nextSecrets = new Set(held.secrets);
-    const touched: FicheSetting[] = [];
+    // 1. Chaque changement vers son réglage, dans l'ordre de la demande.
+    const asked: { setting: FicheSetting; wanted: Wanted }[] = [];
+    const recreate: string[] = [];
     for (const change of request.changes) {
       const setting = detail.settings.find((item) => item.question.id === change.id);
       if (!setting) {
@@ -402,97 +383,158 @@ export class SimulatedGameSettings {
         });
       }
       const question = setting.question;
-      const fail = (reason: string, character: string | null = null) =>
-        refused({ kind: "setting_refused", id: question.id, reason, character });
-      if (setting.imposedWhy !== null) return fail("imposed");
-      if (question.frozenAfterCreation) return fail("frozen");
-      let value: string | null = null;
-      if (change.action === "set") value = change.value ?? "";
-      if (change.action === "from_import") {
-        const pasted = textRead?.entries.filter(([name]) => name === setting.key).at(-1);
-        if (!pasted) return fail("unknown_id");
-        value = pasted[1];
+      if (request.origin === "reset" && question.secret) {
+        return refused({
+          kind: "setting_refused",
+          id: question.id,
+          reason: "secret",
+          character: null,
+        });
       }
-      if (change.action === "reset" && question.secret) return fail("secret");
-      if (value !== null) {
-        const refusal = judgeValue(question, value, setting.list);
-        if (refusal) return fail(refusal.reason, refusal.character);
+      if (this.effectOf(setting) === "recreate") {
+        recreate.push(question.id);
+        continue;
       }
-      touched.push(setting);
-      if (question.secret) {
-        if (value !== null) {
-          if (value === "") nextSecrets.delete(question.id);
-          else nextSecrets.add(question.id);
-        } else nextSecrets.delete(question.id);
-      } else if (value !== null) next.set(question.id, value);
-      else if (change.action === "reset" && question.proposed !== null) {
-        next.set(question.id, question.proposed);
-      } else next.delete(question.id);
+      let wanted: Wanted;
+      if (change.action === "set") {
+        if (change.value === null) return refused({ kind: "invalid" });
+        wanted = { action: "set", value: change.value };
+      } else if (change.action === "unset") wanted = { action: "unset" };
+      else if (change.action === "reset") wanted = { action: "reset" };
+      else {
+        if (request.importText === null) return refused({ kind: "invalid" });
+        if (parsedText === null) {
+          return refused({
+            kind: "file_unreadable",
+            reason: "no_separator",
+            line: this.badLine(request.importText),
+          });
+        }
+        const pasted = parsedText.entries.filter(([name]) => name === setting.key).at(-1);
+        if (!pasted) return refused({ kind: "invalid" });
+        wanted = { action: "set", value: pasted[1] };
+      }
+      asked.push({ setting, wanted });
     }
-    // Un réglage reçu par argument demande de recréer le service (HRT-87 pas livré).
-    const recreate = touched.filter((setting) => this.effectOf(setting) === "recreate");
-    if (recreate.length > 0) {
-      return refused({
-        kind: "recreate_not_available",
-        ids: recreate.map((setting) => setting.question.id),
-      });
+    if (recreate.length > 0) return refused({ kind: "recreate_not_available", ids: recreate });
+    for (const other of request.others) {
+      if (!other.remove && other.value === null) return refused({ kind: "invalid" });
     }
-    // L'effet signé est recalculé : le fichier est retouché (redémarrage) dès qu'un réglage, un réglage inconnu ou un
-    // écart rendu à Hearth change quelque chose ; garder la valeur du fichier ne touche à rien.
-    const keepMine = request.driftChoices.some((choice) => choice.choice === "keep_mine");
-    const effect: SettingEffect =
-      touched.length + request.others.length > 0 || keepMine ? "restart" : "none";
+
+    // 2. Les écarts : un choix par réglage que la demande ne change pas.
+    const current = this.read(serverId, key);
+    const drifts = (current.kind === "found" ? current.view.drifts : []).filter(
+      (drift) => !asked.some((item) => item.setting.question.id === drift.id),
+    );
+    const next = new Map(held.wanted);
+    const adopted: string[] = [];
+    const mine: [FicheSetting, string | null][] = [];
+    const unresolved: string[] = [];
+    for (const drift of drifts) {
+      const setting = detail.settings.find((item) => item.question.id === drift.id);
+      if (!setting) continue;
+      const choice = request.driftChoices.find((item) => item.id === drift.id);
+      if (choice?.choice === "keep_file") {
+        const refusal =
+          drift.file === null ? null : judgeValue(setting.question, drift.file, setting.list);
+        if (refusal) {
+          return refused({
+            kind: "setting_refused",
+            id: drift.id,
+            reason: refusal.reason,
+            character: refusal.character,
+          });
+        }
+        if (drift.file === null) next.delete(drift.id);
+        else next.set(drift.id, drift.file);
+        adopted.push(drift.id);
+      } else if (choice?.choice === "keep_mine") mine.push([setting, drift.hearth]);
+      else unresolved.push(drift.id);
+    }
+
+    // 3. Les valeurs, seulement si aucun écart n'attend de choix (l'agent rend `SETTINGS_FILE_CHANGED` avant de juger).
+    const nextSecrets = new Set(held.secrets);
+    const changed: FicheSetting[] = [];
+    const edits: [FicheSetting, string | null][] = [];
+    if (unresolved.length === 0) {
+      for (const { setting, wanted } of asked) {
+        const question = setting.question;
+        const refuse = (reason: string, character: string | null = null) =>
+          refused({ kind: "setting_refused", id: question.id, reason, character });
+        if (setting.imposedWhy !== null) return refuse("imposed");
+        if (question.frozenAfterCreation) return refuse("frozen");
+        let value: string | null;
+        if (wanted.action === "set") {
+          const refusal = judgeValue(question, wanted.value, setting.list);
+          if (refusal) return refuse(refusal.reason, refusal.character);
+          value = wanted.value;
+        } else if (wanted.action === "reset") {
+          value = question.secret ? null : question.proposed;
+        } else value = null;
+        const before = question.secret
+          ? held.secrets.has(question.id)
+            ? "set"
+            : null
+          : (next.get(question.id) ?? null);
+        const differs = question.secret ? value !== null || before !== null : before !== value;
+        if (question.secret) {
+          if (value !== null) nextSecrets.add(question.id);
+          else nextSecrets.delete(question.id);
+        } else if (value !== null) next.set(question.id, value);
+        else next.delete(question.id);
+        if (!differs) continue;
+        changed.push(setting);
+        edits.push([setting, value]);
+      }
+    }
+
+    // 4. Le fichier a bougé ou un écart attend un choix : rien n'est écrit.
+    if (unresolved.length > 0 || request.fileStamp !== stamp) {
+      return refused({ kind: "file_changed", ids: unresolved });
+    }
+
+    // 5. Ce qu'il faut réécrire dans le fichier : seulement ce qui diffère de ce qu'il porte déjà.
+    const observed = this.fileMap(held);
+    const all: [string, string | null][] = [];
+    for (const [setting, value] of mine) all.push([setting.key, value]);
+    for (const [setting, value] of edits) {
+      if (this.catalogChannel(setting) === "config") all.push([setting.key, value]);
+    }
+    const known = this.knownKeys(detail);
+    for (const other of request.others) {
+      if (known.has(other.key)) return refused({ kind: "invalid" });
+      all.push([other.key, other.remove ? null : other.value]);
+    }
+    const toWrite = all.filter(([name, value]) => (observed.get(name) ?? null) !== value);
+
+    // 6. L'effet signé : le plus lourd des changements, ou un redémarrage quand seul le fichier est retouché.
+    const effect: SettingEffect = changed.length > 0 || toWrite.length > 0 ? "restart" : "none";
     if (request.effect !== effect) {
       return refused({ kind: "conflict", by: null, effectMismatch: true });
     }
-
-    // Les choix d'écart : garder le fichier reprend sa valeur, remettre la mienne la réécrit.
-    const adopted: string[] = [];
-    for (const choice of request.driftChoices) {
-      const drift = drifts.find((item) => item.id === choice.id);
-      if (!drift || choice.choice !== "keep_file") continue;
-      if (drift.file === null) next.delete(choice.id);
-      else next.set(choice.id, drift.file);
-      adopted.push(choice.id);
+    if (changed.length === 0 && adopted.length === 0 && toWrite.length === 0) {
+      return {
+        kind: "saved",
+        rev: held.rev,
+        effect: "none",
+        fileWritten: false,
+        changed: 0,
+        adopted: [],
+      };
     }
 
-    // Le fichier est retouché sur les seules valeurs demandées : commentaires et lignes inconnues gardent leurs octets.
+    // 7. Écrire : le fichier est retouché sur les seules lignes demandées, commentaires et lignes inconnues intacts.
     const lines = [...held.lines];
-    const write = (setting: FicheSetting, value: string | null) => {
-      if (this.catalogChannel(setting) !== "config") return;
-      const at = lines.findIndex((line) => parseLine(line)?.key === setting.key);
+    for (const [name, value] of toWrite) {
+      const at = lines.findIndex((line) => parseLine(line)?.key === name);
       if (value === null) {
         if (at >= 0) lines.splice(at, 1);
-      } else if (at >= 0) lines[at] = `${setting.key}=${value}`;
-      else lines.push(`${setting.key}=${value}`);
-    };
-    for (const setting of touched) {
-      const question = setting.question;
-      if (question.secret) {
-        const change = request.changes.find((item) => item.id === question.id);
-        const value =
-          change?.action === "from_import"
-            ? (textRead?.entries.filter(([name]) => name === setting.key).at(-1)?.[1] ?? null)
-            : (change?.value ?? null);
-        write(setting, nextSecrets.has(question.id) ? value : null);
-      } else {
-        write(setting, next.get(question.id) ?? null);
-      }
+      } else if (at >= 0) lines[at] = `${name}=${value}`;
+      else lines.push(`${name}=${value}`);
     }
-    for (const choice of request.driftChoices) {
-      const setting = detail.settings.find((item) => item.question.id === choice.id);
-      if (setting && choice.choice === "keep_mine") write(setting, next.get(choice.id) ?? null);
-    }
-    for (const other of request.others) {
-      const at = lines.findIndex((line) => parseLine(line)?.key === other.key);
-      if (at < 0) continue;
-      if (other.remove) lines.splice(at, 1);
-      else lines[at] = `${other.key}=${other.value ?? ""}`;
-    }
-    const written = lines.join("\n") !== held.lines.join("\n");
     held.wanted = next;
     held.secrets = nextSecrets;
-    if (written) held.lines = lines;
+    if (toWrite.length > 0) held.lines = lines;
     held.fileMissing = false;
     held.writtenStamp = stampOf(held.lines.join("\n"));
     held.rev += 1;
@@ -501,9 +543,12 @@ export class SimulatedGameSettings {
       kind: "saved",
       rev: held.rev,
       effect,
-      fileWritten: written,
-      changed: touched.length + request.others.length,
+      fileWritten: toWrite.length > 0,
+      changed: changed.length + request.others.length,
       adopted,
     };
   }
 }
+
+/** Ce qu'un changement demande, une fois décodé (`set` porte sa valeur, y compris reprise d'un texte collé). */
+type Wanted = { action: "set"; value: string } | { action: "unset" } | { action: "reset" };

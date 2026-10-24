@@ -1,4 +1,5 @@
 import type { FicheDetail, FicheQuestion, FicheSetting } from "@/link";
+import { differsFromProposed } from "@/settings/modified";
 
 /**
  * Les questions d'installation d'une fiche (HRT-102, BR-FICHE-016, BR-FICHE-017, BR-FICHE-038), des fonctions pures sans
@@ -178,6 +179,11 @@ export function changedExtras(
   return extras.filter((setting) => {
     const value = answers[setting.question.id];
     if (value === undefined) return false;
-    return value !== (setting.question.secret ? "" : (setting.question.proposed ?? ""));
+    const { secret, proposed } = setting.question;
+    // Un mot de passe vidé n'est pas écrit ; toute autre valeur posée l'est, vide comprise (la même règle que l'onglet).
+    return differsFromProposed(secret ? null : proposed, secret, {
+      written: !secret || value !== "",
+      value,
+    });
   });
 }

@@ -1,6 +1,7 @@
 import { type AnswerIssue, answerIssue } from "@/fiche/answers";
 import type { FicheSetting, SaveSettingsRequest, SettingEffect } from "@/link";
 import { isSecret, proposedOf, type SettingModel } from "./model";
+import { differsFromProposed } from "./modified";
 
 /**
  * Les changements en cours d'un réglage (HRT-109, BR-FICHE-041, BR-FICHE-044, BR-FICHE-048), des fonctions pures sans E/S.
@@ -67,11 +68,7 @@ export function controlValue(model: SettingModel, edit: Edit | undefined): strin
  * écrit » est la valeur proposée : tout réglage écrit est modifié. Un secret défini est modifié.
  */
 export function isModified(model: SettingModel, edit: Edit | undefined): boolean {
-  const effective = effectiveOf(model, edit);
-  if (isSecret(model.setting)) return effective.written;
-  const proposed = proposedOf(model);
-  if (proposed === null) return effective.written;
-  return !(effective.written && effective.value === proposed);
+  return differsFromProposed(proposedOf(model), isSecret(model.setting), effectiveOf(model, edit));
 }
 
 /**
@@ -83,18 +80,14 @@ export function resettable(model: SettingModel, edit: Edit | undefined): boolean
   return isModified(model, edit);
 }
 
-/** Le contrôle du réglage est en lecture seule. */
-export function readOnly(model: SettingModel): boolean {
-  return model.lock !== null;
-}
-
 /** La phrase du défaut d'une valeur à saisir : `null` si elle est permise (le serveur reste l'arbitre). */
 export function valueIssue(
   setting: FicheSetting,
   value: string,
 ): AnswerIssue | { code: "list" } | null {
-  if (setting.question.kind === "id_list")
-    return listIssue(setting, value) ? { code: "list" } : null;
+  if (setting.question.kind === "id_list") {
+    return listIssue(setting, listText(setting, value)) ? { code: "list" } : null;
+  }
   return answerIssue(setting.question, value);
 }
 
@@ -156,21 +149,6 @@ export function pendingEdits(models: readonly SettingModel[], edits: Edits): Set
     const after = effectiveOf(model, edit);
     return before.written !== after.written || before.value !== after.value;
   });
-}
-
-/** Le défaut de forme de chaque changement posé, par identifiant ; un réglage sans défaut n'y figure pas. */
-export function editIssues(
-  models: readonly SettingModel[],
-  edits: Edits,
-): Map<string, AnswerIssue | { code: "list" }> {
-  const found = new Map<string, AnswerIssue | { code: "list" }>();
-  for (const model of models) {
-    const edit = edits[model.id];
-    if (edit?.action !== "set" || model.lock !== null) continue;
-    const issue = valueIssue(model.setting, edit.value);
-    if (issue) found.set(model.id, issue);
-  }
-  return found;
 }
 
 const WEIGHT: Record<SettingEffect, number> = { none: 0, restart: 1, unknown: 1, recreate: 2 };

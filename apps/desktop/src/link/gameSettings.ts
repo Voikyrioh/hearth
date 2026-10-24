@@ -6,7 +6,7 @@ import type {
 } from "@/bindings";
 
 /**
- * Les réglages d'un serveur de jeu (HRT-109, ADR-0051, `BR-FICHE-037` à `053`) : types de l'interface, côté pont. Aucune
+ * Les réglages d'un serveur de jeu (HRT-109, ADR-0051, `BR-FICHE-037`, `040` à `049`, `051` à `054`) : types de l'interface, côté pont. Aucune
  * règle ici et aucune valeur inventée : les libellés, bornes et choix viennent de la fiche (`FicheSetting`), les valeurs
  * voulues et l'état du fichier de l'agent (`GameSettingsView`).
  *

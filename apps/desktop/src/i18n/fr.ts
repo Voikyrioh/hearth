@@ -1753,11 +1753,9 @@ export const fr = {
     },
   },
   // L'onglet « Réglages » d'un serveur de jeu et « Voir tous les réglages » de l'installation (HRT-109,
-  // BR-FICHE-037 à 053). Textes de la spec `installer-serveur-de-jeu` et du design (sections 16 et 17), mis au
+  // BR-FICHE-037, 040 à 049, 051 à 054). Textes de la spec `installer-serveur-de-jeu` et du design (sections 16 et 17), mis au
   // vouvoiement ; les libellés, aides, bornes et choix d'un réglage viennent de la fiche, jamais d'ici.
   gameSettings: {
-    tab: "Réglages",
-    region: "Réglages du jeu",
     loading: "Lecture des réglages en cours.",
     readFailed: "Impossible de lire les réglages de ce service.",
     absentTitle: "Ce service n'a pas de réglages de jeu.",
@@ -1787,7 +1785,6 @@ export const fr = {
     tagModified: "Modifié",
     tagFrozen: "Figé",
     tagImposed: "Imposé par la fiche",
-    tagNew: "Nouveau dans {version}",
     technicalName: "Nom dans le jeu : {key}",
     gameDefault: "Défaut du jeu : {value}",
     gameDefaultEmpty: "Défaut du jeu : vide",
@@ -1799,14 +1796,11 @@ export const fr = {
     secretSet: "Défini. Saisissez une nouvelle valeur pour le changer.",
     secretNotSet: "Non défini.",
     secretRemove: "Retirer",
-    secretHint: "Il est masqué ici et n'est jamais écrit dans le journal d'activité.",
     resetOne: "Remettre la valeur proposée",
     resetOneAria: "Remettre {label} à la valeur proposée",
     resetNoProposal: "Remettre le réglage à son défaut",
     resetNoProposalAria: "Remettre {label} à son défaut",
     imposedWhy: "Imposé par la fiche : {why}",
-    frozenSentence:
-      "Ce réglage est figé dans le monde : le changer demande de créer un autre monde.",
     recreateSoon: "Ce réglage se change en recréant le service. Cela arrive bientôt.",
     goneSentence: "Ce réglage n'existe plus dans la version {version} : le jeu l'ignore.",
     goneSentenceBare: "Ce réglage n'existe plus dans cette version du jeu : le jeu l'ignore.",
@@ -1864,7 +1858,6 @@ export const fr = {
     import: "Importer des réglages",
     resetAll: "Tout remettre aux valeurs proposées",
     raw: "Modifier le fichier brut",
-    more: "Plus",
     footerChanges: "{n} changement(s) à enregistrer.",
     footerClean: "Aucun changement à enregistrer.",
     footerFixIssues: "Corrigez les réglages signalés pour enregistrer.",
@@ -2021,8 +2014,6 @@ export const fr = {
     installChanged: "{n} réglage(s) différent(s) des valeurs proposées.",
     installImport:
       "L'import de réglages se fait une fois le service installé, dans son onglet Réglages.",
-    installFrozen: "Ne pourra plus être changé après la création du monde.",
-    installNone: "Cette fiche ne décrit pas d'autres réglages.",
     sheetCount:
       "{n} réglages, dont {m} demandés à l'installation. Les autres se règlent ensuite dans l'onglet Réglages.",
     sheetThemes: "Rangés par thèmes : {list}.",

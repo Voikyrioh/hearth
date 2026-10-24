@@ -4,6 +4,7 @@ import { type ActReport, useReauth } from "@/composables/useReauth";
 import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
 import { alreadyText, type Gesture, refusalText } from "@/services/lifecycle";
+import { useGameSettingsPendingStore } from "@/stores/gameSettingsPending";
 import { useToastsStore } from "@/stores/toasts";
 
 /** Le geste en attente de confirmation : le service visé (par sa clé stable) et ce que l'on veut en faire. */
@@ -30,6 +31,7 @@ export function useServiceLifecycle(
   services: () => readonly ServiceInfo[],
 ) {
   const toasts = useToastsStore();
+  const waitingSettings = useGameSettingsPendingStore();
   const actions = useLifecycleActions(serverId);
   /** Le dernier geste demandé : la fenêtre garde son sujet le temps de se fermer. */
   const pending = ref<PendingGesture | null>(null);
@@ -62,11 +64,19 @@ export function useServiceLifecycle(
     }
   }
 
+  /** Un démarrage ou un redémarrage accepté applique les réglages enregistrés : le repère « À appliquer » s'efface (HRT-109). */
+  function launched(report: ActReport, service: ServiceInfo, gesture: Gesture): void {
+    if (report.kind === "done" && gesture !== "stop") {
+      waitingSettings.clear(serverId(), service.key);
+    }
+  }
+
   /** Lance l'acte (appelé par la fenêtre, avec le mot de passe saisi ou `null` sous l'élévation). */
   async function perform(adminPassword: string | null): Promise<ActReport> {
     const target = pending.value;
     if (!target || !open.value) return { kind: "failed" };
     const report = await actions.perform(target.service.key, target.gesture, adminPassword);
+    launched(report, target.service, target.gesture);
     return settle(report, target.service);
   }
 
@@ -92,7 +102,9 @@ export function useServiceLifecycle(
         show(service, gesture);
         return;
       }
-      const report = settle(await actions.perform(service.key, "start", null), service);
+      const sent = await actions.perform(service.key, "start", null);
+      launched(sent, service, "start");
+      const report = settle(sent, service);
       // L'état de confiance a changé entre la lecture et l'ordre (normal vers alerte, ou délai fermé) : la fenêtre
       // s'ouvre avec le champ, le geste n'est pas perdu.
       if (report.kind === "refused" && report.refusal?.kind === "password_required") {

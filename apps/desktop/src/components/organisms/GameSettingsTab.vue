@@ -20,7 +20,7 @@ import RawFileDialog from "./RawFileDialog.vue";
 import SettingsImportDialog from "./SettingsImportDialog.vue";
 import SettingsResetDialog from "./SettingsResetDialog.vue";
 
-// L'onglet « Réglages » d'un service de jeu (HRT-109, BR-FICHE-037 à 053). Tous les réglages utiles du jeu, rangés par
+// L'onglet « Réglages » d'un service de jeu (HRT-109, BR-FICHE-037, 040 à 049, 051 à 054). Tous les réglages utiles du jeu, rangés par
 // thèmes en mots simples : le libellé, l'explication, le défaut du jeu, la valeur proposée, la mention de ce qui se passe
 // si on le change. Les libellés, aides, bornes et choix sont ceux de la FICHE (écart 14.26) ; les valeurs voulues et l'état
 // du fichier sont ceux de l'AGENT, qui juge chaque changement (tous ou aucun) et a le dernier mot. Aucune règle propre à
@@ -95,9 +95,7 @@ async function performSave(adminPassword: string | null): Promise<ActReport> {
 }
 
 function openResetTheme(themeId: string) {
-  const theme = themes.value.find((item) => item.id === themeId);
   resetting.value = { title: t("gameSettings.resetThemeTitle"), themeId };
-  void theme;
 }
 function openResetAll() {
   resetting.value = { title: t("gameSettings.resetAllTitle"), themeId: null };

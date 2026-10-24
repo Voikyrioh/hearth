@@ -30,6 +30,8 @@ const props = defineProps<{
    * alors dire « inchangé », pas « aucun mot de passe » ; les avertissements d'un champ vide ne s'appliquent pas.
    */
   secretKept?: boolean;
+  /** Ne pas dire « Ne pourra plus être changé après la création du monde » : l'appelant le dit déjà (onglet « Réglages »). */
+  hideFrozen?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -129,7 +131,7 @@ const pick = computed(() => props.question.kind === "choice" || props.question.k
       @blur="emit('blur')"
     />
     <p v-if="error && pick" class="field__error" role="alert">{{ error }}</p>
-    <p v-if="question.frozenAfterCreation" class="field__frozen" data-question-frozen>
+    <p v-if="question.frozenAfterCreation && hideFrozen !== true" class="field__frozen" data-question-frozen>
       <HIcon name="lock" size="sm" />
       {{ t("fiche.frozen") }}
     </p>

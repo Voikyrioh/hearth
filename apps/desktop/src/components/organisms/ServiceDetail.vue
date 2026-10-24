@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, useId, watch } from "vue";
+import { computed, nextTick, onMounted, ref, useId } from "vue";
 import { clip, safeText } from "@/audit/text";
 import BoundedText from "@/components/atoms/BoundedText.vue";
 import HButton from "@/components/atoms/HButton.vue";
@@ -26,7 +26,6 @@ import { imageLabel, loopBand, portLabel, stateLine } from "@/services/format";
 import { type Controls, controlsOf, type Gesture } from "@/services/lifecycle";
 import { busyText, pilotLock } from "@/services/pilot";
 import { canAct, type RightsGate } from "@/services/rights";
-import { useGameSettingsPresenceStore } from "@/stores/gameSettingsPresence";
 import { useServersStore } from "@/stores/servers";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import Callout from "../molecules/Callout.vue";
@@ -57,6 +56,8 @@ const props = defineProps<{
   focusTitle: boolean;
   /** L'onglet affiché (dans l'adresse : `&onglet=journaux` ou `&onglet=reglages`). */
   tab: "detail" | "settings" | "logs";
+  /** L'agent annonce `game-settings` (`ServiceRights.gameSettings`) : l'onglet « Réglages » peut exister. */
+  gameSettings: boolean;
   /** Dernier contact avec le serveur (pour « Vu il y a… » dans les journaux). */
   lastContactAt: number | null;
 }>();
@@ -108,27 +109,18 @@ const controls = computed<Controls | null>(() =>
 );
 const sameName = computed(() => (props.opened.kind === "gone" ? props.opened.sameName : null));
 
-// L'onglet « Réglages » (HRT-109, BR-FICHE-041, 054) : seulement pour un service créé par une fiche ; l'agent le dit (une
-// lecture qui répond « pas de réglages » pour un service ordinaire ou adopté), jamais l'interface qui le devinerait.
-const presence = useGameSettingsPresenceStore();
-const askSettings = computed(
+// L'onglet « Réglages » (HRT-109, BR-FICHE-041, 054) : l'agent annonce la capacité `game-settings` (lue avec le droit) et le
+// service est un service créé par Hearth, ni adopté ni en cours de déploiement. La liste des services ne dit pas qu'il
+// vient d'une fiche : la vue n'est lue qu'à l'OUVERTURE de l'onglet, qui dit « pas de réglages de jeu » (`NOT_A_GAME_SERVICE`)
+// pour un service déployé à la main. Un repère léger dans la liste attend HRT-197.
+const hasSettings = computed(
   () =>
-    props.connected &&
+    props.gameSettings &&
     canAct(props.gate) &&
     service.value !== null &&
     service.value.origin === "hearth" &&
     service.value.adopted === null &&
     service.value.state !== "deploying",
-);
-watch(
-  [askSettings, () => service.value?.key],
-  ([ask, key]) => {
-    if (ask && key) void presence.check(props.serverId, key);
-  },
-  { immediate: true },
-);
-const hasSettings = computed(
-  () => service.value !== null && presence.has(props.serverId, service.value.key) === true,
 );
 
 const tabs = computed(() => [

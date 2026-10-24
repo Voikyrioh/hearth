@@ -10,7 +10,7 @@ import { answerIssues, extraSettings, visibleQuestions } from "@/fiche/answers";
 import type { FicheDraft } from "@/fiche/draft";
 import { toInstallRequest } from "@/fiche/draft";
 import { diskVerdict, memoryNotices, minimumVerdicts, placement, tooSmall } from "@/fiche/fit";
-import { answerIssueText, ficheFormRefusal } from "@/fiche/messages";
+import { ficheFormRefusal } from "@/fiche/messages";
 import { proposedName } from "@/fiche/name";
 import {
   duplicateHostPorts,
@@ -22,8 +22,7 @@ import {
 } from "@/fiche/ports";
 import { type DeployCheckInput, type DeployRefusal, getLinkBridge, type ServiceInfo } from "@/link";
 import type { Resources } from "@/resources";
-import { listIssue, valueIssue } from "@/settings/edits";
-import { listIssueText } from "@/settings/messages";
+import { problemText } from "@/settings/messages";
 import { useFicheInstallStore } from "@/stores/ficheInstall";
 import { useServicesStore } from "@/stores/services";
 
@@ -101,17 +100,8 @@ export function useFicheInstall(
     for (const setting of extras.value) {
       const value = current.answers[setting.question.id];
       if (value === undefined) continue;
-      const issue = valueIssue(setting, value);
-      if (!issue) continue;
-      if (issue.code === "list") {
-        const bad = listIssue(setting, value);
-        if (bad) {
-          found.set(
-            setting.question.id,
-            listIssueText(bad, setting.list?.itemCharset ?? "unknown"),
-          );
-        }
-      } else found.set(setting.question.id, answerIssueText(issue));
+      const problem = problemText(setting, value);
+      if (problem) found.set(setting.question.id, problem);
     }
     return found;
   });
