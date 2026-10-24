@@ -28,6 +28,9 @@ use hearth_proto::api::accounts::{
     ChangeOwnPasswordRequest, ChangeRoleRequest, CreateAccountRequest, RoleName,
 };
 use hearth_proto::api::deploy::DeploySpec;
+use hearth_proto::api::game_settings::{
+    ChangeAction, DriftResolution, SaveOrigin, SaveSettingsRequest, SettingEffect,
+};
 use hearth_proto::api::reauth::{
     Reauth, ReauthMode, SetReauthRequest, lenient_reauth, reauth_refusal,
 };
@@ -81,6 +84,10 @@ enum Parsed {
     /// fonction que la liaison cliente) : le nom, `dépôt:version`, l'empreinte de la partie non secrète, le
     /// nombre de variables, la présence d'une commande. Le corps ne reste pas en mémoire ici.
     Deploy(Box<DeployAct>),
+    /// Enregistrer des réglages (HRT-108) : la révision de base, le nombre de changements, l'empreinte de leurs
+    /// identifiants, l'origine et l'effet sont signés (`AdminAct::game_settings_save`, la fonction de la liaison
+    /// cliente) ; jamais une valeur.
+    Settings(Box<SaveSettingsRequest>),
     /// Acte dont la cible est dans le chemin et dont aucun paramètre ne vient du corps.
     TargetOnly,
 }
@@ -152,11 +159,25 @@ impl Parsed {
                         _ => None,
                     })
             }
+            // Enregistrer des réglages : un mot que cette version ne connaît pas (origine, effet, geste, choix) rend le
+            // corps illisible, jamais un acte signé avec un repli (BR-COMPAT-001 point 5).
+            ActKind::GameSettingsSave => serde_json::from_slice::<SaveSettingsRequest>(bytes)
+                .ok()
+                .filter(|request| {
+                    request.origin != SaveOrigin::Unknown
+                        && request.effect != SettingEffect::Unknown
+                        && request
+                            .changes
+                            .iter()
+                            .all(|change| change.action != ChangeAction::Unknown)
+                        && request
+                            .drift_choices
+                            .iter()
+                            .all(|choice| choice.choice != DriftResolution::Unknown)
+                })
+                .map(|request| Self::Settings(Box::new(request))),
             // Déclarés pour les tranches suivantes : aucune route ne les porte, donc aucun corps à lire.
-            ActKind::ServiceDelete
-            | ActKind::BackupCreate
-            | ActKind::BackupDelete
-            | ActKind::GameSettingsSave => None,
+            ActKind::ServiceDelete | ActKind::BackupCreate | ActKind::BackupDelete => None,
         }
     }
 
@@ -207,6 +228,9 @@ impl Parsed {
                 env_count: deploy.env_count,
                 command: deploy.command,
             },
+            (Self::Settings(request), _) => {
+                AdminAct::game_settings_save(std::borrow::Cow::Borrowed(id), request)
+            }
             (Self::Decide(request), _) => AdminAct::OperationDecide {
                 target: id,
                 choice: request.choice,

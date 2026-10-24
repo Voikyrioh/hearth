@@ -729,6 +729,8 @@ async fn a_service_that_stops_right_after_its_start_is_noted_on_the_finished_act
         assert!(started.elapsed() < Duration::from_secs(5), "{operation:?}");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    // FIX:01M5NYA5W781YW5NFQ7W1JGR98 Le GET ci-dessus lit le journal des opérations : la cause et la ligne du
+    // journal d'activité sont écrites dans la même transaction, la ligne est donc là dès que la cause se lit.
     let journal = b.journal().await;
     assert!(
         journal
@@ -736,6 +738,79 @@ async fn a_service_that_stops_right_after_its_start_is_noted_on_the_finished_act
             .any(|row| row.1 == "failed"
                 && row.3.as_deref() == Some("arrêté juste après le démarrage")),
         "{journal:?}"
+    );
+}
+
+/// L'issue est lisible (GET) avec son entrée du journal, et le verrou est déjà rendu : l'action suivante du
+/// même service n'est jamais refusée (409), sans attente (HRT-101).
+#[tokio::test]
+async fn the_next_action_is_never_refused_once_the_previous_outcome_can_be_read() {
+    let b = bench().await;
+    let (key, _id) = publish(&b, "terraria", RunState::Running).await;
+    for round in 0..20 {
+        let stop = b.accepted("stop", &key).await;
+        let operation = b.finished(&stop.action_id).await;
+        assert_eq!(operation.status, OperationStatus::Succeeded, "{round}");
+        let journal = b.journal().await;
+        assert_eq!(journal.len(), 2 * round + 1, "{round} {journal:?}");
+        let start = b.accepted("start", &key).await;
+        let operation = b.finished(&start.action_id).await;
+        assert_eq!(operation.status, OperationStatus::Succeeded, "{round}");
+        let journal = b.journal().await;
+        assert_eq!(journal.len(), 2 * round + 2, "{round} {journal:?}");
+    }
+}
+
+/// Si l'entrée du journal d'activité ne peut pas s'écrire, l'action est close sans elle : elle ne reste pas
+/// `running` avec son verrou alors que le geste a eu lieu (HRT-101).
+#[tokio::test]
+async fn an_action_whose_journal_entry_cannot_be_written_is_closed_without_it_and_frees_the_service()
+ {
+    let b = bench().await;
+    let (key, _id) = publish(&b, "terraria", RunState::Running).await;
+    sqlx::query(
+        "CREATE TRIGGER refuse_audit BEFORE INSERT ON audit_events
+         BEGIN SELECT RAISE(ABORT, 'journal indisponible'); END",
+    )
+    .execute(b.env.db.pool())
+    .await
+    .unwrap();
+    let stop = b.accepted("stop", &key).await;
+    let operation = b.finished(&stop.action_id).await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+    assert!(b.journal().await.is_empty());
+    // Le verrou est rendu : l'action suivante est acceptée.
+    let start = b.accepted("start", &key).await;
+    let operation = b.finished(&start.action_id).await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+}
+
+/// Un nom qui ne s'identifie pas dans le journal d'activité pose quand même la cause de la surveillance, sans
+/// entrée (HRT-101).
+#[tokio::test]
+async fn a_service_whose_name_cannot_be_journaled_still_gets_the_watch_cause_without_an_entry() {
+    let b = bench().await;
+    let (key, id) = publish(&b, "\u{200b}\u{200b}", RunState::Exited).await;
+    let accepted = b.accepted("start", &key).await;
+    let operation = b.finished(&accepted.action_id).await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+    b.engine.update(&id, |c| {
+        c.run_state = RunState::Exited;
+        c.exit_code = Some(1);
+    });
+    let started = Instant::now();
+    loop {
+        let operation = b.operation(&accepted.action_id).await;
+        if operation.cause == Some(OperationCause::StoppedRightAfterStart) {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(5), "{operation:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let journal = b.journal().await;
+    assert!(
+        journal.iter().all(|row| row.1 != "failed"),
+        "aucune entrée pour un nom illisible : {journal:?}"
     );
 }
 

@@ -32,4 +32,13 @@ pub trait ServiceOpTx: Send {
         decision: Option<&DecisionOffer>,
         at: OffsetDateTime,
     ) -> Result<(), JournalError>;
+
+    /// Pose, après coup, une cause sur une réussite qui n'en a pas, comme `OpJournal::annotate_cause`.
+    /// `false` : rien n'a changé.
+    async fn annotate_cause(
+        &mut self,
+        id: &str,
+        cause: Cause,
+        at: OffsetDateTime,
+    ) -> Result<bool, JournalError>;
 }

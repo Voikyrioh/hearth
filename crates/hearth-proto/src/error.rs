@@ -133,6 +133,10 @@ pub enum ErrorCode {
     SettingRefused,
     /// Les réglages ont changé depuis la lecture (`details.by`, `details.at`).
     SettingsConflict,
+    /// Le fichier de réglages n'est plus celui que le client a lu (`details.ids` : les réglages en écart).
+    SettingsFileChanged,
+    /// Le fichier de réglages n'est pas lisible par son format : rien n'est retouché (`details.reason`).
+    SettingsFileUnreadable,
     /// Ce réglage exige de recréer le service, ce que cet agent ne sait pas encore faire.
     RecreateNotAvailable,
     /// Aucune sauvegarde de cet identifiant.
@@ -191,6 +195,7 @@ impl ErrorCode {
             | Self::DecisionNotOffered
             | Self::FicheChanged
             | Self::SettingsConflict
+            | Self::SettingsFileChanged
             | Self::RecreateNotAvailable => 409,
             Self::ValidationError
             | Self::BadSignature
@@ -202,6 +207,7 @@ impl ErrorCode {
             | Self::FolderRefused
             | Self::LimitsRequired
             | Self::AgreementRequired
+            | Self::SettingsFileUnreadable
             | Self::SettingRefused => 422,
             Self::Busy | Self::EngineUnavailable => 503,
             Self::IncompatibleVersion => 426,
@@ -378,7 +384,7 @@ mod tests {
         assert_eq!(ErrorCode::Unknown.or_from_status(200), ErrorCode::Unknown);
     }
 
-    const ALL: [(ErrorCode, &str, u16); 66] = [
+    const ALL: [(ErrorCode, &str, u16); 68] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -454,6 +460,12 @@ mod tests {
         (ErrorCode::FicheChanged, "FICHE_CHANGED", 409),
         (ErrorCode::SettingRefused, "SETTING_REFUSED", 422),
         (ErrorCode::SettingsConflict, "SETTINGS_CONFLICT", 409),
+        (ErrorCode::SettingsFileChanged, "SETTINGS_FILE_CHANGED", 409),
+        (
+            ErrorCode::SettingsFileUnreadable,
+            "SETTINGS_FILE_UNREADABLE",
+            422,
+        ),
         (
             ErrorCode::RecreateNotAvailable,
             "RECREATE_NOT_AVAILABLE",

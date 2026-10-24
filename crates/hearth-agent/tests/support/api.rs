@@ -149,6 +149,10 @@ fn state_over_rig(
         env.clock.clone(),
         Arc::new(hearth_agent::infrastructure::ids::UlidGen),
         Arc::new(hearth_agent::infrastructure::created_objects::FsCreatedObjects::new([])),
+        Arc::new(hearth_agent::infrastructure::sqlite::SqliteStore::new(
+            env.db.pool().clone(),
+        )),
+        env.trail.clone(),
     ));
     // Les conteneurs que l'agent crée sont consignés dans la vraie base (HRT-68).
     let repo = Arc::new(
@@ -171,6 +175,19 @@ fn state_over_rig(
         )),
         env.clock.clone(),
     ));
+    let game_settings = hearth_agent::application::game_settings::GameSettings::new(
+        Arc::new(hearth_agent::application::catalog::CatalogService::embedded(true)),
+        specs.clone(),
+        Arc::new(
+            hearth_agent::infrastructure::sqlite::SqliteGameSettingsRepo::new(
+                env.db.pool().clone(),
+            ),
+        ),
+        rig.safe_fs.clone(),
+        ops.locks().clone(),
+        env.audit_sink.clone(),
+        env.clock.clone(),
+    );
     let deployments = hearth_agent::application::deployments::Deployments::new(
         services.clone(),
         ops.clone(),
@@ -180,7 +197,6 @@ fn state_over_rig(
         rig.free_space.clone(),
         rig.safe_fs.clone(),
         repo,
-        env.audit_sink.clone(),
         Arc::new(hearth_agent::infrastructure::ids::UlidGen),
         env.clock.clone(),
         hearth_agent::application::deployments::DeployContext {
@@ -202,7 +218,6 @@ fn state_over_rig(
         Arc::new(
             hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(env.db.pool().clone()),
         ),
-        env.audit_sink.clone(),
         env.clock.clone(),
         super::engine::fast_lifecycle(),
     );
@@ -221,6 +236,7 @@ fn state_over_rig(
         service_ops,
         service_lifecycle,
         deployments,
+        game_settings,
         catalog: Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         hello: Arc::new(HelloService::new(
             InstallId::from_bytes([3; 16]),

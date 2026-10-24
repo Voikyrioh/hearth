@@ -8,6 +8,7 @@
 //! - `loading/` : schéma, chargeur, invariants I1 à I9, `ids.lock`. AUTONOME (`super::` seulement) : `build.rs` et
 //!   `xtask` l'incluent par `#[path]` pour appliquer le chargeur réel ;
 //! - `formats/` : `kv_lines` et `xml_properties`, lecture et retouche sans perte d'un fichier de réglages ;
+//! - `settings_io` : plan d'un enregistrement dans le fichier du jeu (écart, retouche sans perte), analyse d'un texte collé ;
 //! - `settings_state` : état des réglages, validation d'un changement, effet déduit du canal, écart ;
 //! - `readiness` : le signe « prêt » (sous-chaîne littérale) et les phases d'un serveur de jeu ;
 //! - `stop_plan` : séquence d'arrêt bornée, un élément `untested` n'est jamais exécuté ;
@@ -19,6 +20,7 @@ pub mod formats;
 pub mod generate;
 pub mod loading;
 pub mod readiness;
+pub mod settings_io;
 pub mod settings_state;
 pub mod stop_plan;
 pub mod translate;
@@ -33,6 +35,8 @@ mod architecture_guard;
 pub(crate) mod test_support;
 #[cfg(test)]
 mod tests_fiches;
+#[cfg(test)]
+mod tests_io;
 #[cfg(test)]
 mod tests_memory;
 #[cfg(test)]

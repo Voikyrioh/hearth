@@ -18,6 +18,9 @@ Deux formats écrits à la main, sans bibliothèque : `kv_lines` et `xml_propert
 - `crates/hearth-agent/src/domain/catalog/formats/kv_lines.rs::KvLines`
 - `crates/hearth-agent/src/domain/catalog/formats/xml_properties.rs::XmlProperties`
 
+- `crates/hearth-agent/src/domain/catalog/settings_io.rs::{apply_edits, plan_save}` (HRT-108 : le plan d'un enregistrement ne retouche que les valeurs demandées)
+- `crates/hearth-agent/src/application/game_settings.rs::GameSettings::save` (HRT-108 : lecture par `SafeFs`, 2 Mio au plus, un fichier illisible est refusé entier)
+
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/formats/contract.rs::p1_identity_render_of_parse_gives_the_same_bytes (suite de contrat, les deux formats)`
 - `crates/hearth-agent/src/domain/catalog/formats/contract.rs::p2_locality_setting_a_value_changes_only_its_bytes`
@@ -27,12 +30,18 @@ Deux formats écrits à la main, sans bibliothèque : `kv_lines` et `xml_propert
 - `crates/hearth-agent/src/domain/catalog/formats/kv_lines.rs::tests::identite_octets_d_un_fichier_a_la_terraria`
 - `crates/hearth-agent/src/domain/catalog/formats/xml_properties.rs::tests::entities_and_doctype_and_encodings_are_refused_whole`
 
+- `crates/hearth-agent/tests/game_settings_https.rs::an_unreadable_file_is_refused_whole_for_a_save_and_told_by_the_view`
+- `crates/hearth-agent/src/domain/catalog/tests_io.rs::an_unreadable_file_is_refused_whole_and_nothing_is_planned`
+
 ## Cas limites
 - Un doublon de clé : la DERNIÈRE entrée est lue et retouchée (hypothèse sur le jeu, non vérifiée) ; `duplicate_keys` le signale.
 - Aucun troisième format (`json`, `ini_sections`, `cfg_lines`) : ils viennent avec leur premier jeu.
 
+- Un fichier qui retire ou défait un réglage imposé avertit : l'analyse d'un texte collé dit `imposed_undone`, la vue dit `imposed_broken`, aucune écriture ne le corrige (BR-FICHE-048, BR-FICHE-052).
+
 ## Règles liées
-- BR-FICHE-047, BR-FICHE-048
+- BR-FICHE-047, BR-FICHE-048, BR-FICHE-052
 
 ## Historique
 - 2026-10-13 — création (HRT-113, format de fiche version 2, domaine pur).
+- 2026-10-24 — HRT-108 : l'agent lit le fichier du jeu et le retouche à l'enregistrement.

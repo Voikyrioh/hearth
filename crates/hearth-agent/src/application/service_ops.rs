@@ -17,10 +17,12 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
+use super::audit::{AuditTrail, Pending};
 use super::ports::{
     Clock, CreatedObjects, DecisionOffer, IdGen, JournalError, NewOp, OpJournal, OpRecord,
-    Progress, RemoveOutcome, ServiceObserver, StepGuard, StoreError,
+    Progress, RemoveOutcome, ServiceObserver, StepGuard, Store, StoreError,
 };
+use crate::domain::audit::{Actor, AuditAction, AuditEvent, Outcome, Target};
 use crate::domain::ops::{
     CancelVerdict, Cause, Choice, ChoiceRefused, LockTable, OpKind, OpPlan, OpStatus, OpSummary,
     OpsIndex, Refusal, StepName, StepRecord, StepState, UndoInfo, apply_choice, cancel_verdict,
@@ -211,6 +213,31 @@ pub struct ServiceOps {
     /// s'envoyer dans l'ordre inverse de leur lecture : un abonné ne reçoit jamais un état plus ancien
     /// APRÈS un plus récent (revue de la PR 94).
     publishing: AsyncMutex<()>,
+    /// Le magasin et la diffusion du journal d'activité : une clôture ou un constat écrit son entrée dans la
+    /// transaction de l'opération (jamais regroupée : ce n'est pas un refus répété, BR-AUDIT-007).
+    store: Arc<dyn Store>,
+    trail: Arc<AuditTrail>,
+}
+
+/// Un événement du journal d'activité sans sa date : la date est celle de la transaction qui l'écrit avec
+/// l'issue ou la cause (`finish_with`, `annotate_with`).
+pub struct AuditDraft {
+    pub actor: Actor,
+    pub action: AuditAction,
+    pub target: Target,
+    pub outcome: Outcome,
+}
+
+impl AuditDraft {
+    fn event(&self, at: OffsetDateTime) -> AuditEvent {
+        AuditEvent::new(
+            at,
+            self.actor.clone(),
+            self.action,
+            self.target.clone(),
+            self.outcome,
+        )
+    }
 }
 
 impl ServiceOps {
@@ -220,6 +247,8 @@ impl ServiceOps {
         clock: Arc<dyn Clock>,
         ids: Arc<dyn IdGen>,
         objects: Arc<dyn CreatedObjects>,
+        store: Arc<dyn Store>,
+        trail: Arc<AuditTrail>,
     ) -> Self {
         let (feed, _) = broadcast::channel(FEED_CAPACITY);
         Self {
@@ -232,6 +261,8 @@ impl ServiceOps {
             index: Mutex::new(OpsIndex::new()),
             progress_gate: Mutex::new(HashMap::new()),
             publishing: AsyncMutex::new(()),
+            store,
+            trail,
         }
     }
 
@@ -547,37 +578,103 @@ impl ServiceOps {
     }
 
     /// Pose, après coup, une cause sur une réussite qui n'en a pas (HRT-64, BR-LIFE-005, BR-LIFE-011) et
-    /// prévient les abonnés. `false` : rien n'a changé.
-    pub async fn annotate(&self, id: &str, cause: Cause) -> Result<bool, OpError> {
-        let written = self
-            .journal
-            .annotate_cause(id, cause, self.clock.now())
-            .await?;
-        if written {
-            self.publish(id).await;
+    /// prévient les abonnés. La cause et l'entrée du journal d'activité de ce constat sont écrites dans UNE
+    /// transaction, puis l'état est annoncé (flux et projection) : `GET /operations/...` lit le journal des
+    /// opérations et ne voit la cause qu'avec son entrée (HRT-101). `false` : rien n'a changé, aucune entrée
+    /// n'est écrite. Sans entrée (`None`) : la cause seule, par le même chemin.
+    pub async fn annotate_with(
+        &self,
+        id: &str,
+        cause: Cause,
+        draft: Option<AuditDraft>,
+    ) -> Result<bool, OpError> {
+        let now = self.clock.now();
+        let mut tx = self.store.begin().await?;
+        if !tx.service_ops().annotate_cause(id, cause, now).await? {
+            return Ok(false);
         }
-        Ok(written)
+        let mut pending = Pending::default();
+        if let Some(draft) = &draft {
+            pending.record(&mut *tx, draft.event(now)).await?;
+        }
+        tx.commit().await?;
+        pending.publish(&self.trail);
+        self.publish(id).await;
+        Ok(true)
     }
 
-    /// Clôt l'opération dans un statut terminal et rend ses verrous.
+    /// Clôt l'opération dans un statut terminal, sans entrée au journal d'activité, et rend ses verrous. Le
+    /// même chemin que [`Self::finish_with`].
     pub async fn finish(
         &self,
         id: &str,
         to: OpStatus,
         cause: Option<Cause>,
     ) -> Result<(), OpError> {
+        self.finish_with(id, to, cause, None).await
+    }
+
+    /// Clôt l'opération dans un statut terminal avec l'entrée du journal d'activité de l'issue. La transition
+    /// et l'entrée sont écrites dans UNE transaction (une transition refusée n'écrit rien) : `GET
+    /// /operations/...`, qui lit le journal des opérations, ne voit l'issue qu'avec son entrée. Puis, dans cet
+    /// ordre : les verrous sont rendus, l'issue est annoncée (flux et projection), comme `move_to` et `settle`
+    /// (HRT-101).
+    ///
+    /// Si l'écriture de l'entrée échoue, l'opération n'est pas laissée `running` avec son verrou alors que le
+    /// geste a eu lieu : elle est close sans entrée, dans une seconde transaction, et l'échec est tracé.
+    pub async fn finish_with(
+        &self,
+        id: &str,
+        to: OpStatus,
+        cause: Option<Cause>,
+        draft: Option<AuditDraft>,
+    ) -> Result<(), OpError> {
         if !to.is_terminal() {
             return Err(OpError::IllegalTransition);
         }
-        let op = self
-            .journal
+        match self.close(id, to, cause, draft.as_ref()).await {
+            Err(OpError::Storage(error)) if draft.is_some() => {
+                tracing::error!(
+                    %error,
+                    operation = id,
+                    "clôture en échec (entrée du journal d'activité ou transition) : nouvelle tentative sans entrée"
+                );
+                self.close(id, to, cause, None).await
+            }
+            other => other,
+        }
+    }
+
+    /// La clôture dans une transaction : statut, entrée éventuelle, puis verrous et annonce.
+    async fn close(
+        &self,
+        id: &str,
+        to: OpStatus,
+        cause: Option<Cause>,
+        draft: Option<&AuditDraft>,
+    ) -> Result<(), OpError> {
+        let now = self.clock.now();
+        let mut tx = self.store.begin().await?;
+        let op = tx
+            .service_ops()
             .get(id)
             .await?
             .ok_or(OpError::NoSuchOperation)?;
         if !op.status.can_become(to) {
             return Err(OpError::IllegalTransition);
         }
-        self.move_to(id, op.status, to, cause).await
+        tx.service_ops()
+            .transition(id, op.status, to, cause, None, now)
+            .await?;
+        let mut pending = Pending::default();
+        if let Some(draft) = draft {
+            pending.record(&mut *tx, draft.event(now)).await?;
+        }
+        tx.commit().await?;
+        pending.publish(&self.trail);
+        self.locks.with(|table| table.release_all_of(id));
+        self.publish(id).await;
+        Ok(())
     }
 
     /// Demande une décision au compte : `running` → `awaiting_decision` avec les choix offerts.

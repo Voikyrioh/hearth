@@ -25,7 +25,7 @@ use super::spec::{
 use crate::domain::catalog::loading::model::Fiche;
 use crate::domain::catalog::loading::schema::fiche::{Evidence, PlainEvidence, Protocol};
 use crate::domain::catalog::loading::schema::settings::ChangeWhen;
-use crate::domain::catalog::settings_state::Slot;
+use crate::domain::catalog::settings_state::{SettingsState, Slot};
 use crate::domain::catalog::translate::{DeploymentValidator, ServiceSpecDraft};
 use crate::domain::sealed::{AnswerId, MAX_ANSWER_ID_CHARS};
 use crate::domain::secret::Secret;
@@ -35,6 +35,63 @@ use super::deploy::OrdinaryDeployment;
 /// Préfixe, dans les réponses scellées, d'un secret tiré par l'agent. Le tiret ne peut pas entrer en collision
 /// avec l'identifiant d'un réglage (`[a-z0-9_]`).
 pub const GENERATED_PREFIX: &str = "gen-";
+
+/// La clé, dans les réponses scellées, du secret que l'agent a tiré pour le secret `id` de la fiche.
+pub fn generated_answer_key(id: &str) -> String {
+    format!("{GENERATED_PREFIX}{id}")
+}
+
+/// L'inverse de [`generated_answer_key`] : l'identifiant du secret de la fiche, ou rien si la clé n'est pas celle
+/// d'un secret tiré.
+pub fn generated_secret_id(key: &str) -> Option<&str> {
+    key.strip_prefix(GENERATED_PREFIX)
+}
+
+/// La réponse que la description garde pour un emplacement de réglage (la valeur seulement si elle n'est pas
+/// secrète ; un réglage « non écrit » n'a pas de réponse). L'inverse est [`slot_of_answer`].
+pub fn answer_of_slot(id: &str, slot: &Slot, frozen: bool) -> Option<SpecAnswer> {
+    match slot {
+        Slot::Value(value) => Some(SpecAnswer {
+            id: id.to_owned(),
+            value: Some(value.clone()),
+            secret: false,
+            frozen,
+        }),
+        Slot::Secret => Some(SpecAnswer {
+            id: id.to_owned(),
+            value: None,
+            secret: true,
+            frozen,
+        }),
+        Slot::Unwritten => None,
+    }
+}
+
+/// L'emplacement d'un réglage d'après la réponse gardée : l'inverse de [`answer_of_slot`].
+pub fn slot_of_answer(answer: &SpecAnswer) -> Slot {
+    match (answer.secret, &answer.value) {
+        (true, _) => Slot::Secret,
+        (false, Some(value)) => Slot::Value(value.clone()),
+        (false, None) => Slot::Unwritten,
+    }
+}
+
+/// L'état des réglages d'un service d'après les réponses de sa description : un emplacement par réglage de la
+/// fiche, « non écrit » quand il n'a pas de réponse.
+pub fn state_of_answers(fiche: &Fiche, answers: &[SpecAnswer]) -> SettingsState {
+    let slots: BTreeMap<String, Slot> = fiche
+        .settings
+        .iter()
+        .map(|setting| {
+            let slot = answers
+                .iter()
+                .find(|a| a.id == setting.id)
+                .map_or(Slot::Unwritten, slot_of_answer);
+            (setting.id.clone(), slot)
+        })
+        .collect();
+    SettingsState::from_slots(slots)
+}
 
 /// Un fichier à créer dans un dossier géré avant la création du conteneur. Son contenu peut porter un secret :
 /// c'est le seul endroit où il est volontairement en clair (dans le dossier géré, droits `0600` ou `0640`).
@@ -193,20 +250,10 @@ pub fn body_and_secrets_from(
             .setting(id)
             .is_some_and(|s| s.change == ChangeWhen::WorldCreation);
         match slot {
-            Slot::Value(value) => answers.push(SpecAnswer {
-                id: id.to_owned(),
-                value: Some(value.clone()),
-                secret: false,
-                frozen,
-            }),
+            Slot::Value(_) => answers.extend(answer_of_slot(id, slot, frozen)),
             Slot::Secret if sealed_settings.contains(&id) => {
                 let value = inputs.answers.get(id).ok_or(FromFicheError::AnswerId)?;
-                answers.push(SpecAnswer {
-                    id: id.to_owned(),
-                    value: None,
-                    secret: true,
-                    frozen,
-                });
+                answers.extend(answer_of_slot(id, slot, frozen));
                 sealed_answers.push(crate::domain::services::spec::AnswerEntry {
                     id: AnswerId::parse(id).ok_or(FromFicheError::AnswerId)?,
                     value: Secret::new(value.clone()),
@@ -221,7 +268,7 @@ pub fn body_and_secrets_from(
             continue;
         };
         let value = inputs.generated.get(id).ok_or(FromFicheError::AnswerId)?;
-        let key = format!("{GENERATED_PREFIX}{id}");
+        let key = generated_answer_key(id);
         if key.chars().count() > MAX_ANSWER_ID_CHARS {
             return Err(FromFicheError::AnswerId);
         }
