@@ -11,7 +11,7 @@ import type { ServerInfo } from "@/link";
 const props = defineProps<{ server: ServerInfo }>();
 
 interface Entry {
-  route: "dashboard" | "services" | "accounts" | "audit" | "security";
+  route: "dashboard" | "services" | "catalogue" | "accounts" | "audit" | "security";
   label: MessageKey;
   adminOnly: boolean;
 }
@@ -19,6 +19,7 @@ interface Entry {
 const ENTRIES: Entry[] = [
   { route: "dashboard", label: "nav.dashboard", adminOnly: false },
   { route: "services", label: "nav.services", adminOnly: false },
+  { route: "catalogue", label: "nav.catalogue", adminOnly: false },
   { route: "accounts", label: "nav.accounts", adminOnly: true },
   { route: "audit", label: "nav.audit", adminOnly: true },
   { route: "security", label: "nav.security", adminOnly: false },
@@ -30,9 +31,13 @@ const entries = computed(() =>
 const nav = ref<HTMLElement | null>(null);
 const route = useRoute();
 
-/** Le formulaire de déploiement fait partie de la section Services : son entrée reste marquée (HRT-69). */
+/**
+ * Le formulaire de déploiement fait partie de la section Services (HRT-69), la fiche d'un jeu et son installation de la
+ * section Catalogue (HRT-102) : leur entrée reste marquée.
+ */
 function inSection(entry: Entry): boolean {
-  return entry.route === "services" && route.name === "services-deploy";
+  if (entry.route === "services") return route.name === "services-deploy";
+  return entry.route === "catalogue" && (route.name === "fiche" || route.name === "fiche-install");
 }
 </script>
 

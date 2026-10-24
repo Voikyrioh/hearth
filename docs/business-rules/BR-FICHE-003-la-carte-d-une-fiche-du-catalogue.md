@@ -16,10 +16,13 @@ Pour chaque fiche, la liste rend son identifiant, son nom, sa phrase de descript
 ## Application (code)
 - `crates/hearth-agent/src/application/catalog.rs::{CatalogService::list, CatalogService::record_refused}`
 - `crates/hearth-proto/src/api/catalog.rs::{FicheCard, RefusedFiche, CatalogView}`
+- `apps/desktop/src/components/molecules/FicheCard.vue`
+- `apps/desktop/src/pages/Catalogue.vue`
 
 ## Vérification
 - `crates/hearth-agent/src/application/catalog.rs::a_refused_fiche_is_counted_with_its_invariant_and_unknown_ids_are_refused`
 - `crates/hearth-agent/tests/catalog_https.rs::the_detail_carries_no_secret_a_refused_fiche_is_counted_and_journaled_once_by_the_system`
+- `apps/desktop/src/pages/Catalogue.test.ts`
 
 ## Cas limites
 - Le compte des services installés depuis une fiche et le rangement par jeu relèvent du client (HRT-102).
@@ -29,3 +32,4 @@ Pour chaque fiche, la liste rend son identifiant, son nom, sa phrase de descript
 
 ## Historique
 - 2026-10-24 — création (HRT-101, étapes S7 et S8).
+- 2026-10-24 — côté client (HRT-102).

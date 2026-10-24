@@ -17,10 +17,13 @@ Une fiche qui exige un contrat le déclare ; aucune fiche, variante, valeur prop
 - `crates/hearth-agent/src/domain/catalog/translate.rs::translate`
 - `crates/hearth-agent/src/domain/services/from_fiche.rs::body_and_secrets_from`
 - `crates/hearth-agent/src/domain/services/spec.rs::SpecAgreement`
+- `apps/desktop/src/components/organisms/AgreementDialog.vue`
+- `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::i8_a_contract_is_accepted_only_by_a_gesture`
 - `crates/hearth-agent/src/domain/services/from_fiche.rs::a_translated_fiche_becomes_the_description_of_an_ordinary_deployment`
+- `apps/desktop/src/pages/InstallFromFiche.test.ts::le contrat de licence (BR-FICHE-026, 058)`
 
 ## Cas limites
 - Le refus HTTP `AGREEMENT_REQUIRED` (liste des identifiants) arrive avec l'étape d'installation de HRT-101.
@@ -30,3 +33,4 @@ Une fiche qui exige un contrat le déclare ; aucune fiche, variante, valeur prop
 
 ## Historique
 - 2026-10-24 — création (HRT-101, étapes S2 et S3).
+- 2026-10-24 — côté client (HRT-102).

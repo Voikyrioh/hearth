@@ -3,6 +3,7 @@ import type { EngineCapacity } from "@/resources";
 import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
+import type { Catalog, FicheInstallRequest, FicheLinkKind, FicheRead } from "./catalog";
 import type {
   CancelOutcome,
   DeployCheck,
@@ -41,6 +42,7 @@ import {
 } from "./simulated-accounts";
 import { SimulatedAgentUpdates } from "./simulated-agent-update";
 import { SimulatedAudit } from "./simulated-audit";
+import { SimulatedCatalog } from "./simulated-catalog";
 import { SimulatedDeploys } from "./simulated-deploy";
 import { SimulatedDevices } from "./simulated-devices";
 import { SimulatedLogs } from "./simulated-logs";
@@ -225,6 +227,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly logs = new SimulatedLogs();
   /** Déployer une image (HRT-69) : l'agent simulé juge comme le vrai ; la suite est pilotée (`deploys.progress`, `toStep`, `succeed`, `fail`). */
   readonly deploys: SimulatedDeploys;
+  /** Le Catalogue et l'installation depuis une fiche (HRT-102) : l'agent simulé propose Terraria (`catalog.addRich()` en ajoute une plus riche). */
+  readonly catalog: SimulatedCatalog;
 
   constructor(options: SimulatedOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -258,6 +262,7 @@ export class SimulatedLinkBridge implements LinkBridge {
       this.now,
     );
     this.deploys = new SimulatedDeploys(this.services, this.serviceOps, this.now);
+    this.catalog = new SimulatedCatalog(this.deploys);
     this.agentUpdates = new SimulatedAgentUpdates({
       now: this.now,
       publishLink: (id, state) => this.publish(id, state),
@@ -585,6 +590,89 @@ export class SimulatedLinkBridge implements LinkBridge {
     }
     this.calls.push("engine capacity");
     return this.deploys.capacity(serverId);
+  }
+
+  // --- Le Catalogue et l'installation depuis une fiche (HRT-102) ---
+
+  async readCatalog(serverId: string): Promise<Catalog> {
+    this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("catalog");
+    // Ouverte à tout compte : ni droit ni moteur n'est demandé pour lire.
+    if (this.catalog.failRead) throw this.fail({ kind: "unreachable" });
+    return this.catalog.list();
+  }
+
+  async readFiche(serverId: string, ficheId: string): Promise<FicheRead> {
+    this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("fiche");
+    if (this.catalog.failRead) throw this.fail({ kind: "unreachable" });
+    return this.catalog.read(ficheId);
+  }
+
+  /** Les adresses qu'une fiche a fait ouvrir, dans l'ordre (de quoi vérifier ce qui s'ouvre). */
+  readonly openedLinks: { serverId: string; ficheId: string; kind: string; key: string }[] = [];
+
+  /** `true` : le navigateur ne s'ouvre pas (l'ouverture d'une adresse de fiche échoue). */
+  failLinks = false;
+
+  async openFicheLink(
+    serverId: string,
+    ficheId: string,
+    kind: FicheLinkKind,
+    key: string,
+  ): Promise<void> {
+    this.requireServer(serverId);
+    await this.delay();
+    this.calls.push("fiche link");
+    if (this.failLinks) throw this.fail({ kind: "internal" });
+    this.openedLinks.push({ serverId, ficheId, kind, key });
+  }
+
+  async installFiche(
+    serverId: string,
+    request: FicheInstallRequest,
+    adminPassword: string | null,
+  ): Promise<DeployOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("fiche install");
+    // Les contrôles dans l'ordre de l'agent : droit, confirmation (jamais couverte par l'élévation), moteur, demande.
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    const confirmation = this.reauth.confirm(
+      serverId,
+      "service_deploy",
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    const engine = this.services.engineState(serverId);
+    if (engine !== "ready") {
+      return { kind: "refused", refusal: { kind: "engine_unavailable", engine } };
+    }
+    const by = server.username ?? "marie";
+    const accept = () => this.catalog.install(serverId, request, by);
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) accept();
+      this.publish(serverId, "reconnecting");
+      const opId = `sim-op-${this.nextOperation++}`;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return accept();
   }
 
   async recheckEngine(serverId: string): Promise<EngineInfo> {

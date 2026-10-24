@@ -198,6 +198,11 @@ export class SimulatedDeploys {
     return listed || running ? "taken" : "ok";
   }
 
+  /** L'espace libre du disque des images, en octets. */
+  freeDiskBytes(serverId: string): number {
+    return this.disk(serverId).freeBytes;
+  }
+
   private disk(serverId: string): { freeBytes: number; low: boolean } {
     const freeBytes = this.disks.get(serverId) ?? 200 * GIB;
     return { freeBytes, low: freeBytes < LOW_DISK_BYTES };
@@ -344,7 +349,19 @@ export class SimulatedDeploys {
     if (request.command !== null && commandIssue(request.command) !== null) {
       return invalid("command", "bad_format");
     }
-    const limits = request.resources;
+    return this.limitsRefusal(serverId, request.resources);
+  }
+
+  /** Les limites de mémoire et de processeur, jugées comme l'agent (obligatoires, au cran, dans les bornes de la machine). */
+  limitsRefusal(
+    serverId: string,
+    limits: { cpuMillis: number | null; memoryBytes: number | null },
+  ): DeployRefusal | null {
+    const invalid = (field: DeployField, reason: string): DeployRefusal => ({
+      kind: "invalid",
+      field,
+      reason,
+    });
     if (limits.cpuMillis === null || limits.memoryBytes === null)
       return { kind: "limits_required" };
     const capacity = this.capacity(serverId);
@@ -369,16 +386,50 @@ export class SimulatedDeploys {
   accept(serverId: string, request: DeployRequest, by: string): DeployOutcome {
     const refusal = this.validate(serverId, request);
     if (refusal) return { kind: "refused", refusal };
+    const { repository, embedded } = splitImage(request.image);
+    const tag =
+      embedded ?? ((request.tag ?? "").trim() === "" ? "latest" : (request.tag ?? "").trim());
+    return this.admit(
+      serverId,
+      {
+        name: request.name,
+        repository,
+        tag,
+        ports: request.ports,
+        accept: request.accept,
+      },
+      by,
+      () => this.received.push({ serverId, request: structuredClone(request) }),
+    );
+  }
+
+  /**
+   * Ce que l'agent fait d'une demande DÉJÀ jugée dans sa forme, image ou fiche (`Deployments::deploy`) : deux
+   * déploiements au plus, nom libre, ports libres (un port réservé par un service arrêté ne bloque qu'avec la case),
+   * place sur le disque des images, puis l'opération `deploy`. `remember` garde la demande pour un test.
+   */
+  admit(
+    serverId: string,
+    plan: {
+      name: string;
+      repository: string;
+      tag: string;
+      ports: readonly DeployPort[];
+      accept: { reservedPorts: boolean; lowDisk: boolean };
+    },
+    by: string,
+    remember: () => void,
+  ): DeployOutcome {
     const mine = this.held.get(serverId) ?? new Map<string, Held>();
     if (mine.size >= 2) return { kind: "refused", refusal: { kind: "deploy_limit" } };
-    const name = this.nameStatus(serverId, request.name);
+    const name = this.nameStatus(serverId, plan.name);
     if (name === "being_deleted")
       return { kind: "refused", refusal: { kind: "name_being_deleted" } };
     if (name !== "ok") return { kind: "refused", refusal: { kind: "name_taken" } };
-    for (const check of this.judgePorts(serverId, request.ports)) {
+    for (const check of this.judgePorts(serverId, plan.ports)) {
       const blocks =
         check.status === "reserved_by_stopped"
-          ? !request.accept.reservedPorts
+          ? !plan.accept.reservedPorts
           : check.status !== "free";
       if (blocks) {
         return {
@@ -395,23 +446,20 @@ export class SimulatedDeploys {
       }
     }
     const disk = this.disk(serverId);
-    if (disk.low && !request.accept.lowDisk && !this.present(request.image, request.tag)) {
+    if (disk.low && !plan.accept.lowDisk && !this.present(plan.repository, plan.tag)) {
       return { kind: "refused", refusal: { kind: "no_space", freeBytes: disk.freeBytes } };
     }
 
-    const { repository, embedded } = splitImage(request.image);
-    const tag =
-      embedded ?? ((request.tag ?? "").trim() === "" ? "latest" : (request.tag ?? "").trim());
     const key = `h_SIMDEPLOY${String(this.nextKey++).padStart(6, "0")}`;
     // La ligne « Déploiement en cours » existe avant la première annonce de l'opération (le nom lui est connu).
     this.services.upsert(serverId, {
       key,
-      name: request.name,
+      name: plan.name,
       origin: "hearth",
       state: "deploying",
       neverStarted: true,
-      image: { ref: repository, tag },
-      ports: request.ports.map((port) => ({
+      image: { ref: plan.repository, tag: plan.tag },
+      ports: plan.ports.map((port) => ({
         hostPort: port.hostPort,
         containerPort: port.containerPort,
         protocol: port.protocol,
@@ -432,13 +480,13 @@ export class SimulatedDeploys {
     mine.set(operation.id, {
       operationId: operation.id,
       key,
-      name: request.name,
+      name: plan.name,
       step: "check",
-      image: `${repository}:${tag}`,
+      image: `${plan.repository}:${plan.tag}`,
       by,
     });
     this.held.set(serverId, mine);
-    this.received.push({ serverId, request: structuredClone(request) });
+    remember();
     return { kind: "accepted", operationId: operation.id, serviceKey: key };
   }
 

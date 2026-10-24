@@ -42,6 +42,8 @@ const props = defineProps<{
   service: ServiceInfo | null;
   /** Annule la récupération (acte confirmé, couvert par l'élévation). */
   performCancel: (adminPassword: string | null) => Promise<ActReport>;
+  /** L'installation d'un serveur de jeu depuis une fiche (HRT-102) : le même parcours, un autre titre. */
+  installing?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -135,7 +137,7 @@ function onCancelKey() {
 <template>
   <FormDialog
     :open="open"
-    :title="t('deploy.progressTitle', { name })"
+    :title="installing ? t('fiche.progressTitle', { name }) : t('deploy.progressTitle', { name })"
     hide-submit
     data-deploy-progress
     @cancel="onCancelKey"

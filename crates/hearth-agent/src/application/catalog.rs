@@ -6,9 +6,10 @@
 //! d'essai (`include_preview`). Le catalogue ne rend jamais un secret : une fiche n'en contient aucun.
 
 use hearth_proto::api::catalog::{
-    AgreementView, CatalogView, CpuNeed, DiskNeed, EvidenceView, FicheCard, FicheDetail,
-    FicheStatus, FolderView, ImageView, MemoryNeed, PortView, QuestionView, RefusedFiche,
-    ResourcesView, VariantView,
+    AgreementView, CatalogView, CharsetView, ChoiceView, CpuNeed, DiskNeed, DownloadView,
+    EvidenceView, FicheCard, FicheDetail, FicheStatus, FirstStartView, FolderView, ImageView,
+    ImposedView, MemoryNeed, PortMappingView, PortView, QuestionKind, QuestionView, RefusedFiche,
+    ResourcesView, SecretKindView, StopView, VariantView, WorldSavedView,
 };
 
 use crate::application::ports::AuditSink;
@@ -16,9 +17,10 @@ use crate::domain::audit::{Actor, AuditAction, ClientName, Outcome, Reason, Targ
 use crate::domain::catalog::embedded;
 use crate::domain::catalog::loading::model::{Fiche, ValueSpec};
 use crate::domain::catalog::loading::schema::fiche::{
-    Evidence, FolderRole, PlainEvidence, Platform, PortRole, Protocol, Publish, Status,
+    Evidence, FolderRole, PlainEvidence, Platform, PortMapping, PortRole, Proof, Protocol, Publish,
+    Status, WorldSaved,
 };
-use crate::domain::catalog::loading::schema::settings::Level;
+use crate::domain::catalog::loading::schema::settings::{Level, SecretKind};
 
 /// Une fiche écartée au chargement : son dossier et l'invariant violé.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +199,12 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
                 role: port_role(p.role).to_owned(),
                 publish: publish(p.publish).to_owned(),
                 default_host: p.default_host,
+                mapping: match p.mapping {
+                    PortMapping::Nat => PortMappingView::Nat,
+                    PortMapping::SameNumber => PortMappingView::SameNumber,
+                },
+                // Jamais `Some([])` : le chargeur le refuse (`Motif::ListeDeVariantesVide`), `None` dit « toutes ».
+                only_variants: p.only_variants.clone().unwrap_or_default(),
             })
             .collect::<Vec<_>>()
             .into(),
@@ -208,6 +216,7 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
                 role: folder_role(f.role).to_owned(),
                 target: f.target.clone(),
                 backup: f.backup,
+                only_variants: f.only_variants.clone().unwrap_or_default(),
             })
             .collect::<Vec<_>>()
             .into(),
@@ -228,16 +237,7 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
             .settings
             .iter()
             .filter(|s| s.level == Level::Essential && s.imposed.is_none())
-            .map(|s| {
-                let secret = matches!(s.spec, ValueSpec::Secret { .. });
-                QuestionView {
-                    id: s.id.clone(),
-                    label: s.label.clone(),
-                    help: s.help.clone(),
-                    secret,
-                    proposed: if secret { None } else { s.proposed.clone() },
-                }
-            })
+            .map(question)
             .collect::<Vec<_>>()
             .into(),
         resources: ResourcesView {
@@ -256,7 +256,145 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
                 evidence: evidence(&file.resources.disk.evidence),
             },
         },
+        first_start: Some(FirstStartView {
+            ready_timeout_s: file.first_start.ready_timeout_s,
+            world_generation: file.first_start.world_generation,
+            downloads: file
+                .first_start
+                .download
+                .iter()
+                .map(|d| DownloadView {
+                    what: d.what.clone(),
+                    source: d.source_label.clone(),
+                    bytes: d.bytes,
+                    evidence: evidence(&d.evidence),
+                })
+                .collect(),
+            stages: file
+                .first_start
+                .stage
+                .iter()
+                .map(|stage| stage.label.clone())
+                .collect(),
+        }),
+        stop: Some(StopView {
+            grace_s: file.stop.grace_s,
+            world_saved: match file.stop.world_saved {
+                WorldSaved::ByImageOnSignal => WorldSavedView::ByImageOnSignal,
+                WorldSaved::BySequence => WorldSavedView::BySequence,
+                WorldSaved::NotSaved => WorldSavedView::NotSaved,
+            },
+            sequence_tested: file
+                .stop
+                .sequence
+                .as_ref()
+                .is_some_and(|sequence| sequence.status == Proof::Tested),
+        }),
+        // Les réglages posés par la fiche, avec leur raison. Une valeur tirée, dérivée ou secrète n'est jamais rendue.
+        imposed: fiche
+            .settings
+            .iter()
+            .filter_map(|setting| {
+                setting.imposed.as_ref().map(|imposed| ImposedView {
+                    label: setting.label.clone(),
+                    value: imposed
+                        .value
+                        .clone()
+                        .filter(|_| imposed.secret.is_none() && !setting.is_secret()),
+                    why: imposed.why.clone(),
+                })
+            })
+            .collect::<Vec<_>>()
+            .into(),
     }
+}
+
+/// Une question d'installation : le genre, les bornes et les choix sont ceux de la fiche (jamais inventés par le
+/// client). Un secret ne porte jamais de valeur proposée.
+fn question(setting: &crate::domain::catalog::loading::model::Setting) -> QuestionView {
+    use crate::domain::catalog::loading::schema::settings::ChangeWhen;
+    use crate::domain::catalog::loading::value::Charset;
+    let mut view = QuestionView {
+        id: setting.id.clone(),
+        label: setting.label.clone(),
+        help: setting.help.clone(),
+        secret: false,
+        proposed: setting.proposed.clone(),
+        kind: QuestionKind::Unknown,
+        choices: Vec::new(),
+        min: None,
+        max: None,
+        min_len: None,
+        max_len: None,
+        charset: None,
+        frozen_after_creation: setting.change == ChangeWhen::WorldCreation,
+        variants: setting.only_variants.clone().unwrap_or_default(),
+        secret_kind: None,
+        obtain_url: None,
+    };
+    match &setting.spec {
+        ValueSpec::Text {
+            charset,
+            min_len,
+            max_len,
+        } => {
+            view.kind = QuestionKind::Text;
+            view.min_len = u32::try_from(*min_len).ok();
+            view.max_len = u32::try_from(*max_len).ok();
+            view.charset = Some(match charset {
+                Charset::Line => CharsetView::Line,
+                Charset::FileStem => CharsetView::FileStem,
+                Charset::ArgSafe => CharsetView::ArgSafe,
+            });
+        }
+        ValueSpec::Secret {
+            kind,
+            min_len,
+            max_len,
+            obtain_url,
+        } => {
+            view.secret_kind = Some(match kind {
+                SecretKind::GamePassword => SecretKindView::GamePassword,
+                SecretKind::AdminPassword => SecretKindView::AdminPassword,
+                SecretKind::ServerToken => SecretKindView::ServerToken,
+            });
+            view.kind = QuestionKind::Secret;
+            view.secret = true;
+            view.proposed = None;
+            view.min_len = u32::try_from(*min_len).ok();
+            view.max_len = u32::try_from(*max_len).ok();
+            view.obtain_url = obtain_url.clone();
+        }
+        ValueSpec::Int { min, max } => {
+            view.kind = QuestionKind::Int;
+            view.min = *min;
+            view.max = *max;
+        }
+        // Les deux valeurs que le jeu comprend (« activé » puis « désactivé ») : le client ne les devine pas.
+        ValueSpec::Bool { on, off } => {
+            view.kind = QuestionKind::Bool;
+            view.choices = [on, off]
+                .into_iter()
+                .map(|value| ChoiceView {
+                    value: value.clone(),
+                    label: value.clone(),
+                })
+                .collect();
+        }
+        ValueSpec::Choice { choices } => {
+            view.kind = QuestionKind::Choice;
+            view.choices = choices
+                .iter()
+                .map(|choice| ChoiceView {
+                    value: choice.value.clone(),
+                    label: choice.label.clone(),
+                })
+                .collect();
+        }
+        ValueSpec::IdList { .. } => view.kind = QuestionKind::IdList,
+        ValueSpec::Opaque { .. } => view.kind = QuestionKind::Opaque,
+    }
+    view
 }
 
 #[cfg(test)]
@@ -297,6 +435,83 @@ mod tests {
         // Les secrets que l'agent tire ne figurent nulle part dans le détail.
         let json = serde_json::to_string(&detail).unwrap();
         assert!(!json.contains("rcon_password\":\""));
+    }
+
+    #[test]
+    fn each_question_says_its_kind_bounds_and_choices_so_the_client_invents_none() {
+        let catalog = CatalogService::from_parts(vec![rich()], Vec::new(), true);
+        let id = rich().id().to_owned();
+        let detail = catalog.detail(&id).unwrap();
+        assert!(!detail.questions.is_empty());
+        for question in detail.questions.iter() {
+            assert_ne!(question.kind, QuestionKind::Unknown, "{}", question.id);
+            assert_eq!(question.secret, question.kind == QuestionKind::Secret);
+            match question.kind {
+                QuestionKind::Choice => assert!(!question.choices.is_empty()),
+                QuestionKind::Text => {
+                    assert!(question.charset.is_some() && question.max_len.is_some());
+                }
+                _ => {}
+            }
+        }
+        let terraria = CatalogService::embedded(true).detail("terraria").unwrap();
+        let size = terraria
+            .questions
+            .iter()
+            .find(|q| q.id == "world_size")
+            .unwrap();
+        assert_eq!(size.kind, QuestionKind::Choice);
+        assert_eq!(size.choices.len(), 3);
+        assert!(size.frozen_after_creation);
+        let players = terraria
+            .questions
+            .iter()
+            .find(|q| q.id == "max_players")
+            .unwrap();
+        assert_eq!(
+            (players.kind, players.min, players.max),
+            (QuestionKind::Int, Some(1), Some(255))
+        );
+        let name = terraria
+            .questions
+            .iter()
+            .find(|q| q.id == "world_name")
+            .unwrap();
+        assert_eq!(name.charset, Some(CharsetView::FileStem));
+        assert_eq!(name.max_len, Some(100));
+        assert!(terraria.questions.len() <= 8);
+        // Le premier démarrage, l'arrêt et ce que la fiche impose sont dits par la fiche.
+        let first = terraria.first_start.as_ref().unwrap();
+        assert!(first.world_generation && first.ready_timeout_s > 0);
+        let stop = terraria.stop.as_ref().unwrap();
+        assert_eq!(stop.world_saved, WorldSavedView::BySequence);
+        assert!(!stop.sequence_tested, "la suite n'a pas été essayée");
+        // Chaque port dit comment il se relie au port du serveur et pour quelles variantes il existe.
+        assert!(
+            terraria
+                .ports
+                .iter()
+                .all(|port| port.mapping == PortMappingView::Nat)
+        );
+        assert!(
+            terraria
+                .ports
+                .iter()
+                .all(|port| port.only_variants.is_empty())
+        );
+        assert!(
+            terraria
+                .folders
+                .iter()
+                .all(|folder| folder.only_variants.is_empty())
+        );
+        assert!(!terraria.imposed.is_empty());
+        assert!(
+            terraria
+                .imposed
+                .iter()
+                .all(|setting| !setting.why.is_empty())
+        );
     }
 
     #[test]

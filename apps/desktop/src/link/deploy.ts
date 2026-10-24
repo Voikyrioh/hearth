@@ -127,6 +127,20 @@ export type DeployRefusal =
     }
   | { kind: "deploy_limit" }
   | { kind: "no_space"; freeBytes: number | null }
+  // Installer depuis une fiche (HRT-102) : des CODES, jamais un texte de l'agent ni la valeur d'une réponse.
+  | { kind: "fiche_unknown" }
+  | { kind: "fiche_changed" }
+  | { kind: "agreement_required"; ids: string[] }
+  /** Une réponse est refusée : la question (si c'est une de la fiche), la raison (code) et au plus UN caractère. */
+  | { kind: "answer_refused"; id: string | null; reason: string; character: string | null }
+  /** Un minimum MESURÉ dépasse la machine : `lack` vaut `cpu` (millicœurs) ou `memory` (octets). */
+  | { kind: "host_too_small"; lack: "cpu" | "memory"; needed: number | null; has: number | null }
+  | {
+      kind: "no_space_to_install";
+      neededBytes: number | null;
+      freeBytes: number | null;
+      missingBytes: number | null;
+    }
   | { kind: "other" };
 
 /**

@@ -6,6 +6,7 @@ pub mod accounts;
 pub mod agent_update;
 pub mod alerts;
 pub mod audit;
+pub mod browser;
 mod commands;
 pub mod dashboard;
 pub mod devices;
@@ -120,6 +121,10 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             service_ops::commands::deploy_service,
             service_ops::commands::cancel_service_operation,
             service_ops::commands::read_engine_capacity,
+            service_ops::commands::read_catalog,
+            service_ops::commands::read_fiche,
+            service_ops::commands::install_fiche,
+            service_ops::commands::open_fiche_link,
         ])
         .typ::<link_dto::ServersEvent>()
         .typ::<link_dto::OperationEventDto>()

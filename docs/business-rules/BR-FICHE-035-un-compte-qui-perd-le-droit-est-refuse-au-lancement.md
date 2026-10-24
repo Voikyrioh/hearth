@@ -15,9 +15,12 @@ Le droit « gérer les services » est relu à CHAQUE requête par la couche d'a
 
 ## Application (code)
 - `crates/hearth-agent/src/entrypoint/http/auth.rs::allows`
+- `apps/desktop/src/composables/useDeployFlow.ts`
+- `apps/desktop/src/stores/ficheInstall.ts`
 
 ## Vérification
 - `crates/hearth-agent/tests/fiche_install_https.rs::an_account_without_the_right_creates_no_service`
+- `apps/desktop/src/pages/InstallFromFiche.test.ts::dit le droit retiré au lancement et garde la saisie`
 
 ## Cas limites
 - La conservation de la saisie est au client (HRT-102).
@@ -27,3 +30,4 @@ Le droit « gérer les services » est relu à CHAQUE requête par la couche d'a
 
 ## Historique
 - 2026-10-24 — création (HRT-101).
+- 2026-10-24 — côté client (HRT-102).

@@ -1,6 +1,7 @@
 import type { EngineCapacity } from "@/resources";
 import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
+import type { Catalog, FicheInstallRequest, FicheLinkKind, FicheRead } from "./catalog";
 import type {
   CancelOutcome,
   DeployCheck,
@@ -380,6 +381,33 @@ export interface LinkBridge {
    * bornes sûres. Hors « Connecté » : échec `not_connected`.
    */
   readEngineCapacity(serverId: string): Promise<EngineCapacity | null>;
+
+  // Le Catalogue et l'installation d'un serveur de jeu (HRT-102, ADR-0050, BR-FICHE-*). Une fiche est livrée avec
+  // l'agent : ces lectures sont ouvertes à tout compte, jamais journalisées, et fonctionnent sans Internet.
+
+  /** Les fiches que cet agent propose, plus le compte de celles qu'il a écartées. Hors « Connecté » : `not_connected`. */
+  readCatalog(serverId: string): Promise<Catalog>;
+  /** Le détail d'une fiche avec son empreinte ; `unknown` : l'agent ne la propose pas (jamais une panne). */
+  readFiche(serverId: string, ficheId: string): Promise<FicheRead>;
+  /**
+   * Installe un serveur de jeu depuis une fiche : le déploiement ordinaire avec un membre `source` (BR-FICHE-013), donc
+   * le même acte confirmé, JAMAIS couvert par l'élévation (`adminPassword` redemandé à chaque fois, jamais gardé), le
+   * même droit, la même opération suivie par `onServiceOperations`, jamais rejoué (BR-DEPLOY-028). Une réponse peut
+   * être un secret : elle ne traverse que cet appel. Sans le droit : échec `missing_services_right`.
+   */
+  installFiche(
+    serverId: string,
+    request: FicheInstallRequest,
+    adminPassword: string | null,
+  ): Promise<DeployOutcome>;
+  /**
+   * Ouvre dans le navigateur de l'utilisateur une adresse que la FICHE porte : `agreement` (le contrat de licence, par
+   * son identifiant), `token` (le site où créer un jeton de serveur, par l'identifiant de la question) ou `evidence`
+   * (la source d'un chiffre de l'éditeur : `cpu`, `memory`, `disk`). L'adresse n'est jamais fournie par l'interface :
+   * la coquille la relit dans la fiche chez l'agent et refuse tout ce qui n'est pas une adresse `https` ordinaire.
+   * Hearth ne contacte jamais cette adresse lui-même.
+   */
+  openFicheLink(serverId: string, ficheId: string, kind: FicheLinkKind, key: string): Promise<void>;
 
   /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
   setDisplayedServer(serverId: string | null): Promise<void>;

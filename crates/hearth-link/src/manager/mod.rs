@@ -9,6 +9,7 @@ mod accounts;
 mod agent_update;
 mod attempt;
 mod audit;
+mod catalog;
 mod device;
 mod events;
 mod persist;
@@ -41,6 +42,7 @@ use tokio::time::timeout;
 
 pub use accounts::AccountsRead;
 pub use audit::AuditExportFile;
+pub use catalog::is_stable_id;
 pub use events::EventStream;
 use events::Fanout;
 pub use reauth::ReauthState;

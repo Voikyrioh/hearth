@@ -16,13 +16,18 @@ Une installation par fiche porte les deux limites (`resources`), jugées par `ch
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/deploy.rs::check_limits`
 - `crates/hearth-agent/src/application/fiche_install.rs::FicheInstaller::prepare`
+- `apps/desktop/src/fiche/fit.ts::placement`
+- `apps/desktop/src/components/organisms/InstallResources.vue`
 
 ## Vérification
 - `crates/hearth-agent/tests/fiche_install_https.rs::an_install_without_memory_limit_is_refused`
 - `crates/hearth-agent/src/domain/services/from_fiche.rs::a_request_without_memory_limit_is_refused`
+- `apps/desktop/src/fiche/fiche.test.ts`
+- `apps/desktop/src/pages/InstallFromFiche.test.ts`
 
 ## Règles liées
 - BR-DEPLOY-038, BR-RES-038
 
 ## Historique
 - 2026-10-24 — création (HRT-101).
+- 2026-10-24 — côté client (HRT-102).

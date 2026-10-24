@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-fiche-link"
+description = "Enables the open_fiche_link command without any pre-configured scope."
+commands.allow = ["open_fiche_link"]
+
+[[permission]]
+identifier = "deny-open-fiche-link"
+description = "Denies the open_fiche_link command without any pre-configured scope."
+commands.deny = ["open_fiche_link"]

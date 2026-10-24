@@ -16,15 +16,20 @@ L'opération est un `deploy` : `check`, `pull`, `create`, `start`, `watch`. Le f
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/deploy.rs::op_plan`
 - `crates/hearth-agent/src/application/deployments.rs::Deployments::prepare_folders`
+- `apps/desktop/src/pages/InstallFromFiche.vue`
+- `apps/desktop/src/composables/useDeployFlow.ts`
 
 ## Vérification
 - `crates/hearth-agent/tests/fiche_install_https.rs::a_failed_start_leaves_no_file_and_no_description_behind`
+- `apps/desktop/src/pages/InstallFromFiche.test.ts::lancer, suivre, terminer (BR-FICHE-013, 027, 034)`
 
 ## Cas limites
 - Une étape « Préparation du monde » séparée relève du client et d'un plan d'opération étendu (HRT-102).
+- La progression est la fenêtre du déploiement (`DeployProgressDialog`, titre « Installation de {nom} ») ; l'étape « Préparation du monde » n'existe pas côté client faute de donnée de l'agent.
 
 ## Règles liées
 - BR-DEPLOY-016, BR-DEPLOY-019
 
 ## Historique
 - 2026-10-24 — création (HRT-101).
+- 2026-10-24 — côté client (HRT-102).

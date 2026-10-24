@@ -7,3 +7,4 @@ Choix exclusif entre quelques options : `radiogroup`, flèches pour passer d'une
 - Props : `modelValue`, `options` (`{ value, label }[]`), `label` (nom du groupe)
 - Événements et slots : événement `update:modelValue`
 - Notes : Générique (`T extends string`). Tests : `atoms.test.ts`.
+- `disabled` (HRT-102) : fige les boutons (un champ de fiche inactif).

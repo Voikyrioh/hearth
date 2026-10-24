@@ -1,14 +1,14 @@
-import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
+import { computed, reactive, ref } from "vue";
+import { useDeployCheck } from "@/composables/useDeployCheck";
+import { useEngineCapacity } from "@/composables/useEngineCapacity";
 import { type Draft, type EnvRow, movedVersion, type PortRow } from "@/deploy/draft";
 import { type FormIssues, formIssues, readablePorts, toCheckInput } from "@/deploy/form";
 import { type PortVerdict, portVerdict } from "@/deploy/messages";
-import { logUiError } from "@/errors/report";
-import { type DeployCheck, type DeployProtocol, getLinkBridge } from "@/link";
-import { type EngineCapacity, startingResources } from "@/resources";
+import type { DeployProtocol } from "@/link";
+import { startingResources } from "@/resources";
 import { useDeployFormStore } from "@/stores/deployForm";
 
-/** Le délai après la dernière frappe avant de demander au serveur (les constats sont indicatifs, BR-DEPLOY-032). */
-export const CHECK_DELAY_MS = 400;
+export { CHECK_DELAY_MS } from "@/composables/useDeployCheck";
 
 /**
  * Le formulaire « Déployer un service » d'un serveur (HRT-69) : le brouillon en mémoire, les défauts de forme, les
@@ -44,76 +44,17 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
     for (const key of Object.keys(touched)) delete touched[key];
   }
 
-  // ── Les constats du serveur ──────────────────────────────────────────────────────────────────
-  const check = ref<DeployCheck | null>(null);
-  const checkSent = ref<string | null>(null);
-  const checking = ref(false);
-  let ticket = 0;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
+  // ── Les constats du serveur (partagés avec l'installation d'une fiche) ──────────────────────
   const input = computed(() => toCheckInput(draft.value));
-  /** La consultation telle qu'elle partirait : sans secret, donc sûre à comparer. */
-  const inputKey = computed(() => (input.value ? JSON.stringify(input.value) : null));
-
-  /** Pose la question maintenant (sans attendre la fin de la frappe) et rend la réponse, `null` si elle n'a pas pu venir. */
-  async function refreshCheck(): Promise<DeployCheck | null> {
-    clearTimeout(timer);
-    const asked = input.value;
-    const key = inputKey.value;
-    if (!asked || !enabled()) {
-      check.value = null;
-      checkSent.value = null;
-      checking.value = false;
-      return null;
-    }
-    const mine = ++ticket;
-    checking.value = true;
-    try {
-      const answer = await getLinkBridge().checkDeployment(serverId(), asked);
-      if (mine !== ticket) return null;
-      check.value = answer;
-      checkSent.value = key;
-      return answer;
-    } catch (error) {
-      if (mine !== ticket) return null;
-      // Une consultation qui échoue n'interdit rien : le serveur dira non au lancement s'il le faut.
-      check.value = null;
-      checkSent.value = null;
-      logUiError(error, "deploy:check");
-      return null;
-    } finally {
-      if (mine === ticket) checking.value = false;
-    }
-  }
-
-  watch(inputKey, (key) => {
-    clearTimeout(timer);
-    if (key === null) {
-      ticket += 1;
-      check.value = null;
-      checkSent.value = null;
-      checking.value = false;
-      return;
-    }
-    checking.value = true;
-    timer = setTimeout(() => void refreshCheck(), CHECK_DELAY_MS);
-  });
-  // Le lien ou le moteur reviennent : on repose la question.
-  watch(enabled, (now) => {
-    if (now && inputKey.value !== null) void refreshCheck();
-  });
-  onBeforeUnmount(() => {
-    clearTimeout(timer);
-    ticket += 1;
-  });
-
-  /** Le constat du serveur est celui de ce que le formulaire dit MAINTENANT (pas d'une saisie plus ancienne). */
-  const checkCurrent = computed(() => (checkSent.value === inputKey.value ? check.value : null));
+  const checks = useDeployCheck(serverId, enabled, input);
+  const check = checks.check;
+  const checking = checks.checking;
+  const refreshCheck = checks.refresh;
 
   /** Ce que le serveur dit d'une rangée de port. */
   const portVerdicts = computed(() => {
     const map = new Map<number, PortVerdict>();
-    const answer = checkCurrent.value;
+    const answer = check.value;
     for (const port of readablePorts(draft.value)) {
       const found = answer?.ports.find(
         (item) => item.hostPort === port.hostPort && item.protocol === port.protocol,
@@ -123,51 +64,16 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
     return map;
   });
   /** Une rangée de port attend encore la réponse du serveur. */
-  const portsWaiting = computed(() => checking.value && checkCurrent.value === null);
+  const portsWaiting = computed(() => checking.value && check.value === null);
 
   // ── Les bornes de la machine ─────────────────────────────────────────────────────────────────
-  const capacity = ref<EngineCapacity | null>(null);
-  const capacityFailed = ref(false);
-  let capacityTicket = 0;
-
-  async function loadCapacity(): Promise<void> {
-    const mine = ++capacityTicket;
-    try {
-      const read = await getLinkBridge().readEngineCapacity(serverId());
-      if (mine !== capacityTicket) return;
-      capacity.value = read;
-      capacityFailed.value = read === null;
-      // Les curseurs partent de la valeur de départ de BR-RES-039 ; un réglage déjà fait n'est pas écrasé.
-      if (read && draft.value.resources === null) {
-        draft.value.resources = startingResources(read, null);
-      }
-    } catch (error) {
-      if (mine !== capacityTicket) return;
-      capacityFailed.value = true;
-      logUiError(error, "deploy:capacity");
-    }
-  }
-  // Un autre serveur a d'autres bornes (et d'autres constats) : rien de l'ancien ne reste.
-  watch(serverId, () => {
-    clearTimeout(timer);
-    // Une réponse encore en vol de l'ancien serveur ne doit atterrir nulle part, même si la clé de consultation est
-    // la même (deux brouillons de même nom).
-    ticket += 1;
-    capacityTicket += 1;
-    capacity.value = null;
-    capacityFailed.value = false;
-    check.value = null;
-    checkSent.value = null;
-    checking.value = false;
-    if (inputKey.value !== null && enabled()) void refreshCheck();
+  // Les curseurs partent de la valeur de départ de BR-RES-039 ; un réglage déjà fait n'est pas écrasé.
+  const limits = useEngineCapacity(serverId, enabled, (read) => {
+    if (draft.value.resources === null) draft.value.resources = startingResources(read, null);
   });
-  watch(
-    [serverId, enabled],
-    ([, on]) => {
-      if (on && capacity.value === null) void loadCapacity();
-    },
-    { immediate: true },
-  );
+  const capacity = limits.capacity;
+  const capacityFailed = limits.failed;
+  const loadCapacity = limits.load;
 
   // ── Les gestes sur les rangées ───────────────────────────────────────────────────────────────
   function addEnv(): number {
@@ -230,8 +136,7 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
   function wipe(): void {
     store.wipe(serverId());
     resetTouched();
-    check.value = null;
-    checkSent.value = null;
+    checks.reset();
     movedImage.value = null;
   }
 
@@ -242,7 +147,7 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
     touchAll,
     shown,
     resetTouched,
-    check: checkCurrent,
+    check,
     checking,
     refreshCheck,
     portVerdicts,

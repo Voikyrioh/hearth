@@ -26,7 +26,10 @@ use std::path::{Path, PathBuf};
 use hearth_proto::admin_act::TrustLevel;
 use hearth_proto::api::accounts::{AccountInfo, RoleName};
 use hearth_proto::api::audit::{OriginKindName, OutcomeName};
-use hearth_proto::api::catalog::{EvidenceView, FicheStatus};
+use hearth_proto::api::catalog::{
+    CharsetView, EvidenceView, FicheStatus, PortMappingView, QuestionKind, SecretKindView,
+    WorldSavedView,
+};
 use hearth_proto::api::deploy::{
     DeployPlace, DeployProtocol, DeploySource, MountStatus, NameStatus, PortStatus,
 };
@@ -175,6 +178,11 @@ fn enums() -> Vec<Entry> {
         entry!("api/game_settings.rs::ValueState", Tolerant, ValueState),
         entry!("api/catalog.rs::FicheStatus", Tolerant, FicheStatus),
         entry!("api/catalog.rs::EvidenceView", Tolerant, EvidenceView),
+        entry!("api/catalog.rs::QuestionKind", Tolerant, QuestionKind),
+        entry!("api/catalog.rs::WorldSavedView", Tolerant, WorldSavedView),
+        entry!("api/catalog.rs::PortMappingView", Tolerant, PortMappingView),
+        entry!("api/catalog.rs::CharsetView", Tolerant, CharsetView),
+        entry!("api/catalog.rs::SecretKindView", Tolerant, SecretKindView),
         entry!("api/deploy.rs::NameStatus", Tolerant, NameStatus),
         entry!("api/deploy.rs::PortStatus", Tolerant, PortStatus),
         entry!("api/deploy.rs::MountStatus", Tolerant, MountStatus),
@@ -643,6 +651,10 @@ const LOCAL_ENUMS: &[(&str, &str)] = &[
     (
         "service_ops/deploy_dto.rs::DeployProtocolDto",
         "commande de la WebView (protocole d'un port du formulaire) ; lu de l'agent par `hearth_proto::DeployProtocol`",
+    ),
+    (
+        "service_ops/catalog_dto.rs::FicheLinkKind",
+        "commande de la WebView (quelle adresse de la fiche s'ouvre : un genre, jamais l'adresse)",
     ),
     (
         "service_ops/dto.rs::OperationChoiceDto",
