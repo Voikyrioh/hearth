@@ -445,6 +445,7 @@ impl TestAgent {
                     deploy: hearth_agent::application::deployments::DeployTimings::production(),
                     delete: hearth_agent::application::delete::DeleteTimings::production(),
                     safe_fs: None,
+                    host_paths: None,
                     catalog: hearth_agent::app::CatalogParts::production(),
                 },
             )

@@ -31,7 +31,7 @@ La suppression est le geste irréversible du lot : l'agent est root et efface de
 - **Effacer d'abord, supprimer le conteneur ensuite** : un échec du moteur laisserait un service vivant sans ses données.
 - **Reprendre un effacement interrompu au redémarrage** : le dossier a pu être réutilisé par un nouveau service du même nom.
 - **Juger le partage une seule fois** : un conteneur créé entre la fenêtre et l'effacement perdrait ses données.
-- **`ioprio_set` classe `idle`** : non exposé par `rustix`, `libc` est interdit avec `unsafe` ; un « nice » de 19 sur un fil créé pour le geste en tient lieu pour le processeur seulement : l'entrée-sortie n'est pas abaissée (suivi à créer).
+- **`ioprio_set` classe `idle`** : non exposé par `rustix`, `libc` est interdit avec `unsafe` ; un « nice » de 19 sur un fil créé pour le geste en tient lieu pour le processeur seulement : l'entrée-sortie n'est pas abaissée (suivi : HRT-212).
 
 ## Conséquences
 

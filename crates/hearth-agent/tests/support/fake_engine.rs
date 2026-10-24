@@ -139,6 +139,8 @@ struct DeployScript {
     removed_keeping_volumes: Vec<String>,
     /// `remove_keeping_volumes` échoue avec cette erreur.
     remove_error: Option<EngineError>,
+    /// `remove_keeping_volumes` panique (une exécution qui s'effondre après l'ordre de suppression).
+    panic_on_remove: bool,
     create_error: Option<EngineError>,
     /// Le moteur crée le conteneur, puis met ce temps à répondre (la réponse peut ne jamais être lue).
     create_reply_delay: Duration,
@@ -563,6 +565,11 @@ impl FakeEngine {
     /// `remove_keeping_volumes` échoue avec cette erreur (None : rétablit).
     pub fn fail_remove(&self, error: Option<EngineError>) {
         self.lock().deploy.remove_error = error;
+    }
+
+    /// `remove_keeping_volumes` panique (false : rétablit).
+    pub fn panic_on_remove(&self, on: bool) {
+        self.lock().deploy.panic_on_remove = on;
     }
 
     /// `create` échoue avec cette erreur (None : rétablit).
@@ -1292,6 +1299,8 @@ impl ContainerEngine for FakeEngine {
     }
 
     async fn remove_keeping_volumes(&self, id: &str) -> Result<(), EngineError> {
+        let panics = self.lock().deploy.panic_on_remove;
+        assert!(!panics, "panique voulue du faux moteur");
         let existed = {
             let mut state = self.lock();
             if let Some(error) = state.list_error {

@@ -119,6 +119,10 @@ impl ServerHandle {
     pub async fn run_until(mut self, stop: impl Future<Output = ()>) -> Result<(), ServerError> {
         tokio::select! {
             result = &mut self.task => {
+                // Le serveur tombe de lui-même : ce qui tourne à côté (flux, effacement) s'arrête aussi.
+                if let Some(hook) = self.on_shutdown.take() {
+                    hook();
+                }
                 result??;
                 Err(ServerError::StoppedUnexpectedly)
             }
@@ -151,6 +155,21 @@ mod tests {
             matches!(result, Err(ServerError::StoppedUnexpectedly)),
             "{result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn the_shutdown_hook_also_runs_when_the_server_falls_on_its_own() {
+        // Sans cela, un effacement en cours n'apprend jamais que l'agent s'arrête (HRT-85).
+        let dir = crate::infrastructure::data_dir::private_tempdir();
+        let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&called);
+        let server = started(dir.path()).on_shutdown(move || {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        server.handle.shutdown();
+        let result = server.run_until(std::future::pending()).await;
+        assert!(result.is_err(), "{result:?}");
+        assert!(called.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[tokio::test]

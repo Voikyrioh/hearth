@@ -792,6 +792,7 @@ async fn no_variable_value_reaches_a_message_a_response_or_a_trace_and_no_name_o
             deploy: support::engine::fast_deploy(),
             delete: support::engine::fast_delete(),
             safe_fs: None,
+            host_paths: None,
             catalog: hearth_agent::app::CatalogParts::production(),
         },
     )
@@ -1577,6 +1578,7 @@ async fn a_revealed_value_reaches_only_the_admin_response_never_a_trace_the_jour
             deploy: support::engine::fast_deploy(),
             delete: support::engine::fast_delete(),
             safe_fs: None,
+            host_paths: None,
             catalog: hearth_agent::app::CatalogParts::production(),
         },
     )
@@ -1941,6 +1943,7 @@ async fn nothing_of_a_container_that_is_not_adopted_leaves_the_agent_by_any_rout
             deploy: support::engine::fast_deploy(),
             delete: support::engine::fast_delete(),
             safe_fs: None,
+            host_paths: None,
             catalog: hearth_agent::app::CatalogParts::production(),
         },
     )

@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use hearth_agent::application::catalog::CatalogService;
 use hearth_agent::application::game_phase::GamePhases;
-use hearth_agent::application::ports::{EngineError, EngineInfo};
+use hearth_agent::application::ports::{EngineError, EngineInfo, HostPaths, Resolved};
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::catalog::loading::model::Fiche;
 use hearth_agent::domain::catalog::{Origin, load};
@@ -549,6 +549,241 @@ async fn a_folder_another_container_mounts_is_kept_even_when_the_data_box_is_tic
 }
 
 // ---------------------------------------------------------------------------------------------
+// Le même dossier sous un autre nom, un parent ou un enfant monté (revue de la PR 125, round 2)
+// ---------------------------------------------------------------------------------------------
+
+/// Une topologie de chemins donnée à l'agent : un montage « bind » ne se fabrique pas sans droits, la lignée
+/// (identité du dossier, puis de ses parents) se dicte ici. Notre dossier géré : `(1,100)`, son parent `(1,50)`,
+/// le dossier de données `(1,10)`, la racine `(1,2)`.
+struct Topology {
+    others: Vec<(&'static str, Resolved)>,
+    /// Combien de temps met chaque lecture à répondre (un partage réseau mort).
+    delay: Duration,
+}
+
+impl HostPaths for Topology {
+    fn resolve(&self, path: &str) -> Resolved {
+        std::thread::sleep(self.delay);
+        if path.ends_with(FOLDER) {
+            return found(path, &[(1, 100), (1, 50), (1, 10), (1, 2)]);
+        }
+        self.others
+            .iter()
+            .find(|(source, _)| *source == path)
+            .map_or(Resolved::Absent, |(_, resolved)| resolved.clone())
+    }
+}
+
+fn found(path: &str, lineage: &[(u64, u64)]) -> Resolved {
+    Resolved::Found {
+        canonical: path.to_owned(),
+        lineage: lineage.to_vec(),
+    }
+}
+
+/// Un agent dont les chemins du serveur sont `others` ; `delay` ralentit chaque lecture, `budget` borne leur somme.
+async fn bench_over(
+    others: Vec<(&'static str, Resolved)>,
+    delay: Duration,
+    budget: Option<Duration>,
+) -> Bench {
+    bench_with(move |parts| {
+        parts.host_paths = Some(Arc::new(Topology { others, delay }));
+        if let Some(budget) = budget {
+            parts.delete.resolve_budget = budget;
+        }
+    })
+    .await
+}
+
+/// Un conteneur arrêté, créé hors de Hearth, qui monte `source`.
+fn mounting(source: &str) -> hearth_agent::domain::services::Observation {
+    let mut other = container("sauvegarde", RunState::Exited);
+    other.mounts = vec![MountInfo {
+        kind: MountType::Folder,
+        source: source.into(),
+        target: "/in".into(),
+        read_only: true,
+    }];
+    other
+}
+
+/// Déploie `web`, fait monter `source` par un autre conteneur, demande l'effacement : rend le sort annoncé par la
+/// fenêtre et le nombre d'effacements réellement lancés.
+async fn fate_with(b: &Bench, source: &str) -> (FolderFate, usize) {
+    let service = b.deploy("web").await;
+    b.engine.put_silently(mounting(source));
+    b.resync().await;
+    let preview = b.preview(service.key.as_str()).await;
+    assert_eq!(preview.status, 200, "{}", preview.text);
+    let preview: DeletePreview = serde_json::from_value(preview.body).unwrap();
+    let accepted = b
+        .accepted(
+            service.key.as_str(),
+            json!({ "erase_data": true, "confirm_name": "web" }),
+        )
+        .await;
+    let operation = b.finished(&accepted.operation_id).await;
+    assert_eq!(
+        operation.status,
+        OperationStatus::Succeeded,
+        "{operation:?}"
+    );
+    (preview.folders[0].fate, b.safe_fs.erase_calls().len())
+}
+
+#[tokio::test]
+async fn a_parent_of_the_folder_mounted_under_another_name_keeps_it() {
+    // `/persist/hearth` est le dossier de données (`(1,10)`) vu par un autre chemin : aucun nom ne se recouvre,
+    // l'identité d'un PARENT de notre dossier est pourtant celle du montage de l'autre conteneur.
+    let b = bench_over(
+        vec![(
+            "/persist/hearth",
+            found("/persist/hearth", &[(1, 10), (1, 5), (1, 2)]),
+        )],
+        Duration::ZERO,
+        None,
+    )
+    .await;
+    let (fate, erased) = fate_with(&b, "/persist/hearth").await;
+    assert_eq!(fate, FolderFate::KeptShared);
+    assert_eq!(erased, 0);
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_child_of_the_folder_mounted_under_another_name_keeps_it() {
+    let b = bench_over(
+        vec![(
+            "/elsewhere/saves",
+            found(
+                "/elsewhere/saves",
+                &[(1, 200), (1, 100), (1, 50), (1, 10), (1, 2)],
+            ),
+        )],
+        Duration::ZERO,
+        None,
+    )
+    .await;
+    let (fate, erased) = fate_with(&b, "/elsewhere/saves").await;
+    assert_eq!(fate, FolderFate::KeptShared);
+    assert_eq!(erased, 0);
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn parents_in_common_are_not_a_sharing() {
+    // Le dossier de l'autre conteneur n'a que la racine en commun avec le nôtre : l'effacement a lieu.
+    let b = bench_over(
+        vec![(
+            "/srv/media",
+            found("/srv/media", &[(1, 300), (1, 3), (1, 2)]),
+        )],
+        Duration::ZERO,
+        None,
+    )
+    .await;
+    let (fate, erased) = fate_with(&b, "/srv/media").await;
+    assert_eq!(fate, FolderFate::Erasable);
+    assert_eq!(erased, 1);
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_mount_that_cannot_be_read_keeps_the_folder_as_unverifiable() {
+    let b = bench_over(
+        vec![("/mnt/nfs-mort", Resolved::Unreadable)],
+        Duration::ZERO,
+        None,
+    )
+    .await;
+    let (fate, erased) = fate_with(&b, "/mnt/nfs-mort").await;
+    assert_eq!(fate, FolderFate::KeptUnverifiable);
+    assert_eq!(erased, 0);
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_dead_network_share_never_hangs_the_request_the_folder_is_kept() {
+    // Chaque lecture met 3 s ; le budget de lecture est de 300 ms : la fenêtre répond vite, dossier conservé.
+    let b = bench_over(
+        Vec::new(),
+        Duration::from_secs(3),
+        Some(Duration::from_millis(300)),
+    )
+    .await;
+    let service = b.deploy("web").await;
+    let started = Instant::now();
+    let preview = b.preview(service.key.as_str()).await;
+    assert_eq!(preview.status, 200, "{}", preview.text);
+    assert!(
+        started.elapsed() < Duration::from_millis(2500),
+        "la fenêtre a attendu le partage : {:?}",
+        started.elapsed()
+    );
+    let preview: DeletePreview = serde_json::from_value(preview.body).unwrap();
+    assert_eq!(preview.folders[0].fate, FolderFate::KeptUnverifiable);
+    b.agent.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Une liste de conteneurs pas fiable ne dit jamais « personne ne monte ce dossier »
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_container_list_that_cannot_be_trusted_keeps_the_folder() {
+    let b = bench().await;
+    let service = b.deploy("web").await;
+    // Un conteneur ne s'inspecte plus : la liste n'est plus fiable, personne ne peut dire qu'il ne monte rien.
+    let other = container("gros", RunState::Running);
+    let id = other.id.clone();
+    b.engine.put_silently(other);
+    b.resync().await;
+    b.engine.fail_inspect(&id, Some(EngineError::Timeout));
+    b.resync().await;
+    let preview = b.preview(service.key.as_str()).await;
+    assert_eq!(preview.status, 200, "{}", preview.text);
+    let preview: DeletePreview = serde_json::from_value(preview.body).unwrap();
+    assert_eq!(preview.folders[0].fate, FolderFate::KeptUnverifiable);
+    b.agent.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Une panique de l'exécution après l'ordre de suppression du conteneur
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_panic_after_the_container_removal_order_leaves_the_operation_to_check_and_the_name_reserved()
+ {
+    let b = bench().await;
+    let service = b.deploy("web").await;
+    b.engine.panic_on_remove(true);
+    let accepted = b.accepted(service.key.as_str(), json!({})).await;
+    let operation = b
+        .until(&accepted.operation_id, |op| {
+            op.status == OperationStatus::NeedsAttention
+        })
+        .await;
+    // Comme après un redémarrage : cause et choix identiques, rien n'est rejoué.
+    assert_eq!(operation.cause, Some(OperationCause::IntentWithoutDone));
+    assert_eq!(
+        operation.decision.expect("décision").choices,
+        [hearth_proto::api::service_ops::OperationChoice::Verified]
+    );
+    // Le nom reste réservé : on ne remonte pas un service du même nom tant que personne n'a vérifié.
+    b.engine.panic_on_remove(false);
+    let deploy = b
+        .agent
+        .confirmed(&b.ada, "POST", "/deployments", spec("web"))
+        .await
+        .send()
+        .await;
+    assert_eq!(deploy.status, 409, "{}", deploy.text);
+    assert_eq!(code(&deploy), "NAME_BEING_DELETED");
+    b.agent.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------------------------
 // La fenêtre : dossiers, tailles, sort de chacun (BR-DEL-006 à BR-DEL-009)
 // ---------------------------------------------------------------------------------------------
 
@@ -672,6 +907,10 @@ async fn an_adopted_service_is_never_deleted_and_the_refusal_is_journaled() {
     b.env.adopt(&key, "7dtd", "ada").await;
     b.agent.services().reload_adopted().await;
     let before = b.engine.calls().len();
+    // Ouvrir la fenêtre n'écrit aucun refus `service.delete` : seul l'acte le fait.
+    let preview = b.preview(&key).await;
+    assert_eq!(code(&preview), "SERVICE_ADOPTED");
+    assert_eq!(b.journal().await.len(), 0, "la fenêtre n'écrit rien");
     for body in [
         json!({}),
         json!({ "erase_data": true, "confirm_name": "7dtd" }),
@@ -684,22 +923,24 @@ async fn an_adopted_service_is_never_deleted_and_the_refusal_is_journaled() {
             "Hearth ne supprime pas les services créés hors de Hearth. Tu peux seulement ne plus le gérer."
         );
     }
-    let preview = b.preview(&key).await;
-    assert_eq!(code(&preview), "SERVICE_ADOPTED");
-    // Ouvrir la fenêtre n'écrit aucun refus `service.delete` : seul l'acte le fait.
     // Rien n'est touché, et le refus est au journal avec sa cause (BR-DEL-002).
     assert!(b.engine.container_ids().contains(&adopted.id));
     assert!(b.engine.removed_keeping_volumes().is_empty());
     assert_eq!(b.engine.calls().len(), before);
-    // Des refus répétés se regroupent (« n autres fois »), mais le premier dit la cause et le service.
+    // Deux demandes refusées : au plus deux entrées (les répétitions se regroupent), chacune échouée, avec la
+    // cause et le service. On compte les entrées ; on ne lit pas le libellé d'un regroupement.
     let journal = b.journal().await;
-    assert!(!journal.is_empty(), "{journal:?}");
+    assert!(
+        (1..=2).contains(&journal.len()),
+        "une entrée par refus au plus : {journal:?}"
+    );
     for entry in &journal {
         assert_eq!(entry.0, "failed");
         assert!(
-            entry.2.as_deref().is_some_and(
-                |reason| reason.starts_with("service adopté") && !reason.contains("(2 autres")
-            ),
+            entry
+                .2
+                .as_deref()
+                .is_some_and(|reason| reason.starts_with("service adopté")),
             "{entry:?}"
         );
         assert_eq!(entry.1.as_deref(), Some("service 7dtd"));

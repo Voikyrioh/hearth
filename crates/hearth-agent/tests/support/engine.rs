@@ -66,6 +66,7 @@ pub fn parts_supervised(
         deploy: fast_deploy(),
         delete: fast_delete(),
         safe_fs: Some(Arc::new(super::fake_safe_fs::FakeSafeFs::new())),
+        host_paths: None,
         catalog: hearth_agent::app::CatalogParts {
             include_preview: false,
             random: Arc::new(super::fake_random::FakeRandom::counting_from(0)),
@@ -93,6 +94,7 @@ pub fn fast_delete() -> hearth_agent::application::delete::DeleteTimings {
         stop_floor: Duration::from_secs(1),
         remove_wait: Duration::from_secs(5),
         progress_every: Duration::from_millis(20),
+        resolve_budget: Duration::from_secs(10),
     }
 }
 

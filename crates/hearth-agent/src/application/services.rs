@@ -1888,13 +1888,17 @@ impl ServicesRegistry {
     /// n'a pas de nom ici (`Holder::Unmanaged`, BR-ADOPT-002). **Lecture réservée à la suppression** : jamais
     /// diffusée, jamais gardée.
     ///
-    /// `None` : la liste des conteneurs n'est pas connue (moteur pas « Prêt » : le registre vide sa liste quand il
-    /// ne la tient plus). Une liste qu'on n'a pas est un doute, jamais « personne ne l'utilise ».
+    /// `None` : la liste des conteneurs n'est pas fraîche (moteur pas vu prêt, liste pas encore relue au retour,
+    /// suivi perdu, lecture en échec, conteneur illisible). Une liste qu'on n'a pas est un doute, jamais
+    /// « personne ne l'utilise ».
     pub fn folder_users(&self, own: &ServiceKey) -> Option<Vec<FolderUse>> {
-        if self.engine_state() != EngineState::Ready {
+        // « Prêt » publié ne veut pas dire « liste relue » : au retour du moteur la liste est vide tant qu'elle n'a
+        // pas été relue, et une liste figée (suivi perdu, lecture en échec, conteneur illisible) n'est pas fiable.
+        // Seule une liste fraîche (`list_fresh`) peut dire « personne ne monte ce dossier ».
+        let inner = self.lock();
+        if !Self::list_fresh(&inner) {
             return None;
         }
-        let inner = self.lock();
         Some(
             inner
                 .containers
@@ -1911,10 +1915,17 @@ impl ServicesRegistry {
                         .map(|mount| mount.source.clone())
                         .collect(),
                     identities: Vec::new(),
-                    complete: observation.mounts_omitted == 0,
+                    ancestry: Vec::new(),
+                    // Un conteneur dont l'inspection a échoué n'a aucun montage lu : on ne sait pas.
+                    complete: observation.mounts_omitted == 0 && !Self::is_unread(observation),
                 })
                 .collect(),
         )
+    }
+
+    /// Un conteneur que la liste montre mais dont l'inspection a échoué (`Observation::unreadable`).
+    fn is_unread(observation: &Observation) -> bool {
+        observation.run_state == RunState::Unknown && observation.created_at.is_none()
     }
 
     /// Combien de volumes du moteur (pas des dossiers) les conteneurs de ce service montent : la suppression
@@ -3535,6 +3546,34 @@ mod tests {
         let snapshot = registry.snapshot();
         assert_eq!(snapshot.engine.state, EngineState::Ready);
         assert!(snapshot.services.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_folders_others_mount_are_only_known_from_a_fresh_list() {
+        // HRT-85, BR-DEL-008 : « Prêt » publié ne veut pas dire « liste relue ». Une liste pas encore relue, ou
+        // qu'un conteneur illisible rend douteuse, ne dit jamais « personne ne monte ce dossier ».
+        let own = ServiceKey::parse("c_0123abcd").expect("clé");
+        let (registry, engine, _mono) = registry(true);
+        engine.put_silently(container("web", RunState::Running));
+        engine.put_silently(container("db", RunState::Running));
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_state(), EngineState::Ready);
+        assert!(
+            registry.folder_users(&own).is_none(),
+            "moteur prêt mais liste pas encore relue"
+        );
+        registry.resync().await.expect("resync");
+        let users = registry.folder_users(&own).expect("liste fraîche");
+        assert_eq!(users.len(), 2);
+        assert!(users.iter().all(|other| other.complete));
+        // Un conteneur illisible : la liste n'est plus fiable, la réponse est « on ne sait pas ».
+        let db_id = container("db", RunState::Running).id;
+        engine.fail_inspect(&db_id, Some(EngineError::Timeout));
+        registry.resync().await.expect("resync");
+        assert!(registry.folder_users(&own).is_none(), "conteneur illisible");
+        engine.fail_inspect(&db_id, None);
+        registry.resync().await.expect("resync");
+        assert!(registry.folder_users(&own).is_some());
     }
 
     #[tokio::test]

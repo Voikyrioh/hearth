@@ -26,9 +26,9 @@ use super::ports::{
 };
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Outcome, Target};
 use crate::domain::ops::{
-    CancelVerdict, Cause, Choice, ChoiceRefused, LockTable, OpKind, OpPlan, OpStatus, OpSummary,
-    OpsIndex, Refusal, StepName, StepRecord, StepState, UndoInfo, apply_choice, cancel_verdict,
-    cleanup_on_cancel, decision_expired, decision_expiry, latest_state, recover,
+    CancelVerdict, Cause, Choice, ChoiceRefused, LockTable, Observed, OpKind, OpPlan, OpStatus,
+    OpSummary, OpsIndex, Refusal, StepName, StepRecord, StepState, UndoInfo, apply_choice,
+    cancel_verdict, cleanup_on_cancel, decision_expired, decision_expiry, latest_state, recover,
     recover_unreadable_journal,
 };
 use crate::domain::services::key::ServiceKey;
@@ -989,6 +989,51 @@ impl ServiceOps {
             tracing::error!(%error, "projection des opérations non rebâtie : busy et last_action seront vides jusqu'au prochain changement");
         }
         Ok(summary)
+    }
+
+    /// Une exécution a paniqué : si l'opération a déjà écrit l'`intent` d'un geste destructif, personne ne sait
+    /// où il en était. Elle devient « à vérifier » EXACTEMENT comme après un redémarrage (`recover`, même cause,
+    /// mêmes choix), son verrou et le nom réservé sont gardés, rien n'est rejoué. `Ok(false)` : aucun geste
+    /// destructif n'a commencé, l'appelant clôt l'opération lui-même (le service est resté entier).
+    pub async fn park_for_check(&self, id: &str) -> Result<bool, OpError> {
+        let op = self
+            .journal
+            .get(id)
+            .await?
+            .ok_or(OpError::NoSuchOperation)?;
+        if op.status == OpStatus::NeedsAttention {
+            return Ok(true);
+        }
+        if op.status.is_terminal() {
+            return Ok(false);
+        }
+        let recovery = match self.journal.steps(id).await {
+            Ok(records) => recover(op.kind, &op.plan, &records, Observed::Unreadable),
+            Err(error) => {
+                tracing::error!(op = %id, %error, "journal des étapes illisible : opération à vérifier");
+                recover_unreadable_journal(op.kind)
+            }
+        };
+        if recovery.status != OpStatus::NeedsAttention || !op.status.can_become(recovery.status) {
+            return Ok(false);
+        }
+        let now = self.clock.now();
+        let offer = DecisionOffer {
+            choices: recovery.choices.clone(),
+            since: now,
+        };
+        self.journal
+            .transition(
+                id,
+                op.status,
+                recovery.status,
+                Some(recovery.cause),
+                Some(&offer),
+                now,
+            )
+            .await?;
+        self.publish(id).await;
+        Ok(true)
     }
 
     fn hold_lock(&self, op: &OpRecord) {

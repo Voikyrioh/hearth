@@ -1208,6 +1208,7 @@ async fn the_engine_socket_is_drained_whatever_the_client_does_with_the_real_ada
             deploy: support::engine::fast_deploy(),
             delete: support::engine::fast_delete(),
             safe_fs: None,
+            host_paths: None,
             catalog: hearth_agent::app::CatalogParts::production(),
         },
     )
@@ -1427,6 +1428,7 @@ async fn no_line_reaches_a_trace_the_database_the_journal_or_the_operations_queu
             deploy: support::engine::fast_deploy(),
             delete: support::engine::fast_delete(),
             safe_fs: None,
+            host_paths: None,
             catalog: hearth_agent::app::CatalogParts::production(),
         },
     )

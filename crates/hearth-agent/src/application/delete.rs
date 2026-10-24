@@ -41,7 +41,7 @@ use tokio::time::Instant;
 
 use super::game_phase::GamePhases;
 use super::ports::{
-    Clock, ContainerEngine, EngineError, Erased, FsError, HostPaths, Measure, SafeFs,
+    Clock, ContainerEngine, EngineError, Erased, FsError, HostPaths, Measure, Resolved, SafeFs,
     ServiceContainers, ServiceIntents, StopIntent,
 };
 use super::service_lifecycle::reason_of;
@@ -57,7 +57,7 @@ use crate::domain::ops::{
     stop_was_forced, wait_budget_with,
 };
 use crate::domain::services::delete::{
-    Fate, FolderUse, ManagedFolder, MountSplit, OwnFolder, fate_of, split_mounts,
+    Fate, FileId, FolderUse, ManagedFolder, MountSplit, OwnFolder, fate_of, split_mounts,
 };
 use crate::domain::services::plan::image_reference;
 use crate::domain::services::spec::{SpecBody, fold_name};
@@ -77,6 +77,9 @@ pub struct DeleteTimings {
     pub remove_wait: Duration,
     /// L'intervalle entre deux signes de vie de l'effacement.
     pub progress_every: Duration,
+    /// Combien de temps au plus pour lire les chemins qui jugent un dossier (liens, parents, montages des autres
+    /// conteneurs) : un partage réseau mort ne fait jamais pendre la demande, le dossier est alors conservé.
+    pub resolve_budget: Duration,
 }
 
 impl DeleteTimings {
@@ -87,6 +90,7 @@ impl DeleteTimings {
             stop_floor: WAIT_FLOOR,
             remove_wait: Duration::from_secs(60),
             progress_every: Duration::from_millis(500),
+            resolve_budget: Duration::from_secs(10),
         }
     }
 }
@@ -157,26 +161,14 @@ struct Finish {
     status: OpStatus,
     cause: Option<Cause>,
     note: DeleteNote,
-    /// L'effacement s'est arrêté avec l'agent : rien n'est clos.
-    halted: bool,
 }
 
 impl Finish {
-    fn halted(note: DeleteNote) -> Self {
-        Self {
-            status: OpStatus::Failed,
-            cause: None,
-            note,
-            halted: true,
-        }
-    }
-
     fn failed(cause: Cause, note: DeleteNote) -> Self {
         Self {
             status: OpStatus::Failed,
             cause: Some(cause),
             note,
-            halted: false,
         }
     }
 
@@ -186,7 +178,6 @@ impl Finish {
             status: OpStatus::Interrupted,
             cause: Some(cause),
             note,
-            halted: false,
         }
     }
 
@@ -195,7 +186,6 @@ impl Finish {
             status: OpStatus::Cancelled,
             cause: Some(Cause::CancelledByAccount),
             note,
-            halted: false,
         }
     }
 
@@ -204,7 +194,6 @@ impl Finish {
             status: OpStatus::Succeeded,
             cause: (left > 0).then_some(Cause::DataNotErased),
             note,
-            halted: false,
         }
     }
 }
@@ -362,34 +351,51 @@ impl ServiceDeletion {
     }
 
     /// Le sort d'un dossier géré MAINTENANT : la liste des autres conteneurs est lue à cet instant ; chemins
-    /// canoniques et identité (périphérique, inode) des deux côtés ; au moindre doute (liste absente, chemin
-    /// illisible d'un côté seulement), le dossier est conservé (BR-DEL-008).
+    /// canoniques, identité (périphérique, inode) du dossier ET de tous ses parents, des deux côtés, dans les deux
+    /// sens (parent monté, enfant monté) ; au moindre doute (liste absente ou pas relue, chemin qu'on ne peut pas
+    /// lire, lecture trop longue), le dossier est conservé (BR-DEL-008).
     async fn fate_now(&self, key: &ServiceKey, host_path: &str) -> Fate {
         let users = self.registry.folder_users(key);
         let paths = Arc::clone(&self.host_paths);
         let host_path = host_path.to_owned();
-        tokio::task::spawn_blocking(move || {
+        let work = tokio::task::spawn_blocking(move || {
+            let own = see(paths.as_ref(), &host_path, true);
+            if own.unreadable {
+                return Fate::Unverifiable;
+            }
             let own = OwnFolder {
-                paths: variants(paths.as_ref(), &host_path),
-                identity: paths.identity(&host_path),
+                paths: own.names,
+                lineage: own.lineage,
             };
             let resolved: Option<Vec<FolderUse>> = users.map(|list| {
                 list.into_iter()
                     .map(|mut other| {
-                        let mut sources = Vec::new();
+                        let (mut sources, mut identities, mut ancestry) =
+                            (Vec::new(), Vec::new(), Vec::new());
                         for source in &other.sources {
-                            sources.extend(variants(paths.as_ref(), source));
-                            other.identities.extend(paths.identity(source));
+                            let seen = see(paths.as_ref(), source, false);
+                            sources.extend(seen.names);
+                            identities.extend(seen.lineage.first().copied());
+                            ancestry.extend(seen.lineage);
+                            if seen.unreadable {
+                                // Un montage qu'on ne sait pas lire : on ne peut pas dire qu'il est ailleurs.
+                                other.complete = false;
+                                break;
+                            }
                         }
                         other.sources = sources;
+                        other.identities = identities;
+                        other.ancestry = ancestry;
                         other
                     })
                     .collect()
             });
             fate_of(&own, resolved.as_deref())
-        })
-        .await
-        .unwrap_or(Fate::Unverifiable)
+        });
+        match tokio::time::timeout(self.context.timings.resolve_budget, work).await {
+            Ok(Ok(fate)) => fate,
+            _ => Fate::Unverifiable,
+        }
     }
 
     // -----------------------------------------------------------------------------------------
@@ -639,13 +645,12 @@ impl ServiceDeletion {
     async fn execute(&self, job: Job) {
         let started = Instant::now();
         let mut note = DeleteNote::default();
-        let finish = self.run(&job, &mut note).await;
-        if finish.halted {
+        let Some(finish) = self.run(&job, &mut note).await else {
             // L'agent s'arrête au milieu de l'effacement : l'opération n'est pas close, son `intent` sans `done`
             // en fait une opération « à vérifier » au prochain démarrage (BR-DEL-025), jamais reprise.
             tracing::info!(operation = %job.id, "effacement arrêté par l'arrêt de l'agent : à vérifier au prochain démarrage");
             return;
-        }
+        };
         self.settle(&job, finish, started.elapsed()).await;
     }
 
@@ -671,13 +676,14 @@ impl ServiceDeletion {
         }
     }
 
-    async fn run(&self, job: &Job, note: &mut DeleteNote) -> Finish {
+    /// `None` : l'effacement s'est arrêté avec l'agent, rien n'est clos.
+    async fn run(&self, job: &Job, note: &mut DeleteNote) -> Option<Finish> {
         // 1. Arrêt, si le service tourne (BR-DEL-013).
         if let Err(finish) = self.begin(job, step::STOP, *note).await {
-            return finish;
+            return Some(finish);
         }
         if let Err(finish) = self.stop(job, note).await {
-            return finish;
+            return Some(finish);
         }
         journal(
             self.ops
@@ -686,15 +692,15 @@ impl ServiceDeletion {
             "done",
         );
         if self.is_cancelling(&job.id).await {
-            return Finish::cancelled(*note);
+            return Some(Finish::cancelled(*note));
         }
 
         // 2. Le conteneur : le point de non-retour (BR-DEL-014).
         if let Err(finish) = self.begin(job, step::REMOVE_CONTAINER, *note).await {
-            return finish;
+            return Some(finish);
         }
         if let Err(finish) = self.remove_containers(job, *note).await {
-            return finish;
+            return Some(finish);
         }
         journal(
             self.ops
@@ -705,10 +711,10 @@ impl ServiceDeletion {
 
         // 3. La description et tout ce qui s'y rattache (BR-DEL-004).
         if let Err(finish) = self.begin(job, step::FORGET, *note).await {
-            return finish;
+            return Some(finish);
         }
         if let Err(finish) = self.forget(job, *note).await {
-            return finish;
+            return Some(finish);
         }
         journal(
             self.ops
@@ -721,13 +727,9 @@ impl ServiceDeletion {
         let mut left = 0;
         if !job.erase.is_empty() {
             if let Err(finish) = self.begin(job, step::ERASE, *note).await {
-                return finish;
+                return Some(finish);
             }
-            let (remaining, halted) = self.erase(job, note).await;
-            if halted {
-                return Finish::halted(*note);
-            }
-            left = remaining;
+            left = self.erase(job, note).await?;
             journal(
                 self.ops
                     .done(&job.id, step::ERASE, &UndoInfo::default())
@@ -736,7 +738,7 @@ impl ServiceDeletion {
             );
         }
         note.left = left;
-        Finish::done(left, *note)
+        Some(Finish::done(left, *note))
     }
 
     /// Arrête les conteneurs du service qui tournent : l'arrêt voulu est écrit AVANT l'ordre (`BR-LIFE-010`), le
@@ -885,9 +887,9 @@ impl ServiceDeletion {
     }
 
     /// Efface les dossiers gérés un par un (`BR-DEL-006` à `BR-DEL-008`). Rend le nombre d'éléments qui n'ont pas
-    /// pu être effacés. Le sort de chaque dossier est rejugé juste avant : un conteneur créé entre-temps qui le
+    /// pu être effacés, ou `None` si l'agent s'est arrêté en cours de route. Le sort de chaque dossier est rejugé juste avant : un conteneur créé entre-temps qui le
     /// monte le fait conserver.
-    async fn erase(&self, job: &Job, note: &mut DeleteNote) -> (u64, bool) {
+    async fn erase(&self, job: &Job, note: &mut DeleteNote) -> Option<u64> {
         let timings = self.context.timings;
         let deadline = Instant::now() + timings.measure_budget;
         let mut left = 0_u64;
@@ -959,7 +961,7 @@ impl ServiceDeletion {
             partial,
         });
         if halted {
-            return (left, true);
+            return None;
         }
         // La racine du service ne part que si plus rien n'y est : un dossier conservé la garde (`BR-DEL-008`).
         if left == 0 {
@@ -971,7 +973,7 @@ impl ServiceDeletion {
                 Err(error) => tracing::warn!(%error, "retrait de la racine interrompu"),
             }
         }
-        (left, false)
+        Some(left)
     }
 
     /// Efface un dossier sur un fil à part, avec un signe de vie régulier dans l'opération (`BR-DEL-030`).
@@ -1082,6 +1084,19 @@ impl ServiceDeletion {
     /// transaction, entrée au journal d'activité, verrous rendus, annonce). Pendant `Cancelling`, la seule issue
     /// permise est « annulé » (un `failed` serait refusé et laisserait le verrou).
     async fn close_after_panic(&self, id: &str, name: &str, actor: Actor) {
+        // Après l'`intent` d'un geste destructif (le conteneur, l'oubli, l'effacement), on ne sait pas où il en
+        // était : l'opération est « à vérifier » comme après un redémarrage, le nom reste réservé, rien n'est
+        // rejoué (BR-DEL-025). Seule une panique AVANT ce point (l'arrêt) laisse le service entier et se clôt.
+        match self.ops.park_for_check(id).await {
+            Ok(true) => {
+                tracing::error!(operation = %id, "suppression interrompue par une panique après un geste destructif : à vérifier");
+                return;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                tracing::error!(%error, "suppression interrompue : classement « à vérifier » impossible");
+            }
+        }
         let cancelling = self.is_cancelling(id).await;
         let (status, cause) = if cancelling {
             (OpStatus::Cancelled, Cause::CancelledByAccount)
@@ -1101,10 +1116,11 @@ impl ServiceDeletion {
                 Outcome::Failed(Reason::Internal)
             },
         });
+        // `finish_with` rend les verrous et annonce : rien à faire de plus quand il réussit.
         if let Err(error) = self.ops.finish_with(id, status, Some(cause), draft).await {
             tracing::error!(%error, "suppression interrompue non close dans le journal");
+            self.ops.settle(id, None).await;
         }
-        self.ops.settle(id, None).await;
     }
 
     /// Une entrée au journal d'activité (`BR-DEL-029`) : le compte, le service, ce qui a été effacé (des nombres),
@@ -1184,22 +1200,55 @@ fn journal<T>(result: Result<T, OpError>, what: &'static str) {
     }
 }
 
-/// Les formes d'un chemin du serveur à comparer : celle qu'on donne, sa forme canonique, et la forme canonique de
-/// son dossier parent suivie de son dernier nom (le dossier lui-même peut ne pas exister).
-fn variants(paths: &dyn HostPaths, path: &str) -> Vec<String> {
-    let mut out = vec![path.to_owned()];
-    let mut add = |candidate: String| {
-        if !out.contains(&candidate) {
-            out.push(candidate);
+/// Ce que la lecture d'un chemin du serveur établit : ses noms à comparer, sa lignée (lui, puis ses parents), et
+/// si une lecture n'a pas pu se faire.
+struct Seen {
+    names: Vec<String>,
+    lineage: Vec<FileId>,
+    unreadable: bool,
+}
+
+/// Lit un chemin du serveur : le nom donné, sa forme canonique, et la forme canonique de son dossier parent suivie
+/// de son dernier nom (le dossier lui-même peut ne pas exister). `own` : un dossier qui n'existe pas prend la
+/// lignée de son parent (un parent monté ailleurs reste vu).
+fn see(paths: &dyn HostPaths, path: &str, own: bool) -> Seen {
+    let mut seen = Seen {
+        names: vec![path.to_owned()],
+        lineage: Vec::new(),
+        unreadable: false,
+    };
+    let add = |seen: &mut Seen, candidate: String| {
+        if !seen.names.contains(&candidate) {
+            seen.names.push(candidate);
         }
     };
-    if let Some(canonical) = paths.canonical(path) {
-        add(canonical);
+    let absent = match paths.resolve(path) {
+        Resolved::Found { canonical, lineage } => {
+            add(&mut seen, canonical);
+            seen.lineage = lineage;
+            false
+        }
+        Resolved::Absent => true,
+        Resolved::Unreadable => {
+            seen.unreadable = true;
+            return seen;
+        }
+    };
+    if let Some((parent, leaf)) = path.trim_end_matches('/').rsplit_once('/') {
+        let parent = if parent.is_empty() { "/" } else { parent };
+        match paths.resolve(parent) {
+            Resolved::Found { canonical, lineage } => {
+                add(
+                    &mut seen,
+                    format!("{}/{leaf}", canonical.trim_end_matches('/')),
+                );
+                if absent && own {
+                    seen.lineage = lineage;
+                }
+            }
+            Resolved::Absent => {}
+            Resolved::Unreadable => seen.unreadable = true,
+        }
     }
-    if let Some((parent, leaf)) = path.trim_end_matches('/').rsplit_once('/')
-        && let Some(canonical) = paths.canonical(parent)
-    {
-        add(format!("{}/{leaf}", canonical.trim_end_matches('/')));
-    }
-    out
+    seen
 }

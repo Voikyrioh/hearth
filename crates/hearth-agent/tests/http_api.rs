@@ -290,10 +290,11 @@ async fn every_services_route_refuses_an_account_without_the_right_even_an_admin
             );
         }
         // Le refus est consigné sous l'action de la route, avec la cause « droits insuffisants ».
-        let action = endpoint
-            .audit
-            .expect("une route de service est consignée")
-            .code();
+        // Une consultation sans action de journal propre (la fenêtre de suppression, HRT-85) ne consigne rien.
+        let Some(action) = endpoint.audit.map(|audit| audit.code()) else {
+            swept += 1;
+            continue;
+        };
         for who in ["bob", "cleo"] {
             let reasons: Vec<Option<String>> = sqlx::query_scalar(
                 "SELECT reason FROM audit_events WHERE outcome = 'denied' AND action = ? AND account = ?",
@@ -1806,6 +1807,11 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),
             // Lire une opération de service (HRT-144) : une lecture, aucune entrée de journal.
             "/operations/services/{id}" => "/operations/services/INCONNUE".to_owned(),
+            // La fenêtre « Supprimer {nom} ? » (HRT-85) : une consultation ; une clé inconnue est `404`, rien n'est
+            // écrit au journal.
+            "/services/{key}/delete-preview" => {
+                "/services/h_01J0ABCDEFGHJKMNPQRSTVWXYZ/delete-preview".to_owned()
+            }
             // Un POST qui ne modifie rien : il relance la détection du moteur (HRT-61, lecture seule).
             "/engine/recheck" => {
                 let reply = api

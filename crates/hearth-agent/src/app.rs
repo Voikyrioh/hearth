@@ -215,6 +215,9 @@ pub struct EngineParts {
     /// Les dossiers de données des services (HRT-145, HRT-68). `None` : le vrai, sous le dossier de données de
     /// l'agent ; les tests y posent un faux en mémoire.
     pub safe_fs: Option<Arc<dyn SafeFs>>,
+    /// Ce que l'agent lit des chemins du serveur pour juger un dossier partagé (HRT-85). `None` : le système de
+    /// fichiers de l'hôte ; les tests y posent une fausse topologie (montages « bind » impossibles sans droits).
+    pub host_paths: Option<Arc<dyn crate::application::ports::HostPaths>>,
     /// Les fiches de serveurs de jeu proposées et le hasard des secrets qu'elles font tirer (HRT-101).
     pub catalog: CatalogParts,
 }
@@ -266,6 +269,7 @@ impl EngineParts {
             deploy: DeployTimings::production(),
             delete: DeleteTimings::production(),
             safe_fs: None,
+            host_paths: None,
             catalog: CatalogParts::production(),
         }
     }
@@ -930,19 +934,18 @@ pub async fn start_engined(
     // La racine des dossiers gérés telle que la suppression la compare aux montages des autres conteneurs : le dossier
     // de données canonique (liens, `//` et `..` résolus), lu une fois au démarrage (BR-DEL-008). Sans forme
     // canonique, la forme de la configuration ; la suppression compare de toute façon les deux et l'identité.
-    let host_paths: Arc<dyn crate::application::ports::HostPaths> =
-        Arc::new(crate::infrastructure::host::paths::SystemHostPaths);
-    let deletion_root = host_paths
-        .canonical(&config.data_dir.to_string_lossy())
-        .map_or_else(
-            || services_root.clone(),
-            |canonical| {
-                std::path::Path::new(&canonical)
-                    .join(SERVICES_DIR)
-                    .to_string_lossy()
-                    .into_owned()
-            },
-        );
+    let host_paths: Arc<dyn crate::application::ports::HostPaths> = engine
+        .host_paths
+        .unwrap_or_else(|| Arc::new(crate::infrastructure::host::paths::SystemHostPaths));
+    let deletion_root = match host_paths.resolve(&config.data_dir.to_string_lossy()) {
+        crate::application::ports::Resolved::Found { canonical, .. } => {
+            std::path::Path::new(&canonical)
+                .join(SERVICES_DIR)
+                .to_string_lossy()
+                .into_owned()
+        }
+        _ => services_root.clone(),
+    };
     // Ce que l'agent sait de lui-même, pour juger un dossier du serveur (BR-DEPLOY-012) : sans l'un de ces faits,
     // aucun dossier du serveur n'est jugé (et tous restent refusés).
     let folders = FolderFacts::new(

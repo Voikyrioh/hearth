@@ -79,7 +79,8 @@ fn single_component(source: &str) -> Option<RelPath> {
 }
 
 /// L'identité d'un dossier sur le serveur : (périphérique, inode). Deux chemins qui désignent le même dossier
-/// (lien, montage « bind », `//`) ont la même identité.
+/// (lien, montage « bind », `//`) ont la même identité. L'identité du montage (`mnt_id`) n'en fait pas partie :
+/// deux montages « bind » du même dossier ont deux `mnt_id` et sont pourtant le même dossier.
 pub type FileId = (u64, u64);
 
 /// Ce qu'un AUTRE conteneur monte : ses dossiers du serveur (le chemin que le moteur donne, et sa forme
@@ -92,18 +93,22 @@ pub struct FolderUse {
     pub holder: Holder,
     /// Les chemins du serveur que ce conteneur monte.
     pub sources: Vec<String>,
-    /// Les identités de ceux qui existent.
+    /// Les identités de ces dossiers eux-mêmes (ceux qui existent).
     pub identities: Vec<FileId>,
+    /// Les identités de ces dossiers ET de tous leurs parents jusqu'à la racine : un dossier géré qui en fait
+    /// partie est sous un montage de ce conteneur, quel que soit le nom par lequel on y arrive.
+    pub ancestry: Vec<FileId>,
     /// La liste est entière. `false` : des montages ne sont pas lus, on ne sait pas.
     pub complete: bool,
 }
 
-/// Le dossier géré dont on juge le sort : ses chemins (celui de la description et sa forme canonique) et son
-/// identité quand il existe.
+/// Le dossier géré dont on juge le sort : ses chemins (celui de la description et sa forme canonique) et sa
+/// lignée quand il existe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnFolder {
     pub paths: Vec<String>,
-    pub identity: Option<FileId>,
+    /// Son identité d'abord, puis celle de chacun de ses parents jusqu'à la racine. Vide : il n'existe pas.
+    pub lineage: Vec<FileId>,
 }
 
 /// Ce qu'il advient d'un dossier géré.
@@ -161,13 +166,22 @@ pub fn fate_of(own: &OwnFolder, others: Option<&[FolderUse]>) -> Fate {
     let mut unmanaged = false;
     let mut unverifiable = false;
     for other in others {
+        // Par le nom (lexical et canonique) ou par l'identité, dans les DEUX sens : le dossier est un montage de
+        // l'autre ou sous l'un de ses parents (sa propre identité est dans la lignée de la source, ou
+        // l'inverse). Les parents communs (`/`, la racine de données) ne comptent pas : on ne compare la lignée
+        // de chaque côté qu'à l'identité propre de l'autre.
         let same_place = other
             .sources
             .iter()
             .any(|source| own.paths.iter().any(|path| overlaps(path, source)))
             || own
-                .identity
-                .is_some_and(|identity| other.identities.contains(&identity));
+                .lineage
+                .first()
+                .is_some_and(|identity| other.ancestry.contains(identity))
+            || other
+                .identities
+                .iter()
+                .any(|identity| own.lineage.contains(identity));
         if same_place {
             match &other.holder {
                 Holder::Service(name) => {
@@ -235,6 +249,7 @@ mod tests {
             holder: Holder::Service(name.into()),
             sources: sources.iter().map(|s| (*s).into()).collect(),
             identities: Vec::new(),
+            ancestry: Vec::new(),
             complete,
         }
     }
@@ -242,7 +257,7 @@ mod tests {
     fn own(path: &str) -> OwnFolder {
         OwnFolder {
             paths: vec![path.to_owned()],
-            identity: None,
+            lineage: Vec::new(),
         }
     }
 
@@ -345,6 +360,7 @@ mod tests {
             holder: Holder::Unmanaged,
             sources: vec![path.clone()],
             identities: Vec::new(),
+            ancestry: Vec::new(),
             complete: true,
         };
         assert_eq!(
@@ -426,15 +442,47 @@ mod tests {
     fn the_same_directory_under_another_name_is_found_by_its_identity() {
         // Un lien ou un montage « bind » : le chemin ne dit rien, le périphérique et l'inode oui.
         let mut folder = own("/var/lib/hearth/services/h_x/data");
-        folder.identity = Some((7, 42));
+        folder.lineage = vec![(7, 42), (7, 10), (7, 2)];
         let mut other = used_by("alias", &["/mnt/elsewhere/looks-unrelated"], true);
         other.identities = vec![(7, 42)];
+        other.ancestry = vec![(7, 42), (7, 90), (7, 2)];
         assert!(matches!(
             fate_of(&folder, Some(&[other.clone()])),
             Fate::Shared { .. }
         ));
+        // Les parents communs (ici le 2, la racine) ne font pas un partage.
         other.identities = vec![(7, 43)];
+        other.ancestry = vec![(7, 43), (7, 90), (7, 2)];
         assert_eq!(fate_of(&folder, Some(&[other])), Fate::Erase);
+    }
+
+    #[test]
+    fn a_mount_of_a_parent_under_another_name_keeps_the_folder() {
+        // `/persist/var/lib/hearth` est le même dossier que `/var/lib/hearth` (montage « bind ») : le conteneur
+        // qui monte le premier a le parent de notre dossier, sans qu'aucun nom ne se recouvre.
+        let mut folder = own("/var/lib/hearth/services/h_x/data");
+        folder.lineage = vec![(7, 42), (7, 30), (7, 20), (7, 2)];
+        let mut other = used_by("sauvegarde", &["/persist/var/lib/hearth"], true);
+        other.identities = vec![(7, 20)];
+        other.ancestry = vec![(7, 20), (7, 15), (7, 2)];
+        assert!(matches!(
+            fate_of(&folder, Some(&[other])),
+            Fate::Shared { .. }
+        ));
+    }
+
+    #[test]
+    fn a_mount_of_a_child_under_another_name_keeps_the_folder() {
+        // L'enfant monté par un autre nom : l'identité de NOTRE dossier est dans la lignée de la source.
+        let mut folder = own("/var/lib/hearth/services/h_x/data");
+        folder.lineage = vec![(7, 42), (7, 30), (7, 20), (7, 2)];
+        let mut other = used_by("saves", &["/elsewhere/looks/unrelated"], true);
+        other.identities = vec![(7, 77)];
+        other.ancestry = vec![(7, 77), (7, 42), (7, 5), (7, 2)];
+        assert!(matches!(
+            fate_of(&folder, Some(&[other])),
+            Fate::Shared { .. }
+        ));
     }
 
     #[test]
@@ -444,7 +492,7 @@ mod tests {
                 "/srv/link/services/h_x/data".into(),
                 "/real/hearth/services/h_x/data".into(),
             ],
-            identity: None,
+            lineage: Vec::new(),
         };
         let other = used_by("b", &["/real/hearth/services/h_x"], true);
         assert!(matches!(

@@ -75,6 +75,8 @@ pub struct DeployRig {
     pub timings: hearth_agent::application::deployments::DeployTimings,
     /// Les délais d'une suppression de service (HRT-85).
     pub delete: hearth_agent::application::delete::DeleteTimings,
+    /// Ce que l'agent lit des chemins du serveur (liens, parents, montages) pour juger un dossier partagé.
+    pub host_paths: Arc<dyn hearth_agent::application::ports::HostPaths>,
 }
 
 impl DeployRig {
@@ -90,6 +92,7 @@ impl DeployRig {
                 poll: std::time::Duration::from_millis(20),
             },
             delete: super::engine::fast_delete(),
+            host_paths: Arc::new(hearth_agent::infrastructure::host::paths::SystemHostPaths),
         }
     }
 }
@@ -203,7 +206,7 @@ fn state_over_rig(
             hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(env.db.pool().clone()),
         ),
         rig.safe_fs.clone(),
-        Arc::new(hearth_agent::infrastructure::host::paths::SystemHostPaths),
+        rig.host_paths.clone(),
         phases.clone(),
         env.clock.clone(),
         hearth_agent::application::delete::DeleteContext {
