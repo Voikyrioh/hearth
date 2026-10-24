@@ -60,12 +60,12 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
     expect(questions.length).toBeLessThanOrEqual(8);
     const world = questions[0]?.text() ?? "";
     expect(world).toContain("Nom du monde");
-    expect(world).toContain("Valeur proposée : Monde");
-    expect(world).toContain("Ne pourra plus être changé après la création du monde");
+    expect(world).toContain("La valeur proposée est Monde.");
+    expect(world).toContain("Ce réglage ne pourra plus être changé après la création du monde.");
     // Un secret n'a aucune valeur proposée, un nombre dit ses bornes, un choix dit sa liste.
-    expect(questions[1]?.text()).toContain("Aucune valeur proposée");
-    expect(questions[3]?.text()).toContain("De 1 à 255");
-    expect(questions[4]?.text()).toContain("Choix : Petit, Moyen, Grand");
+    expect(questions[1]?.text()).toContain("La fiche ne propose aucune valeur.");
+    expect(questions[3]?.text()).toContain("Le nombre est compris entre 1 et 255.");
+    expect(questions[4]?.text()).toContain("Les choix sont : Petit, Moyen, Grand.");
     expect(wrapper.get("[data-imposed-count]").text()).toBe(
       "3 réglage(s) posé(s) par la fiche à votre place.",
     );
@@ -76,7 +76,7 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
     const { wrapper } = await bootCatalogue(undefined, fiche("terraria"));
     const stop = wrapper.get("[data-fiche-stop]").text();
     expect(stop).toContain("Hearth ne peut pas encore lui demander de le faire");
-    expect(stop).toContain("Délai d'arrêt : 10 secondes");
+    expect(stop).toContain("Le délai d'arrêt est de 10 secondes.");
     const downloads = wrapper.get("[data-fiche-downloads]").text();
     expect(downloads).toContain(
       "Cette fiche ne déclare aucun téléchargement au premier démarrage.",

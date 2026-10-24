@@ -122,7 +122,7 @@ describe("QuestionField", () => {
       },
     });
     expect(text.text()).toContain("Lettres, chiffres, tirets et soulignés seulement.");
-    expect(text.get("[data-question-frozen]").text()).toContain("Ne pourra plus être changé");
+    expect(text.get("[data-question-frozen]").text()).toContain("ne pourra plus être changé");
   });
 });
 

@@ -89,7 +89,7 @@ export function toInstallRequest(
   if (resources === null || resources.memoryBytes === null || resources.cpuMillis === null) {
     return null;
   }
-  const published = publishedPorts(detail.ports, draft.optionalPorts);
+  const published = publishedPorts(detail.ports, draft.optionalPorts, draft.variant);
   const readable = readableHostPorts(published, draft.hostPorts);
   if (readable.length !== published.length) return null;
   return {
@@ -101,7 +101,7 @@ export function toInstallRequest(
     answers: answersToSend(visibleQuestions(detail, draft.variant), draft.answers),
     agreements: [...choices.agreements],
     ports: readable.map(({ id, deploy }) => ({ id, hostPort: deploy.hostPort })),
-    optionalPorts: [...draft.optionalPorts],
+    optionalPorts: published.filter((port) => port.publish === "optional").map((port) => port.id),
     resources: { memoryBytes: resources.memoryBytes, cpuMillis: resources.cpuMillis },
     accept: { ...choices.accept },
   };

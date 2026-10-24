@@ -19,19 +19,17 @@ import { useAgentVersion } from "@/composables/useAgentVersion";
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { useDeployFlow } from "@/composables/useDeployFlow";
 import { useFicheInstall } from "@/composables/useFicheInstall";
+import { useFicheLinks } from "@/composables/useFicheLinks";
 import { useNeedsLink } from "@/composables/useNeedsLink";
 import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { deployDoor } from "@/deploy/availability";
-import { logUiError } from "@/errors/report";
 import { minimumText } from "@/fiche/messages";
 import { t } from "@/i18n";
-import { getLinkBridge } from "@/link";
 import { resourcesIssue } from "@/resources";
 import { useFicheInstallStore } from "@/stores/ficheInstall";
 import { useServiceOpsStore } from "@/stores/serviceOps";
 import { useServicesStore } from "@/stores/services";
-import { useToastsStore } from "@/stores/toasts";
 
 // Installer un serveur de jeu depuis une fiche (HRT-102, BR-FICHE-012 à 036) : trois étapes. « Réponses » (variante, nom
 // du service, questions de la fiche, ports) et « Ressources » (curseurs, avertissements chiffrés, place) sont des PAGES ;
@@ -48,7 +46,6 @@ const { server, isConnected } = useCurrentServer();
 const services = useServicesStore();
 const operations = useServiceOpsStore();
 const rights = useServiceRights();
-const toasts = useToastsStore();
 const drafts = useFicheInstallStore();
 const serverId = () => server.value?.id ?? "";
 const ficheId = () => (typeof route.params.fiche === "string" ? route.params.fiche : "");
@@ -243,14 +240,7 @@ function stopLooping() {
 }
 
 // ── Les adresses de la fiche, ouvertes dans le navigateur de l'utilisateur ──────────────────────
-async function openLink(kind: "agreement" | "token", key: string) {
-  try {
-    await getLinkBridge().openFicheLink(serverId(), ficheId(), kind, key);
-  } catch (error) {
-    logUiError(error, "fiche:link");
-    toasts.push({ kind: "error", message: t("fiche.agreementOpenFailed") });
-  }
-}
+const links = useFicheLinks(serverId, ficheId);
 
 const imposedOpen = ref(false);
 const refusalVisible = computed(() => flow.refusal.value !== null);
@@ -320,7 +310,7 @@ const name = computed(() => safeText(detail.value?.card.name ?? ""));
         v-show="install.step.value === 1"
         ref="answers"
         :install="install"
-        @link="openLink"
+        @link="(kind, key) => links.open(kind, key)"
       />
       <InstallResources v-if="install.step.value === 2" :install="install" />
 
@@ -371,7 +361,6 @@ const name = computed(() => safeText(detail.value?.card.name ?? ""));
         @close="flow.closeSummary()"
         @agree="install.agreed.value = $event"
         @imposed="imposedOpen = true"
-        @link="openLink"
       />
       <ImposedDialog :open="imposedOpen" :settings="detail.imposed" @close="imposedOpen = false" />
     </template>

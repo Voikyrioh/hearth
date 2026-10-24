@@ -13,7 +13,7 @@ import type { EngineCapacity } from "@/resources";
 export function useEngineCapacity(
   serverId: () => string,
   enabled: () => boolean,
-  onLoaded: (capacity: EngineCapacity) => void,
+  onLoaded?: (capacity: EngineCapacity) => void,
 ) {
   const capacity = ref<EngineCapacity | null>(null);
   const failed = ref(false);
@@ -26,7 +26,7 @@ export function useEngineCapacity(
       if (mine !== ticket) return;
       capacity.value = read;
       failed.value = read === null;
-      if (read) onLoaded(read);
+      if (read) onLoaded?.(read);
     } catch (error) {
       if (mine !== ticket) return;
       failed.value = true;

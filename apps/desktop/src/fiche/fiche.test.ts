@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FicheDetail, FicheQuestion } from "@/link";
 import { rich, terraria } from "@/link/simulated-fiches";
 import { type EngineCapacity, GIB } from "@/resources";
-import { answerIssue, answersToSend, visibleQuestions } from "./answers";
+import { answerIssue, answersToSend, changedAnswers, visibleQuestions } from "./answers";
 import { acceptOf, allValidated, attentionPoints } from "./attention";
 import {
   defaultVariant,
@@ -16,7 +16,14 @@ import { coverage, diskVerdict, memoryNotices, minimumVerdicts, placement, tooSm
 import { registryOf } from "./image";
 import { answerIssueText, ficheFormRefusal, minimumText, stopTexts } from "./messages";
 import { proposedName, slugOf } from "./name";
-import { duplicateHostPorts, parseHostPort, publishedPorts, readableHostPorts } from "./ports";
+import {
+  containerPortOf,
+  duplicateHostPorts,
+  forVariant,
+  parseHostPort,
+  publishedPorts,
+  readableHostPorts,
+} from "./ports";
 import { isMeasured, proofOf, proofUrl, proven } from "./proof";
 
 // Les règles pures de l'installation depuis une fiche (HRT-102) : la preuve d'un chiffre, les réponses jugées comme
@@ -147,6 +154,17 @@ describe("les réponses, jugées sur ce que la fiche dit (BR-FICHE-016, 017)", (
   });
 });
 
+describe("ce qui diffère de ce que la fiche propose (BR-FICHE-040)", () => {
+  it("compte les réponses changées, un secret saisi compris, et rien d'autre", () => {
+    const questions = terraria().questions;
+    expect(changedAnswers(questions, {})).toEqual([]);
+    expect(changedAnswers(questions, { max_players: "8" })).toEqual([]);
+    expect(
+      changedAnswers(questions, { max_players: "16", password: "x" }).map((q) => q.id),
+    ).toEqual(["password", "max_players"]);
+  });
+});
+
 describe("le nom du service proposé (BR-FICHE-015)", () => {
   it("réduit le nom du jeu à ce qu'un nom de service accepte", () => {
     expect(slugOf("Terraria")).toBe("terraria");
@@ -165,8 +183,50 @@ describe("les ports d'une fiche (BR-FICHE-019)", () => {
   const ports = rich().ports;
 
   it("publie les ports « toujours » et les facultatifs cochés, jamais ceux qui ne le sont pas", () => {
-    expect(publishedPorts(ports, []).map((port) => port.id)).toEqual(["game"]);
-    expect(publishedPorts(ports, ["query"]).map((port) => port.id)).toEqual(["game", "query"]);
+    expect(publishedPorts(ports, [], "vanilla").map((port) => port.id)).toEqual(["game"]);
+    expect(publishedPorts(ports, ["query"], "vanilla").map((port) => port.id)).toEqual([
+      "game",
+      "query",
+    ]);
+  });
+
+  it("ne publie que les ports de la variante choisie, les facultatifs d'une autre variante jamais", () => {
+    const fiche = rich();
+    expect(forVariant(fiche.ports, "vanilla").map((port) => port.id)).toEqual(["game", "query"]);
+    expect(forVariant(fiche.ports, "modded").map((port) => port.id)).toEqual([
+      "game",
+      "query",
+      "mods_port",
+    ]);
+    expect(forVariant(fiche.ports, null).map((port) => port.id)).toEqual(["game", "query"]);
+    expect(publishedPorts(fiche.ports, ["query"], "modded").map((port) => port.id)).toEqual([
+      "game",
+      "query",
+      "mods_port",
+    ]);
+    expect(forVariant(fiche.folders, "vanilla").map((folder) => folder.id)).toEqual([
+      "world",
+      "logs",
+    ]);
+    expect(forVariant(fiche.folders, "modded").map((folder) => folder.id)).toContain("mods");
+  });
+
+  it("donne au service le même nombre que le serveur quand le jeu annonce son port (same_number)", () => {
+    const fiche = rich();
+    const [game, , mods] = fiche.ports;
+    expect(containerPortOf(game as (typeof fiche.ports)[number], 30000)).toBe(25565);
+    expect(containerPortOf(mods as (typeof fiche.ports)[number], 7778)).toBe(7778);
+    const published = publishedPorts(fiche.ports, [], "modded");
+    expect(
+      readableHostPorts(published, { mods_port: "7778" }).map(({ id, deploy }) => [
+        id,
+        deploy.hostPort,
+        deploy.containerPort,
+      ]),
+    ).toEqual([
+      ["game", 25565, 25565],
+      ["mods_port", 7778, 7778],
+    ]);
   });
 
   it("juge le port du serveur : un nombre entre 1024 et 65535", () => {
@@ -178,7 +238,7 @@ describe("les ports d'une fiche (BR-FICHE-019)", () => {
   });
 
   it("dit les ports lisibles et repère deux ports de même numéro et de même protocole", () => {
-    const both = publishedPorts(ports, ["query"]);
+    const both = publishedPorts(ports, ["query"], "vanilla");
     expect(readableHostPorts(both, { game: "25565" }).map((item) => item.deploy.hostPort)).toEqual([
       25565, 25566,
     ]);

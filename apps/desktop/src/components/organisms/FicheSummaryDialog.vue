@@ -8,9 +8,10 @@ import Callout from "@/components/molecules/Callout.vue";
 import StepTrail from "@/components/molecules/StepTrail.vue";
 import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import AgreementDialog from "@/components/organisms/AgreementDialog.vue";
+import { useFicheLinks } from "@/composables/useFicheLinks";
 import type { ActReport } from "@/composables/useReauth";
 import { portVerdict, refusalText } from "@/deploy/messages";
-import { currentAnswer, startingAnswer } from "@/fiche/answers";
+import { changedAnswers, currentAnswer } from "@/fiche/answers";
 import { type AttentionPoint, acceptOf, allValidated, attentionPoints } from "@/fiche/attention";
 import { type FicheDraft, shownHostPort } from "@/fiche/draft";
 import { registryOf } from "@/fiche/image";
@@ -24,10 +25,10 @@ import {
   registryText,
   stopTexts,
 } from "@/fiche/messages";
-import { publishedPorts } from "@/fiche/ports";
+import { containerPortOf, forVariant, parseHostPort, publishedPorts } from "@/fiche/ports";
 import { proofOf } from "@/fiche/proof";
 import { t } from "@/i18n";
-import type { DeployCheck, FicheDetail, FicheQuestion } from "@/link";
+import type { DeployCheck, FicheDetail, FichePort, FicheQuestion } from "@/link";
 import { type EngineCapacity, formatCpu, formatMemory } from "@/resources";
 import { formatSize } from "@/serviceOps/messages";
 
@@ -63,7 +64,6 @@ const emit = defineEmits<{
   /** Les contrats que l'utilisateur vient d'accepter, juste avant l'envoi. */
   agree: [ids: string[]];
   imposed: [];
-  link: [kind: "agreement", key: string];
 }>();
 
 const ticked = ref<Record<string, boolean>>({});
@@ -85,7 +85,15 @@ const points = computed<AttentionPoint[]>(() =>
 );
 const attentionDone = computed(() => allValidated(points.value, ticked.value));
 
-const published = computed(() => publishedPorts(props.detail.ports, props.draft.optionalPorts));
+const published = computed(() =>
+  publishedPorts(props.detail.ports, props.draft.optionalPorts, props.draft.variant),
+);
+const folders = computed(() => forVariant(props.detail.folders, props.draft.variant));
+/** Le port du service pour le port du serveur choisi : celui de la fiche, ou le même nombre quand le jeu annonce son port. */
+function containerShown(port: FichePort): number {
+  const parsed = parseHostPort(shownHostPort(props.draft, port));
+  return "port" in parsed ? containerPortOf(port, parsed.port) : port.container;
+}
 const variant = computed(() =>
   props.detail.variants.find((item) => item.id === props.draft.variant),
 );
@@ -99,9 +107,8 @@ const stop = computed(() => (props.detail.stop ? stopTexts(props.detail.stop) : 
 const downloads = computed(() => props.detail.firstStart?.downloads ?? []);
 
 /** Une réponse telle que la fenêtre la dit : le secret masqué, un choix par son libellé, jamais une valeur secrète. */
-function answerOf(question: FicheQuestion): { text: string; proposed: boolean } {
+function answerOf(question: FicheQuestion, proposed: boolean): { text: string; proposed: boolean } {
   const value = currentAnswer(question, props.draft.answers);
-  const proposed = value === startingAnswer(question);
   if (question.secret) {
     return { text: value === "" ? t("fiche.sumEmptyAnswer") : t("fiche.secretMask"), proposed };
   }
@@ -115,10 +122,13 @@ function answerOf(question: FicheQuestion): { text: string; proposed: boolean } 
   const choice = question.choices.find((item) => item.value === value);
   return { text: safeText(choice ? choice.label : value), proposed };
 }
+const changed = computed(() => changedAnswers(props.questions, props.draft.answers));
 const answers = computed(() =>
-  props.questions.map((question) => ({ question, ...answerOf(question) })),
+  props.questions.map((question) => ({
+    question,
+    ...answerOf(question, !changed.value.includes(question)),
+  })),
 );
-const changed = computed(() => answers.value.filter((answer) => !answer.proposed).length);
 
 const memory = computed(() =>
   props.draft.resources?.memoryBytes != null ? formatMemory(props.draft.resources.memoryBytes) : "",
@@ -148,6 +158,15 @@ const lowDiskText = computed(() => {
 const asking = ref<FicheDetail["agreements"][number] | null>(null);
 const openFailed = ref(false);
 let settle: ((accepted: boolean) => void) | null = null;
+const links = useFicheLinks(
+  () => props.serverId,
+  () => props.detail.card.id,
+);
+
+/** « Lire le contrat » : le navigateur de l'utilisateur. S'il ne s'ouvre pas, la fenêtre du contrat le dit (une notification passerait sous la fenêtre modale). */
+async function readAgreement(id: string): Promise<void> {
+  openFailed.value = !(await links.open("agreement", id, { notify: false }));
+}
 
 function ask(agreement: FicheDetail["agreements"][number]): Promise<boolean> {
   asking.value = agreement;
@@ -246,7 +265,7 @@ function refusal(refused: { kind: string }): string | undefined {
               {{
                 t("deploy.summaryPortRow", {
                   host: shownHostPort(draft, port),
-                  container: port.container,
+                  container: containerShown(port),
                   protocol: port.protocol.toUpperCase(),
                 })
               }}
@@ -260,7 +279,7 @@ function refusal(refused: { kind: string }): string | undefined {
         <dt>{{ t("fiche.sumFolders") }}</dt>
         <dd data-sum-folders>
           <ul class="sum__list">
-            <li v-for="folder in detail.folders" :key="folder.id">
+            <li v-for="folder in folders" :key="folder.id">
               {{ folderRoleText(folder.role) }}
               <span class="sum__mono sum__block">{{ safeText(folder.target) }}</span>
             </li>
@@ -281,7 +300,7 @@ function refusal(refused: { kind: string }): string | undefined {
             </li>
           </ul>
           <span v-if="answers.length > 0" class="sum__note" data-sum-changed>
-            {{ t("fiche.sumChanged", { n: changed }) }}
+            {{ t("fiche.sumChanged", { n: changed.length }) }}
           </span>
         </dd>
       </div>
@@ -353,7 +372,7 @@ function refusal(refused: { kind: string }): string | undefined {
       :open="asking !== null"
       :agreement="asking"
       :open-failed="openFailed"
-      @read="emit('link', 'agreement', asking.id)"
+      @read="readAgreement(asking.id)"
       @accept="answer(true)"
       @refuse="answer(false)"
     />

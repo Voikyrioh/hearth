@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import HButton from "@/components/atoms/HButton.vue";
 import HCheckbox from "@/components/atoms/HCheckbox.vue";
 import HInput from "@/components/atoms/HInput.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
 import Callout from "@/components/molecules/Callout.vue";
+import PortNotes from "@/components/molecules/PortNotes.vue";
 import type { PortVerdict } from "@/deploy/messages";
 import { portRoleText } from "@/fiche/messages";
 import { t } from "@/i18n";
@@ -67,27 +67,12 @@ const emit = defineEmits<{
       <Callout v-if="changed && !error && !verdict.error" tone="info" inline data-port-changed>
         {{ t("fiche.portChanged") }}
       </Callout>
-      <Callout v-if="!error && verdict.warning" tone="warn" inline data-port-warning>
-        {{ verdict.warning }}
-      </Callout>
-      <Callout
-        v-if="verdict.error && verdict.suggested !== null"
-        tone="info"
-        inline
-        data-port-suggested
-      >
-        {{ t("fiche.suggested", { port: verdict.suggested }) }}
-        <template #actions>
-          <HButton
-            variant="secondary"
-            size="sm"
-            data-port-use
-            @click="emit('suggest', verdict.suggested as number)"
-          >
-            {{ t("fiche.useSuggested", { port: verdict.suggested }) }}
-          </HButton>
-        </template>
-      </Callout>
+      <PortNotes
+        :verdict="verdict"
+        :privileged="false"
+        :clean="!error && !verdict.error"
+        @suggest="emit('suggest', $event)"
+      />
       <p class="pfield__exposed" data-port-exposed>{{ t("deploy.portExposed") }}</p>
     </template>
   </div>

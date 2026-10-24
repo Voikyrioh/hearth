@@ -20,13 +20,7 @@ import {
   readableHostPorts,
   startingHostPort,
 } from "@/fiche/ports";
-import {
-  type DeployCheckInput,
-  type DeployRefusal,
-  type FicheDetail,
-  getLinkBridge,
-  type ServiceInfo,
-} from "@/link";
+import { type DeployCheckInput, type DeployRefusal, getLinkBridge, type ServiceInfo } from "@/link";
 import type { Resources } from "@/resources";
 import { useFicheInstallStore } from "@/stores/ficheInstall";
 import { useServicesStore } from "@/stores/services";
@@ -95,7 +89,7 @@ export function useFicheInstall(
   );
   const published = computed(() =>
     detail.value && draft.value
-      ? publishedPorts(detail.value.ports, draft.value.optionalPorts)
+      ? publishedPorts(detail.value.ports, draft.value.optionalPorts, draft.value.variant)
       : [],
   );
   const duplicates = computed(() =>
@@ -146,23 +140,22 @@ export function useFicheInstall(
   const portsWaiting = computed(() => checks.checking.value && check.value === null);
 
   // ── Les bornes de la machine, les curseurs ───────────────────────────────────────────────────
-  const limits = useEngineCapacity(serverId, enabled, (read) => {
-    const current = draft.value;
-    const fiche = detail.value;
-    if (current && fiche && current.resources === null) {
-      current.resources = placement(fiche, read).resources;
-    }
-  });
+  const limits = useEngineCapacity(serverId, enabled);
   const capacity = limits.capacity;
-  // La fiche peut arriver après les bornes de la machine : les curseurs se placent dès que les deux sont là.
-  watch([draft, detail, capacity], () => {
-    const current = draft.value;
-    const fiche = detail.value;
-    const read = capacity.value;
-    if (current && fiche && read && current.resources === null) {
-      current.resources = placement(fiche, read).resources;
-    }
-  });
+  // La fiche et les bornes de la machine arrivent dans un ordre quelconque : les curseurs se placent dès que les deux
+  // sont là, et un réglage déjà fait n'est jamais écrasé.
+  watch(
+    [draft, detail, capacity],
+    () => {
+      const current = draft.value;
+      const fiche = detail.value;
+      const read = capacity.value;
+      if (current && fiche && read && current.resources === null) {
+        current.resources = placement(fiche, read).resources;
+      }
+    },
+    { immediate: true },
+  );
 
   const minimums = computed(() =>
     detail.value ? minimumVerdicts(detail.value, capacity.value) : [],
@@ -272,7 +265,7 @@ export function useFicheInstall(
   };
 
   return {
-    detail: detail as { value: FicheDetail | null },
+    detail,
     phase,
     reload,
     draft,

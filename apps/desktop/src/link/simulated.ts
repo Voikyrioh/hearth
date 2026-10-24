@@ -620,6 +620,9 @@ export class SimulatedLinkBridge implements LinkBridge {
   /** Les adresses qu'une fiche a fait ouvrir, dans l'ordre (de quoi vérifier ce qui s'ouvre). */
   readonly openedLinks: { serverId: string; ficheId: string; kind: string; key: string }[] = [];
 
+  /** `true` : le navigateur ne s'ouvre pas (l'ouverture d'une adresse de fiche échoue). */
+  failLinks = false;
+
   async openFicheLink(
     serverId: string,
     ficheId: string,
@@ -629,6 +632,7 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.requireServer(serverId);
     await this.delay();
     this.calls.push("fiche link");
+    if (this.failLinks) throw this.fail({ kind: "internal" });
     this.openedLinks.push({ serverId, ficheId, kind, key });
   }
 

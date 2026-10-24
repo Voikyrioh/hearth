@@ -15,16 +15,14 @@ import { useAgentVersion } from "@/composables/useAgentVersion";
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { useEngineCapacity } from "@/composables/useEngineCapacity";
 import { useFicheDetail } from "@/composables/useFicheDetail";
+import { useFicheLinks } from "@/composables/useFicheLinks";
 import { usePageData } from "@/composables/usePageData";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { deployDoor } from "@/deploy/availability";
-import { logUiError } from "@/errors/report";
 import { minimumVerdicts, tooSmall } from "@/fiche/fit";
 import { minimumText } from "@/fiche/messages";
 import { t } from "@/i18n";
-import { getLinkBridge } from "@/link";
 import { useServicesStore } from "@/stores/services";
-import { useToastsStore } from "@/stores/toasts";
 
 // La fiche d'un jeu (HRT-102, BR-FICHE-003, 004, 006, 008, 012, 021, 033, 036) : tout ce que la fiche offre, lu dans la
 // fiche que l'agent propose, avec la preuve de chaque chiffre. Aucune ligne « compte exigé » (une fiche n'en demande
@@ -38,7 +36,6 @@ const router = useRouter();
 const { server, isConnected } = useCurrentServer();
 const services = useServicesStore();
 const rights = useServiceRights();
-const toasts = useToastsStore();
 const serverId = () => server.value?.id ?? "";
 const ficheId = () => (typeof route.params.fiche === "string" ? route.params.fiche : "");
 
@@ -92,14 +89,8 @@ function install(proposed: boolean) {
   });
 }
 
-async function openLink(kind: "agreement" | "token" | "evidence", key: string) {
-  try {
-    await getLinkBridge().openFicheLink(serverId(), ficheId(), kind, key);
-  } catch (error) {
-    logUiError(error, "fiche:link");
-    toasts.push({ kind: "error", message: t("fiche.agreementOpenFailed") });
-  }
-}
+const links = useFicheLinks(serverId, ficheId);
+const openLink = (kind: "agreement" | "token" | "evidence", key: string) => links.open(kind, key);
 
 const imposedOpen = ref(false);
 const delivered = computed(() =>

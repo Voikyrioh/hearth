@@ -103,11 +103,15 @@ describe("la page (BR-FICHE-014, 015)", () => {
     expect(size.get('[aria-checked="true"]').text()).toBe("Grand");
     const frozen = wrapper.findAll("[data-question-frozen]").map((item) => item.text());
     expect(frozen).toHaveLength(3);
-    expect(frozen[0]).toContain("Ne pourra plus être changé après la création du monde");
+    expect(frozen[0]).toContain(
+      "Ce réglage ne pourra plus être changé après la création du monde.",
+    );
     expect(wrapper.get('[data-question="world_name"]').text()).toContain(
       "Lettres, chiffres, tirets et soulignés seulement.",
     );
-    expect(wrapper.get('[data-question="max_players"]').text()).toContain("De 1 à 255");
+    expect(wrapper.get('[data-question="max_players"]').text()).toContain(
+      "Le nombre est compris entre 1 et 255.",
+    );
     wrapper.unmount();
   });
 
@@ -183,7 +187,7 @@ describe("les défauts de forme, jugés sur la fiche", () => {
     await settle();
     expect(wrapper.get("[data-fiche-port]").text()).toContain("occupé sur le serveur par « sshd »");
     expect(wrapper.get("[data-port-suggested]").text()).toContain(
-      "Port libre le plus proche : 7778",
+      "Le port libre le plus proche est le 7778.",
     );
     await wrapper.get("[data-port-use]").trigger("click");
     await settle();
@@ -349,7 +353,7 @@ describe("« Vérifiez avant de lancer » (BR-FICHE-025, 026, 036)", () => {
     );
     expect(document.querySelector("[data-sum-restart]")?.textContent).toBeTruthy();
     expect(document.querySelector("[data-sum-stop]")?.textContent).toContain(
-      "Délai d'arrêt : 10 secondes",
+      "Le délai d'arrêt est de 10 secondes.",
     );
     expect(document.querySelector("[data-sum-imposed]")?.textContent).toContain(
       "3 réglage(s) posé(s)",
@@ -740,6 +744,62 @@ describe("fermer et abandonner (BR-FICHE-034, BR-DEPLOY-029)", () => {
     await router.push(installPath("terraria"));
     await settle();
     expect(questionInput(wrapper, "password").element.value).toBe("");
+    wrapper.unmount();
+  });
+});
+
+describe("le récapitulatif suit la variante et le mapping des ports (BR-FICHE-019, 060)", () => {
+  it("ne liste ni le port ni le dossier d'une autre variante", async () => {
+    const { wrapper } = await bootCatalogue(rich, installPath("essai"));
+    await fillRich(wrapper);
+    await openSummary(wrapper);
+    expect(document.querySelector("[data-sum-ports]")?.textContent).toContain(
+      "25565 vers 25565 (TCP)",
+    );
+    expect(document.querySelector("[data-sum-ports]")?.textContent).not.toContain("25575");
+    expect(document.querySelector("[data-sum-folders]")?.textContent).not.toContain("/data/mods");
+    wrapper.unmount();
+  });
+
+  it("montre « 7778 vers 7778 » pour un port que le jeu annonce, et le dossier de la variante avec mods", async () => {
+    const { wrapper } = await bootCatalogue(rich, installPath("essai"));
+    await wrapper.findAll("[data-variant-card] input")[1]?.setValue(true);
+    await settle();
+    await fillRich(wrapper);
+    await answer(wrapper, "mod_pack", "base");
+    typeInto(wrapper.get<HTMLInputElement>('[data-port="mods_port"] input').element, "7778");
+    await settle();
+    await openSummary(wrapper);
+    const ports = document.querySelector("[data-sum-ports]")?.textContent ?? "";
+    expect(ports).toContain("7778 vers 7778 (TCP)");
+    expect(ports).toContain("25565 vers 25565 (TCP)");
+    expect(document.querySelector("[data-sum-folders]")?.textContent).toContain("/data/mods");
+    wrapper.unmount();
+  });
+
+  it("dit dans la fenêtre du contrat que le navigateur ne s'est pas ouvert, sans notification sous la modale", async () => {
+    const { wrapper, bridge } = await bootCatalogue((b) => {
+      rich(b);
+      b.failLinks = true;
+    }, installPath("essai"));
+    await fillRich(wrapper);
+    await openSummary(wrapper);
+    typeInto(
+      document.querySelector<HTMLInputElement>("dialog [data-reauth-field] input"),
+      "Correct-Horse-9",
+    );
+    await flushPromises();
+    topButton("Installer le serveur de jeu")?.click();
+    await flushPromises();
+    (
+      document.querySelector("[data-agreement-dialog] [data-agreement-read]") as HTMLElement
+    ).click();
+    await settle();
+    expect(document.querySelector("[data-agreement-failed]")?.textContent).toContain(
+      "Hearth n'a pas pu ouvrir le navigateur.",
+    );
+    expect(toasts()).toEqual([]);
+    expect(bridge.catalog.received).toHaveLength(0);
     wrapper.unmount();
   });
 });

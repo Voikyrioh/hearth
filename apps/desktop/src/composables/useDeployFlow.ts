@@ -114,21 +114,21 @@ export interface Launch {
  * La saisie (valeurs de variables, commande) est effacée de la mémoire dès que l'issue est connue et que le formulaire
  * n'a plus à rouvrir, ou aussitôt à l'abandon (BR-DEPLOY-029). Aucun mot de passe n'est gardé : il traverse l'appel.
  */
-export function useDeployFlow(options: {
-  serverId: () => string;
-  /** Le formulaire d'une image (`DeployService`) ; ou `source` pour une autre origine (une fiche). */
-  form?: DeployFormState;
-  source?: DeployFlowSource;
-  navigate: (to: RouteLocationRaw) => void;
-  /** Met le curseur sur ce champ du formulaire. */
-  focusField: (field: DeployField) => void;
-  /** Met le curseur sur cette question d'une fiche. */
-  focusQuestion?: (id: string) => void;
-  /** Où va la page après un succès (le détail du nouveau service, par défaut). */
-  successRoute?: (serviceKey: string | null) => RouteLocationRaw;
-}) {
+export function useDeployFlow(
+  options: {
+    serverId: () => string;
+    navigate: (to: RouteLocationRaw) => void;
+    /** Met le curseur sur ce champ du formulaire. */
+    focusField: (field: DeployField) => void;
+    /** Met le curseur sur cette question d'une fiche. */
+    focusQuestion?: (id: string) => void;
+  } & (
+    | /** Le formulaire d'une image (`DeployService`). */ { form: DeployFormState }
+    | /** Une autre origine (une fiche du Catalogue). */ { source: DeployFlowSource }
+  ),
+) {
   const { serverId } = options;
-  const form: DeployFlowSource = options.source ?? sourceOfForm(options.form as DeployFormState);
+  const form: DeployFlowSource = "source" in options ? options.source : sourceOfForm(options.form);
   const operations = useServiceOpsStore();
   const services = useServicesStore();
   const toasts = useToastsStore();
@@ -286,12 +286,13 @@ export function useDeployFlow(options: {
       settle();
       form.wipe();
       launch.value = null;
-      options.navigate(
-        options.successRoute?.(key) ??
-          (key
-            ? { name: "services", params: { id: serverId() }, query: { service: key } }
-            : { name: "services", params: { id: serverId() } }),
-      );
+      if (key) {
+        options.navigate({
+          name: "services",
+          params: { id: serverId() },
+          query: { service: key },
+        });
+      }
       return;
     }
     if (op.status === "cancelled") {

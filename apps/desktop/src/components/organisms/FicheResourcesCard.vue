@@ -84,7 +84,7 @@ const TONES = { too_small: "error", publisher_above: "warn", unproven: "info" } 
       <table class="res__table" :aria-label="t('fiche.resHead')">
         <thead>
           <tr>
-            <th scope="col"><span class="res__sr">{{ t("fiche.cardResources") }}</span></th>
+            <th scope="col"><span class="sr-only">{{ t("fiche.cardResources") }}</span></th>
             <th scope="col">{{ t("fiche.colMin") }}</th>
             <th scope="col">{{ t("fiche.colRecommended") }}</th>
             <th scope="col">{{ t("fiche.colThisServer") }}</th>
@@ -165,15 +165,6 @@ const TONES = { too_small: "error", publisher_above: "warn", unproven: "info" } 
 
 .res__table tbody th {
   font-weight: var(--fw-medium);
-}
-
-.res__sr {
-  position: absolute;
-  width: var(--border-width);
-  height: var(--border-width);
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
 }
 
 .res__unproven {

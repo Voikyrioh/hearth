@@ -12,20 +12,43 @@ export const FICHE_PORT_MAX = 65535;
 
 export type HostPortIssue = "required" | "not_a_number" | "range";
 
-/** Les ports que la fiche publie : ceux de `always`, plus les `optional` que l'utilisateur a cochés. */
+/** Ce qui ne vaut que pour certaines variantes d'une fiche (un port, un dossier) : vide, toutes. */
+export function forVariant<T extends { onlyVariants: readonly string[] }>(
+  items: readonly T[],
+  variant: string | null,
+): T[] {
+  return items.filter(
+    (item) =>
+      item.onlyVariants.length === 0 || (variant !== null && item.onlyVariants.includes(variant)),
+  );
+}
+
+/**
+ * Les ports que la fiche publie pour cette variante : ceux de `always`, plus les `optional` que l'utilisateur a cochés.
+ * Un port d'une autre variante ne part jamais.
+ */
 export function publishedPorts(
   ports: readonly FichePort[],
   optionalOn: readonly string[],
+  variant: string | null,
 ): FichePort[] {
-  return ports.filter(
+  return forVariant(ports, variant).filter(
     (port) =>
       port.publish === "always" || (port.publish === "optional" && optionalOn.includes(port.id)),
   );
 }
 
-/** Les ports facultatifs : l'utilisateur choisit de les publier ou non. */
-export function optionalPorts(ports: readonly FichePort[]): FichePort[] {
-  return ports.filter((port) => port.publish === "optional");
+/** Les ports facultatifs de cette variante : l'utilisateur choisit de les publier ou non. */
+export function optionalPorts(ports: readonly FichePort[], variant: string | null): FichePort[] {
+  return forVariant(ports, variant).filter((port) => port.publish === "optional");
+}
+
+/**
+ * Le port du SERVICE pour un port du serveur choisi : celui de la fiche, sauf en `same_number` où le jeu annonce son port
+ * et le service, le serveur et le jeu valent le même nombre (BR-FICHE-019).
+ */
+export function containerPortOf(port: FichePort, hostPort: number): number {
+  return port.mapping === "same_number" ? hostPort : port.container;
 }
 
 /** Le port du serveur proposé par la fiche, ou vide quand elle n'en propose pas. */
@@ -56,7 +79,11 @@ export function readableHostPorts(
     if ("port" in parsed) {
       out.push({
         id: port.id,
-        deploy: { hostPort: parsed.port, containerPort: port.container, protocol: port.protocol },
+        deploy: {
+          hostPort: parsed.port,
+          containerPort: containerPortOf(port, parsed.port),
+          protocol: port.protocol,
+        },
       });
     }
   }

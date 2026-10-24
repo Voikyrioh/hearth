@@ -65,6 +65,8 @@ export function terraria(): FicheDetail {
         role: "game",
         publish: "always",
         defaultHost: 7777,
+        mapping: "nat",
+        onlyVariants: [],
       },
     ],
     folders: [
@@ -73,8 +75,9 @@ export function terraria(): FicheDetail {
         role: "world",
         target: "/root/.local/share/Terraria/Worlds",
         backup: true,
+        onlyVariants: [],
       },
-      { id: "config", role: "config", target: "/config", backup: true },
+      { id: "config", role: "config", target: "/config", backup: true, onlyVariants: [] },
     ],
     agreements: [],
     questions: [
@@ -209,6 +212,8 @@ export function rich(): FicheDetail {
         role: "game",
         publish: "always",
         defaultHost: 25565,
+        mapping: "nat",
+        onlyVariants: [],
       },
       {
         id: "query",
@@ -217,11 +222,26 @@ export function rich(): FicheDetail {
         role: "query",
         publish: "optional",
         defaultHost: 25566,
+        mapping: "nat",
+        onlyVariants: [],
+      },
+      // Un port que seule la variante avec mods publie, et que le jeu annonce lui-même : même nombre partout.
+      {
+        id: "mods_port",
+        container: 25575,
+        protocol: "tcp",
+        role: "remote_console",
+        publish: "always",
+        defaultHost: 25575,
+        mapping: "same_number",
+        onlyVariants: ["modded"],
       },
     ],
     folders: [
-      { id: "world", role: "world", target: "/data/world", backup: true },
-      { id: "logs", role: "logs", target: "/data/logs", backup: false },
+      { id: "world", role: "world", target: "/data/world", backup: true, onlyVariants: [] },
+      { id: "logs", role: "logs", target: "/data/logs", backup: false, onlyVariants: [] },
+      // Un dossier que seule la variante avec mods demande.
+      { id: "mods", role: "mods", target: "/data/mods", backup: true, onlyVariants: ["modded"] },
     ],
     agreements: [
       {

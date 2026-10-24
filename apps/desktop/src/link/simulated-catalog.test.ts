@@ -354,4 +354,98 @@ describe("refuser comme l'agent, dans l'ordre", () => {
     expect(second.kind).toBe("accepted");
     expect(await refused(sim, otherPort("trois", 7801))).toEqual({ kind: "deploy_limit" });
   });
+
+  it("compte « mesuré au repos » comme mesuré pour le processeur aussi, comme l'agent", async () => {
+    const sim = bridge();
+    const rich = sim.catalog.addRich();
+    rich.resources.cpu = {
+      minMillis: 2000,
+      recommendedMillis: null,
+      evidence: { kind: "measured_idle" },
+    };
+    sim.catalog.put(rich);
+    sim.deploys.setCapacity("forge", { cpus: 1, memoryBytes: 16 * GIB });
+    const request: FicheInstallRequest = {
+      ...terrariaRequest(rich),
+      variant: "vanilla",
+      answers: [{ id: "server_token", value: "jeton" }],
+      agreements: ["licence"],
+      ports: [{ id: "game", hostPort: 25570 }],
+      resources: { memoryBytes: 4 * GIB, cpuMillis: 1000 },
+    };
+    expect(await refused(sim, request)).toEqual({
+      kind: "host_too_small",
+      lack: "cpu",
+      needed: 2000,
+      has: 1000,
+    });
+  });
+
+  it("juge les contrats avant les réponses : un contrat manquant et une réponse fausse disent le contrat", async () => {
+    const sim = bridge();
+    const rich = sim.catalog.addRich();
+    const request: FicheInstallRequest = {
+      ...terrariaRequest(rich),
+      variant: "vanilla",
+      answers: [{ id: "slots", value: "9999" }],
+      ports: [{ id: "game", hostPort: 25570 }],
+    };
+    expect(await refused(sim, request)).toEqual({ kind: "agreement_required", ids: ["licence"] });
+  });
+
+  it("répond « autre refus » pour une fiche sans serveur sur ce système : l'agent répond sur `source`, pas sur le nom", async () => {
+    const sim = bridge();
+    const detail = await detailOf(sim, "terraria");
+    const unavailable = sim.catalog.get("terraria");
+    if (unavailable) unavailable.card.installable = false;
+    expect(await refused(sim, terrariaRequest(detail))).toEqual({ kind: "other" });
+  });
+
+  it("ne publie que les ports de la variante, et donne au service le port du serveur quand le jeu annonce le sien", async () => {
+    const sim = bridge();
+    const rich = sim.catalog.addRich();
+    const base: FicheInstallRequest = {
+      ...terrariaRequest(rich),
+      variant: "modded",
+      answers: [
+        { id: "server_token", value: "jeton" },
+        { id: "mod_pack", value: "base" },
+      ],
+      agreements: ["licence"],
+      resources: { memoryBytes: 4 * GIB, cpuMillis: 2000 },
+    };
+    // Le port de la variante avec mods manque : refus.
+    expect(await refused(sim, { ...base, ports: [{ id: "game", hostPort: 25570 }] })).toEqual({
+      kind: "other",
+    });
+    // Un port d'une autre variante envoyé tel quel : refus.
+    expect(
+      await refused(sim, {
+        ...base,
+        variant: "vanilla",
+        answers: [{ id: "server_token", value: "jeton" }],
+        ports: [
+          { id: "game", hostPort: 25570 },
+          { id: "mods_port", hostPort: 7778 },
+        ],
+      }),
+    ).toEqual({ kind: "other" });
+    const outcome = await sim.installFiche(
+      "forge",
+      {
+        ...base,
+        ports: [
+          { id: "game", hostPort: 25570 },
+          { id: "mods_port", hostPort: 7778 },
+        ],
+      },
+      PASSWORD,
+    );
+    expect(outcome.kind).toBe("accepted");
+    if (outcome.kind !== "accepted") return;
+    expect(sim.services.find("forge", outcome.serviceKey)?.ports).toMatchObject([
+      { hostPort: 25570, containerPort: 25565 },
+      { hostPort: 7778, containerPort: 7778 },
+    ]);
+  });
 });

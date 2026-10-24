@@ -47,6 +47,15 @@ export type Evidence =
   | { kind: "unmeasured" }
   | { kind: "unknown" };
 
+/** Le jeu de caractères d'un texte ; `unknown` : un jeu plus récent que ce client, l'agent juge. */
+export type Charset = "line" | "file_stem" | "arg_safe" | "unknown";
+
+/** Le genre d'un secret. */
+export type SecretKind = "game_password" | "admin_password" | "server_token" | "unknown";
+
+/** Comment le port du serveur se relie à celui du service : `same_number`, le jeu annonce son port, les deux valent le même nombre. */
+export type PortMapping = "nat" | "same_number" | "unknown";
+
 export type QuestionKind =
   | "text"
   | "secret"
@@ -71,14 +80,13 @@ export interface FicheQuestion {
   max: number | null;
   minLen: number | null;
   maxLen: number | null;
-  /** `line`, `file_stem` ou `arg_safe`. */
-  charset: string | null;
+  charset: Charset | null;
   /** « Ne pourra plus être changé après la création du monde » (BR-FICHE-016). */
   frozenAfterCreation: boolean;
   /** Les variantes pour lesquelles la question existe ; vide : toutes. */
   variants: string[];
-  /** `game_password`, `admin_password` ou `server_token` pour un secret ; `null` sinon. */
-  secretKind: string | null;
+  /** Le genre d'un secret ; `null` pour une question qui n'en est pas un. */
+  secretKind: SecretKind | null;
   /** Où créer un jeton de serveur. */
   obtainUrl: string | null;
 }
@@ -92,6 +100,9 @@ export interface FichePort {
   /** `always`, `optional` ou `never`. */
   publish: string;
   defaultHost: number | null;
+  mapping: PortMapping;
+  /** Les variantes pour lesquelles le port existe ; vide : toutes. */
+  onlyVariants: string[];
 }
 
 /** Ce que le programme du jeu télécharge lui-même au premier démarrage, avec la preuve de la taille (BR-FICHE-010). */
@@ -140,7 +151,7 @@ export interface FicheDetail {
   ownerGid: number;
   variants: { id: string; label: string; help: string; default: boolean }[];
   ports: FichePort[];
-  folders: { id: string; role: string; target: string; backup: boolean }[];
+  folders: { id: string; role: string; target: string; backup: boolean; onlyVariants: string[] }[];
   agreements: { id: string; title: string; url: string; sentence: string }[];
   questions: FicheQuestion[];
   resources: {
@@ -225,6 +236,8 @@ function toFicheDetail(dto: FicheDetailDto): FicheDetail {
       role: port.role,
       publish: port.publish,
       defaultHost: port.defaultHost,
+      mapping: port.mapping,
+      onlyVariants: port.onlyVariants,
     })),
     folders: dto.folders.map((folder) => ({ ...folder })),
     agreements: dto.agreements.map((agreement) => ({ ...agreement })),

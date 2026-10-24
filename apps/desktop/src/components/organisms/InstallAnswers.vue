@@ -7,7 +7,7 @@ import FichePortField from "@/components/molecules/FichePortField.vue";
 import QuestionField from "@/components/molecules/QuestionField.vue";
 import VariantChoice from "@/components/molecules/VariantChoice.vue";
 import type { FicheInstallState } from "@/composables/useFicheInstall";
-import { nameText } from "@/deploy/messages";
+import { nameText, portVerdict } from "@/deploy/messages";
 import { currentAnswer } from "@/fiche/answers";
 import { shownHostPort } from "@/fiche/draft";
 import { answerIssueText } from "@/fiche/messages";
@@ -52,7 +52,9 @@ function portError(port: FichePort): string | undefined {
   return t("fiche.portRange");
 }
 
-const optional = computed(() => (detail.value ? optionalPorts(detail.value.ports) : []));
+const optional = computed(() =>
+  detail.value ? optionalPorts(detail.value.ports, draft.value?.variant ?? null) : [],
+);
 const always = computed(() =>
   props.install.published.value.filter((port) => port.publish === "always"),
 );
@@ -119,7 +121,7 @@ defineExpose({
         :port="port"
         :model-value="shownHostPort(draft, port)"
         :error="portError(port)"
-        :verdict="install.portVerdicts.value.get(port.id) ?? { error: null, warning: null, reserved: false, suggested: null }"
+        :verdict="install.portVerdicts.value.get(port.id) ?? portVerdict(undefined)"
         :changed="changed(port)"
         :waiting="install.portsWaiting.value"
         @update:model-value="install.setHostPort(port.id, $event)"
@@ -132,7 +134,7 @@ defineExpose({
         :port="port"
         :model-value="shownHostPort(draft, port)"
         :error="portError(port)"
-        :verdict="install.portVerdicts.value.get(port.id) ?? { error: null, warning: null, reserved: false, suggested: null }"
+        :verdict="install.portVerdicts.value.get(port.id) ?? portVerdict(undefined)"
         :changed="changed(port)"
         :waiting="install.portsWaiting.value"
         optional

@@ -149,7 +149,7 @@ export class SimulatedCatalog {
 
   /**
    * Juge et accepte une installation, ou la refuse. Le droit, la confirmation et le moteur ont déjà été jugés par
-   * l'appelant. Les contrôles dans l'ordre de l'agent : fiche proposée et inchangée, nom, réponses, contrats,
+   * l'appelant. Les contrôles dans l'ordre de l'agent : fiche proposée et inchangée, nom, contrats, réponses,
    * ports, limites obligatoires, machine, espace, puis le déploiement ordinaire.
    */
   install(serverId: string, request: FicheInstallRequest, by: string): DeployOutcome {
@@ -160,7 +160,8 @@ export class SimulatedCatalog {
       return refused({ kind: "fiche_changed" });
     }
     if (!detail.card.installable) {
-      return refused({ kind: "invalid", field: "name", reason: "platform_unavailable" });
+      // L'agent répond sur le champ `source`, que la coquille ne sait pas nommer : « autre refus ».
+      return refused({ kind: "other" });
     }
     if (nameIssue(request.name) !== null) {
       return refused({ kind: "invalid", field: "name", reason: "bad_format" });
@@ -168,6 +169,12 @@ export class SimulatedCatalog {
     if (request.variant !== null && !detail.variants.some((item) => item.id === request.variant)) {
       return refused({ kind: "other" });
     }
+
+    // Les contrats : l'agent refuse même d'un client modifié.
+    const missing = detail.agreements
+      .filter((agreement) => !request.agreements.includes(agreement.id))
+      .map((agreement) => agreement.id);
+    if (missing.length > 0) return refused({ kind: "agreement_required", ids: missing });
 
     // Les réponses : une par question, jamais deux ; une question hors variante est refusée.
     const seen = new Set<string>();
@@ -200,12 +207,6 @@ export class SimulatedCatalog {
       }
     }
 
-    // Les contrats : l'agent refuse même d'un client modifié.
-    const missing = detail.agreements
-      .filter((agreement) => !request.agreements.includes(agreement.id))
-      .map((agreement) => agreement.id);
-    if (missing.length > 0) return refused({ kind: "agreement_required", ids: missing });
-
     // Les ports : tout port publié toujours a son port du serveur, au-dessus de 1024.
     const hostPorts = new Map<string, number>();
     for (const choice of request.ports) {
@@ -214,8 +215,10 @@ export class SimulatedCatalog {
     }
     const published = detail.ports.filter(
       (port) =>
-        port.publish === "always" ||
-        (port.publish === "optional" && request.optionalPorts.includes(port.id)),
+        (port.onlyVariants.length === 0 ||
+          (request.variant !== null && port.onlyVariants.includes(request.variant))) &&
+        (port.publish === "always" ||
+          (port.publish === "optional" && request.optionalPorts.includes(port.id))),
     );
     for (const port of published) {
       const host = hostPorts.get(port.id);
@@ -234,7 +237,7 @@ export class SimulatedCatalog {
     const isMeasured = (evidence: { kind: string }) =>
       evidence.kind === "measured" || evidence.kind === "measured_idle";
     const cpu = detail.resources.cpu;
-    if (capacity && cpu.minMillis !== null && cpu.evidence.kind === "measured") {
+    if (capacity && cpu.minMillis !== null && isMeasured(cpu.evidence)) {
       const has = capacity.cpus * 1000;
       if (cpu.minMillis > has) {
         return refused({ kind: "host_too_small", lack: "cpu", needed: cpu.minMillis, has });
@@ -281,7 +284,9 @@ export class SimulatedCatalog {
         tag: detail.image.tag,
         ports: published.map((port) => ({
           hostPort: hostPorts.get(port.id) ?? 0,
-          containerPort: port.container,
+          // `same_number` : le jeu annonce son port, le service prend le même nombre que le serveur.
+          containerPort:
+            port.mapping === "same_number" ? (hostPorts.get(port.id) ?? 0) : port.container,
           protocol: port.protocol,
         })),
         accept: request.accept,

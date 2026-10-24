@@ -273,6 +273,12 @@ const NOT_SHOWN: Record<string, string> = {
     "ne s'affiche pas : sert à la règle du mot de passe (inconnu = le plus strict), testé dans simulated-reauth.test.ts et password_need",
   ProtocolDto: "dit par portLabel (testé dans services.test.ts)",
   ScopeDto: "dit par portLabel (testé dans services.test.ts)",
+  FicheCharsetDto:
+    "sert à l'aide sous un texte (lettres, chiffres…) ; un jeu inconnu n'a pas d'aide et l'agent juge (HRT-102)",
+  FicheSecretKindDto:
+    "choisit l'avertissement d'un mot de passe vide ou l'aide d'un jeton ; un genre inconnu n'ajoute rien (HRT-102)",
+  FichePortMappingDto:
+    "décide du port du service (`same_number` : le même nombre que le serveur) ; inconnu se lit comme un port fixe (HRT-102)",
   FicheStatusDto:
     "l'état d'une fiche (publiée ou d'essai) ne s'affiche pas : la liste dit seulement « Livrée avec Hearth » (BR-FICHE-003)",
   NameStatusDto:

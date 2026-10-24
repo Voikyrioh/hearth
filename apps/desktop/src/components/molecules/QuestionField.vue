@@ -85,6 +85,7 @@ const pick = computed(() => props.question.kind === "choice" || props.question.k
         :model-value="modelValue"
         :options="choices"
         :label="label"
+        :disabled="disabled"
         @update:model-value="emit('update:modelValue', $event)"
       />
       <p v-if="help" class="field__help">{{ help }}</p>

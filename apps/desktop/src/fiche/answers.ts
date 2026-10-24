@@ -131,3 +131,13 @@ export function answersToSend(
   }
   return out;
 }
+
+/** Les questions dont la réponse diffère de ce que la fiche propose (BR-FICHE-040) : un secret saisi compte. */
+export function changedAnswers(
+  questions: readonly FicheQuestion[],
+  answers: Readonly<Record<string, string>>,
+): FicheQuestion[] {
+  return questions.filter(
+    (question) => currentAnswer(question, answers) !== startingAnswer(question),
+  );
+}

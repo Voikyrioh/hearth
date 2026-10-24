@@ -1,5 +1,5 @@
 /**
- * Textes de l'interface : français, tutoiement, pas de tiret cadratin.
+ * Textes de l'interface : français, vouvoiement et impératif, pas de tiret cadratin.
  * Aucun texte en dur dans les composants : tout passe par `t()`.
  */
 export const fr = {
@@ -1427,9 +1427,8 @@ export const fr = {
     noCapacity:
       "Hearth n'a pas pu lire les limites de ce serveur. Le service ne peut pas être envoyé sans elles.",
   },
-  // Déployer une image (HRT-69, BR-DEPLOY-001 à 009, 014 à 016, 020, 027 à 031, 033). Textes de la spec
-  // `deployer-image` et du design du lot 1, mis au vouvoiement ; les autres sont marqués « hors spec ». Le moteur de
-  // conteneurs, l'image, le registre : aucun nom interne n'est dit.
+  // Le Catalogue et l'installation d'un serveur de jeu depuis une fiche (HRT-102, BR-FICHE-*). Les libellés, bornes et
+  // choix d'une fiche viennent de la fiche ; ici ne sont que les phrases autour.
   catalogue: {
     subtitle: "Serveurs de jeu prêts à installer",
     label: "Fiches de serveurs de jeu",
@@ -1465,10 +1464,6 @@ export const fr = {
     digest: "Empreinte de la fiche",
     install: "Installer",
     installProposed: "Installer avec les valeurs proposées",
-    advice:
-      "Conseil : laissez Hearth piloter seul ce serveur. Deux outils qui lancent des conteneurs se partagent le processeur et la mémoire sans se voir. Rien n'est bloqué.",
-    noRight: "Votre compte ne peut pas gérer les services de ce serveur.",
-    offline: "Indisponible tant que le serveur est hors ligne.",
     // Les cartes de la fiche
     cardImage: "Image",
     cardPorts: "Ports",
@@ -1575,7 +1570,7 @@ export const fr = {
     stopUntested:
       "Ce jeu n'enregistre pas son monde en s'arrêtant, et Hearth ne peut pas encore lui demander de le faire. Seul l'enregistrement automatique du jeu protège votre monde.",
     stopSignal: "Ce jeu enregistre son monde en s'arrêtant. Il lui faut jusqu'à {delay}.",
-    stopGrace: "Délai d'arrêt : {delay}",
+    stopGrace: "Le délai d'arrêt est de {delay}.",
     stopUnknown: "Hearth ne sait pas comment ce jeu enregistre son monde à l'arrêt.",
     seconds: "{n} secondes",
     minutes: "{n} minutes",
@@ -1593,13 +1588,13 @@ export const fr = {
       opaque: "Texte libre",
       unknown: "Valeur",
     },
-    proposedValue: "Valeur proposée : {value}",
-    noProposedValue: "Aucune valeur proposée",
-    bounds: "De {min} à {max}",
-    boundsMin: "Au moins {min}",
-    boundsMax: "Au plus {max}",
-    choicesList: "Choix : {list}",
-    frozen: "Ne pourra plus être changé après la création du monde",
+    proposedValue: "La valeur proposée est {value}.",
+    noProposedValue: "La fiche ne propose aucune valeur.",
+    bounds: "Le nombre est compris entre {min} et {max}.",
+    boundsMin: "Le nombre est d'au moins {min}.",
+    boundsMax: "Le nombre est d'au plus {max}.",
+    choicesList: "Les choix sont : {list}.",
+    frozen: "Ce réglage ne pourra plus être changé après la création du monde.",
     // Ce que la fiche impose
     imposedCount: "{n} réglage(s) posé(s) par la fiche à votre place.",
     imposedNone: "Cette fiche ne pose aucun réglage à votre place.",
@@ -1612,7 +1607,6 @@ export const fr = {
     secretMask: "••••••••",
     // Contrat
     agreementRead: "Lire le contrat",
-    agreementLine: "{title}",
     // L'installation
     installTitle: "Installer {name}",
     close: "Fermer",
@@ -1641,8 +1635,6 @@ export const fr = {
     portDuplicate: "Deux ports ne peuvent pas porter le même numéro.",
     portPlaceholder: "Numéro du port",
     portLabel: "Port du serveur pour {role}",
-    useSuggested: "Utiliser le port {port}",
-    suggested: "Port libre le plus proche : {port}",
     versionFixed: "Version : {version} (la seule proposée par cette fiche).",
     noPassword:
       "Aucun mot de passe : toute personne qui peut joindre ce port peut rejoindre la partie.",
@@ -1651,8 +1643,6 @@ export const fr = {
     tokenOpen: "Ouvrir le site de la plateforme",
     tokenNeeded: "Ce jeu a besoin d'un jeton de serveur.",
     secretHint: "Il est masqué ici et n'est jamais écrit dans le journal d'activité.",
-    secretLogsNote:
-      "Certains jeux écrivent leurs réglages dans leurs journaux : Hearth ne peut pas le filtrer.",
     charsetFileStem: "Lettres, chiffres, tirets et soulignés seulement.",
     charsetArgSafe: "Lettres sans accent, chiffres, points, tirets, soulignés et deux-points.",
     yes: "Oui",
@@ -1720,7 +1710,6 @@ export const fr = {
     sumEmptyAnswer: "Laissé vide",
     sumResourcesText: "{memory} de mémoire, {cpu} de processeur.",
     sumMemoryProof: "Mémoire recommandée : {proof}.",
-    sumFolderLine: "{role} : {path}",
     needAttention: "Validez les points d'attention pour continuer.",
     attention: {
       title: "Points d'attention",
@@ -1762,6 +1751,9 @@ export const fr = {
       label: "Premier démarrage du jeu",
     },
   },
+  // Déployer une image (HRT-69, BR-DEPLOY-001 à 009, 014 à 016, 020, 027 à 031, 033). Textes de la spec
+  // `deployer-image` et du design du lot 1, mis au vouvoiement ; les autres sont marqués « hors spec ». Le moteur de
+  // conteneurs, l'image, le registre : aucun nom interne n'est dit.
   deploy: {
     open: "Déployer un service",
     pageTitle: "Déployer un service",
