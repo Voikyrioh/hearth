@@ -212,7 +212,11 @@ impl ServiceOpAccess {
         viewer: Viewer,
     ) -> Result<CancelDone, AccessError> {
         // La visibilité d'abord : une opération qu'on ne voit pas n'existe pas, quel que soit son état.
-        self.read(id, viewer).await?;
+        let seen = self.read(id, viewer).await?;
+        // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC : la porte du service est TOUJOURS prise avant le commit. Le statut
+        // lu ici l'est hors transaction : il peut changer avant la transition (un arrêt de jeu passe de
+        // `running` à `awaiting_decision`), donc il ne décide pas de la porte.
+        let closing = self.ops.closing(&seen.record.service).await;
         let mut tx = self.store.begin().await?;
         let record = tx
             .service_ops()
@@ -261,7 +265,7 @@ impl ServiceOpAccess {
             .await?;
         tx.commit().await?;
         journal.publish(&self.trail);
-        self.ops.settle(id).await;
+        self.ops.settle(id, Some(closing)).await;
         let after = self.ops.snapshot(id).await?.ok_or(AccessError::NotFound)?;
         if to == OpStatus::Cancelled {
             self.ops.clean_after_cancel(&before).await;
@@ -279,7 +283,10 @@ impl ServiceOpAccess {
         actor: &Actor,
         viewer: Viewer,
     ) -> Result<OpSnapshot, AccessError> {
-        self.read(id, viewer).await?;
+        let seen = self.read(id, viewer).await?;
+        // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC : la porte du service est TOUJOURS prise avant le commit (voir
+        // `cancel`) : le choix et le statut lus hors transaction ne la décident pas.
+        let closing = self.ops.closing(&seen.record.service).await;
         let mut tx = self.store.begin().await?;
         let record = tx
             .service_ops()
@@ -339,7 +346,7 @@ impl ServiceOpAccess {
             .await?;
         tx.commit().await?;
         journal.publish(&self.trail);
-        self.ops.settle(id).await;
+        self.ops.settle(id, Some(closing)).await;
         if next == OpStatus::Cancelled {
             self.ops.clean_after_cancel(&before).await;
         }
