@@ -281,6 +281,7 @@ pub fn run(args: &[String]) -> ExitCode {
                             (Err(_), _) => println!(
                                 "catalog-check : fiche `{dir}` : la fiche de la branche principale ne passe pas le chargeur de cette branche, comparaison de version sautée"
                             ),
+                            // La fiche de cette branche ne se charge pas : `check_texts` le reproche plus bas.
                             (_, Err(_)) => {}
                         }
                     }
