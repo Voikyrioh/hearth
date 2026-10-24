@@ -244,13 +244,4 @@ impl GameSettingsRepo for SqliteGameSettingsRepo {
         tx.commit().await.map_err(storage(RESOURCE))?;
         Ok(rev)
     }
-
-    async fn forget(&self, key: &ServiceKey) -> Result<(), StoreError> {
-        sqlx::query("DELETE FROM game_settings WHERE service_key = ?")
-            .bind(key.as_str())
-            .execute(&self.pool)
-            .await
-            .map_err(storage(RESOURCE))?;
-        Ok(())
-    }
 }

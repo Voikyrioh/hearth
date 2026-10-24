@@ -603,23 +603,32 @@ pub fn drift(
             });
         }
     }
-    let known = |key: &str| {
-        fiche
-            .settings
-            .iter()
-            .any(|s| s.channel == channel && s.key == key)
-            || fiche
-                .retired
-                .iter()
-                .any(|r| r.channel == channel && r.key == key)
-    };
     let mut extras: Vec<String> = Vec::new();
     for (key, _) in entries {
-        if !known(key) && !extras.contains(key) {
+        if !is_known_key(fiche, channel, key) && !extras.contains(key) {
             extras.push(key.clone());
         }
     }
     (drifts, extras)
+}
+
+/// La fiche connaît-elle cette clé du fichier d'un canal ? Un réglage, un réglage retiré ou un réglage écarté
+/// (`[[not_exposed]]`) : une telle ligne n'est jamais un « autre réglage », elle n'est ni montrée comme telle ni
+/// écrite par ce chemin. Prédicat unique de l'écart, de l'import et de l'enregistrement.
+pub fn is_known_key(fiche: &Fiche, channel: &str, key: &str) -> bool {
+    fiche
+        .settings
+        .iter()
+        .any(|s| s.channel == channel && s.key == key)
+        || fiche
+            .retired
+            .iter()
+            .any(|r| r.channel == channel && r.key == key)
+        || fiche
+            .file
+            .not_exposed
+            .iter()
+            .any(|n| n.channel == channel && n.key == key)
 }
 
 /// Le nom d'un réglage que la fiche ne connaît pas ressemble-t-il à un secret ? Sa valeur n'est alors jamais montrée

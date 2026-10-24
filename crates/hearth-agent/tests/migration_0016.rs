@@ -224,22 +224,6 @@ async fn the_repository_writes_numbered_revisions_keeps_the_seals_and_refuses_a_
         4
     );
     assert!(repo.load(&key).await.unwrap().unwrap().sealed.is_empty());
-
-    // Oublier un service emporte ses scellés.
-    repo.save(new(
-        Some(4),
-        state(&[("password", Slot::Secret)]),
-        vec![("password".into(), blob(3))],
-    ))
-    .await
-    .unwrap();
-    repo.forget(&key).await.unwrap();
-    assert!(repo.load(&key).await.unwrap().is_none());
-    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM game_setting_secrets")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(left, 0);
 }
 
 #[tokio::test]

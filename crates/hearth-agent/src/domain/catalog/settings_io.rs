@@ -12,7 +12,7 @@ use super::formats::{ConfigFormat, Refused, Unreadable};
 use super::loading::model::Fiche;
 use super::settings_state::{
     Applied, Change, Context, Drift, Effect, Reason, Refusal, SettingsState, Slot, apply_changes,
-    drift, validate_text,
+    drift, is_known_key, validate_text,
 };
 use crate::domain::secret::Secret;
 
@@ -185,15 +185,7 @@ pub fn plan_save(
     // Les réglages inconnus de la fiche : changer une valeur ou retirer la ligne (BR-FICHE-047). Une clé que la
     // fiche connaît passe par son réglage, jamais par ici.
     for (key, value) in others {
-        let known = fiche
-            .settings
-            .iter()
-            .any(|s| s.channel == channel && s.key == *key)
-            || fiche
-                .retired
-                .iter()
-                .any(|r| r.channel == channel && r.key == *key);
-        if known {
+        if is_known_key(fiche, channel, key) {
             return Err(SaveFailure::KnownKeyAsOther);
         }
         all.push((key.clone(), value.clone()));
@@ -366,12 +358,7 @@ pub fn analyze_import(
     let unknown: Vec<&str> = {
         let mut seen: Vec<&str> = Vec::new();
         for (key, _) in &entries {
-            let known = known_keys.contains(&key.as_str())
-                || fiche
-                    .retired
-                    .iter()
-                    .any(|r| r.channel == channel && r.key == *key);
-            if !known && !seen.contains(&key.as_str()) {
+            if !is_known_key(fiche, channel, key) && !seen.contains(&key.as_str()) {
                 seen.push(key);
             }
         }

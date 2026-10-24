@@ -44,10 +44,10 @@ fn settings_error(error: SettingsError) -> ApiError {
             "Les réglages ont changé depuis que vous les avez lus. Relisez-les, puis recommencez.",
             serde_json::json!({ "by": by, "at": at.and_then(|date| super::wire::date(date).ok()) }),
         )),
-        SettingsError::FileChanged { ids } => ApiError(ErrorBody::with_details(
+        SettingsError::FileChanged { ids, by, at } => ApiError(ErrorBody::with_details(
             ErrorCode::SettingsFileChanged,
             "Le fichier de réglages a changé depuis que vous l'avez lu. Relisez-le, puis choisissez, réglage par réglage, ce que vous gardez.",
-            serde_json::json!({ "ids": ids }),
+            serde_json::json!({ "ids": ids, "by": by, "at": at.and_then(|date| super::wire::date(date).ok()) }),
         )),
         SettingsError::FileUnreadable { reason, line } => ApiError(ErrorBody::with_details(
             ErrorCode::SettingsFileUnreadable,

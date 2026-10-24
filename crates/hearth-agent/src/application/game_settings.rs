@@ -84,7 +84,12 @@ pub enum SettingsError {
     },
     /// Le fichier n'est plus celui que le client a lu, ou des réglages en écart attendent un choix.
     #[error("le fichier de réglages a changé")]
-    FileChanged { ids: Vec<String> },
+    FileChanged {
+        ids: Vec<String>,
+        /// Qui a gagné la course, quand c'est elle (comme pour `Conflict`).
+        by: Option<String>,
+        at: Option<OffsetDateTime>,
+    },
     #[error("le fichier de réglages n'est pas lisible")]
     FileUnreadable {
         reason: &'static str,
@@ -113,6 +118,40 @@ pub enum SettingsError {
     Invalid(&'static str),
     #[error("stockage indisponible : {0}")]
     Storage(String),
+}
+
+impl SettingsError {
+    fn file_changed(ids: Vec<String>) -> Self {
+        Self::FileChanged {
+            ids,
+            by: None,
+            at: None,
+        }
+    }
+}
+
+/// Les octets que le plan d'un canal veut écrire.
+fn plan_bytes(plans: &[(usize, SavePlan)], index: usize) -> Option<&[u8]> {
+    plans
+        .iter()
+        .find(|(i, _)| *i == index)
+        .and_then(|(_, plan)| plan.file.as_ref())
+        .map(|bytes| bytes.as_slice())
+}
+
+/// Ce qu'on sait d'un fichier pour en calculer l'empreinte.
+enum FileView<'f> {
+    Bytes(&'f [u8]),
+    Missing,
+    Unsafe,
+}
+
+fn view_of(read: &FileRead) -> FileView<'_> {
+    match read {
+        FileRead::Bytes(bytes) => FileView::Bytes(bytes),
+        FileRead::Missing => FileView::Missing,
+        FileRead::Unsafe => FileView::Unsafe,
+    }
 }
 
 impl From<SpecServiceError> for SettingsError {
@@ -398,6 +437,8 @@ impl GameSettings {
     /// Le verrou d'exclusion de ce service.
     fn serial(&self, key: &ServiceKey) -> Arc<Mutex<()>> {
         let mut map = self.saving.lock().unwrap_or_else(PoisonError::into_inner);
+        // Une entrée que plus personne ne tient (seule la table la garde) est retirée : la table ne grossit pas.
+        map.retain(|_, lock| Arc::strong_count(lock) > 1);
         Arc::clone(map.entry(key.as_str().to_owned()).or_default())
     }
 
@@ -494,24 +535,18 @@ impl GameSettings {
     }
 
     /// L'empreinte de l'ensemble des fichiers de réglages : un fichier absent et un fichier vide diffèrent.
-    fn fingerprint<'f>(
-        files: impl IntoIterator<Item = (&'f str, Option<&'f FileRead>, Option<&'f [u8]>)>,
-    ) -> String {
+    fn fingerprint<'f>(files: impl IntoIterator<Item = (&'f str, FileView<'f>)>) -> String {
         let mut all = Vec::new();
-        for (id, read, replaced) in files {
+        for (id, view) in files {
             all.extend_from_slice(&u16::try_from(id.len()).unwrap_or(u16::MAX).to_be_bytes());
             all.extend_from_slice(id.as_bytes());
-            match (replaced, read) {
-                (Some(bytes), _) => {
+            match view {
+                FileView::Bytes(bytes) => {
                     all.push(b'f');
                     all.extend_from_slice(sha256_hex(bytes).as_bytes());
                 }
-                (None, Some(FileRead::Bytes(bytes))) => {
-                    all.push(b'f');
-                    all.extend_from_slice(sha256_hex(bytes).as_bytes());
-                }
-                (None, Some(FileRead::Missing) | None) => all.push(b'm'),
-                (None, Some(FileRead::Unsafe)) => all.push(b'u'),
+                FileView::Missing => all.push(b'm'),
+                FileView::Unsafe => all.push(b'u'),
             }
         }
         sha256_hex(&all)
@@ -519,7 +554,7 @@ impl GameSettings {
 
     /// L'empreinte des fichiers tels qu'ils ont été lus.
     fn stamp_of(files: &[ChannelFile]) -> String {
-        Self::fingerprint(files.iter().map(|f| (f.id.as_str(), Some(&f.read), None)))
+        Self::fingerprint(files.iter().map(|f| (f.id.as_str(), view_of(&f.read))))
     }
 
     /// Les réglages d'un serveur de jeu : valeurs voulues, état du fichier, écarts, réglages inconnus (BR-FICHE-047,
@@ -915,7 +950,7 @@ impl GameSettings {
             return Err(SettingsError::Invalid("channel"));
         }
         if !unresolved.is_empty() || stamp_moved {
-            return Err(SettingsError::FileChanged { ids: unresolved });
+            return Err(SettingsError::file_changed(unresolved));
         }
         if request.effect != effect_wire(effect) {
             return Err(SettingsError::EffectMismatch);
@@ -952,44 +987,30 @@ impl GameSettings {
             }
         }
 
-        // Le fichier a-t-il bougé depuis le plan ? Il est relu JUSTE avant l'écriture et comparé à l'empreinte du plan :
-        // un fichier réécrit entre-temps ne se recouvre pas (ADR-0051 point 5). Rien n'est alors écrit.
-        if any_file {
-            let again = self.read_files(key, &channels).await?;
-            if Self::stamp_of(&again) != stamp {
-                return Err(SettingsError::FileChanged { ids: Vec::new() });
-            }
-        }
-        // Les fichiers : écrits l'un après l'autre. Si l'un échoue, les précédents ne sont remis que s'ils portent
-        // encore exactement ce que cet enregistrement y a écrit : jamais par-dessus le travail d'un autre.
-        let mut written: Vec<usize> = Vec::new();
+        // Les fichiers : chacun est écrit seulement s'il est ENCORE tel que le plan l'a lu, en un seul geste (lecture,
+        // comparaison, écriture : ADR-0051 point 5). Un fichier réécrit entre-temps n'est jamais recouvert. Le geste
+        // rend ce qu'il a remplacé, pour pouvoir le remettre si l'enregistrement perd ensuite en base.
+        let mut written: Vec<(usize, Option<Zeroizing<Vec<u8>>>)> = Vec::new();
         for (index, plan) in &plans {
             let Some(bytes) = &plan.file else { continue };
             let channel = &channels[*index];
-            if let Err(error) = self
-                .write_file(key, &channel.rel, bytes, channel.perms)
+            match self
+                .swap_file(key, channel, bytes, &files[*index].read)
                 .await
             {
-                for done in &written {
-                    self.restore_if_ours(key, &channels[*done], &files[*done].read, &plans, *done)
-                        .await;
+                Ok(previous) => written.push((*index, previous)),
+                Err(error) => {
+                    self.undo_writes(key, &channels, &plans, &written).await;
+                    return Err(error);
                 }
-                return Err(error);
             }
-            written.push(*index);
         }
-        let replaced = |index: usize| {
-            plans
-                .iter()
-                .find(|(i, _)| *i == index)
-                .and_then(|(_, plan)| plan.file.as_ref().map(|b| b.as_slice()))
-        };
-        let new_stamp = Self::fingerprint(
-            files
-                .iter()
-                .enumerate()
-                .map(|(i, f)| (f.id.as_str(), Some(&f.read), replaced(i))),
-        );
+        let new_stamp = Self::fingerprint(files.iter().enumerate().map(|(i, f)| {
+            (
+                f.id.as_str(),
+                plan_bytes(&plans, i).map_or_else(|| view_of(&f.read), FileView::Bytes),
+            )
+        }));
 
         let rev = match self
             .repo
@@ -1005,10 +1026,16 @@ impl GameSettings {
             .await
         {
             Ok(rev) => rev,
-            // Une autre écriture a gagné la course : son fichier est déjà là et rien n'est remis par-dessus. Le
-            // client relit, voit l'écart éventuel et tranche.
-            Err(SettingsStoreError::Conflict { .. }) => {
-                return Err(SettingsError::FileChanged { ids: Vec::new() });
+            // Une autre écriture a gagné la course en base. Si le fichier porte encore ce que CET enregistrement y a
+            // écrit, le contenu qu'il a remplacé (celui du gagnant, ou à défaut l'ancien) y revient : fichier et base
+            // restent d'accord. Le client relit, voit l'éventuel écart et tranche.
+            Err(SettingsStoreError::Conflict { by, at, .. }) => {
+                self.undo_writes(key, &channels, &plans, &written).await;
+                return Err(SettingsError::FileChanged {
+                    ids: Vec::new(),
+                    by,
+                    at,
+                });
             }
             Err(SettingsStoreError::Store(error)) => return Err(error.into()),
         };
@@ -1023,28 +1050,86 @@ impl GameSettings {
         })
     }
 
-    /// Remet l'ancien contenu d'un canal, mais seulement si le fichier porte encore ce que cet enregistrement y a écrit.
-    async fn restore_if_ours(
+    /// Écrit `bytes` dans le fichier d'un canal SI ce fichier est encore tel que le plan l'a lu, en un seul geste
+    /// bloquant (lecture, comparaison, écriture atomique). Rend le contenu remplacé (`None` : le fichier n'existait
+    /// pas). Un fichier qui a bougé : `SETTINGS_FILE_CHANGED`, rien n'est écrit.
+    async fn swap_file(
         &self,
         key: &ServiceKey,
         channel: &FileChannel<'_>,
-        before: &FileRead,
-        plans: &[(usize, SavePlan)],
-        index: usize,
-    ) {
-        let (FileRead::Bytes(old), Some(ours)) = (
-            before,
-            plans
-                .iter()
-                .find(|(i, _)| *i == index)
-                .and_then(|(_, plan)| plan.file.as_ref()),
-        ) else {
-            return;
+        bytes: &[u8],
+        expected: &FileRead,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>, SettingsError> {
+        let expected: Option<Zeroizing<Vec<u8>>> = match expected {
+            FileRead::Bytes(old) => Some(Zeroizing::new(old.to_vec())),
+            FileRead::Missing => None,
+            FileRead::Unsafe => {
+                return Err(SettingsError::FileUnreadable {
+                    reason: "unsafe",
+                    line: None,
+                });
+            }
         };
-        if let Ok(FileRead::Bytes(now)) = self.read_file(key, &channel.rel).await
-            && now.as_slice() == ours.as_slice()
-        {
-            let _ = self.write_file(key, &channel.rel, old, channel.perms).await;
+        let fs = Arc::clone(&self.fs);
+        let key = key.clone();
+        let rel = channel.rel.clone();
+        let perms = channel.perms;
+        let bytes = Zeroizing::new(bytes.to_vec());
+        let swapped = tokio::task::spawn_blocking(move || {
+            let root = fs.open_service_root(&key)?;
+            let now = match root.read_bounded(&rel, MAX_FILE_BYTES as u64) {
+                Ok(found) => Some(Zeroizing::new(found)),
+                Err(FsError::NotFound) => None,
+                Err(error) => return Err(error),
+            };
+            if now.as_deref() != expected.as_deref() {
+                return Ok(None);
+            }
+            root.write_atomic(&rel, &bytes, perms)?;
+            Ok(Some(now))
+        })
+        .await
+        .map_err(|error| SettingsError::Storage(error.to_string()))?
+        .map_err(|error| SettingsError::Storage(format!("fichier non écrit : {error}")))?;
+        swapped.ok_or_else(|| SettingsError::file_changed(Vec::new()))
+    }
+
+    /// Remet, pour chaque canal écrit par cet enregistrement, le contenu qu'il a remplacé, mais seulement si le fichier
+    /// porte encore exactement ce que cet enregistrement y a écrit : jamais par-dessus le travail d'un autre.
+    async fn undo_writes(
+        &self,
+        key: &ServiceKey,
+        channels: &[FileChannel<'_>],
+        plans: &[(usize, SavePlan)],
+        written: &[(usize, Option<Zeroizing<Vec<u8>>>)],
+    ) {
+        for (index, previous) in written {
+            let Some(ours) = plan_bytes(plans, *index) else {
+                continue;
+            };
+            let channel = &channels[*index];
+            let fs = Arc::clone(&self.fs);
+            let key = key.clone();
+            let rel = channel.rel.clone();
+            let perms = channel.perms;
+            let ours = Zeroizing::new(ours.to_vec());
+            let previous = previous.as_ref().map(|old| Zeroizing::new(old.to_vec()));
+            let _ = tokio::task::spawn_blocking(move || {
+                let root = fs.open_service_root(&key)?;
+                if root
+                    .read_bounded(&rel, MAX_FILE_BYTES as u64)
+                    .ok()
+                    .as_deref()
+                    == Some(&*ours)
+                {
+                    match &previous {
+                        Some(old) => root.write_atomic(&rel, old, perms)?,
+                        None => root.remove_tree(&rel)?,
+                    }
+                }
+                Ok::<(), FsError>(())
+            })
+            .await;
         }
     }
 
@@ -1067,36 +1152,36 @@ impl GameSettings {
     ) {
         // Un enregistrement va TOUJOURS au journal (BR-FICHE-053) : si le nom du service ne se nettoie pas en un nom
         // affichable, la clé du service (`h_...`, toujours affichable) le remplace.
-        let Some(service) =
-            ClientName::parse(&loaded.name).or_else(|| ClientName::parse(loaded.key.as_str()))
-        else {
-            return;
-        };
-        let names: Vec<ClientName> = changed
-            .iter()
-            .filter(|id| {
-                loaded
-                    .fiche
-                    .setting(id)
-                    .is_some_and(|setting| !setting.is_secret())
-            })
-            .filter_map(|id| ClientName::parse(id))
-            .collect();
-        let target = Target::GameSettings {
-            service,
-            changed: names,
-            count: u32::try_from(changed.len() + others.len()).unwrap_or(u32::MAX),
-            password_changed: !secrets.is_empty(),
-            raw_file: false,
-        };
-        self.sink
-            .record(
-                actor.clone(),
-                AuditAction::ServiceGameSettings,
-                target,
-                Outcome::Succeeded,
-            )
-            .await;
+        let service = ClientName::parse(&loaded.name)
+            .or_else(|| ClientName::parse(loaded.key.as_str()))
+            .or_else(|| ClientName::parse("service"));
+        if let Some(service) = service {
+            let names: Vec<ClientName> = changed
+                .iter()
+                .filter(|id| {
+                    loaded
+                        .fiche
+                        .setting(id)
+                        .is_some_and(|setting| !setting.is_secret())
+                })
+                .filter_map(|id| ClientName::parse(id))
+                .collect();
+            let target = Target::GameSettings {
+                service,
+                changed: names,
+                count: u32::try_from(changed.len() + others.len()).unwrap_or(u32::MAX),
+                password_changed: !secrets.is_empty(),
+                raw_file: false,
+            };
+            self.sink
+                .record(
+                    actor.clone(),
+                    AuditAction::ServiceGameSettings,
+                    target,
+                    Outcome::Succeeded,
+                )
+                .await;
+        }
     }
 
     // -------------------------------------------------------------------------------------------------

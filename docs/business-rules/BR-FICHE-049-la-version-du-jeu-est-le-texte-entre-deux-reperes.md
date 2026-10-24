@@ -24,9 +24,9 @@ maj: 2026-10-13
 - `crates/hearth-agent/src/domain/catalog/tests_state.rs::cross_checks_variants_retired_settings_and_game_versions_are_enforced`
 - `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::i6_neither_regular_expression_nor_template_signs_and_versions_are_literals`
 
-- **Réglage disparu de la version (HRT-108)** : l'agent n'a pas de lecteur de la version INSTALLÉE du jeu branché (il lit les journaux du jeu, ce que la fiche de 7 Days to Die livre avec HRT-115). Tant que la version est inconnue, `version_status` rend « inconnue » et le champ `gone` de `GET /services/{key}/settings` vaut toujours faux : ce champ n'est PAS livré fonctionnel. `Reason::Version` refuse déjà l'écriture d'un réglage disparu quand une version est donnée au domaine.
 
 ## Cas limites
+- **Réglage disparu de la version (HRT-108)** : l'agent n'a pas de lecteur de la version INSTALLÉE du jeu branché (il lit les journaux du jeu, ce que la fiche de 7 Days to Die livre avec HRT-115). Tant que la version est inconnue, `version_status` rend « inconnue » et le champ `gone` de `GET /services/{key}/settings` vaut toujours faux : ce champ n'est PAS livré fonctionnel. `Reason::Version` refuse déjà l'écriture d'un réglage disparu quand une version est donnée au domaine.
 - La ligne de journal qui annonce la version de 7 Days to Die n'est pas vérifiée (HRT-115).
 
 ## Règles liées

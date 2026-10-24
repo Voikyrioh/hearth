@@ -214,6 +214,21 @@ async fn a_second_agent_that_lost_the_race_refuses_and_never_restores_the_file_o
         );
     }
     // Le fichier porte un enregistrement abouti ou celui du perdant, jamais l'ancien contenu remis par-dessus.
+    // Fichier et base concordent : aucun écart, et la valeur voulue est celle que le fichier porte.
     let file = String::from_utf8(support::game::file_of(&rig.safe_fs, &key)).unwrap();
-    assert!(file.contains("motd=A") || file.contains("motd=B"), "{file}");
+    let view = state.game_settings.view(&key).await.unwrap();
+    assert!(view.drifts.is_empty(), "{:?} {file}", view.drifts);
+    let wanted = view
+        .settings
+        .iter()
+        .find(|s| s.id == "motd")
+        .and_then(|s| s.value.clone())
+        .expect("motd voulu");
+    assert!(
+        file.contains(&format!(
+            "motd={wanted}
+"
+        )),
+        "{wanted} {file}"
+    );
 }

@@ -982,3 +982,29 @@ async fn the_other_settings_of_the_file_can_be_changed_or_removed_and_a_secret_l
     assert_eq!(code(&b.save(&key, known).await), "VALIDATION_ERROR");
     b.agent.shutdown().await;
 }
+
+#[tokio::test]
+async fn a_key_the_fiche_keeps_out_is_never_an_other_setting_and_never_written() {
+    let b = bench().await;
+    let key = b.install().await;
+    let mut file = b.file(&key);
+    file.push_str(
+        "banlist=bans.txt
+",
+    );
+    b.rewrite(&key, file.as_bytes());
+    let view = b.view(&key).await;
+    assert!(
+        view.others.iter().all(|o| o.key != "banlist"),
+        "{:?}",
+        view.others
+    );
+    assert!(view.drifts.is_empty());
+    let body = json!({
+        "base_rev": 0, "file_stamp": view.file_stamp.unwrap(), "origin": "form", "effect": "restart",
+        "others": [{"key": "banlist", "value": "n-importe-quoi"}]
+    });
+    assert_eq!(code(&b.save(&key, body).await), "VALIDATION_ERROR");
+    assert!(b.file(&key).contains("banlist=bans.txt"));
+    b.agent.shutdown().await;
+}

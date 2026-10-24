@@ -59,7 +59,4 @@ pub trait GameSettingsRepo: Send + Sync {
 
     /// Écrit la ligne dans UNE transaction, avec ses scellés. Rend la nouvelle révision.
     async fn save(&self, new: NewSettings) -> Result<u32, SettingsStoreError>;
-
-    /// Efface les réglages d'un service supprimé, scellés compris.
-    async fn forget(&self, key: &ServiceKey) -> Result<(), StoreError>;
 }
