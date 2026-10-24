@@ -80,9 +80,9 @@ fn help_repeats(dir: &str, loaded: &loading::model::Fiche) -> Vec<String> {
     let mut problems = Vec::new();
     for setting in &loaded.settings {
         let help = setting.help.to_lowercase();
-        if help.contains("caractères") || help.contains("lettres, chiffres") {
+        if help.contains("caractère") || help.contains("lettres, chiffres") {
             problems.push(format!(
-                "fiche `{dir}` : réglage `{}` : l'aide parle de caractères ; le client dit déjà le jeu de caractères (ADR-0050)",
+                "fiche `{dir}` : réglage `{}` : l'aide parle de caractère(s) ; le client dit déjà le jeu de caractères (ADR-0050)",
                 setting.id
             ));
         }
@@ -104,6 +104,7 @@ fn help_repeats(dir: &str, loaded: &loading::model::Fiche) -> Vec<String> {
 
 /// Le nombre écrit tel quel dans le texte, sans chiffre collé avant ou après.
 fn contains_number(text: &str, number: impl ToString) -> bool {
+    let text = &without_thousands_separators(text);
     let needle = number.to_string();
     text.match_indices(&needle).any(|(at, _)| {
         let before = text[..at].chars().next_back();
@@ -112,8 +113,20 @@ fn contains_number(text: &str, number: impl ToString) -> bool {
     })
 }
 
-fn hex(digest: &[u8; 32]) -> String {
-    digest.iter().map(|b| format!("{b:02x}")).collect()
+/// « 65 535 » s'écrit aussi « 65535 » : une espace, insécable ou fine, entre deux chiffres est un séparateur de milliers.
+fn without_thousands_separators(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    for (at, &c) in chars.iter().enumerate() {
+        let separator = matches!(c, ' ' | '\u{00A0}' | '\u{202F}');
+        let between_digits = at > 0
+            && chars[at - 1].is_ascii_digit()
+            && chars.get(at + 1).is_some_and(char::is_ascii_digit);
+        if !(separator && between_digits) {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Le contenu d'une fiche change son empreinte : la version doit monter (ADR-0050). `base` : version et empreinte de
@@ -245,19 +258,35 @@ pub fn run(args: &[String]) -> ExitCode {
                         "catalog-check : fiche `{dir}` : pas de registre sur la branche principale (ou git muet), comparaison sautée"
                     );
                 }
-                if let (Some(base_fiche), Some(base_settings)) = (
+                match (
                     base_file(dir, "fiche.toml"),
                     base_file(dir, "settings.toml"),
-                ) && let (Ok(base), Ok(now)) = (
-                    load(Origin::Embedded, &base_fiche, &base_settings),
-                    load(Origin::Embedded, &fiche, &settings),
                 ) {
-                    let (base_digest, now_digest) = (hex(&base.digest), hex(&now.digest));
-                    problems.extend(check_version_against_base(
-                        dir,
-                        (u64::from(base.file.version), &base_digest),
-                        (u64::from(now.file.version), &now_digest),
-                    ));
+                    (Some(base_fiche), Some(base_settings)) => {
+                        match (
+                            load(Origin::Embedded, &base_fiche, &base_settings),
+                            load(Origin::Embedded, &fiche, &settings),
+                        ) {
+                            (Ok(base), Ok(now)) => {
+                                let (base_digest, now_digest) = (
+                                    loading::model::hex(&base.digest),
+                                    loading::model::hex(&now.digest),
+                                );
+                                problems.extend(check_version_against_base(
+                                    dir,
+                                    (u64::from(base.file.version), &base_digest),
+                                    (u64::from(now.file.version), &now_digest),
+                                ));
+                            }
+                            (Err(_), _) => println!(
+                                "catalog-check : fiche `{dir}` : la fiche de la branche principale ne passe pas le chargeur de cette branche, comparaison de version sautée"
+                            ),
+                            (_, Err(_)) => {}
+                        }
+                    }
+                    _ => println!(
+                        "catalog-check : fiche `{dir}` : pas de fiche sur la branche principale (ou git muet), comparaison de version sautée"
+                    ),
                 }
                 problems.extend(check_texts(
                     dir,
@@ -360,6 +389,11 @@ mod tests {
         );
         // 25 n'est pas 255 : un nombre qui en contient un autre ne compte pas.
         assert!(!contains_number("de 1 à 2550", 255));
+        // Séparateurs de milliers : espace simple, insécable ou fine.
+        assert!(contains_number("jusqu'à 65 535.", 65535));
+        assert!(contains_number("jusqu'à 65\u{00A0}535.", 65535));
+        assert!(contains_number("jusqu'à 65\u{202F}535.", 65535));
+        assert!(!contains_number("de 1 à 65 5350", 65535));
         assert!(contains_number("de 1 à 255.", 255));
     }
 
