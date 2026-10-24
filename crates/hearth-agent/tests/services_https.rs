@@ -171,7 +171,8 @@ async fn hello_announces_the_services_capability() {
             "service-adoption",
             "service-ops",
             "service-deploy",
-            "catalog"
+            "catalog",
+            "game-settings"
         ])
     );
     // L'interface ne monte pas : un client ancien parle encore à cet agent (ADR-0033, ADR-0038).
