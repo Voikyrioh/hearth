@@ -369,10 +369,12 @@ pub enum Cause {
     DiskFull,
     /// Un conteneur a pris le nom entre la vérification et la création (BR-DEPLOY-025).
     NameTaken,
+    /// Supprimer (HRT-85, BR-DEL-016) : le service est supprimé, mais des données n'ont pas pu être effacées.
+    DataNotErased,
 }
 
 impl Cause {
-    pub const ALL: [Cause; 27] = [
+    pub const ALL: [Cause; 28] = [
         Self::NotExecuted,
         Self::RunsWithPrevious,
         Self::RunsWithNew,
@@ -400,6 +402,7 @@ impl Cause {
         Self::PlatformMismatch,
         Self::DiskFull,
         Self::NameTaken,
+        Self::DataNotErased,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -431,6 +434,7 @@ impl Cause {
             Self::PlatformMismatch => "platform_mismatch",
             Self::DiskFull => "disk_full",
             Self::NameTaken => "name_taken",
+            Self::DataNotErased => "data_not_erased",
         }
     }
 
@@ -467,6 +471,7 @@ impl Cause {
             Self::PlatformMismatch => OperationCause::PlatformMismatch,
             Self::DiskFull => OperationCause::DiskFull,
             Self::NameTaken => OperationCause::NameTaken,
+            Self::DataNotErased => OperationCause::DataNotErased,
         }
     }
 }

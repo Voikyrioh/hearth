@@ -173,6 +173,8 @@ pub enum OperationCause {
     DiskFull,
     /// Un conteneur a pris le nom entre la vérification et la création (BR-DEPLOY-025).
     NameTaken,
+    /// Supprimer (HRT-85, BR-DEL-016) : le service est supprimé, mais des données n'ont pas pu être effacées.
+    DataNotErased,
     /// Une cause que ce client ne connaît pas.
     #[serde(other)]
     Unknown,
