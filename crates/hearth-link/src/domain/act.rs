@@ -259,7 +259,7 @@ mod tests {
             "/services/adopt" => json!({ "keys": ["c_0123abcd", "u_docker-x.service"] }),
             "/operations/services/{id}/decision" => json!({ "choice": "keep" }),
             "/services/{key}/settings" => json!({
-                "base_rev": 2, "origin": "form", "effect": "restart",
+                "base_rev": 2, "file_stamp": "ab", "origin": "form", "effect": "restart",
                 "changes": [{ "id": "motd", "action": "set", "value": "Salut" }]
             }),
             "/deployments" => {
