@@ -5,9 +5,10 @@ L'onglet « Réglages » d'un serveur de jeu et « Voir tous les réglages » de
 ```
 settings/
 ├── model.ts      → `SettingModel` (réglage du catalogue + valeur voulue), `modelsOf` (service), `installModelsOf` (installation), verrous (`frozen`, `imposed`, `gone`, `recreate`), `proposedOf`, `defaultUnverified` — BR-FICHE-037
-├── edits.ts      → les changements (`set`, `unset`, `reset`), `effectiveOf`, `isModified`, `resettable`, `pendingEdits`, `editIssues`, listes d'identifiants, `heaviestEffect`, `toSaveRequest` (origine, effet, choix d'écart par défaut « garder le fichier ») — BR-FICHE-041, 044, 048
+├── modified.ts   → LA règle « modifié » (`differsFromProposed`), une feuille sans import partagée avec le récapitulatif de l'installation (`fiche/answers.ts`) — BR-FICHE-040, 041
+├── edits.ts      → les changements (`set`, `unset`, `reset`), `effectiveOf`, `isModified`, `resettable`, `pendingEdits`, `valueIssue`, listes d'identifiants, `heaviestEffect`, `toSaveRequest` (origine, effet, choix d'écart par défaut « garder le fichier ») — BR-FICHE-041, 044, 048
 ├── filter.ts     → `plain` (sans accents ni majuscules), `matches`, `shown` (Courants / Tout afficher, Modifiés, recherche), `groupByTheme`, `opensByDefault` — BR-FICHE-043, 045
 ├── importing.ts  → l'import d'un texte collé : `importRows`, `importChanges`, `toImportRequest` (les lignes reconnues sont reprises du texte par l'agent), `undoneLabels` — BR-FICHE-052
-├── messages.ts   → les codes mis en phrases : mentions d'effet (une des quatre), refus d'un enregistrement, défauts de forme, états d'import ; jamais un texte de l'agent, jamais une valeur
+├── messages.ts   → les codes mis en phrases : mentions d'effet (une des quatre), refus d'un enregistrement (`isSaveRefusal`, `saveRefusalText`), le défaut de forme d'une valeur (`problemText`, UNE fonction pour l'onglet et l'installation), états d'import ; jamais un texte de l'agent, jamais une valeur
 └── settings.test.ts → les règles sur la fiche réelle de Terraria (32 réglages, 7 thèmes) et la fiche d'essai
 ```

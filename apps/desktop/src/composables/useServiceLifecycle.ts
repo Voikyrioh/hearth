@@ -67,7 +67,7 @@ export function useServiceLifecycle(
   /** Un démarrage ou un redémarrage accepté applique les réglages enregistrés : le repère « À appliquer » s'efface (HRT-109). */
   function launched(report: ActReport, service: ServiceInfo, gesture: Gesture): void {
     if (report.kind === "done" && gesture !== "stop") {
-      waitingSettings.clear(serverId(), service.key);
+      waitingSettings.restarted(serverId(), service.key);
     }
   }
 

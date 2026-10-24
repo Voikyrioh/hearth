@@ -55,6 +55,9 @@ export interface ReceivedSave {
   request: SaveSettingsRequest;
 }
 
+/** La valeur que le simulateur écrit pour un réglage imposé : l'agent la calcule (dérivée, tirée, fixe), le client ne la lit jamais. */
+export const IMPOSED_STAND_IN = "valeur-imposee-par-la-fiche";
+
 const SECRET_NAME = /PASSWORD|PASS|SECRET|TOKEN|KEY/i;
 
 /** Une empreinte déterministe du texte (le vrai est un SHA-256 hexadécimal). */
@@ -113,7 +116,14 @@ export class SimulatedGameSettings {
     const given = new Map(answers.map((answer) => [answer.id, answer.value]));
     for (const setting of detail.settings) {
       const question = setting.question;
-      if (setting.imposedWhy !== null) continue;
+      if (setting.imposedWhy !== null) {
+        // La fiche pose ses réglages imposés dans le fichier à l'installation (valeur calculée par l'agent, ici une
+        // valeur de remplacement) : un texte collé qui ne les porte pas les défait (`imposed_undone`).
+        if (this.catalogChannel(setting) === "config") {
+          lines.push(`${setting.key}=${IMPOSED_STAND_IN}`);
+        }
+        continue;
+      }
       const value = given.get(question.id) ?? (question.secret ? null : question.proposed);
       if (value === null || value === undefined) continue;
       if (question.secret) {
@@ -488,6 +498,12 @@ export class SimulatedGameSettings {
       }
     }
 
+    // Une clé que la fiche connaît ne se règle pas comme « autre réglage » : refusé dans `plan_save`, donc avant l'empreinte.
+    const knownKeys = this.knownKeys(detail);
+    for (const other of request.others) {
+      if (knownKeys.has(other.key)) return refused({ kind: "invalid" });
+    }
+
     // 4. Le fichier a bougé ou un écart attend un choix : rien n'est écrit.
     if (unresolved.length > 0 || request.fileStamp !== stamp) {
       return refused({ kind: "file_changed", ids: unresolved });
@@ -500,9 +516,7 @@ export class SimulatedGameSettings {
     for (const [setting, value] of edits) {
       if (this.catalogChannel(setting) === "config") all.push([setting.key, value]);
     }
-    const known = this.knownKeys(detail);
     for (const other of request.others) {
-      if (known.has(other.key)) return refused({ kind: "invalid" });
       all.push([other.key, other.remove ? null : other.value]);
     }
     const toWrite = all.filter(([name, value]) => (observed.get(name) ?? null) !== value);

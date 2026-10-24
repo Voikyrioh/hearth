@@ -29,6 +29,15 @@ export const useGameSettingsPendingStore = defineStore("gameSettingsPending", ()
     items.set(keyOf(serverId, serviceKey), { effect: heavier });
   }
 
+  /**
+   * Un démarrage ou un redémarrage vient d'être lancé : il applique ce qui attend un redémarrage, PAS ce qui attend la
+   * recréation du service (un redémarrage simple ne recrée rien, BR-FICHE-042).
+   */
+  function restarted(serverId: string, serviceKey: string): void {
+    if (items.get(keyOf(serverId, serviceKey))?.effect === "recreate") return;
+    items.delete(keyOf(serverId, serviceKey));
+  }
+
   function clear(serverId: string, serviceKey: string): void {
     items.delete(keyOf(serverId, serviceKey));
   }
@@ -42,5 +51,5 @@ export const useGameSettingsPendingStore = defineStore("gameSettingsPending", ()
     }
   });
 
-  return { of, note, clear };
+  return { of, note, restarted, clear };
 });

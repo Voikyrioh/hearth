@@ -41,7 +41,7 @@ fn not_a_game_service() -> ApiError {
 
 fn settings_error(error: SettingsError) -> ApiError {
     match error {
-        SettingsError::NotFound => not_a_game_service(),
+        SettingsError::NotAGameService => not_a_game_service(),
         SettingsError::Conflict { by, at } => ApiError(ErrorBody::with_details(
             ErrorCode::SettingsConflict,
             "Les réglages ont changé depuis que vous les avez lus. Relisez-les, puis recommencez.",

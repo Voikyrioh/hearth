@@ -98,6 +98,16 @@ describe("l'onglet", () => {
     await settle();
     expect(wrapper.findAll("[role=tab]").map((tab) => tab.text())).not.toContain("Réglages");
     wrapper.unmount();
+    const capacityOnly = await boot((bridge) => {
+      setup()(bridge);
+      // Le droit reste annoncé : seule la capacité `game-settings` manque, et l'onglet disparaît quand même.
+      bridge.accounts.setGameSettingsServed("forge", false);
+    });
+    await settle();
+    expect(capacityOnly.wrapper.findAll("[role=tab]").map((tab) => tab.text())).not.toContain(
+      "Réglages",
+    );
+    capacityOnly.wrapper.unmount();
     const adopted = await boot((bridge) => {
       bridge.services.seed("forge", [
         {

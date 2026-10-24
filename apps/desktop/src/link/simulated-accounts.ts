@@ -186,6 +186,14 @@ export class SimulatedAccounts {
     return !this.oldAgents.has(server.id);
   }
 
+  /** La capacité `game-settings` de l'agent simulé (vraie par défaut, indépendante du droit : `false` ne retire aucun droit). */
+  private readonly withoutGameSettings = new Set<string>();
+
+  setGameSettingsServed(serverId: string, served: boolean): void {
+    if (served) this.withoutGameSettings.delete(serverId);
+    else this.withoutGameSettings.add(serverId);
+  }
+
   setRightsKnown(serverId: string, known: boolean): void {
     if (known) this.oldAgents.delete(serverId);
     else this.oldAgents.add(serverId);
@@ -208,8 +216,9 @@ export class SimulatedAccounts {
     return {
       known,
       granted: known && (me?.managesServices ?? false),
-      // Le pont simulé sert les réglages de jeu dès que l'agent connaît le droit (comme la fiche de référence).
-      gameSettings: known,
+      // Par défaut l'agent qui connaît le droit annonce aussi les réglages de jeu (comme la fiche de référence) ;
+      // `setGameSettingsServed(…, false)` retire la capacité SEULE.
+      gameSettings: known && !this.withoutGameSettings.has(server.id),
       account: me?.username ?? server.username.toLowerCase(),
     };
   }

@@ -126,25 +126,26 @@ function settingRefusalText(
     : t("gameSettings.saveRefusals.setting", { label: safeText(label), why });
 }
 
-const SAVE_REFUSALS: ReadonlySet<string> = new Set<SaveRefusal["kind"]>([
-  "wrong_password",
-  "password_required",
-  "too_many_attempts",
-  "busy",
-  "conflict",
-  "file_changed",
-  "file_unreadable",
-  "setting_refused",
-  "recreate_not_available",
-  "operation_in_progress",
-  "service_not_found",
-  "invalid",
-  "other",
-]);
+/** Tous les genres de refus d'un enregistrement : un `Record` exhaustif, un genre ajouté ne compile pas sans être déclaré ici. */
+const SAVE_REFUSALS: Record<SaveRefusal["kind"], true> = {
+  wrong_password: true,
+  password_required: true,
+  too_many_attempts: true,
+  busy: true,
+  conflict: true,
+  file_changed: true,
+  file_unreadable: true,
+  setting_refused: true,
+  recreate_not_available: true,
+  operation_in_progress: true,
+  service_not_found: true,
+  invalid: true,
+  other: true,
+};
 
 /** Le refus que la fenêtre de confirmation rend est-il l'un de ceux d'un enregistrement ? (Un autre n'a pas de texte ici.) */
 export function isSaveRefusal(refusal: { kind: string }): refusal is SaveRefusal {
-  return SAVE_REFUSALS.has(refusal.kind);
+  return Object.hasOwn(SAVE_REFUSALS, refusal.kind);
 }
 
 /** Le refus d'un enregistrement, en phrase ; `undefined` : un refus de la confirmation, que la fenêtre dit elle-même. */

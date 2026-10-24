@@ -18,13 +18,11 @@ use super::game_settings_dto::{
 use crate::link_dto::LinkFailure;
 use crate::reauth::wire::{Confirmation, confirmation_of};
 
-/// Ce service n'a pas de réglages de jeu : `NOT_A_GAME_SERVICE` (pas né d'une fiche) ou `NOT_FOUND` (un agent plus
-/// ancien, sans la route). Une clé mal formée (`SERVICE_NOT_FOUND`) n'en est PAS : c'est une erreur.
+/// Ce service n'a pas de réglages de jeu : `NOT_A_GAME_SERVICE` (pas né d'une fiche), et rien d'autre. `NOT_FOUND`
+/// (route inconnue) ne peut pas venir d'un agent qui annonce `game-settings`, et le client ne lit la vue que s'il l'annonce :
+/// c'est une erreur, comme une clé mal formée (`SERVICE_NOT_FOUND`), jamais « pas de réglages ».
 fn has_no_settings(error: &LinkError) -> bool {
-    matches!(
-        error,
-        LinkError::Rejected(Some(ErrorCode::NotAGameService | ErrorCode::NotFound))
-    )
+    matches!(error, LinkError::Rejected(Some(ErrorCode::NotAGameService)))
 }
 
 /// Les réglages voulus et l'état du fichier (`GET /services/{key}/settings`). Un service qui n'est pas né d'une fiche
@@ -218,12 +216,13 @@ mod tests {
     }
 
     #[test]
-    fn only_a_service_that_is_not_a_game_server_or_an_old_agent_has_no_settings() {
-        for absent in [ErrorCode::NotAGameService, ErrorCode::NotFound] {
-            assert!(has_no_settings(&LinkError::Rejected(Some(absent))));
-        }
-        // Une clé mal formée, un refus de droit, une panne : ce sont des erreurs, jamais « pas de réglages ».
+    fn only_a_service_that_is_not_a_game_server_has_no_settings() {
+        assert!(has_no_settings(&LinkError::Rejected(Some(
+            ErrorCode::NotAGameService
+        ))));
+        // Une clé mal formée, une route inconnue, un refus de droit, une panne : des erreurs, jamais « pas de réglages ».
         for error in [
+            LinkError::Rejected(Some(ErrorCode::NotFound)),
             LinkError::Rejected(Some(ErrorCode::ServiceNotFound)),
             LinkError::Rejected(Some(ErrorCode::ForbiddenRole)),
             LinkError::Rejected(None),

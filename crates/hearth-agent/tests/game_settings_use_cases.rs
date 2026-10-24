@@ -156,14 +156,14 @@ async fn a_service_that_is_not_a_game_server_has_no_settings() {
         hearth_agent::domain::services::ServiceKey::parse("h_01JZ0000000000000000000555").unwrap();
     assert!(matches!(
         state.game_settings.view(&key).await,
-        Err(SettingsError::NotFound)
+        Err(SettingsError::NotAGameService)
     ));
     assert!(matches!(
         state
             .game_settings
             .save(&key, &Actor::command_line(), &request(0, "x", Vec::new()))
             .await,
-        Err(SettingsError::NotFound)
+        Err(SettingsError::NotAGameService)
     ));
 }
 

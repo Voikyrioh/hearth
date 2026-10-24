@@ -6,6 +6,7 @@ import type {
   SimulatedLinkBridge,
 } from "@/link";
 import { freshBridge } from "@/test/app";
+import { IMPOSED_STAND_IN } from "./simulated-game-settings";
 
 // L'agent d'essai des réglages juge COMME LE VRAI (HRT-108, ADR-0051) : même ordre de refus, `file_stamp` obligatoire, un
 // écart détecté par empreinte, des lignes inconnues et des commentaires gardés, un secret qui ne revient jamais. Le client
@@ -312,6 +313,16 @@ describe("un écart et un changement du même réglage", () => {
 
 describe("lire un texte collé", () => {
   const analyze = (text: string) => bridge.gameSettings.analyze(SERVER, KEY, text);
+
+  it("un texte collé sans le réglage imposé le défait, avec la valeur posée à l'installation il ne le défait pas", () => {
+    const outcome = analyze("motd=Salut");
+    if (outcome.kind !== "read") throw new Error("une analyse était attendue");
+    expect(outcome.analysis.imposedUndone).toContain("world_path");
+    const kept = analyze(`motd=Salut
+worldpath=${IMPOSED_STAND_IN}`);
+    if (kept.kind !== "read") throw new Error("une analyse était attendue");
+    expect(kept.analysis.imposedUndone).not.toContain("world_path");
+  });
 
   it("dit réglage par réglage ce que le texte apporterait, sans rien écrire", () => {
     const outcome = analyze(

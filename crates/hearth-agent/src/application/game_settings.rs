@@ -76,7 +76,7 @@ pub enum SettingsError {
     /// Aucun serveur de jeu de cette clé (service inconnu, pas créé par Hearth, ou pas depuis une fiche proposée) :
     /// l'API répond `NOT_A_GAME_SERVICE`.
     #[error("aucun serveur de jeu de cette clé")]
-    NotFound,
+    NotAGameService,
     /// Les réglages ont changé depuis leur lecture.
     #[error("les réglages ont changé depuis leur lecture")]
     Conflict {
@@ -449,16 +449,16 @@ impl GameSettings {
 
     async fn load(&self, key: &ServiceKey) -> Result<Loaded<'_>, SettingsError> {
         let Some((revision, access)) = self.specs.read(key, None).await? else {
-            return Err(SettingsError::NotFound);
+            return Err(SettingsError::NotAGameService);
         };
         let body = revision.body;
         let Some(spec_fiche) = &body.fiche else {
-            return Err(SettingsError::NotFound);
+            return Err(SettingsError::NotAGameService);
         };
         let fiche = self
             .catalog
             .fiche(&spec_fiche.id)
-            .ok_or(SettingsError::NotFound)?;
+            .ok_or(SettingsError::NotAGameService)?;
         let variant = spec_fiche.variant.clone();
         let stored = self.repo.load(key).await?;
         let (rev, state, fingerprint) = match &stored {
@@ -696,7 +696,8 @@ impl GameSettings {
         let loaded = self.load(key).await?;
         let channels = file_channels(loaded.fiche);
         let Some(channel) = channels.first() else {
-            return Err(SettingsError::NotFound);
+            // Un serveur de jeu sans fichier de réglages que Hearth sache lire n'est pas « pas un serveur de jeu ».
+            return Err(SettingsError::Invalid("channel"));
         };
         let (_resolved, imposed) = imposed_values(
             loaded.fiche,
@@ -944,7 +945,7 @@ impl GameSettings {
                 Err(SaveFailure::Unreadable(failure)) => return Err(unreadable(&failure)),
                 Err(SaveFailure::Write(_)) => return Err(SettingsError::Invalid("value")),
                 Err(SaveFailure::KnownKeyAsOther) => return Err(SettingsError::Invalid("others")),
-                Err(SaveFailure::NoFileFormat) => return Err(SettingsError::NotFound),
+                Err(SaveFailure::NoFileFormat) => return Err(SettingsError::Invalid("channel")),
             }
         }
         if !per_channel.is_empty() {

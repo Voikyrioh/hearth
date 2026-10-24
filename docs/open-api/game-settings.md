@@ -1,6 +1,6 @@
 # Réglages d'un serveur de jeu (HRT-108)
 
-Capacité `game-settings` annoncée par [`GET /hello`](./hello.md). Trois routes, toutes de niveau `Services` (le droit « gérer les services », refus consigné) ; elles ne servent qu'un service créé par Hearth depuis une fiche que CET agent propose ; tout autre service (clé inconnue, adopté, déployé à la main, fiche que cet agent ne propose pas) reçoit `404 NOT_A_GAME_SERVICE`, une réponse unique qui ne dit pas si la clé existe ; une clé mal formée reçoit `404 SERVICE_NOT_FOUND` ; un agent sans la capacité répond `404 NOT_FOUND` (route inconnue). Le client lit la capacité `game-settings` du `/hello` pour montrer l'onglet « Réglages », puis ne lit la vue qu'à l'ouverture de l'onglet. Décisions : ADR-0051. Règles : BR-FICHE-037, 042, 044, 046 à 049, 052, 053, BR-JEU-035, 036.
+Capacité `game-settings` annoncée par [`GET /hello`](./hello.md). Trois routes, toutes de niveau `Services` (le droit « gérer les services », refus consigné) ; elles ne servent qu'un service créé par Hearth depuis une fiche que CET agent propose ; tout autre service (clé inconnue, adopté, déployé à la main, fiche que cet agent ne propose pas) reçoit `404 NOT_A_GAME_SERVICE`, une réponse unique qui ne dit pas si la clé existe ; une clé mal formée reçoit `404 SERVICE_NOT_FOUND` ; un agent sans la capacité répond `404 NOT_FOUND` (route inconnue : une erreur pour le client, qui ne lit la vue que s'il lit la capacité). Le client lit la capacité `game-settings` du `/hello` pour montrer l'onglet « Réglages », puis ne lit la vue qu'à l'ouverture de l'onglet. Décisions : ADR-0051. Règles : BR-FICHE-037, 042, 044, 046 à 049, 052, 053, BR-JEU-035, 036.
 
 Les libellés, aides, types et bornes d'un réglage ne passent pas ici : le client les lit dans la fiche ([`GET /catalog/{id}`](./catalog.md)). Ces routes ne portent que les VALEURS voulues et l'état du fichier. **Un secret n'y figure jamais**, ni sa valeur ni sa longueur.
 
@@ -59,6 +59,6 @@ Corps (`SaveSettingsRequest`) :
 | `422 SETTING_REFUSED` | un changement est refusé (`details.id` seulement si c'est un réglage de la fiche, `details.reason` : `bounds`, `choice`, `charset`, `length`, `frozen`, `imposed`, `retired`, `unknown_id`, `variant`, `version`, `check`, `secret`, `carried_by_world`, `details.char` au plus un caractère) ; jamais la valeur |
 | `409 RECREATE_NOT_AVAILABLE` | un réglage reçu par variable ou argument demande de recréer le service (`details.ids`) ; rien n'est écrit |
 | `409 OPERATION_IN_PROGRESS` | une opération exclusive tient le service |
-| `422 VALIDATION_ERROR` | corps incohérent (`details.field`) |
+| `422 VALIDATION_ERROR` | corps incohérent (`details.field`) ; `details.field = "channel"` : la fiche de ce serveur n'a aucun fichier de réglages que Hearth sache lire (analyser ou enregistrer est impossible ; la vue, elle, est vide) |
 
 Journal : `service.game.settings`, le NOMBRE de réglages changés, les noms de ceux qui ne sont pas des secrets, « mot de passe modifié » ; jamais une valeur (BR-FICHE-053).

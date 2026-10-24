@@ -50,7 +50,40 @@ const fixture = wire as unknown as {
   settings: WireSetting[];
 };
 
-function toSetting(item: WireSetting): FicheSetting {
+/** Les clés du fil que `toSetting` lit : le test de la fixture échoue si le JSON en porte une de plus (ou en perd une). */
+export const WIRE_SETTING_KEYS = [
+  "question",
+  "key",
+  "theme",
+  "level",
+  "channel",
+  "game_default",
+  "imposed_why",
+  "since",
+  "until",
+  "replaced_by",
+  "list",
+] as const;
+export const WIRE_QUESTION_KEYS = [
+  "id",
+  "label",
+  "help",
+  "secret",
+  "proposed",
+  "kind",
+  "choices",
+  "min",
+  "max",
+  "min_len",
+  "max_len",
+  "charset",
+  "frozen_after_creation",
+  "variants",
+  "secret_kind",
+  "obtain_url",
+] as const;
+
+export function toSetting(item: WireSetting): FicheSetting {
   const q = item.question;
   return {
     question: {
