@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use thiserror::Error;
 use time::OffsetDateTime;
-use tokio::sync::{Mutex as AsyncMutex, broadcast};
+use tokio::sync::{Mutex as AsyncMutex, RwLock, RwLockReadGuard, broadcast};
 
 use super::audit::{AuditTrail, Pending};
 use super::ports::{
@@ -32,6 +32,9 @@ use crate::domain::ops::{
 use crate::domain::services::key::ServiceKey;
 use crate::domain::services::spec::fold_name;
 use hearth_proto::api::service_ops::{FINISHED_RETENTION_S, MAX_RETAINED_OPERATIONS};
+
+/// L'attente maximale d'une demande devant une clôture en cours (FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC).
+const CLOSING_GATE_WAIT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Combien de changements d'opération le canal garde pour un abonné lent. Un abonné qui en perd relit les
 /// opérations en cours (`open_snapshots`) : il ne bloque jamais l'agent (HRT-144).
@@ -213,6 +216,8 @@ pub struct ServiceOps {
     /// s'envoyer dans l'ordre inverse de leur lecture : un abonné ne reçoit jamais un état plus ancien
     /// APRÈS un plus récent (revue de la PR 94).
     publishing: AsyncMutex<()>,
+    /// La porte de clôture (voir [`Self::closing`]).
+    closing: RwLock<()>,
     /// Le magasin et la diffusion du journal d'activité : une clôture ou un constat écrit son entrée dans la
     /// transaction de l'opération (jamais regroupée : ce n'est pas un refus répété, BR-AUDIT-007).
     store: Arc<dyn Store>,
@@ -261,6 +266,7 @@ impl ServiceOps {
             index: Mutex::new(OpsIndex::new()),
             progress_gate: Mutex::new(HashMap::new()),
             publishing: AsyncMutex::new(()),
+            closing: RwLock::new(()),
             store,
             trail,
         }
@@ -334,24 +340,13 @@ impl ServiceOps {
     /// leur statut dans la transaction de leur entrée du journal d'activité, `ServiceOpAccess`) : rend le
     /// verrou d'une opération devenue terminale, met la projection à jour et prévient les abonnés.
     pub async fn settle(&self, id: &str) {
+        let _closing = self.closing().await;
         if let Ok(Some(record)) = self.journal.get(id).await
             && record.status.is_terminal()
         {
             self.locks.with(|table| table.release_all_of(id));
         }
         self.publish(id).await;
-    }
-
-    /// Si le journal dit l'opération terminale, rend ses verrous et annonce l'issue (projection comprise) ;
-    /// sinon ne touche à rien. Pour qui voit l'index dire « occupé » alors que l'issue est déjà lisible.
-    pub async fn settle_if_terminal(&self, id: &str) -> bool {
-        match self.journal.get(id).await {
-            Ok(Some(record)) if record.status.is_terminal() => {
-                self.settle(id).await;
-                true
-            }
-            _ => false,
-        }
     }
 
     /// Retire ce qu'une opération ANNULÉE avait créé pour elle-même (archive partielle, dossier d'import ou
@@ -417,50 +412,58 @@ impl ServiceOps {
         true
     }
 
-    fn try_lock(&self, request: &AcceptRequest, id: &str) -> Result<(), Refusal> {
-        let service = request.service.as_str();
-        self.locks.with(|table| -> Result<(), Refusal> {
-            table.acquire_exclusive(service, id, request.kind)?;
-            if let Some(name) = &request.reserve_name
-                && let Err(refusal) = table.reserve_name(name, id, request.kind)
-            {
-                table.release_all_of(id);
-                return Err(refusal);
-            }
-            if request.heavy_io
-                && let Err(refusal) = table.acquire_heavy_io(service, id)
-            {
-                table.release_all_of(id);
-                return Err(refusal);
-            }
-            Ok(())
-        })
+    /// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+    /// La porte de clôture : tenue (en lecture, plusieurs clôtures à la fois) du commit du statut terminal
+    /// jusqu'à la fin de [`Self::publish`], verrous et projection compris. Un client qui a lu l'issue (le
+    /// `GET` lit le journal) puis demande l'action suivante ne peut donc pas être refusé par un état en
+    /// retard. Ne jamais la tenir pendant une attente de [`Self::wait_closed`].
+    async fn closing(&self) -> RwLockReadGuard<'_, ()> {
+        self.closing.read().await
     }
 
-    /// Rend les verrous des opérations que le journal dit terminales (lecture seule du journal).
-    async fn release_stale_locks(&self) {
-        let holders = self.locks.with(|table| table.holders());
-        for holder in holders {
-            if let Ok(Some(record)) = self.journal.get(&holder).await
-                && record.status.is_terminal()
-            {
-                self.locks.with(|table| table.release_all_of(&holder));
-            }
-        }
+    /// Attend, une fois et au plus [`CLOSING_GATE_WAIT`], que les clôtures en cours se terminent. À
+    /// l'échéance on juge quand même : une clôture bloquée ne gèle pas le service.
+    pub async fn wait_closed(&self) {
+        let _ = tokio::time::timeout(CLOSING_GATE_WAIT, self.closing.write()).await;
+    }
+
+    /// Qui tient le service d'après la projection, une fois les clôtures en cours terminées : le compte et
+    /// le genre de l'opération non terminée. C'est ici, et non chez l'appelant, que se juge « occupé ».
+    pub async fn busy(&self, key: &ServiceKey) -> Option<(String, OpKind)> {
+        self.wait_closed().await;
+        self.with_index(|index| {
+            index
+                .busy(key)
+                .map(|open| (open.account.clone(), open.kind))
+        })
     }
 
     /// Accepte une opération : prend les verrous (service exclusif, nom, place lourde), écrit la ligne
     /// `accepted`. Si l'écriture échoue, les verrous sont rendus. Rend l'identifiant.
     pub async fn accept(&self, request: AcceptRequest) -> Result<String, OpError> {
-        let id = self.ids.new_id();
         // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
-        // Un verrou dont l'opération est déjà terminale dans le journal n'est plus qu'en retard sur sa
-        // libération (commit, puis verrous rendus : deux temps). Un lecteur qui a vu l'issue ne doit pas
-        // être refusé : on rend ces verrous périmés et on réessaie une fois.
-        if self.try_lock(&request, &id).is_err() {
-            self.release_stale_locks().await;
-            self.try_lock(&request, &id).map_err(OpError::Locked)?;
-        }
+        // Une clôture en cours (commit, verrous, index, annonce) se termine avant que l'on juge « occupé ».
+        self.wait_closed().await;
+        let id = self.ids.new_id();
+        let service = request.service.as_str();
+        self.locks
+            .with(|table| -> Result<(), Refusal> {
+                table.acquire_exclusive(service, &id, request.kind)?;
+                if let Some(name) = &request.reserve_name
+                    && let Err(refusal) = table.reserve_name(name, &id, request.kind)
+                {
+                    table.release_all_of(&id);
+                    return Err(refusal);
+                }
+                if request.heavy_io
+                    && let Err(refusal) = table.acquire_heavy_io(service, &id)
+                {
+                    table.release_all_of(&id);
+                    return Err(refusal);
+                }
+                Ok(())
+            })
+            .map_err(OpError::Locked)?;
         let new = NewOp {
             id: id.clone(),
             op_key: request.op_key,
@@ -686,6 +689,8 @@ impl ServiceOps {
         cause: Option<Cause>,
         draft: Option<&AuditDraft>,
     ) -> Result<(), OpError> {
+        // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC : tenue jusqu'à la fin de la publication.
+        let _closing = self.closing().await;
         let now = self.clock.now();
         let mut tx = self.store.begin().await?;
         let op = tx
@@ -817,6 +822,8 @@ impl ServiceOps {
         if !from.can_become(to) {
             return Err(OpError::IllegalTransition);
         }
+        // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+        let _closing = self.closing().await;
         self.journal
             .transition(id, from, to, cause, None, self.clock.now())
             .await?;
