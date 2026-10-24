@@ -51,15 +51,16 @@ use crate::application::ports::{
     ServiceRepo, ServiceSupervisor, StopIntent, StoreError, SupervisedRecord, SupervisorError,
 };
 use crate::domain::audit::{Actor, AdoptionCause, AuditAction, ClientName, Outcome, Target};
+use crate::domain::services::delete::FolderUse;
 use crate::domain::services::image::ImageName;
 use crate::domain::services::logs::{LogContainer, LogOrigin, LogTarget};
 use crate::domain::services::{
-    Adoption, Announced, Debounce, Derived, EngineProbe, EngineState, Holder, KeyKind, Observation,
-    PortProtocol, ProbeOutcome, RunState, ServiceKey, ServiceStateKind, StartWindow, Transition,
-    TransitionKind, UnitLookup, UnitName, UnitStatus, Visibility, classify_probe, compare_names,
-    confirmation_expired, derive_state, derive_supervised, gone_long_enough, honour_stop_request,
-    lapsed, overlay_transition, stop_grace_s, unit_answered, unit_is_gone, unread_unit_adoptions,
-    visibility_of,
+    Adoption, Announced, Debounce, Derived, EngineProbe, EngineState, Holder, KeyKind, MountType,
+    Observation, PortProtocol, ProbeOutcome, RunState, ServiceKey, ServiceStateKind, StartWindow,
+    Transition, TransitionKind, UnitLookup, UnitName, UnitStatus, Visibility, classify_probe,
+    compare_names, confirmation_expired, derive_state, derive_supervised, gone_long_enough,
+    honour_stop_request, lapsed, overlay_transition, stop_grace_s, unit_answered, unit_is_gone,
+    unread_unit_adoptions, visibility_of,
 };
 
 /// Capacité de la diffusion : un abonné qui prend plus de 64 lots de retard relit un instantané.
@@ -1881,6 +1882,62 @@ impl ServicesRegistry {
         }
     }
 
+    /// Ce que les AUTRES conteneurs du serveur montent (HRT-85, BR-DEL-008) : pour chacun, ses dossiers du
+    /// serveur et si la liste est entière. Tous les conteneurs comptent, en marche ou arrêtés, créés par Hearth,
+    /// adoptés ou non ; seuls ceux du service `own` sont exclus. Un conteneur créé hors de Hearth et non adopté
+    /// n'a pas de nom ici (`Holder::Unmanaged`, BR-ADOPT-002). **Lecture réservée à la suppression** : jamais
+    /// diffusée, jamais gardée.
+    ///
+    /// `None` : la liste des conteneurs n'est pas fraîche (moteur pas vu prêt, liste pas encore relue au retour,
+    /// suivi perdu, lecture en échec, conteneur illisible). Une liste qu'on n'a pas est un doute, jamais
+    /// « personne ne l'utilise ».
+    pub fn folder_users(&self, own: &ServiceKey) -> Option<Vec<FolderUse>> {
+        // « Prêt » publié ne veut pas dire « liste relue » : au retour du moteur la liste est vide tant qu'elle n'a
+        // pas été relue, et une liste figée (suivi perdu, lecture en échec, conteneur illisible) n'est pas fiable.
+        // Seule une liste fraîche (`list_fresh`) peut dire « personne ne monte ce dossier ».
+        let inner = self.lock();
+        if !Self::list_fresh(&inner) {
+            return None;
+        }
+        Some(
+            inner
+                .containers
+                .values()
+                .filter(|observation| {
+                    key_of(&inner.owners, &inner.hearth_ids, observation).as_ref() != Some(own)
+                })
+                .map(|observation| FolderUse {
+                    holder: Self::holder_of(&inner, observation),
+                    sources: observation
+                        .mounts
+                        .iter()
+                        .filter(|mount| mount.kind == MountType::Folder)
+                        .map(|mount| mount.source.clone())
+                        .collect(),
+                    identities: Vec::new(),
+                    ancestry: Vec::new(),
+                    complete: observation.mounts_omitted == 0,
+                })
+                .collect(),
+        )
+    }
+
+    /// Combien de volumes du moteur (pas des dossiers) les conteneurs de ce service montent : la suppression
+    /// les garde et le dit (HRT-85, BR-DEL-006).
+    pub fn volume_count(&self, key: &ServiceKey) -> u32 {
+        let inner = self.lock();
+        let count = inner
+            .containers
+            .values()
+            .filter(|observation| {
+                key_of(&inner.owners, &inner.hearth_ids, observation).as_ref() == Some(key)
+            })
+            .flat_map(|observation| observation.mounts.iter())
+            .filter(|mount| mount.kind == MountType::Volume)
+            .count();
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
     /// Les conteneurs non gérés que le moteur connaît en ce moment, un par clé (le conteneur qui tourne,
     /// à défaut le plus récent), triés par nom sans tenir compte de la casse (`BR-ADOPT-005`,
     /// `BR-ADOPT-006`). Un service que le système lance mais dont le conteneur n'existe pas n'en fait pas
@@ -3483,6 +3540,34 @@ mod tests {
         let snapshot = registry.snapshot();
         assert_eq!(snapshot.engine.state, EngineState::Ready);
         assert!(snapshot.services.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_folders_others_mount_are_only_known_from_a_fresh_list() {
+        // HRT-85, BR-DEL-008 : « Prêt » publié ne veut pas dire « liste relue ». Une liste pas encore relue, ou
+        // qu'un conteneur illisible rend douteuse, ne dit jamais « personne ne monte ce dossier ».
+        let own = ServiceKey::parse("c_0123abcd").expect("clé");
+        let (registry, engine, _mono) = registry(true);
+        engine.put_silently(container("web", RunState::Running));
+        engine.put_silently(container("db", RunState::Running));
+        registry.probe_and_apply(false).await;
+        assert_eq!(registry.engine_state(), EngineState::Ready);
+        assert!(
+            registry.folder_users(&own).is_none(),
+            "moteur prêt mais liste pas encore relue"
+        );
+        registry.resync().await.expect("resync");
+        let users = registry.folder_users(&own).expect("liste fraîche");
+        assert_eq!(users.len(), 2);
+        assert!(users.iter().all(|other| other.complete));
+        // Un conteneur illisible : la liste n'est plus fiable, la réponse est « on ne sait pas ».
+        let db_id = container("db", RunState::Running).id;
+        engine.fail_inspect(&db_id, Some(EngineError::Timeout));
+        registry.resync().await.expect("resync");
+        assert!(registry.folder_users(&own).is_none(), "conteneur illisible");
+        engine.fail_inspect(&db_id, None);
+        registry.resync().await.expect("resync");
+        assert!(registry.folder_users(&own).is_some());
     }
 
     #[tokio::test]

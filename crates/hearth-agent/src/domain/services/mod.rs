@@ -8,6 +8,7 @@
 //! ne montre rien.
 
 pub mod command;
+pub mod delete;
 pub mod deploy;
 pub mod drift;
 pub mod engine;

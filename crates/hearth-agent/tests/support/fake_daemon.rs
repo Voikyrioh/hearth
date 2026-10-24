@@ -185,6 +185,8 @@ struct State {
     pull_aborts: usize,
     /// Les corps de création reçus, tels quels.
     created_bodies: Vec<Value>,
+    /// Les chaînes de requête des suppressions reçues, dans l'ordre (HRT-85 : `v` et `force`).
+    delete_queries: Vec<String>,
 }
 
 /// Ce que le registre du faux démon rend pour une image : des lignes de progression au format du moteur.
@@ -254,6 +256,7 @@ impl FakeDaemon {
             known_repositories: BTreeSet::new(),
             pull_aborts: 0,
             created_bodies: Vec::new(),
+            delete_queries: Vec::new(),
         }));
         let (events, _) = broadcast::channel(256);
         let connections: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::default();
@@ -396,6 +399,11 @@ impl FakeDaemon {
         self.lock().created_bodies.clone()
     }
 
+    /// Les chaînes de requête des suppressions reçues, dans l'ordre (HRT-85).
+    pub fn delete_queries(&self) -> Vec<String> {
+        self.lock().delete_queries.clone()
+    }
+
     /// Ce conteneur, tel que le démon le tient.
     pub fn container(&self, id: &str) -> Option<DaemonContainer> {
         self.lock().containers.get(id).cloned()
@@ -527,6 +535,32 @@ async fn handle(
         && let Some(id) = route.strip_prefix("/containers/")
         && !id.contains('/')
     {
+        // Comme le vrai démon : sans `force`, un conteneur qui tourne est refusé (409), rien n'est retiré.
+        let forced = query
+            .split('&')
+            .any(|pair| pair == "force=true" || pair == "force=1");
+        let refused = {
+            let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+            guard.delete_queries.push(query.clone());
+            !forced
+                && guard.containers.get(id).is_some_and(|container| {
+                    matches!(
+                        container.status.as_str(),
+                        "running" | "restarting" | "paused"
+                    )
+                })
+        };
+        if refused {
+            write_reply(
+                &mut stream,
+                json_reply(
+                    409,
+                    json!({ "message": format!("cannot remove container \"{id}\": container is running: stop the container before removing it (or force remove)") }),
+                ),
+            )
+            .await;
+            return;
+        }
         let removed = state
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

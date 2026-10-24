@@ -966,4 +966,33 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
     // Supprimer un conteneur qui tourne (pas de conteneur orphelin).
     engine.remove(&id).await.expect("supprimer");
     assert!(find(engine, &name).await.is_none());
+
+    // Supprimer en gardant les volumes (HRT-85) : jamais de coupure forcée. Un conteneur qui tourne est refusé et
+    // reste en marche ; arrêté, il part ; absent, c'est réussi.
+    let keep = engine
+        .create(&plan_for(
+            harness,
+            &format!("{prefix}-d-keep"),
+            &image,
+            18_094,
+            &other,
+        ))
+        .await
+        .expect("créer le conteneur à garder en vie");
+    engine.start(&keep).await.expect("démarrer");
+    assert_eq!(
+        engine.remove_keeping_volumes(&keep).await,
+        Err(EngineError::Refused)
+    );
+    assert!(running(engine, &keep).await, "refusé : rien n'a été coupé");
+    harness.stop(&keep).await;
+    engine
+        .remove_keeping_volumes(&keep)
+        .await
+        .expect("supprimer arrêté");
+    assert!(engine.inspect(&keep).await.expect("inspection").is_none());
+    engine
+        .remove_keeping_volumes(&keep)
+        .await
+        .expect("déjà supprimé");
 }

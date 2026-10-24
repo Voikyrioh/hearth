@@ -1432,6 +1432,9 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
         .unwrap()
         .file_stamp
         .unwrap();
+    // Un second service, dont la description existe mais dont le conteneur n'existe pas : supprimable par sa
+    // description (HRT-85, BR-DEL-018), sans case cochée.
+    let delete_key = support::game::terraria_service(&env, &deploy_rig.safe_fs, 2).await;
     // Deux opérations de service dans le journal (HRT-144) : une qu'on annulera, une qui attend une décision.
     let (cancel_op, decide_op) = {
         use hearth_agent::application::service_ops::AcceptRequest;
@@ -1711,6 +1714,17 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                     Method::POST,
                     &format!("/operations/services/{decide_op}/decision"),
                     json!({ "choice": "continue" }),
+                )
+                .await
+            }
+            // Supprimer un service (HRT-85) : `202`, et UNE entrée réussie, écrite à la fin de la suppression à
+            // l'arrière-plan (attendue plus bas).
+            ("DELETE", "/services/{key}") => {
+                api.act(
+                    &marie,
+                    Method::DELETE,
+                    &format!("/services/{}", delete_key.as_str()),
+                    json!({}),
                 )
                 .await
             }

@@ -19,6 +19,7 @@
 
 pub mod access;
 pub mod decision;
+pub mod delete;
 pub mod flush;
 pub mod game_stop;
 pub mod index;

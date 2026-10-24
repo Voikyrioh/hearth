@@ -24,7 +24,7 @@ Pendant un effacement de données, et après la fermeture de sa fenêtre, l'opé
 - `apps/desktop/src/pages/ServicesOperations.test.ts` (quatre profils)
 
 ## Cas limites
-- Le chemin géré et le compte des éléments effacés ne viennent qu'avec la suppression (HRT-85) ; aujourd'hui le pont simulé seul produit cette opération.
+- Côté agent (HRT-85), l'opération `delete` porte `step: erase`, `percent` (dossier courant sur le total) et `items_done` (éléments effacés), publiés au plus toutes les 500 ms ; jamais un chemin. Le chemin du dossier est celui de `GET /services/{key}/delete-preview`, réservé aux comptes qui ont le droit.
 
 ## Règles liées
 - BR-SVC-029, BR-LIFE-013

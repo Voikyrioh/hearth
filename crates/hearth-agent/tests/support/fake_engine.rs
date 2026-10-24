@@ -135,6 +135,12 @@ struct DeployScript {
     pulls_abandoned: Arc<AtomicUsize>,
     created: Vec<CreatedPlan>,
     removed: Vec<String>,
+    /// Les conteneurs retirés par `remove_keeping_volumes` (HRT-85), dans l'ordre.
+    removed_keeping_volumes: Vec<String>,
+    /// `remove_keeping_volumes` échoue avec cette erreur.
+    remove_error: Option<EngineError>,
+    /// `remove_keeping_volumes` panique (une exécution qui s'effondre après l'ordre de suppression).
+    panic_on_remove: bool,
     create_error: Option<EngineError>,
     /// Le moteur crée le conteneur, puis met ce temps à répondre (la réponse peut ne jamais être lue).
     create_reply_delay: Duration,
@@ -549,6 +555,21 @@ impl FakeEngine {
     /// Les identifiants supprimés, dans l'ordre.
     pub fn removed(&self) -> Vec<String> {
         self.lock().deploy.removed.clone()
+    }
+
+    /// Les conteneurs supprimés par `remove_keeping_volumes` (HRT-85), dans l'ordre.
+    pub fn removed_keeping_volumes(&self) -> Vec<String> {
+        self.lock().deploy.removed_keeping_volumes.clone()
+    }
+
+    /// `remove_keeping_volumes` échoue avec cette erreur (None : rétablit).
+    pub fn fail_remove(&self, error: Option<EngineError>) {
+        self.lock().deploy.remove_error = error;
+    }
+
+    /// `remove_keeping_volumes` panique (false : rétablit).
+    pub fn panic_on_remove(&self, on: bool) {
+        self.lock().deploy.panic_on_remove = on;
     }
 
     /// `create` échoue avec cette erreur (None : rétablit).
@@ -1268,6 +1289,36 @@ impl ContainerEngine for FakeEngine {
                 return Err(error);
             }
             state.deploy.removed.push(id.to_owned());
+            state.containers.remove(id).is_some()
+        };
+        if existed {
+            self.wake_logs();
+            self.emit(id, "destroy");
+        }
+        Ok(())
+    }
+
+    async fn remove_keeping_volumes(&self, id: &str) -> Result<(), EngineError> {
+        let panics = self.lock().deploy.panic_on_remove;
+        assert!(!panics, "panique voulue du faux moteur");
+        let existed = {
+            let mut state = self.lock();
+            if let Some(error) = state.list_error {
+                return Err(error);
+            }
+            if let Some(error) = state.deploy.remove_error {
+                return Err(error);
+            }
+            // Comme le vrai moteur sans `force` : un conteneur qui tourne est refusé, rien n'est retiré.
+            if state.containers.get(id).is_some_and(|container| {
+                matches!(
+                    container.run_state,
+                    RunState::Running | RunState::Restarting | RunState::Paused
+                )
+            }) {
+                return Err(EngineError::Refused);
+            }
+            state.deploy.removed_keeping_volumes.push(id.to_owned());
             state.containers.remove(id).is_some()
         };
         if existed {

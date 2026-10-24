@@ -19,6 +19,7 @@ use crate::application::accounts::AccountService;
 use crate::application::attack_mode::AttackModeService;
 use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
 use crate::application::catalog::CatalogService;
+use crate::application::delete::{DeleteContext, DeleteTimings, ServiceDeletion};
 use crate::application::deployments::{DeployContext, DeployTimings, Deployments, FolderGuard};
 use crate::application::elevation::Elevations;
 use crate::application::folders::FolderFacts;
@@ -209,9 +210,14 @@ pub struct EngineParts {
     pub free_space: Arc<dyn FreeSpace>,
     /// Les délais d'un déploiement (HRT-68) ; les tests les raccourcissent.
     pub deploy: DeployTimings,
+    /// Les délais d'une suppression de service (HRT-85) ; les tests les raccourcissent.
+    pub delete: DeleteTimings,
     /// Les dossiers de données des services (HRT-145, HRT-68). `None` : le vrai, sous le dossier de données de
     /// l'agent ; les tests y posent un faux en mémoire.
     pub safe_fs: Option<Arc<dyn SafeFs>>,
+    /// Ce que l'agent lit des chemins du serveur pour juger un dossier partagé (HRT-85). `None` : le système de
+    /// fichiers de l'hôte ; les tests y posent une fausse topologie (montages « bind » impossibles sans droits).
+    pub host_paths: Option<Arc<dyn crate::application::ports::HostPaths>>,
     /// Les fiches de serveurs de jeu proposées et le hasard des secrets qu'elles font tirer (HRT-101).
     pub catalog: CatalogParts,
 }
@@ -224,6 +230,9 @@ pub struct CatalogParts {
     pub random: Arc<dyn SecretRandom>,
     /// Un catalogue donné (tests : fiches de fabrication) à la place des fiches embarquées.
     pub service: Option<Arc<CatalogService>>,
+    /// Les phases d'un serveur de jeu, tenues par l'installation (qui les commence) ET par la suppression (qui les
+    /// oublie, HRT-85, HRT-197). `None` : les siennes ; les tests y posent les leurs pour les lire.
+    pub phases: Option<Arc<GamePhases>>,
 }
 
 impl CatalogParts {
@@ -233,6 +242,7 @@ impl CatalogParts {
             include_preview: crate::build_info::PREVIEW_FICHES,
             random: Arc::new(OsSecretRandom),
             service: None,
+            phases: None,
         }
     }
 }
@@ -257,7 +267,9 @@ impl EngineParts {
             host_ports: Arc::new(SystemHostPorts::new()),
             free_space: Arc::new(SystemHost),
             deploy: DeployTimings::production(),
+            delete: DeleteTimings::production(),
             safe_fs: None,
+            host_paths: None,
             catalog: CatalogParts::production(),
         }
     }
@@ -919,6 +931,21 @@ pub async fn start_engined(
         .join(SERVICES_DIR)
         .to_string_lossy()
         .into_owned();
+    // La racine des dossiers gérés telle que la suppression la compare aux montages des autres conteneurs : le dossier
+    // de données canonique (liens, `//` et `..` résolus), lu une fois au démarrage (BR-DEL-008). Sans forme
+    // canonique, la forme de la configuration ; la suppression compare de toute façon les deux et l'identité.
+    let host_paths: Arc<dyn crate::application::ports::HostPaths> = engine
+        .host_paths
+        .unwrap_or_else(|| Arc::new(crate::infrastructure::host::paths::SystemHostPaths));
+    let deletion_root = match host_paths.resolve(&config.data_dir.to_string_lossy()) {
+        crate::application::ports::Resolved::Found { canonical, .. } => {
+            std::path::Path::new(&canonical)
+                .join(SERVICES_DIR)
+                .to_string_lossy()
+                .into_owned()
+        }
+        _ => services_root.clone(),
+    };
     // Ce que l'agent sait de lui-même, pour juger un dossier du serveur (BR-DEPLOY-012) : sans l'un de ces faits,
     // aucun dossier du serveur n'est jugé (et tous restent refusés).
     let folders = FolderFacts::new(
@@ -964,6 +991,30 @@ pub async fn start_engined(
         adapters.clock.clone(),
         engine.lifecycle.game,
     ));
+    // Les phases d'un serveur de jeu installé depuis une fiche : un seul registre, partagé entre l'installation (qui
+    // les commence) et la suppression (qui les oublie, HRT-197).
+    let phases = engine
+        .catalog
+        .phases
+        .clone()
+        .unwrap_or_else(|| GamePhases::new(container_engine.clone(), adapters.clock.clone()));
+    // Supprimer un service (HRT-85) : le conteneur et la description partent, les données restent sauf demande.
+    let service_deletion = ServiceDeletion::new(
+        registry.clone(),
+        foundations.ops.clone(),
+        foundations.specs.clone(),
+        container_engine.clone(),
+        service_repo.clone(),
+        service_repo.clone(),
+        safe_fs.clone(),
+        host_paths,
+        phases.clone(),
+        adapters.clock.clone(),
+        DeleteContext {
+            services_root: deletion_root,
+            timings: engine.delete,
+        },
+    );
     let deployments = Deployments::new(
         registry.clone(),
         foundations.ops.clone(),
@@ -984,7 +1035,7 @@ pub async fn start_engined(
         },
         catalog.clone(),
         engine.catalog.random.clone(),
-        GamePhases::new(container_engine.clone(), adapters.clock.clone()),
+        phases,
     );
     let service_logs = Arc::new(ServiceLogs::new(
         registry.clone(),
@@ -1009,6 +1060,7 @@ pub async fn start_engined(
         adapters.clock.clone(),
         services.trail.clone(),
     ));
+    let deletion_for_shutdown = service_deletion.clone();
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
@@ -1025,13 +1077,18 @@ pub async fn start_engined(
         service_ops,
         service_lifecycle,
         deployments,
+        service_deletion,
         catalog,
         game_settings,
         stream,
         erasure_pending: database.erasure_pending(),
     });
     // À l'arrêt, les flux ouverts se ferment d'eux-mêmes avant que le serveur n'attende les connexions.
-    let server = http::spawn(listener, tls, router)?.on_shutdown(move || closing.begin_shutdown());
+    // L'arrêt de l'agent arrête aussi un effacement en cours, qui reste « à vérifier » (BR-DEL-025).
+    let server = http::spawn(listener, tls, router)?.on_shutdown(move || {
+        closing.begin_shutdown();
+        deletion_for_shutdown.begin_shutdown();
+    });
     // Le résultat d'une mise à jour que personne n'a encore annoncé (le nouvel agent après un
     // échange, l'ancien après un retour en arrière) part au journal et au flux.
     tokio::spawn({

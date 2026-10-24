@@ -22,9 +22,10 @@ Pendant une suppression (et un déploiement), le nom du service (replié) est r�
 - `crates/hearth-agent/tests/service_ops_journal.rs::a_name_being_deleted_is_reserved_and_a_file_write_is_refused_under_an_exclusive_lock`
 - `crates/hearth-agent/tests/service_ops_journal.rs::a_name_and_a_heavy_seat_survive_a_restart_and_reverting_only_starts_the_rollback`
 - `crates/hearth-agent/src/domain/ops/locks.rs::tests::a_name_being_deleted_is_reserved_and_says_so`
+- `crates/hearth-agent/tests/service_delete_https.rs::the_data_goes_only_after_the_container_while_the_name_is_reserved_and_the_service_busy`
 
 ## Cas limites
-- Le texte « Le service {nom} est en cours de suppression… » vient avec la suppression (HRT-85).
+- Le nom est réservé de l'acceptation à la fin de l'opération entière (conteneur, description et effacement compris), pas seulement pendant l'effacement : plus strict que la spec, jamais plus lâche. Le texte de la route est « Ce nom est celui d'un service en cours de suppression. Attends la fin de l'effacement. » (`NAME_BEING_DELETED`).
 
 ## Règles liées
 - BR-LIFE-013, BR-EDIT-035

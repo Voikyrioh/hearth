@@ -64,11 +64,14 @@ pub fn parts_supervised(
         host_ports: Arc::new(super::fake_host::FakeHostPorts::new()),
         free_space: Arc::new(super::fake_host::FakeFreeSpace::new()),
         deploy: fast_deploy(),
+        delete: fast_delete(),
         safe_fs: Some(Arc::new(super::fake_safe_fs::FakeSafeFs::new())),
+        host_paths: None,
         catalog: hearth_agent::app::CatalogParts {
             include_preview: false,
             random: Arc::new(super::fake_random::FakeRandom::counting_from(0)),
             service: None,
+            phases: None,
         },
     }
 }
@@ -79,6 +82,19 @@ pub fn fast_deploy() -> hearth_agent::application::deployments::DeployTimings {
         deadline: Duration::from_secs(60),
         watch: Duration::from_millis(300),
         poll: Duration::from_millis(20),
+    }
+}
+
+/// Une suppression de service aux délais courts (HRT-85) : la mesure garde ses 10 s, l'effacement signale sa
+/// progression toutes les 20 ms.
+pub fn fast_delete() -> hearth_agent::application::delete::DeleteTimings {
+    hearth_agent::application::delete::DeleteTimings {
+        measure_budget: Duration::from_secs(10),
+        stop_margin: Duration::from_secs(1),
+        stop_floor: Duration::from_secs(1),
+        remove_wait: Duration::from_secs(5),
+        progress_every: Duration::from_millis(20),
+        resolve_budget: Duration::from_secs(10),
     }
 }
 

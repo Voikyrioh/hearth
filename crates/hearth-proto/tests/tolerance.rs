@@ -40,6 +40,7 @@ use hearth_proto::api::metrics::HistoryWindow;
 use hearth_proto::api::operations::OperationStatus as HttpOperationStatus;
 use hearth_proto::api::reauth::ReauthMode;
 use hearth_proto::api::security::{AttackModeEnd, AttackModeState, SessionDevice};
+use hearth_proto::api::service_delete::FolderFate;
 use hearth_proto::api::service_logs::{
     GapReason, LogSource, LogState, LogsClientMessage, LogsErrorCode, LogsServerMessage, MarkerKind,
 };
@@ -161,6 +162,7 @@ fn enums() -> Vec<Entry> {
         ),
         entry!("api/service_ops.rs::StepStateView", Tolerant, StepStateView),
         entry!("api/service_spec.rs::DriftView", Tolerant, DriftView),
+        entry!("api/service_delete.rs::FolderFate", Tolerant, FolderFate),
         entry!("api/game_settings.rs::ChangeAction", Tolerant, ChangeAction),
         entry!(
             "api/game_settings.rs::DriftResolution",

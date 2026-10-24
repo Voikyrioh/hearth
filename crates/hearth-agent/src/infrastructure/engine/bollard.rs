@@ -684,6 +684,23 @@ impl ContainerEngine for BollardEngine {
         }
     }
 
+    async fn remove_keeping_volumes(&self, id: &str) -> Result<(), EngineError> {
+        let docker = self.inner.docker().await?;
+        // Ni `v` (les volumes, même anonymes, sont des données du service), ni `force` (un conteneur qui tourne
+        // est refusé, 409 : l'arrêt est fait avant, jamais une coupure silencieuse ici).
+        let options = RemoveContainerOptionsBuilder::default()
+            .v(false)
+            .force(false)
+            .build();
+        match docker.remove_container(id, Some(options)).await {
+            Ok(()) => Ok(()),
+            Err(error) => match translate(&error) {
+                EngineError::NotFound => Ok(()),
+                other => Err(other),
+            },
+        }
+    }
+
     async fn info(&self) -> Result<EngineInfo, EngineError> {
         let docker = self.inner.docker().await?;
         let info = docker.info().await.map_err(|error| translate(&error))?;
