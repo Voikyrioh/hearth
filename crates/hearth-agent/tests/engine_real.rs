@@ -33,6 +33,17 @@ use support::engine_contract::{self, Harness, Run, Spec};
 const IMAGE: &str = "public.ecr.aws/docker/library/busybox:1.36";
 const PREFIX: &str = "hearth-contract";
 
+/// Dépôt d'où le MOTEUR récupère les images du contrat (récupération, abandon, échecs typés). Par défaut le
+/// registre public ; la CI pose `HEARTH_TEST_PULL_REPO=localhost:5000` (registre local alimenté depuis le
+/// cache, HRT-168) pour qu'aucun quota public ne frappe en pleine suite. Ce que le test prouve ne change pas :
+/// un vrai téléchargement par le moteur, depuis un vrai registre.
+fn pull_repo() -> String {
+    std::env::var("HEARTH_TEST_PULL_REPO")
+        .ok()
+        .filter(|repo| !repo.trim().is_empty())
+        .unwrap_or_else(|| "public.ecr.aws/docker/library".to_owned())
+}
+
 fn enabled() -> bool {
     std::env::var("HEARTH_TEST_ENGINE").as_deref() == Ok("1")
 }
@@ -129,7 +140,7 @@ impl Harness for RealHarness {
     }
 
     fn image(&self) -> String {
-        IMAGE.to_owned()
+        format!("{}/busybox:1.36", pull_repo())
     }
 
     /// Retire l'image du serveur : sans effet si un conteneur en vit encore (les conteneurs du contrat sont
@@ -139,11 +150,11 @@ impl Harness for RealHarness {
     }
 
     fn missing_image(&self) -> String {
-        "public.ecr.aws/docker/library/hearth-contract-nope:1".to_owned()
+        format!("{}/hearth-contract-nope:1", pull_repo())
     }
 
     fn missing_tag(&self) -> String {
-        "public.ecr.aws/docker/library/busybox:hearth-no-such-tag".to_owned()
+        format!("{}/busybox:hearth-no-such-tag", pull_repo())
     }
 
     fn scratch_dir(&self) -> String {

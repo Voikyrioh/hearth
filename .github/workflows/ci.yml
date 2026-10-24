@@ -175,18 +175,13 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Moteur du runner (version)
         run: docker version
-      # HRT-168 : l'image des tests (busybox:1.36, fixée par empreinte) vient d'abord du cache de la CI
-      # (archive `docker save`, clé = image + empreinte : aucun registre sollicité), sinon d'ECR puis de
-      # Docker Hub par la même empreinte. Le quota anonyme d'ECR ne bloque plus le job (HRT-168, après
-      # `Data limit exceeded` le 2026-10-14). Un registre KO sort en `REGISTRE : ...`, jamais comme un test
-      # en échec. Même valeur que `IMAGE` de `engine_real.rs` et `engine_supervised.rs` (script jumeau).
-      - name: Image des tests en cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/test-image
-          key: engine-test-image-busybox-1.36-sha256-73aaf090f3d8
-      - name: Image des tests (cache, ECR, Docker Hub)
-        run: .github/scripts/test-image.sh "${{ runner.temp }}/test-image/busybox-1.36.tar"
+      # HRT-168 : images des tests fixées par empreinte (busybox:1.36 + un registre local), d'abord du cache
+      # de la CI, sinon ECR puis Docker Hub ; cache sauvé tout de suite, même si le job finit rouge. Le
+      # moteur récupère l'image du contrat chez ce registre local (`HEARTH_TEST_PULL_REPO`) : aucun quota
+      # public pendant la suite. Un registre KO sort en `REGISTRE ...`, jamais comme un test en échec.
+      # Détail : `.github/actions/test-image` et `.github/scripts/test-image.sh`.
+      - name: Images des tests (cache, ECR, Docker Hub, registre local)
+        uses: ./.github/actions/test-image
       # La suite de contrat (liste, inspection, événements, journaux : fin, dernières lignes, reprise, suivi,
       # terminal, ligne géante, pilote `none` ; HRT-64 : démarrer, arrêter dans le délai et de force avec le
       # code 137, redémarrer, un port pris, un conteneur inconnu, l'arrêt d'un conteneur `--rm` ; HRT-68 :
@@ -197,6 +192,7 @@ jobs:
       - name: Suite de contrat de l'adaptateur contre un vrai moteur
         env:
           HEARTH_LOG_RATE_SECONDS: "60"
+          HEARTH_TEST_PULL_REPO: localhost:5000
         run: cargo test -p hearth-agent --test engine_real -- --ignored --test-threads=1 --nocapture
       # HRT-68 (BR-DEPLOY-021) : un service créé par Hearth (`unless-stopped`) revient quand le démon du runner
       # redémarre (`sudo systemctl restart docker`), sauf celui qu'on a arrêté à la main.
@@ -258,18 +254,13 @@ jobs:
         with:
           toolchain: "1.95"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-      # HRT-168 : l'image des tests (busybox:1.36, fixée par empreinte) vient d'abord du cache de la CI
-      # (archive `docker save`, clé = image + empreinte : aucun registre sollicité), sinon d'ECR puis de
-      # Docker Hub par la même empreinte. Le quota anonyme d'ECR ne bloque plus le job (HRT-168, après
-      # `Data limit exceeded` le 2026-10-14). Un registre KO sort en `REGISTRE : ...`, jamais comme un test
-      # en échec. Même valeur que `IMAGE` de `engine_real.rs` et `engine_supervised.rs` (script jumeau).
-      - name: Image des tests en cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/test-image
-          key: engine-test-image-busybox-1.36-sha256-73aaf090f3d8
-      - name: Image des tests (cache, ECR, Docker Hub)
-        run: .github/scripts/test-image.sh "${{ runner.temp }}/test-image/busybox-1.36.tar"
+      # HRT-168 : images des tests fixées par empreinte (busybox:1.36 + un registre local), d'abord du cache
+      # de la CI, sinon ECR puis Docker Hub ; cache sauvé tout de suite, même si le job finit rouge. Le
+      # moteur récupère l'image du contrat chez ce registre local (`HEARTH_TEST_PULL_REPO`) : aucun quota
+      # public pendant la suite. Un registre KO sort en `REGISTRE ...`, jamais comme un test en échec.
+      # Détail : `.github/actions/test-image` et `.github/scripts/test-image.sh`.
+      - name: Images des tests (cache, ECR, Docker Hub, registre local)
+        uses: ./.github/actions/test-image
       - name: Débit soutenu des journaux (version longue)
         run: cargo test -p hearth-agent --test engine_real a_service_writing_a_thousand_lines_a_second -- --ignored --test-threads=1 --nocapture
       - name: Conteneurs laissés par le test

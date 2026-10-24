@@ -899,7 +899,7 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
     );
     no_image.image = format!(
         "{}-never-pulled:1",
-        harness.missing_image().split(':').next().unwrap()
+        harness.missing_image().rsplit_once(':').unwrap().0
     );
     assert_eq!(engine.create(&no_image).await, Err(EngineError::NotFound));
 
