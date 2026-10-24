@@ -12,6 +12,9 @@ mod audit;
 #[path = "support/tmp.rs"]
 mod tmp;
 
+#[path = "support/fake_engine.rs"]
+mod fake_engine;
+
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -552,11 +555,51 @@ impl UnitOfWork for SlowTx {
     }
 }
 
+/// Un registre de services sans service : `ServiceOpAccess` n'en a besoin que pour juger la visibilité.
+fn empty_registry(
+    clock: Arc<dyn Clock>,
+) -> Arc<hearth_agent::application::services::ServicesRegistry> {
+    use hearth_agent::application::ports::{HostDescription, HostEnvironment, MonotonicClock};
+    struct Host;
+    impl HostEnvironment for Host {
+        fn describe(&self) -> HostDescription {
+            HostDescription {
+                os_id: "debian".into(),
+                os_like: vec![],
+                systemd: true,
+                declarative: false,
+                agent_account: "root".into(),
+                agent_is_admin: true,
+            }
+        }
+    }
+    struct Mono;
+    impl MonotonicClock for Mono {
+        fn elapsed(&self) -> Duration {
+            Duration::ZERO
+        }
+    }
+    hearth_agent::application::services::ServicesRegistry::new(
+        Arc::new(fake_engine::FakeEngine::new()),
+        &Host,
+        clock,
+        Arc::new(Mono),
+        true,
+        hearth_agent::application::services::EngineTimings::production(),
+    )
+}
+
 enum Via {
     /// `finish` : la transaction du journal des opérations et de l'activité (`close`).
     Close,
     /// `cancel` d'une opération acceptée : `move_to`.
     Move,
+    /// Le balayage : une décision restée sans réponse expire.
+    Expire,
+    /// `DELETE` d'une opération acceptée, par `ServiceOpAccess` (transaction + entrée du journal d'activité).
+    AccessCancel,
+    /// « Annuler » répondu à une décision en attente, par `ServiceOpAccess`.
+    AccessDecide,
 }
 
 struct Parked {
@@ -571,6 +614,11 @@ struct Parked {
 /// Une opération sur le service 1 dont la clôture est arrêtée après son commit : le journal dit « terminé »,
 /// le verrou et la projection disent encore « occupé ».
 async fn parked_closing(via: Via) -> Parked {
+    parked_closing_with(via, None).await
+}
+
+/// Comme [`parked_closing`], avec une échéance de porte choisie (l'échéance ne coûte pas l'horloge réelle).
+async fn parked_closing_with(via: Via, wait: Option<std::time::Duration>) -> Parked {
     let env = Env::new().await;
     let window = Arc::new(Window {
         armed: std::sync::atomic::AtomicBool::new(false),
@@ -590,30 +638,67 @@ async fn parked_closing(via: Via) -> Parked {
         (ObjectRoot::Backups, env.dir.path().join("backups")),
         (ObjectRoot::Staging, env.dir.path().join("staging")),
     ]));
-    let ops = Arc::new(ServiceOps::new(
+    let mut built = ServiceOps::new(
         journal as Arc<dyn OpJournal>,
         Arc::new(OpLocks::new()),
         env.clock.clone(),
         env.ids.clone(),
         objects,
+        store.clone(),
+        trail.clone(),
+    );
+    if let Some(wait) = wait {
+        built = built.with_closing_wait(wait);
+    }
+    let ops = Arc::new(built);
+    let access = hearth_agent::application::service_op_access::ServiceOpAccess::new(
+        ops.clone(),
+        empty_registry(env.clock.clone()),
         store,
+        env.clock.clone(),
         trail,
-    ));
+    );
     let id = ops
         .accept(request(service(1), OpKind::Update))
         .await
         .unwrap();
-    if matches!(via, Via::Close) {
+    if matches!(via, Via::Close | Via::Expire | Via::AccessDecide) {
         ops.start(&id).await.unwrap();
+    }
+    if matches!(via, Via::Expire | Via::AccessDecide) {
+        ops.ask_decision(&id, &[Choice::Continue, Choice::Cancel])
+            .await
+            .unwrap();
+    }
+    if matches!(via, Via::Expire) {
+        env.clock.advance(Duration::minutes(16));
     }
     window.armed.store(true, Ordering::SeqCst);
     let closer = {
         let (ops, id) = (ops.clone(), id.clone());
         tokio::spawn(async move {
+            let actor = hearth_agent::domain::audit::Actor::system();
+            let viewer = hearth_agent::application::service_op_access::Viewer {
+                may_manage_services: true,
+            };
             match via {
                 Via::Close => ops.finish(&id, OpStatus::Succeeded, None).await.unwrap(),
                 Via::Move => {
                     ops.cancel(&id).await.unwrap();
+                }
+                Via::Expire => {
+                    assert_eq!(ops.sweep().await.unwrap().expired, 1);
+                }
+                Via::AccessCancel => {
+                    assert!(access.cancel(&id, &actor, viewer).await.is_ok());
+                }
+                Via::AccessDecide => {
+                    assert!(
+                        access
+                            .decide(&id, Choice::Cancel, &actor, viewer)
+                            .await
+                            .is_ok()
+                    );
                 }
             }
         })
@@ -724,13 +809,16 @@ async fn a_slow_closing_on_one_service_never_makes_another_service_wait() {
 #[tokio::test]
 async fn a_closing_stuck_past_the_deadline_does_not_freeze_the_service_and_a_running_operation_is_still_refused()
  {
-    let p = parked_closing(Via::Close).await;
+    // Échéance injectée : le test ne paie pas l'échéance de production.
+    let p = parked_closing_with(Via::Close, Some(std::time::Duration::from_millis(200))).await;
+    let started = std::time::Instant::now();
     let refused = p
         .ops
         .accept(request(service(1), OpKind::Stop))
         .await
         .unwrap_err();
     assert!(matches!(refused, OpError::Locked(_)), "{refused:?}");
+    assert!(started.elapsed() >= std::time::Duration::from_millis(150));
     let _env = p.release().await;
     let env = Env::new().await;
     let _id = running(&env, 1, OpKind::Update).await;
@@ -742,6 +830,38 @@ async fn a_closing_stuck_past_the_deadline_does_not_freeze_the_service_and_a_run
         .await
         .unwrap_err();
     assert!(matches!(refused, OpError::Locked(_)), "{refused:?}");
+}
+
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+// Chaque clôture, par chacune de ses voies, tient la porte jusqu'à la fin de sa publication : la demande
+// suivante attend, puis réussit.
+async fn the_next_accept_waits_then_succeeds(via: Via) {
+    let p = parked_closing(via).await;
+    let accepted = {
+        let ops = p.ops.clone();
+        tokio::spawn(async move { ops.accept(request(service(1), OpKind::Stop)).await })
+    };
+    let_others_run().await;
+    assert!(!accepted.is_finished());
+    let ops = p.ops.clone();
+    let _env = p.release().await;
+    accepted.await.unwrap().unwrap();
+    assert_eq!(ops.open_gates(), 0);
+}
+
+#[tokio::test]
+async fn the_expiry_of_a_decision_holds_the_gate_until_it_is_published() {
+    the_next_accept_waits_then_succeeds(Via::Expire).await;
+}
+
+#[tokio::test]
+async fn the_cancellation_of_the_access_holds_the_gate_until_it_is_published() {
+    the_next_accept_waits_then_succeeds(Via::AccessCancel).await;
+}
+
+#[tokio::test]
+async fn the_decision_of_the_access_holds_the_gate_until_it_is_published() {
+    the_next_accept_waits_then_succeeds(Via::AccessDecide).await;
 }
 
 #[tokio::test]

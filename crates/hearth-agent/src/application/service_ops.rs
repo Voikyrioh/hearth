@@ -18,8 +18,8 @@ use time::OffsetDateTime;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
 use super::audit::{AuditTrail, Pending};
+use super::closing_gates::ClosingGates;
 pub use super::closing_gates::ClosingGuard;
-use super::closing_gates::{CLOSING_GATE_WAIT, ClosingGates};
 use super::ports::{
     Clock, CreatedObjects, DecisionOffer, IdGen, JournalError, NewOp, OpJournal, OpRecord,
     Progress, RemoveOutcome, ServiceObserver, StepGuard, Store, StoreError,
@@ -428,13 +428,20 @@ impl ServiceOps {
         self.gates.close(service).await
     }
 
-    /// Attend, une fois et au plus [`CLOSING_GATE_WAIT`], que les clôtures en cours de CE service se
+    /// Une échéance de porte autre que celle de production (tests de l'échéance).
+    #[must_use]
+    pub fn with_closing_wait(mut self, wait: std::time::Duration) -> Self {
+        self.gates = Arc::new(ClosingGates::with_wait(wait));
+        self
+    }
+
+    /// Attend, une fois et au plus [`CLOSING_GATE_WAIT`](super::closing_gates::CLOSING_GATE_WAIT), que les clôtures en cours de CE service se
     /// terminent. À l'échéance on juge quand même (une clôture bloquée ne gèle pas le service) et on le
     /// trace, sans valeur.
     pub async fn wait_closed(&self, service: &ServiceKey) {
         if self.gates.wait(service).await {
             tracing::warn!(
-                wait_ms = u64::try_from(CLOSING_GATE_WAIT.as_millis()).unwrap_or(u64::MAX),
+                wait_ms = u64::try_from(self.gates.deadline().as_millis()).unwrap_or(u64::MAX),
                 "porte de clôture : échéance atteinte, la demande est jugée sur l'état courant"
             );
         }

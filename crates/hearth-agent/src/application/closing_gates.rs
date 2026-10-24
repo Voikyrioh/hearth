@@ -2,7 +2,7 @@
 //!
 //! Une clôture (transition vers un statut terminal) tient la porte de son service, en lecture, du commit
 //! jusqu'à la fin de la publication (verrous rendus, projection, annonce). Une demande qui veut juger
-//! « occupé » attend UNE fois, au plus [`CLOSING_GATE_WAIT`], que les clôtures de CE service se terminent :
+//! « occupé » attend UNE fois, au plus l'échéance ([`CLOSING_GATE_WAIT`]), que les clôtures de CE service se terminent :
 //! une clôture lente sur A ne fait jamais attendre B. La table n'a une entrée que tant que quelqu'un tient
 //! ou attend la porte de la clé (coût : un verrou court sur la table, une allocation par clôture).
 //!
@@ -17,12 +17,20 @@ use tokio::sync::{OwnedRwLockReadGuard, RwLock};
 
 use crate::domain::services::key::ServiceKey;
 
-/// L'attente maximale d'une demande devant une clôture en cours.
-pub const CLOSING_GATE_WAIT: Duration = Duration::from_secs(1);
+/// L'attente maximale d'une demande devant une clôture en cours. Elle est au moins égale au délai d'attente de
+/// la base (`infrastructure::sqlite::BUSY_TIMEOUT`, 5 s) : une clôture qui attend la base ne doit pas
+/// dépasser la porte (un test de l'infrastructure les tient liés). Sans clôture en cours, l'attente est nulle.
+pub const CLOSING_GATE_WAIT: Duration = Duration::from_secs(5);
 
-#[derive(Default)]
 pub struct ClosingGates {
     table: Mutex<HashMap<ServiceKey, Arc<RwLock<()>>>>,
+    wait: Duration,
+}
+
+impl Default for ClosingGates {
+    fn default() -> Self {
+        Self::with_wait(CLOSING_GATE_WAIT)
+    }
 }
 
 /// Retire l'entrée de la clé quand plus personne ne la tient ni ne l'attend (au `Drop`, donc aussi si
@@ -56,6 +64,18 @@ pub struct ClosingGuard {
 }
 
 impl ClosingGates {
+    /// Des portes à l'échéance choisie (les tests de l'échéance ne paient pas l'horloge réelle).
+    pub fn with_wait(wait: Duration) -> Self {
+        Self {
+            table: Mutex::default(),
+            wait,
+        }
+    }
+
+    pub fn deadline(&self) -> Duration {
+        self.wait
+    }
+
     /// Prend la porte du service pour une clôture (plusieurs clôtures du même service peuvent la tenir).
     pub async fn close(self: &Arc<Self>, key: &ServiceKey) -> ClosingGuard {
         let idle = Idle {
@@ -73,7 +93,7 @@ impl ClosingGates {
         }
     }
 
-    /// Attend que les clôtures en cours de ce service se terminent, au plus [`CLOSING_GATE_WAIT`]. Rend
+    /// Attend que les clôtures en cours de ce service se terminent, au plus l'échéance ([`CLOSING_GATE_WAIT`]). Rend
     /// `true` si l'échéance est atteinte (on juge alors quand même).
     pub async fn wait(self: &Arc<Self>, key: &ServiceKey) -> bool {
         let _idle = Idle {
@@ -89,9 +109,7 @@ impl ClosingGates {
         let Some(lock) = lock else {
             return false;
         };
-        tokio::time::timeout(CLOSING_GATE_WAIT, lock.write())
-            .await
-            .is_err()
+        tokio::time::timeout(self.wait, lock.write()).await.is_err()
     }
 
     /// Le nombre de services dont la porte est tenue ou attendue (tests).
