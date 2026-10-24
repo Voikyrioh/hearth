@@ -44,6 +44,15 @@ impl SettingsState {
         }
     }
 
+    /// Un état relu de la description du service (HRT-108).
+    pub fn from_slots(slots: BTreeMap<String, Slot>) -> Self {
+        Self { slots }
+    }
+
+    pub fn set_slot(&mut self, id: &str, slot: Slot) {
+        self.slots.insert(id.to_owned(), slot);
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&str, &Slot)> {
         self.slots.iter().map(|(k, v)| (k.as_str(), v))
     }
