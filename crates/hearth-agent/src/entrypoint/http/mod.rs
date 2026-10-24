@@ -460,6 +460,19 @@ pub static ENDPOINTS: &[Endpoint] = &[
         audit: Some(AuditAction::ServiceGameSettings),
         route: || put(game_settings::save),
     },
+    // Le mot de passe du serveur de jeu (HRT-103, BR-JEU-025, BR-JEU-026) : réservé au droit « gérer les services »
+    // (niveau `Services`), lu dans la description chiffrée, jamais dans le moteur ni le fichier. Comme la
+    // révélation des variables, une consultation et non un acte d'administration (aucun mot de passe demandé) :
+    // le refus est consigné par la couche d'accès, la réussite par le cas d'usage, sans la valeur.
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/game-secret",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::ServiceGamePasswordReveal),
+        route: || get(game_settings::game_secret),
+    },
     // Démarrer, arrêter, redémarrer un service (HRT-64, ADR-0037) : trois actes d'administration confirmés
     // (`ServiceStart` `0x0C`, `ServiceStop` `0x0D`, `ServiceRestart` `0x0E`, couverts par l'élévation),
     // asynchrones (`202`), réservés au droit « gérer les services » (BR-LIFE-001). La couche d'accès consigne
@@ -928,6 +941,8 @@ mod tests {
         // le niveau d'accès de la route (voir `Class::ServiceStream`).
         ("GET", "/services/{key}/logs", ServiceStream),
         ("GET", "/services/{key}/env", Service),
+        // Le mot de passe du serveur de jeu (HRT-103) : le droit est exigé par le niveau, la révélation est consignée.
+        ("GET", "/services/{key}/game-secret", Service),
         // Les réglages d'un serveur de jeu (HRT-108) : le droit est exigé par le niveau ; l'analyse d'un texte collé
         // est une consultation du même droit ; l'enregistrement est un acte confirmé (`0x1E`).
         ("GET", "/services/{key}/settings", Service),
@@ -1129,6 +1144,7 @@ mod tests {
                 ("DELETE", "/operations/services/{id}"),
                 ("GET", "/services/external"),
                 ("GET", "/services/{key}/env"),
+                ("GET", "/services/{key}/game-secret"),
                 ("GET", "/services/{key}/settings"),
                 ("POST", "/deployments"),
                 ("POST", "/operations/services/{id}/decision"),

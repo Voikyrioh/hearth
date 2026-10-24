@@ -29,25 +29,33 @@
 //! (`BR-LIFE-014`), recréer ou modifier le service (`BR-LIFE-002`), écrire dans une trace ou le journal un
 //! texte du moteur, une variable, une commande ou un chemin.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use thiserror::Error;
 use time::OffsetDateTime;
 use tokio::time::Instant;
 
+use super::game_stop::{
+    GameLookup, GameStop, GameStopEnd, GameStopTimings, StopMoments, StopRequest,
+};
 use super::ports::{
     AuditSink, Clock, ContainerEngine, EngineError, ServiceIntents, ServiceSupervisor, StopIntent,
     SupervisorError,
 };
 use super::service_ops::{AcceptRequest, AuditDraft, InterruptedAction, OpError, ServiceOps};
 use super::services::{Driver, LifecycleTarget, ServicesRegistry};
-use crate::domain::audit::{Actor, ClientName, LifecycleNote, Outcome, Reason, Target};
+use crate::domain::audit::{
+    Actor, ClientName, LifecycleNote, Outcome, Reason, SaveMention, Target,
+};
+use crate::domain::catalog::stop_plan::StopPlan;
+use crate::domain::ops::game_stop::step as game_step;
 use crate::domain::ops::{
-    Cause, Gesture, Holder, OpKind, OpStatus, RESTART_WATCH, Refusal, STARTUP_WATCH, Sighting,
-    StateRefusal, StopEvidence, UndoInfo, WAIT_FLOOR, WAIT_MARGIN, Watch, cause_after, check_state,
-    engine_ready, stop_was_forced, wait_budget_with,
+    Cause, GameStopKind, Gesture, Holder, OpKind, OpStatus, RESTART_WATCH, Refusal, STARTUP_WATCH,
+    Sighting, StateRefusal, StopEvidence, UndoInfo, WAIT_FLOOR, WAIT_MARGIN, Watch, cause_after,
+    check_state, engine_ready, op_plan, stop_was_forced, wait_budget_with,
 };
 use crate::domain::services::{
     EngineState, RunState, ServiceKey, ServiceStateKind, TransitionKind, UnitActivity, UnitLookup,
@@ -69,6 +77,9 @@ pub struct LifecycleTimings {
     pub wait_margin: Duration,
     /// Le plancher de cette attente (60 s, `BR-LIFE-021`).
     pub wait_floor: Duration,
+    /// Le déroulé de l'arrêt d'un serveur de jeu (HRT-103) : la durée d'une « seconde de fiche » et le pas de
+    /// lecture de l'opération.
+    pub game: GameStopTimings,
 }
 
 impl LifecycleTimings {
@@ -80,6 +91,7 @@ impl LifecycleTimings {
             exemption_margin: Duration::from_secs(2),
             wait_margin: WAIT_MARGIN,
             wait_floor: WAIT_FLOOR,
+            game: GameStopTimings::production(),
         }
     }
 
@@ -132,6 +144,10 @@ struct Finish {
     forced: bool,
     /// Ce qu'il faut surveiller encore une fois l'action terminée.
     watch: Option<Watch>,
+    /// Un serveur de jeu : ce qu'il est advenu de l'enregistrement du monde (BR-JEU-032).
+    mention: Option<SaveMention>,
+    /// L'opération a déjà été close par la décision ou l'annulation d'un compte (HRT-103) : rien à clore.
+    closed: bool,
 }
 
 impl Finish {
@@ -141,6 +157,8 @@ impl Finish {
             cause: forced.then_some(Cause::ForcedStop),
             forced,
             watch: Some(watch),
+            mention: None,
+            closed: false,
         }
     }
 
@@ -150,6 +168,8 @@ impl Finish {
             cause: Some(cause),
             forced: false,
             watch: None,
+            mention: None,
+            closed: false,
         }
     }
 
@@ -159,7 +179,27 @@ impl Finish {
             cause: Some(cause),
             forced: false,
             watch: None,
+            mention: None,
+            closed: false,
         }
+    }
+
+    /// Le compte a répondu « Annuler », la décision a expiré ou l'opération a été annulée : elle est déjà close
+    /// `cancelled`, le service tourne toujours, rien n'est à clore ni à surveiller.
+    fn closed() -> Self {
+        Self {
+            status: OpStatus::Cancelled,
+            cause: None,
+            forced: false,
+            watch: None,
+            mention: None,
+            closed: true,
+        }
+    }
+
+    fn with_mention(mut self, mention: SaveMention) -> Self {
+        self.mention = Some(mention);
+        self
     }
 }
 
@@ -253,6 +293,8 @@ struct Job {
     actor: Actor,
     account: String,
     requested_at: OffsetDateTime,
+    /// Comment ce serveur de jeu s'arrête d'après sa fiche (HRT-103) ; `None` : pas un serveur de jeu.
+    game: Option<GameStopKind>,
 }
 
 pub struct ServiceLifecycle {
@@ -264,6 +306,9 @@ pub struct ServiceLifecycle {
     clock: Arc<dyn Clock>,
     timings: LifecycleTimings,
     watches: Arc<AtomicUsize>,
+    /// L'arrêt des serveurs de jeu (HRT-103) : branché une fois par la racine de composition. Sans lui, tout
+    /// service s'arrête comme avant.
+    game: OnceLock<Arc<GameStop>>,
 }
 
 impl ServiceLifecycle {
@@ -286,7 +331,31 @@ impl ServiceLifecycle {
             clock,
             timings,
             watches: Arc::new(AtomicUsize::new(0)),
+            game: OnceLock::new(),
         })
+    }
+
+    /// Branche l'arrêt des serveurs de jeu (HRT-103) ; une seule fois, à la composition.
+    pub fn set_game_stop(&self, game: Arc<GameStop>) {
+        if self.game.set(game).is_err() {
+            tracing::warn!("l'arrêt des serveurs de jeu est déjà branché");
+        }
+    }
+
+    /// Comment ce service s'arrête-t-il, d'après sa fiche ? Seulement pour un arrêt ou un redémarrage d'un service
+    /// piloté par le moteur et créé par Hearth : un service adopté, ou lancé par une unité du système, ne reçoit
+    /// JAMAIS d'ordre (BR-JEU-001).
+    async fn game_of(&self, gesture: Gesture, target: &LifecycleTarget) -> Option<GameStopKind> {
+        if !gesture.stops_the_service()
+            || target.adopted
+            || !matches!(target.driver, Driver::Engine { .. })
+        {
+            return None;
+        }
+        match self.game.get()?.lookup(&target.key, target.grace_s).await {
+            GameLookup::NotAGame => None,
+            GameLookup::Game(kind) => Some(kind),
+        }
     }
 
     // -----------------------------------------------------------------------------------------
@@ -321,9 +390,12 @@ impl ServiceLifecycle {
             StateRefusal::AlreadyInState(state) => LifecycleError::AlreadyInState(state),
             StateRefusal::NotDrivable(state) => LifecycleError::NotDrivable(state),
         })?;
-        let plan = gesture
-            .plan()
-            .map_err(|error| LifecycleError::Internal(error.to_string()))?;
+        let game = self.game_of(gesture, &target).await;
+        let plan = match &game {
+            Some(kind) => op_plan(gesture, kind),
+            None => gesture.plan(),
+        }
+        .map_err(|error| LifecycleError::Internal(error.to_string()))?;
         let account = actor
             .account
             .as_ref()
@@ -380,6 +452,7 @@ impl ServiceLifecycle {
             actor,
             account,
             requested_at: self.clock.now(),
+            game,
         };
         let this = Arc::clone(self);
         tokio::spawn(async move { this.execute(job).await });
@@ -417,10 +490,22 @@ impl ServiceLifecycle {
                 registry: &self.registry,
                 key: job.target.key.clone(),
             };
-            match job.gesture {
-                Gesture::Stop => self.run_stop(&job, started).await,
-                Gesture::Start => self.run_start(&job).await,
-                Gesture::Restart => self.run_restart(&job, started).await,
+            let finish = match (&job.game, job.gesture) {
+                // Un serveur de jeu dont la fiche déclare une suite (ou qui demande une décision) : HRT-103.
+                (Some(GameStopKind::Steps(plan)), Gesture::Stop | Gesture::Restart) => {
+                    self.run_game(&job, plan).await
+                }
+                (_, Gesture::Stop) => self.run_stop(&job, started).await,
+                (_, Gesture::Start) => self.run_start(&job).await,
+                (_, Gesture::Restart) => self.run_restart(&job, started).await,
+            };
+            // L'image enregistre elle-même sur le signal : aucun ordre n'a été envoyé (BR-JEU-034).
+            if matches!(job.game, Some(GameStopKind::SelfSaving))
+                && finish.status == OpStatus::Succeeded
+            {
+                finish.with_mention(SaveMention::NotNeeded)
+            } else {
+                finish
             }
         };
         self.settle(&job, finish, started.elapsed()).await;
@@ -429,27 +514,9 @@ impl ServiceLifecycle {
     /// Arrêter : l'arrêt voulu est écrit AVANT l'ordre (`BR-LIFE-010`).
     async fn run_stop(&self, job: &Job, started: Instant) -> Finish {
         let key = &job.target.key;
-        let intent = StopIntent {
-            key: key.clone(),
-            container_id: match &job.target.driver {
-                Driver::Engine { container_id } => container_id.clone(),
-                Driver::Supervisor { .. } => String::new(),
-            },
-            account: job.account.clone(),
-            at: self.clock.now(),
-        };
-        if let Err(error) = self.intents.save(&intent).await {
-            tracing::error!(%error, "arrêt voulu non écrit : l'ordre d'arrêt n'est pas donné");
+        if !self.want_stop(job, TransitionKind::Stopping).await {
             return Finish::failed(Cause::StepFailed);
         }
-        self.registry.note_stop_requested(key, intent.at);
-        if let Err(error) = self.ops.intent(&job.id, "stop", &UndoInfo::default()).await {
-            tracing::error!(%error, "journal de l'action illisible : l'ordre d'arrêt n'est pas donné");
-            self.forget_stop(key).await;
-            return Finish::failed(Cause::StepFailed);
-        }
-        self.registry
-            .begin_transition(key, TransitionKind::Stopping);
         let ordered_at = self.clock.now();
         let ordered = self.order(job).await;
         match ordered {
@@ -459,7 +526,7 @@ impl ServiceLifecycle {
                     "done",
                 );
                 let forced = self
-                    .stop_was_forced(job, started.elapsed(), ordered_at)
+                    .stop_was_forced(job, job.gesture, started.elapsed(), ordered_at)
                     .await;
                 self.refresh(job).await;
                 Finish::done(forced, Watch::after(job.gesture))
@@ -474,6 +541,152 @@ impl ServiceLifecycle {
                 }
                 self.refresh(job).await;
                 finish
+            }
+        }
+    }
+
+    /// L'arrêt voulu est écrit AVANT l'ordre (`BR-LIFE-010`), puis l'étape « stop » du journal, puis « Arrêt en
+    /// cours » est annoncé. `false` : une écriture a échoué, l'arrêt voulu est oublié et AUCUN ordre n'est donné.
+    async fn want_stop(&self, job: &Job, shown: TransitionKind) -> bool {
+        let key = &job.target.key;
+        let intent = StopIntent {
+            key: key.clone(),
+            container_id: match &job.target.driver {
+                Driver::Engine { container_id } => container_id.clone(),
+                Driver::Supervisor { .. } => String::new(),
+            },
+            account: job.account.clone(),
+            at: self.clock.now(),
+        };
+        if let Err(error) = self.intents.save(&intent).await {
+            tracing::error!(%error, "arrêt voulu non écrit : l'ordre d'arrêt n'est pas donné");
+            return false;
+        }
+        self.registry.note_stop_requested(key, intent.at);
+        if let Err(error) = self
+            .ops
+            .intent(&job.id, job.stop_step(), &UndoInfo::default())
+            .await
+        {
+            tracing::error!(%error, "journal de l'action illisible : l'ordre d'arrêt n'est pas donné");
+            self.forget_stop(key).await;
+            return false;
+        }
+        self.registry.begin_transition(key, shown);
+        true
+    }
+
+    /// Arrêter ou redémarrer un serveur de jeu qui déclare une suite d'étapes, ou qui demande une décision
+    /// (HRT-103) : `GameStop::run` déroule la suite et rend la main aux deux moments où l'arrêt devient voulu ou
+    /// cesse de l'être ([`StopMoments`]) ; un redémarrage démarre ensuite le conteneur arrêté.
+    async fn run_game(&self, job: &Job, plan: &StopPlan) -> Finish {
+        let (Some(game), Driver::Engine { container_id }) = (self.game.get(), &job.target.driver)
+        else {
+            tracing::error!(
+                "arrêt de jeu demandé sans l'arrêt des jeux branché ni pilote du moteur"
+            );
+            return Finish::failed(Cause::StepFailed);
+        };
+        let request = StopRequest {
+            op_id: &job.id,
+            container_id,
+            plan,
+            grace: Duration::from_secs(u64::from(job.target.grace_s)),
+            wait: self.timings.wait_for(job.target.grace_s),
+        };
+        let moments = Moments {
+            lifecycle: self,
+            job,
+        };
+        match game.run(&request, &moments).await {
+            GameStopEnd::Stopped {
+                mention,
+                ordered_at,
+                took,
+            } => {
+                journal(
+                    self.ops
+                        .done(&job.id, game_step::STOP, &UndoInfo::default())
+                        .await,
+                    "done",
+                );
+                // La preuve de l'arrêt est celle d'un ARRÊT, même quand le geste est un redémarrage : le
+                // conteneur n'est pas encore reparti.
+                let forced = self
+                    .stop_was_forced(job, Gesture::Stop, took, ordered_at)
+                    .await;
+                if forced {
+                    journal(self.ops.mark_forced(&job.id).await, "forced");
+                }
+                if job.gesture == Gesture::Stop {
+                    self.refresh(job).await;
+                    return Finish::done(forced, Watch::Stopped).with_mention(mention);
+                }
+                self.start_after_stop(job, forced, mention).await
+            }
+            GameStopEnd::Closed => {
+                self.refresh(job).await;
+                Finish::closed()
+            }
+            GameStopEnd::NotWritten => {
+                self.forget_stop(&job.target.key).await;
+                self.refresh(job).await;
+                Finish::failed(Cause::StepFailed)
+            }
+            GameStopEnd::Failed(error) => {
+                journal(self.ops.failed(&job.id, game_step::STOP).await, "failed");
+                let finish = OrderFailure::from_engine(error).finish();
+                // L'ordre n'a pas eu lieu (refusé, service disparu) : rien n'a été arrêté. Un résultat inconnu
+                // garde l'arrêt voulu : l'arrêt a peut-être eu lieu.
+                if finish.status == OpStatus::Failed {
+                    self.forget_stop(&job.target.key).await;
+                }
+                self.refresh(job).await;
+                finish
+            }
+        }
+    }
+
+    /// La seconde moitié d'un redémarrage de jeu : le conteneur arrêté par la suite est démarré. S'il ne repart pas
+    /// (port pris entre-temps), il reste arrêté et l'arrêt reste celui de Hearth (`BR-LIFE-012`).
+    async fn start_after_stop(&self, job: &Job, forced: bool, mention: SaveMention) -> Finish {
+        let key = &job.target.key;
+        let Driver::Engine { container_id } = &job.target.driver else {
+            return Finish::failed(Cause::StepFailed);
+        };
+        if let Err(error) = self
+            .ops
+            .intent(&job.id, game_step::START, &UndoInfo::default())
+            .await
+        {
+            tracing::error!(%error, "journal de l'action illisible : l'ordre de démarrage n'est pas donné");
+            self.refresh(job).await;
+            return Finish::failed(Cause::StepFailed);
+        }
+        let wait = self.timings.wait_for(job.target.grace_s);
+        let started = tokio::time::timeout(wait, self.engine.start(container_id))
+            .await
+            .unwrap_or(Err(EngineError::Timeout));
+        match started {
+            Ok(()) => {
+                journal(
+                    self.ops
+                        .done(&job.id, game_step::START, &UndoInfo::default())
+                        .await,
+                    "done",
+                );
+                self.forget_stop(key).await;
+                self.exempt_starts(job);
+                self.refresh(job).await;
+                Finish::done(forced, Watch::Started).with_mention(mention)
+            }
+            Err(error) => {
+                journal(self.ops.failed(&job.id, game_step::START).await, "failed");
+                self.exempt_starts(job);
+                self.refresh(job).await;
+                OrderFailure::from_engine(error)
+                    .finish()
+                    .with_mention(mention)
             }
         }
     }
@@ -536,7 +749,7 @@ impl ServiceLifecycle {
                 self.forget_stop(key).await;
                 self.exempt_starts(job);
                 let forced = self
-                    .stop_was_forced(job, started.elapsed(), ordered_at)
+                    .stop_was_forced(job, job.gesture, started.elapsed(), ordered_at)
                     .await;
                 self.refresh(job).await;
                 Finish::done(forced, Watch::after(job.gesture))
@@ -608,10 +821,11 @@ impl ServiceLifecycle {
     async fn stop_was_forced(
         &self,
         job: &Job,
+        gesture: Gesture,
         waited: Duration,
         ordered_at: OffsetDateTime,
     ) -> bool {
-        let evidence = self.stop_evidence(job, waited, ordered_at).await;
+        let evidence = self.stop_evidence(job, gesture, waited, ordered_at).await;
         let forced = stop_was_forced(evidence, job.target.grace_s);
         if forced {
             journal(self.ops.mark_forced(&job.id).await, "forced");
@@ -629,10 +843,11 @@ impl ServiceLifecycle {
     async fn stop_evidence(
         &self,
         job: &Job,
+        gesture: Gesture,
         waited: Duration,
         ordered_at: OffsetDateTime,
     ) -> StopEvidence {
-        match (&job.target.driver, job.gesture) {
+        match (&job.target.driver, gesture) {
             (Driver::Engine { container_id }, Gesture::Restart) => {
                 match self.engine.inspect(container_id).await {
                     Ok(Some(observation)) => observation
@@ -744,18 +959,23 @@ impl ServiceLifecycle {
         // FIX:01M5NYA5W781YW5NFQ7W1JGR98 L'issue et l'entrée du journal d'activité sont écrites dans UNE
         // transaction, puis annoncées : une transition refusée n'écrit pas de ligne, et qui lit l'issue (flux
         // ou GET) relit un journal complet.
-        let draft = self.draft(job, finish.status, finish.cause);
-        match self
-            .ops
-            .finish_with(&job.id, finish.status, finish.cause, draft)
-            .await
-        {
-            Ok(()) => {}
-            Err(OpError::IllegalTransition | OpError::Stale) => tracing::info!(
-                operation = %job.id,
-                "action de service non close : l'opération a changé de statut entre-temps"
-            ),
-            Err(error) => tracing::error!(%error, "action de service non close dans le journal"),
+        // Une décision « Annuler » (ou son expiration) a déjà clos l'opération : rien à clore.
+        if !finish.closed {
+            let draft = self.draft(job, finish.status, finish.cause, finish.mention);
+            match self
+                .ops
+                .finish_with(&job.id, finish.status, finish.cause, draft)
+                .await
+            {
+                Ok(()) => {}
+                Err(OpError::IllegalTransition | OpError::Stale) => tracing::info!(
+                    operation = %job.id,
+                    "action de service non close : l'opération a changé de statut entre-temps"
+                ),
+                Err(error) => {
+                    tracing::error!(%error, "action de service non close dans le journal");
+                }
+            }
         }
         tracing::info!(
             operation = %job.id,
@@ -773,14 +993,23 @@ impl ServiceLifecycle {
 
     /// Une entrée au journal d'activité : le compte, le service (son nom), le geste, l'issue et sa cause
     /// typée (`BR-LIFE-018`).
-    fn draft(&self, job: &Job, status: OpStatus, cause: Option<Cause>) -> Option<AuditDraft> {
+    fn draft(
+        &self,
+        job: &Job,
+        status: OpStatus,
+        cause: Option<Cause>,
+        mention: Option<SaveMention>,
+    ) -> Option<AuditDraft> {
         let service = ClientName::parse(&job.target.name)?;
-        let (outcome, note) = match (status, cause) {
-            (OpStatus::Succeeded, Some(Cause::ForcedStop)) => {
-                (Outcome::Succeeded, LifecycleNote::Forced)
+        let forced = matches!(cause, Some(Cause::ForcedStop));
+        let (outcome, note) = match (status, mention) {
+            // Un serveur de jeu : ce qu'il est advenu de l'enregistrement du monde (BR-JEU-032).
+            (OpStatus::Succeeded, Some(save)) => {
+                (Outcome::Succeeded, LifecycleNote::Game { save, forced })
             }
-            (OpStatus::Succeeded, _) => (Outcome::Succeeded, LifecycleNote::Plain),
-            (_, cause) => (
+            (OpStatus::Succeeded, None) if forced => (Outcome::Succeeded, LifecycleNote::Forced),
+            (OpStatus::Succeeded, None) => (Outcome::Succeeded, LifecycleNote::Plain),
+            (_, _) => (
                 Outcome::Failed(cause.map_or(Reason::Internal, reason_of)),
                 LifecycleNote::Plain,
             ),
@@ -878,6 +1107,45 @@ impl ServiceLifecycle {
         self.ops.with_index(|index| {
             index.busy(key).is_none() && index.last_action(key).is_some_and(|last| last.id == id)
         })
+    }
+}
+
+impl Job {
+    /// L'étape du journal qui porte l'arrêt : celle du geste pour un arrêt ordinaire, `stop` pour un jeu.
+    fn stop_step(&self) -> &'static str {
+        if self.game.is_some() {
+            game_step::STOP
+        } else {
+            self.gesture.step()
+        }
+    }
+}
+
+/// Ce que `GameStop` demande au cas d'usage aux moments où l'arrêt devient voulu, ou cesse de l'être (HRT-103).
+struct Moments<'a> {
+    lifecycle: &'a ServiceLifecycle,
+    job: &'a Job,
+}
+
+#[async_trait]
+impl StopMoments for Moments<'_> {
+    async fn stop_wanted(&self) -> bool {
+        let shown = if self.job.gesture == Gesture::Restart {
+            TransitionKind::Restarting
+        } else {
+            TransitionKind::Stopping
+        };
+        self.lifecycle.want_stop(self.job, shown).await
+    }
+
+    async fn stop_dropped(&self) {
+        let lifecycle = self.lifecycle;
+        lifecycle.forget_stop(&self.job.target.key).await;
+        lifecycle.registry.end_transition(&self.job.target.key);
+        journal(
+            lifecycle.ops.undone(&self.job.id, game_step::STOP).await,
+            "undone",
+        );
     }
 }
 

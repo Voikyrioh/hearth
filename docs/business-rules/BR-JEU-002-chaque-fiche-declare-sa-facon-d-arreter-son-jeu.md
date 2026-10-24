@@ -5,7 +5,7 @@ titre: Chaque fiche déclare la façon d'arrêter son jeu : une suite d'étapes 
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-serveur-de-jeu-au-quotidien.md (BR-JEU-002), contexts/hearth/conceptions/2026-10-13-technique-fiches-de-jeu.md, HRT-113
-maj: 2026-10-13
+maj: 2026-10-24
 ---
 
 # BR-JEU-002 — Chaque fiche déclare la façon d'arrêter son jeu : une suite d'étapes bornée, des littéraux de la fiche, jamais saisie
@@ -16,6 +16,7 @@ La fiche dit si le jeu enregistre son monde à l'arrêt (`by_image_on_signal`), 
 ## Application (code)
 - `crates/hearth-agent/src/domain/catalog/stop_plan.rs::{stop_plan, save_plan, StopPlan}`
 - `crates/hearth-agent/src/domain/catalog/loading/invariants.rs::{check_stop, check_steps}`
+- `crates/hearth-agent/src/application/game_stop.rs::GameStop::run` (le déroulé, HRT-103)
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_state.rs::a_tested_sequence_ends_with_the_exit_order_then_the_engine_stop`
@@ -24,10 +25,11 @@ La fiche dit si le jeu enregistre son monde à l'arrêt (`by_image_on_signal`), 
 - `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::i9_a_fiche_cannot_exhaust_the_agent_or_the_screen_bounds`
 
 ## Cas limites
-- Le déroulé de la séquence (envoi par l'entrée standard, suivi des journaux, décision, point de non-retour) est à HRT-103 ; ce ticket produit le PLAN.
+- Le PLAN est produit par `stop_plan` (HRT-113) ; son déroulé (envoi par l'entrée standard, suivi des journaux, décision, arrêt du moteur aussitôt après l'ordre de sortie) est `GameStop::run` (HRT-103, BR-JEU-003, BR-JEU-005, BR-JEU-034).
 
 ## Règles liées
-- BR-JEU-038, BR-JEU-040
+- BR-JEU-003, BR-JEU-016, BR-JEU-034, BR-JEU-038, BR-JEU-040
 
 ## Historique
+- 2026-10-24 — le déroulé existe (HRT-103).
 - 2026-10-13 — création (HRT-113, format de fiche version 2, domaine pur).

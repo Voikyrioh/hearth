@@ -13,9 +13,14 @@
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Extension, Path, State};
+use axum::http::header::{CACHE_CONTROL, PRAGMA};
+use axum::http::{HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
+use hearth_proto::api::game_secret::GameSecret;
 use hearth_proto::api::game_settings::{
     AnalyzeRequest, ImportView, SaveSettingsRequest, SaveSettingsResponse, SettingsView,
 };
+use hearth_proto::api::services::Concealed;
 use hearth_proto::error::{ErrorBody, ErrorCode};
 
 use super::auth::Requester;
@@ -81,6 +86,10 @@ fn settings_error(error: SettingsError) -> ApiError {
             ErrorCode::InternalError,
             "Les secrets des services sont illisibles : rien n'a été changé.",
         ),
+        SettingsError::JournalUnavailable => ApiError::new(
+            ErrorCode::Busy,
+            "La révélation n'a pas pu être consignée au journal : aucune valeur n'est rendue. Réessayez dans un instant.",
+        ),
         SettingsError::Invalid(field) => ApiError(ErrorBody::with_details(
             ErrorCode::ValidationError,
             "Le corps de la demande n'est pas valable.",
@@ -139,4 +148,29 @@ pub async fn save(
         .await
         .map(Json)
         .map_err(settings_error)
+}
+
+/// `GET /api/v1/services/{key}/game-secret` : le mot de passe du serveur de jeu, pour les comptes qui ont le droit
+/// « gérer les services » (BR-JEU-025, BR-GRANT-004). Lu dans la description chiffrée, jamais dans le moteur ni dans
+/// le fichier ; la révélation est inscrite au journal sans la valeur (BR-JEU-026). Aucun cache.
+pub async fn game_secret(
+    State(state): State<AppState>,
+    Requester(actor): Requester,
+    Path(key): Path<String>,
+) -> Result<Response, ApiError> {
+    let key = key_of(&key)?;
+    let password = state
+        .game_settings
+        .reveal_game_password(&key, actor)
+        .await
+        .map_err(settings_error)?;
+    let body = GameSecret {
+        password: password.map(|secret| Concealed::new(secret.expose())),
+    };
+    let mut response = (StatusCode::OK, Json(body)).into_response();
+    // Une valeur secrète : aucun cache, ni du client ni d'un intermédiaire.
+    let headers = response.headers_mut();
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(PRAGMA, HeaderValue::from_static("no-cache"));
+    Ok(response)
 }

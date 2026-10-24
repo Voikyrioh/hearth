@@ -45,9 +45,10 @@ use super::service_ops::OpLocks;
 use super::service_specs::{ServiceSpecs, SpecServiceError};
 use crate::domain::audit::{Actor, AuditAction, ClientName, Outcome, Target};
 use crate::domain::catalog::formats::{ConfigFormat, MAX_FILE_BYTES, format_for};
-use crate::domain::catalog::loading::model::{Fiche, Setting, hex};
+use crate::domain::catalog::loading::model::{Fiche, Setting, ValueSpec, hex};
 use crate::domain::catalog::loading::schema::fiche::{Channel, ChannelKind};
 use crate::domain::catalog::loading::schema::settings::ChangeWhen;
+use crate::domain::catalog::loading::schema::settings::SecretKind;
 use crate::domain::catalog::settings_io::{
     DriftChoice, ImportStatus, SaveFailure, SavePlan, analyze_import, entries_of, imported_value,
     plan_save,
@@ -113,6 +114,9 @@ pub enum SettingsError {
     Busy,
     #[error("les secrets des services sont illisibles")]
     SecretsUnreadable,
+    /// La révélation n'a pas pu être consignée au journal d'activité : aucune valeur n'est rendue (BR-JEU-026).
+    #[error("la révélation n'a pas pu être consignée")]
+    JournalUnavailable,
     /// Un champ du corps est hors des bornes ou incohérent.
     #[error("corps refusé : {0}")]
     Invalid(&'static str),
@@ -1182,6 +1186,62 @@ impl GameSettings {
                 )
                 .await;
         }
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // Révéler le mot de passe du serveur de jeu (HRT-103, BR-JEU-025 à BR-JEU-027)
+    // -------------------------------------------------------------------------------------------------
+
+    /// Le mot de passe du serveur de jeu, descellé de la description du service : ni le moteur, ni le fichier du
+    /// jeu ne sont lus (BR-JEU-025). Le droit « gérer les services » est jugé par la couche d'accès. La réussite est
+    /// inscrite au journal AVANT de rendre la valeur, et la conditionne (échec fermé) : le journal nomme le service,
+    /// jamais la valeur (BR-JEU-026). `None` : le serveur n'a pas de mot de passe (BR-JEU-027). Jamais un secret
+    /// généré par Hearth, ni imposé par la fiche (BR-JEU-039, BR-JEU-040) : un seul réglage est désigné, celui de
+    /// genre `game_password` qui n'est pas imposé. Un service adopté n'a pas de description : inconnu (BR-JEU-001).
+    pub async fn reveal_game_password(
+        &self,
+        key: &ServiceKey,
+        actor: Actor,
+    ) -> Result<Option<Secret>, SettingsError> {
+        let loaded = self.load(key).await?;
+        let setting = loaded
+            .fiche
+            .settings
+            .iter()
+            .find(|setting| {
+                setting.imposed.is_none()
+                    && matches!(
+                        setting.spec,
+                        ValueSpec::Secret {
+                            kind: SecretKind::GamePassword,
+                            ..
+                        }
+                    )
+            })
+            .ok_or(SettingsError::NotFound)?;
+        let value = if matches!(loaded.state.slot(&setting.id), Some(Slot::Secret)) {
+            let (secrets, _generated) = self.spec_secrets(&loaded).await?;
+            secrets
+                .get(&setting.id)
+                .filter(|secret| !secret.expose().is_empty())
+                .map(|secret| Secret::new(secret.expose().to_owned()))
+        } else {
+            None
+        };
+        let service = ClientName::parse(&loaded.name)
+            .or_else(|| ClientName::parse(loaded.key.as_str()))
+            .map_or(Target::None, Target::Service);
+        // La consignation précède la valeur ET la conditionne : si elle échoue, `value` est jeté.
+        self.sink
+            .record_required(
+                actor,
+                AuditAction::ServiceGamePasswordReveal,
+                service,
+                Outcome::Succeeded,
+            )
+            .await
+            .map_err(|_| SettingsError::JournalUnavailable)?;
+        Ok(value)
     }
 
     // -------------------------------------------------------------------------------------------------
