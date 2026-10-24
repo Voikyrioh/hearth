@@ -1,4 +1,4 @@
-//! Les réglages d'un serveur de jeu (HRT-108, ADR-0051, BR-FICHE-037 à 053) : `GET /services/{key}/settings`,
+//! Les réglages d'un serveur de jeu (HRT-108, ADR-0051, BR-FICHE-037, 042, 044, 046 à 049, 052, 053) : `GET /services/{key}/settings`,
 //! `POST /services/{key}/settings/analyze` (lecture d'un texte collé, rien n'est écrit) et
 //! `PUT /services/{key}/settings` (acte `GameSettingsSave` `0x1E`). Annoncés par la capacité
 //! [`CAPABILITY_GAME_SETTINGS`].

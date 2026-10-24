@@ -428,7 +428,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         audit: None,
         route: || get(deployments::capacity),
     },
-    // Les réglages d'un serveur de jeu (HRT-108, ADR-0051, BR-FICHE-037 à 053) : lire, analyser un texte collé (une
+    // Les réglages d'un serveur de jeu (HRT-108, ADR-0051, BR-FICHE-037, 042, 044, 046 à 049, 052, 053) : lire, analyser un texte collé (une
     // consultation, rien n'est écrit, le texte est oublié) et enregistrer (acte `GameSettingsSave` `0x1E`, couvert
     // par l'élévation). Les trois exigent le droit « gérer les services » (niveau `Services`, refus consigné).
     Endpoint {

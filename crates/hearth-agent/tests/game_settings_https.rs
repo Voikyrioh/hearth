@@ -298,7 +298,7 @@ async fn reading_needs_the_right_to_manage_services_and_a_stranger_key_is_unknow
         assert_eq!(reply.status, expected, "{}", reply.text);
     }
     let other = ServiceKey::parse("h_01JZ0000000000000000000777").unwrap();
-    assert_eq!(code(&b.view_as(&b.ada, &other).await), "SERVICE_NOT_FOUND");
+    assert_eq!(code(&b.view_as(&b.ada, &other).await), "NOT_A_GAME_SERVICE");
     let reply = b
         .agent
         .request("GET", "/services/pas-une-cle/settings")

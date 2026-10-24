@@ -1,10 +1,10 @@
 {
   "serviceRights": {
-    "adminGranted": { "known": true, "granted": true, "account": "marie" },
-    "adminNone": { "known": true, "granted": false, "account": "marie" },
-    "readonlyGranted": { "known": true, "granted": true, "account": "paul" },
-    "readonlyNone": { "known": true, "granted": false, "account": "paul" },
-    "oldAgent": { "known": false, "granted": false, "account": "marie" }
+    "adminGranted": { "known": true, "granted": true, "gameSettings": true, "account": "marie" },
+    "adminNone": { "known": true, "granted": false, "gameSettings": true, "account": "marie" },
+    "readonlyGranted": { "known": true, "granted": true, "gameSettings": true, "account": "paul" },
+    "readonlyNone": { "known": true, "granted": false, "gameSettings": true, "account": "paul" },
+    "oldAgent": { "known": false, "granted": false, "gameSettings": false, "account": "marie" }
   },
   "accountList": {
     "accounts": [

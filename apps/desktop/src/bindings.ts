@@ -1898,6 +1898,8 @@ export type ServiceOperationEvent = {
 export type ServiceRightsDto = {
 	known: boolean,
 	granted: boolean,
+	/**  L'agent annonce `game-settings` (HRT-109) : seul cas où l'onglet « Réglages » peut exister. */
+	gameSettings: boolean,
 	account: string,
 };
 

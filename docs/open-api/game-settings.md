@@ -1,6 +1,6 @@
 # Réglages d'un serveur de jeu (HRT-108)
 
-Capacité `game-settings` annoncée par [`GET /hello`](./hello.md). Trois routes, toutes de niveau `Services` (le droit « gérer les services », refus consigné) ; elles ne servent qu'un service créé par Hearth depuis une fiche que CET agent propose (sinon `404 SERVICE_NOT_FOUND`, même réponse qu'une clé inconnue). Décisions : ADR-0051. Règles : BR-FICHE-037, 042, 044, 046 à 049, 052, 053, BR-JEU-035, 036.
+Capacité `game-settings` annoncée par [`GET /hello`](./hello.md). Trois routes, toutes de niveau `Services` (le droit « gérer les services », refus consigné) ; elles ne servent qu'un service créé par Hearth depuis une fiche que CET agent propose ; tout autre service (clé inconnue, adopté, déployé à la main, fiche que cet agent ne propose pas) reçoit `404 NOT_A_GAME_SERVICE`, une réponse unique qui ne dit pas si la clé existe ; une clé mal formée reçoit `404 SERVICE_NOT_FOUND` ; un agent sans la capacité répond `404 NOT_FOUND` (route inconnue). Le client lit la capacité `game-settings` du `/hello` pour montrer l'onglet « Réglages », puis ne lit la vue qu'à l'ouverture de l'onglet. Décisions : ADR-0051. Règles : BR-FICHE-037, 042, 044, 046 à 049, 052, 053, BR-JEU-035, 036.
 
 Les libellés, aides, types et bornes d'un réglage ne passent pas ici : le client les lit dans la fiche ([`GET /catalog/{id}`](./catalog.md)). Ces routes ne portent que les VALEURS voulues et l'état du fichier. **Un secret n'y figure jamais**, ni sa valeur ni sa longueur.
 

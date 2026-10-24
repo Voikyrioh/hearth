@@ -18,7 +18,7 @@ use tokio::time::timeout;
 
 use super::LinkManager;
 use crate::domain::server::ServerId;
-use crate::domain::services::agent_knows_service_rights;
+use crate::domain::services::{agent_knows_service_rights, agent_serves_game_settings};
 use crate::error::LinkError;
 use crate::ports::transport::Target;
 
@@ -31,6 +31,8 @@ pub struct ServiceRightsRead {
     pub agent_knows: bool,
     /// Le compte connecté a le droit (toujours `false` si l'agent ne le connaît pas).
     pub granted: bool,
+    /// L'agent annonce `game-settings` : l'onglet « Réglages » d'un service de fiche peut exister (HRT-109).
+    pub game_settings: bool,
     /// L'identifiant du compte connecté, tel que l'agent le connaît : la commande à lancer sur le serveur
     /// le porte (BR-GRANT-014). Texte de l'agent, à valider avant tout affichage.
     pub account: String,
@@ -63,6 +65,7 @@ impl LinkManager {
         Ok(ServiceRightsRead {
             agent_knows,
             granted: agent_knows && has_right(&me.account.rights, RIGHT_SERVICES),
+            game_settings: agent_serves_game_settings(&capabilities),
             account: me.account.username,
         })
     }

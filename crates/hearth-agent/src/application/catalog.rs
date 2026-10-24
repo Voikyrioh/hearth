@@ -638,6 +638,51 @@ mod tests {
         assert_eq!(name.key, "worldname");
     }
 
+    /// La fiche de Terraria telle que le client simulé la montre (`apps/desktop/src/link/fixtures/`) : générée d'ici, jamais
+    /// écrite à la main. Si la fiche bouge sans que la fixture suive, ce test échoue et dit comment la refaire :
+    /// `HEARTH_REGEN_FIXTURES=1 cargo test -p hearth-agent --lib terraria_fixture`.
+    #[test]
+    fn terraria_fixture_of_the_simulated_client_follows_the_embedded_fiche() {
+        let catalog = CatalogService::embedded(true);
+        let detail = catalog.detail("terraria").unwrap();
+        let fiche = catalog.fiche("terraria").unwrap();
+        let settings: Vec<serde_json::Value> = detail
+            .settings
+            .iter()
+            .zip(&fiche.settings)
+            .map(|(view, setting)| {
+                let mut wire = serde_json::to_value(view).unwrap();
+                // Le canal n'est pas sur le fil : le simulateur en déduit l'effet comme l'agent (fichier, redémarrage ;
+                // argument, recréation).
+                wire["channel"] = serde_json::Value::String(setting.channel.clone());
+                wire
+            })
+            .collect();
+        let generated = serde_json::json!({
+            "fiche": { "id": "terraria", "version": detail.card.version, "digest": detail.digest },
+            "themes": serde_json::to_value(&detail.themes).unwrap(),
+            "settings": settings,
+        });
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../apps/desktop/src/link/fixtures/terraria-settings.json"
+        );
+        if std::env::var_os("HEARTH_REGEN_FIXTURES").is_some() {
+            std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+            let mut text = serde_json::to_string_pretty(&generated).unwrap();
+            text.push(char::from(10));
+            std::fs::write(path, text).unwrap();
+        }
+        let on_disk: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(path).expect("fixture absente : HEARTH_REGEN_FIXTURES=1"),
+        )
+        .unwrap();
+        assert_eq!(
+            on_disk, generated,
+            "la fiche de Terraria a changé : refaire la fixture du client simulé avec `HEARTH_REGEN_FIXTURES=1 cargo test -p hearth-agent --lib terraria_fixture`"
+        );
+    }
+
     #[test]
     fn a_list_setting_says_its_separator_charset_and_maximum() {
         let catalog = CatalogService::from_parts(vec![rich()], Vec::new(), true);

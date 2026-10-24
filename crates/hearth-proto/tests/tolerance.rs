@@ -659,6 +659,22 @@ const LOCAL_ENUMS: &[(&str, &str)] = &[
         "commande de la WebView (quelle adresse de la fiche s'ouvre : un genre, jamais l'adresse)",
     ),
     (
+        "service_ops/game_settings_dto.rs::SettingEffectDto",
+        "commande de la WebView (effet annoncé, signé dans l'acte) ; lu de l'agent par `hearth_proto::SettingEffect`",
+    ),
+    (
+        "service_ops/game_settings_dto.rs::SaveOriginDto",
+        "commande de la WebView (d'où vient l'enregistrement) ; lu de l'agent par `hearth_proto::SaveOrigin`",
+    ),
+    (
+        "service_ops/game_settings_dto.rs::ChangeActionDto",
+        "commande de la WebView (geste sur un réglage) ; lu de l'agent par `hearth_proto::ChangeAction`",
+    ),
+    (
+        "service_ops/game_settings_dto.rs::DriftResolutionDto",
+        "commande de la WebView (choix d'un écart) ; lu de l'agent par `hearth_proto::DriftResolution`",
+    ),
+    (
         "service_ops/dto.rs::OperationChoiceDto",
         "commande de la WebView (choix de la décision) ; lu de l'agent par `hearth_proto::OperationChoice`",
     ),

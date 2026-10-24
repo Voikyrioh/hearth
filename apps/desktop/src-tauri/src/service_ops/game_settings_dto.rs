@@ -1,5 +1,5 @@
 //! Ce que la coquille échange avec l'interface pour les réglages d'un serveur de jeu (HRT-109, ADR-0051,
-//! `BR-FICHE-037` à `053`).
+//! `BR-FICHE-037`, `040` à `049`, `051` à `054`).
 //!
 //! - **Sorties** : copies fidèles de `hearth_proto::api::game_settings`, rien de plus. Un secret n'y figure jamais
 //!   (l'agent ne le rend pas) ; une valeur de réglage inconnu au nom suspect est déjà masquée par l'agent. Une

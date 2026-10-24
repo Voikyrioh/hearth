@@ -1,5 +1,5 @@
 //! Les réglages d'un serveur de jeu : lire, analyser un texte collé, enregistrer (HRT-108, ADR-0051,
-//! BR-FICHE-037 à 053, BR-JEU-035 et BR-JEU-036).
+//! BR-FICHE-037, 042, 044, 046 à 049, 052, 053, BR-JEU-035 et BR-JEU-036).
 //!
 //! **Deux vérités, sans recouvrement.** Le fichier du jeu fait foi pour ses octets ; la table `game_settings` (ou, à
 //! défaut, les réponses de l'installation) pour les valeurs que le compte VEUT. Un écart est montré, jamais corrigé
@@ -73,7 +73,8 @@ const SEAL_REV: u32 = 0;
 
 #[derive(Debug, Error)]
 pub enum SettingsError {
-    /// Aucun serveur de jeu de cette clé (service inconnu, pas créé par Hearth, ou pas depuis une fiche proposée).
+    /// Aucun serveur de jeu de cette clé (service inconnu, pas créé par Hearth, ou pas depuis une fiche proposée) :
+    /// l'API répond `NOT_A_GAME_SERVICE`.
     #[error("aucun serveur de jeu de cette clé")]
     NotFound,
     /// Les réglages ont changé depuis leur lecture.

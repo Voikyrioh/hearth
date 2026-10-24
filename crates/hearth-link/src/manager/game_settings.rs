@@ -1,4 +1,4 @@
-//! Les réglages d'un serveur de jeu depuis le client (HRT-109, ADR-0051, `BR-FICHE-037` à `053`) : `GET
+//! Les réglages d'un serveur de jeu depuis le client (HRT-109, ADR-0051, `BR-FICHE-037`, `040` à `049`, `051` à `054`) : `GET
 //! /services/{key}/settings` (la vue), `POST /services/{key}/settings/analyze` (la lecture d'un texte collé) et
 //! `PUT /services/{key}/settings` (l'acte `GameSettingsSave` `0x1E`). Chemins construits ici : la clé du service est
 //! vérifiée puis encodée par le code, jamais fournie comme chemin.

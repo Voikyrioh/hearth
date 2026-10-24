@@ -1,4 +1,4 @@
-//! Les réglages d'un serveur de jeu (HRT-109, ADR-0051, `BR-FICHE-037` à `053`) : deux lectures (la vue, le texte
+//! Les réglages d'un serveur de jeu (HRT-109, ADR-0051, `BR-FICHE-037`, `040` à `049`, `051` à `054`) : deux lectures (la vue, le texte
 //! collé) et l'enregistrement, un acte d'administration confirmé, couvert par l'élévation. Les requêtes sont
 //! construites par la liaison (`LinkManager::{read,analyze,save}_game_settings`, chemins fixes, clé vérifiée puis
 //! encodée) ; les refus se lisent par leur CODE, jamais par leur texte : aucune valeur reçue n'est répétée. L'agent ne
@@ -18,6 +18,15 @@ use super::game_settings_dto::{
 use crate::link_dto::LinkFailure;
 use crate::reauth::wire::{Confirmation, confirmation_of};
 
+/// Ce service n'a pas de réglages de jeu : `NOT_A_GAME_SERVICE` (pas né d'une fiche) ou `NOT_FOUND` (un agent plus
+/// ancien, sans la route). Une clé mal formée (`SERVICE_NOT_FOUND`) n'en est PAS : c'est une erreur.
+fn has_no_settings(error: &LinkError) -> bool {
+    matches!(
+        error,
+        LinkError::Rejected(Some(ErrorCode::NotAGameService | ErrorCode::NotFound))
+    )
+}
+
 /// Les réglages voulus et l'état du fichier (`GET /services/{key}/settings`). Un service qui n'est pas né d'une fiche
 /// (ou un agent plus ancien) n'a pas de réglages de jeu : ce n'est pas une panne, c'est `Absent`.
 pub async fn read(
@@ -29,9 +38,7 @@ pub async fn read(
         Ok(view) => Ok(SettingsReadDto::Found {
             view: Box::new(SettingsViewDto::from(&view)),
         }),
-        Err(LinkError::Rejected(Some(ErrorCode::ServiceNotFound | ErrorCode::NotFound))) => {
-            Ok(SettingsReadDto::Absent)
-        }
+        Err(error) if has_no_settings(&error) => Ok(SettingsReadDto::Absent),
         Err(other) => Err(other.into()),
     }
 }
@@ -207,6 +214,22 @@ mod tests {
         match interpret_save(status, &body).unwrap() {
             SaveOutcome::Refused { refusal } => refusal,
             other => panic!("refus attendu, reçu {other:?}"),
+        }
+    }
+
+    #[test]
+    fn only_a_service_that_is_not_a_game_server_or_an_old_agent_has_no_settings() {
+        for absent in [ErrorCode::NotAGameService, ErrorCode::NotFound] {
+            assert!(has_no_settings(&LinkError::Rejected(Some(absent))));
+        }
+        // Une clé mal formée, un refus de droit, une panne : ce sont des erreurs, jamais « pas de réglages ».
+        for error in [
+            LinkError::Rejected(Some(ErrorCode::ServiceNotFound)),
+            LinkError::Rejected(Some(ErrorCode::ForbiddenRole)),
+            LinkError::Rejected(None),
+            LinkError::Timeout,
+        ] {
+            assert!(!has_no_settings(&error), "{error:?}");
         }
     }
 
