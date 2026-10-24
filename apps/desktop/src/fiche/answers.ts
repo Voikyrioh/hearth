@@ -1,5 +1,6 @@
 import type { FicheDetail, FicheQuestion, FicheSetting } from "@/link";
 import { differsFromProposed } from "@/settings/modified";
+import { correctedText } from "./character";
 
 /**
  * Les questions d'installation d'une fiche (HRT-102, BR-FICHE-016, BR-FICHE-017, BR-FICHE-038), des fonctions pures sans
@@ -15,7 +16,7 @@ export type AnswerIssue =
   | { code: "too_long"; max: number }
   | { code: "multiline" }
   /** `character` : le caractère refusé, `null` pour un secret (jamais un caractère d'un mot de passe). */
-  | { code: "charset"; character: string | null }
+  | { code: "charset"; character: string | null; suggestion?: string | null }
   | { code: "not_integer" }
   | { code: "out_of_range"; min: number | null; max: number | null }
   | { code: "bad_choice" };
@@ -69,6 +70,12 @@ export function answerIssue(question: FicheQuestion, value: string): AnswerIssue
       const length = lengthIssue(question, value);
       if (length) return length;
       if (/[\r\n]/.test(value)) return { code: "multiline" };
+      const withSuggestion = (character: string | null): AnswerIssue => {
+        // La correction n'est proposée que si elle passe elle-même les contrôles de la question.
+        const fixed = correctedText(question.charset, value);
+        const suggestion = fixed !== null && lengthIssue(question, fixed) === null ? fixed : null;
+        return { code: "charset", character, suggestion };
+      };
       for (const char of value) {
         const bad =
           question.charset === "file_stem"
@@ -76,10 +83,10 @@ export function answerIssue(question: FicheQuestion, value: string): AnswerIssue
             : question.charset === "arg_safe"
               ? !ARG_SAFE.test(char)
               : RISKY.test(char);
-        if (bad) return { code: "charset", character: char };
+        if (bad) return withSuggestion(char);
       }
       if (question.charset === "arg_safe" && /^[-+]/.test(value)) {
-        return { code: "charset", character: value[0] ?? null };
+        return withSuggestion(value[0] ?? null);
       }
       return null;
     }

@@ -1,6 +1,6 @@
 {
   "fiche": {
-    "digest": "445855f4c44590913b08656a3a2fd5af8b8e43e90c7348d72182e0338b85dee5",
+    "digest": "1b1e88e4ce58a8176e0903d28eb5d8ec886c3c078148a24a627605375d187f02",
     "id": "terraria",
     "version": 2
   },
@@ -125,7 +125,7 @@
       "question": {
         "choices": [],
         "frozen_after_creation": false,
-        "help": "Combien de joueurs peuvent être connectés en même temps, de 1 à 255. Plus il y en a, plus le serveur travaille : surveillez l'onglet Ressources.",
+        "help": "Combien de joueurs peuvent être connectés en même temps, de 1 à 255. Plus il y en a, plus le serveur travaille : surveillez la mémoire et le processeur du service.",
         "id": "max_players",
         "kind": "int",
         "label": "Nombre de joueurs",
@@ -425,7 +425,7 @@
           }
         ],
         "frozen_after_creation": false,
-        "help": "La priorité que le système donne au programme du serveur. Son effet sous Linux, dans un service, n'est pas vérifié : pour limiter le serveur, utilisez plutôt les limites de l'onglet Ressources.",
+        "help": "La priorité que le système donne au programme du serveur. Son effet sous Linux, dans un service, n'est pas vérifié : pour limiter le serveur, utilisez plutôt les limites de mémoire et de processeur du service.",
         "id": "priority",
         "kind": "choice",
         "label": "Priorité du serveur",

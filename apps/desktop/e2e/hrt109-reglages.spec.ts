@@ -258,7 +258,7 @@ test("« Voir tous les réglages » dans l'installation : replié, déplié dans
   page,
 }) => {
   await page.goto("/?nodev#/servers/forge/catalogue/terraria/installer");
-  await expect(page.locator("[data-install-title]")).toHaveText("Installer Terraria");
+  await expect(page.locator("[data-page-title]")).toHaveText("Installer Terraria");
   await expect(page.locator("[data-install-settings-body]")).toHaveCount(0);
   await page.locator("[data-install-settings-toggle]").click();
   const body = page.locator("[data-install-settings-body]");

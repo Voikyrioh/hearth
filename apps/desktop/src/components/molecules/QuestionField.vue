@@ -8,7 +8,7 @@ import HPasswordInput from "@/components/atoms/HPasswordInput.vue";
 import HSegmented from "@/components/atoms/HSegmented.vue";
 import HSelect from "@/components/atoms/HSelect.vue";
 import Callout from "@/components/molecules/Callout.vue";
-import { boundsText, charsetHint } from "@/fiche/messages";
+import { extraHint } from "@/fiche/messages";
 import { t } from "@/i18n";
 import type { FicheQuestion } from "@/link";
 
@@ -42,8 +42,9 @@ const emit = defineEmits<{
 
 const label = computed(() => safeText(props.question.label));
 const help = computed(() => {
-  const parts = [safeText(props.question.help)];
-  const hint = charsetHint(props.question) ?? boundsText(props.question);
+  const own = safeText(props.question.help);
+  const parts = [own];
+  const hint = extraHint(props.question, own);
   if (hint) parts.push(hint);
   if (props.question.secret) parts.push(t("fiche.secretHint"));
   return parts.filter((part) => part !== "").join(" ");

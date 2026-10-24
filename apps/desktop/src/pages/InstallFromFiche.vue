@@ -21,8 +21,10 @@ import { useDeployFlow } from "@/composables/useDeployFlow";
 import { useFicheInstall } from "@/composables/useFicheInstall";
 import { useFicheLinks } from "@/composables/useFicheLinks";
 import { useNeedsLink } from "@/composables/useNeedsLink";
+import { usePageTitle } from "@/composables/usePageTitle";
 import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
+import { useUnloadGuard } from "@/composables/useUnloadGuard";
 import { deployDoor } from "@/deploy/availability";
 import { minimumText } from "@/fiche/messages";
 import { t } from "@/i18n";
@@ -168,6 +170,21 @@ watch(
   { immediate: true },
 );
 
+// ── Le curseur dans le premier champ (revue UX 2026-10-24, constat 16) ───────────────────────────
+// Comme le formulaire de déploiement : on arrive, on tape. Pas pour « Installer avec les valeurs proposées », dont la
+// fenêtre prend le focus.
+let focusedFirst = false;
+watch(
+  () => [detail.value, draft.value] as const,
+  async ([loaded, current]) => {
+    if (focusedFirst || !loaded || !current || route.query.proposees === "1") return;
+    focusedFirst = true;
+    await nextTick();
+    answers.value?.focusName();
+  },
+  { immediate: true },
+);
+
 // ── Fermer, abandonner ──────────────────────────────────────────────────────────────────────────
 const abandonOpen = ref(false);
 let pendingLeave: RouteLocationNormalized | null = null;
@@ -181,6 +198,25 @@ onBeforeRouteLeave((to) => {
   abandonOpen.value = true;
   return false;
 });
+
+// Un rechargement efface la saisie sans passer par le routeur : même question qu'à « Fermer » (constat 7 de la revue UX).
+useUnloadGuard(() => !allowLeave && flow.launch.value === null && edited());
+
+/**
+ * « Retour » ou Échap sur le récapitulatif ouvert par « Installer avec les valeurs proposées » ramène à la fiche, d'où on
+ * vient, tant que rien n'a été saisi : le formulaire en trois étapes n'a jamais été demandé (revue UX 2026-10-24,
+ * constat 20). Une saisie déjà commencée, ou un refus qui a ramené à la page, reste sur la page.
+ */
+const proposedEntry = route.query.proposees === "1";
+function closeSummary() {
+  if (proposedEntry && !edited()) {
+    install.wipe();
+    allowLeave = true;
+    void router.push(back());
+    return;
+  }
+  flow.closeSummary();
+}
 
 function requestClose() {
   if (edited()) {
@@ -251,6 +287,8 @@ const steps = computed(() => [
 ]);
 const progressOpen = computed(() => flow.launch.value !== null);
 const name = computed(() => safeText(detail.value?.card.name ?? ""));
+// Un seul titre, à chaque étape : « Installer Terraria » (revue UX 2026-10-24, constat 17).
+usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value }) : null));
 </script>
 
 <template>
@@ -291,7 +329,6 @@ const name = computed(() => safeText(detail.value?.card.name ?? ""));
     </div>
 
     <template v-else>
-      <h2 class="inst__title" data-install-title>{{ t("fiche.installTitle", { name }) }}</h2>
       <StepTrail :steps="steps" :current="install.step.value - 1" :label="t('fiche.stepsLabel')" />
 
       <Callout v-if="refusalVisible" tone="error" role="alert" data-install-refusal>
@@ -359,7 +396,7 @@ const name = computed(() => safeText(detail.value?.card.name ?? ""));
         :force-low-disk="flow.forceLowDisk.value"
         :agent-version="agentVersion"
         :perform="flow.perform"
-        @close="flow.closeSummary()"
+        @close="closeSummary"
         @agree="install.agreed.value = $event"
         @imposed="imposedOpen = true"
       />
@@ -423,14 +460,6 @@ const name = computed(() => safeText(detail.value?.card.name ?? ""));
   display: flex;
   flex-direction: column;
   gap: var(--card-gap);
-}
-
-.inst__title {
-  margin: 0;
-  font-family: var(--font-title);
-  font-size: var(--fs-h3);
-  font-weight: var(--fw-semibold);
-  overflow-wrap: anywhere;
 }
 
 .inst__bar {

@@ -68,6 +68,16 @@ describe("la liste (BR-FICHE-003)", () => {
   });
 });
 
+describe("la carte entière (revue UX 2026-10-24, constat 21)", () => {
+  it("ouvre la fiche d'un clic n'importe où sur la carte", async () => {
+    const { wrapper, router } = await bootCatalogue();
+    await wrapper.get(".fcard__name").trigger("click");
+    await settle();
+    expect(router.currentRoute.value.name).toBe("fiche");
+    wrapper.unmount();
+  });
+});
+
 describe("le pied de la liste (BR-FICHE-006)", () => {
   it("dit les fiches écartées et celles que ce client ne sait pas lire", async () => {
     const { wrapper } = await bootCatalogue((bridge) => {

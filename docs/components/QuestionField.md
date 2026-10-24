@@ -9,3 +9,4 @@ Une question d'installation d'une fiche (HRT-102, BR-FICHE-016, 017, 059) rendue
 - Notes : Règles pures : `fiche/answers.ts`, textes `fiche/messages.ts`. Tests : `pages/InstallFromFiche.test.ts`.
 
 HRT-109 : `secretKept` (un secret DÉFINI sur le serveur dont la valeur n'est jamais lue) supprime les avertissements d'un champ vide (mot de passe de jeu vide, jeton manquant) : vide veut alors dire « inchangé ». Utilisé par `GameSettingRow` dans l'onglet « Réglages ».
+- Revue UX du 2026-10-24 (constat 18) : le jeu de caractères ou les bornes générés par le client ne s'ajoutent à l'aide de la fiche que si elle ne les dit pas déjà (`fiche/messages.ts::extraHint`). Constat 5 : le message d'un caractère refusé le nomme en mots (« l'espace », « le point d'exclamation », `fiche/character.ts`) et propose le texte corrigé (« Essayez « Mon_monde ». »), jamais pour un secret.

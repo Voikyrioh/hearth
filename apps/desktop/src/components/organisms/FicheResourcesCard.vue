@@ -4,7 +4,7 @@ import HIcon from "@/components/atoms/HIcon.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import DashCard from "@/components/molecules/DashCard.vue";
 import ProofTag from "@/components/molecules/ProofTag.vue";
-import { coverage, minimumVerdicts } from "@/fiche/fit";
+import { coverage, minimumVerdicts, noFigureAtAll } from "@/fiche/fit";
 import { coverageText, minimumText } from "@/fiche/messages";
 import { proofOf, proofUrl, proven } from "@/fiche/proof";
 import { t } from "@/i18n";
@@ -73,6 +73,17 @@ const rows = computed<Row[]>(() => {
   ];
 });
 
+/** Aucun chiffre prouvé nulle part : une phrase au lieu d'un tableau d'absences (revue UX 2026-10-24, constat 19). */
+const nothingKnown = computed(() => noFigureAtAll(props.detail));
+const serverHas = computed(() =>
+  props.capacity
+    ? t("fiche.resThisServerHas", {
+        cpu: formatCpu(props.capacity.cpus * 1000),
+        memory: formatMemory(props.capacity.memoryBytes),
+      })
+    : null,
+);
+
 const verdicts = computed(() => minimumVerdicts(props.detail, props.capacity));
 const covers = computed(() => coverage(props.detail, props.capacity));
 const TONES = { too_small: "error", publisher_above: "warn", unproven: "info" } as const;
@@ -80,7 +91,11 @@ const TONES = { too_small: "error", publisher_above: "warn", unproven: "info" } 
 
 <template>
   <DashCard :title="t('fiche.cardResources')" data-fiche-resources>
-    <div class="res__scroll">
+    <template v-if="nothingKnown">
+      <p class="res__none" data-res-none>{{ t("fiche.resNothingKnown") }}</p>
+      <p v-if="serverHas" class="res__server" data-res-server-has>{{ serverHas }}</p>
+    </template>
+    <div v-else class="res__scroll">
       <table class="res__table" :aria-label="t('fiche.resHead')">
         <thead>
           <tr>
@@ -116,7 +131,7 @@ const TONES = { too_small: "error", publisher_above: "warn", unproven: "info" } 
       </table>
     </div>
 
-    <div class="res__verdicts" data-res-verdicts>
+    <div v-if="!nothingKnown" class="res__verdicts" data-res-verdicts>
       <Callout
         v-for="verdict in verdicts"
         :key="`${verdict.kind}-${verdict.lack}`"
@@ -165,6 +180,15 @@ const TONES = { too_small: "error", publisher_above: "warn", unproven: "info" } 
 
 .res__table tbody th {
   font-weight: var(--fw-medium);
+}
+
+.res__none,
+.res__server {
+  margin: 0;
+}
+
+.res__server {
+  color: var(--tx-secondary);
 }
 
 .res__unproven {

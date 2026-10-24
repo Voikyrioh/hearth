@@ -84,20 +84,40 @@ describe("les réponses, jugées sur ce que la fiche dit (BR-FICHE-016, 017)", (
   it("juge un texte sur le jeu de caractères et la longueur de la fiche, et cite UN caractère refusé", () => {
     expect(answerIssue(fileStem, "Monde_1")).toBeNull();
     expect(answerIssue(fileStem, "")).toEqual({ code: "required" });
-    expect(answerIssue(fileStem, "Mon monde")).toEqual({ code: "charset", character: " " });
-    expect(answerIssue(fileStem, "é")).toEqual({ code: "charset", character: "é" });
+    expect(answerIssue(fileStem, "Mon monde")).toEqual({
+      code: "charset",
+      character: " ",
+      suggestion: "Mon_monde",
+    });
+    expect(answerIssue(fileStem, "é")).toEqual({
+      code: "charset",
+      character: "é",
+      suggestion: "e",
+    });
     expect(answerIssue(fileStem, "a".repeat(11))).toEqual({ code: "too_long", max: 10 });
     const line = question({ charset: "line", maxLen: 5 });
     expect(answerIssue(line, "")).toBeNull();
     expect(answerIssue(line, "a\nb")).toEqual({ code: "multiline" });
-    expect(answerIssue(line, "a\u200Bb")).toEqual({ code: "charset", character: "\u200B" });
+    expect(answerIssue(line, "a​b")).toEqual({
+      code: "charset",
+      character: "​",
+      suggestion: null,
+    });
   });
 
   it("refuse un argument qui commence comme un drapeau", () => {
     const arg = question({ charset: "arg_safe" });
     expect(answerIssue(arg, "base-1.2")).toBeNull();
-    expect(answerIssue(arg, "-x")).toEqual({ code: "charset", character: "-" });
-    expect(answerIssue(arg, "+x")).toEqual({ code: "charset", character: "+" });
+    expect(answerIssue(arg, "-x")).toEqual({
+      code: "charset",
+      character: "-",
+      suggestion: "x",
+    });
+    expect(answerIssue(arg, "+x")).toEqual({
+      code: "charset",
+      character: "+",
+      suggestion: "x",
+    });
   });
 
   it("juge un nombre entier dans les bornes de la fiche, sans zéros ni signe de trop", () => {
@@ -129,7 +149,15 @@ describe("les réponses, jugées sur ce que la fiche dit (BR-FICHE-016, 017)", (
   });
 
   it("met chaque défaut en phrase sans jamais citer la valeur d'un secret", () => {
-    expect(answerIssueText({ code: "charset", character: "é" })).toContain("é");
+    expect(answerIssueText({ code: "charset", character: "é" })).toContain(
+      "la lettre accentuée « é »",
+    );
+    expect(answerIssueText({ code: "charset", character: " ", suggestion: "Mon_monde" })).toBe(
+      "Ce texte contient un caractère que ce jeu ne sait pas lire : l'espace. Essayez « Mon_monde ».",
+    );
+    expect(answerIssueText({ code: "charset", character: "!" })).toContain(
+      "le point d'exclamation",
+    );
     expect(answerIssueText({ code: "charset", character: null })).not.toContain("null");
     expect(answerIssueText({ code: "out_of_range", min: 1, max: 255 })).toContain("1 et 255");
     expect(answerIssueText({ code: "out_of_range", min: 2, max: null })).toContain("au moins 2");

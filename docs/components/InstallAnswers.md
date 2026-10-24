@@ -9,3 +9,4 @@ Les « Réponses » de l'installation (HRT-102, BR-FICHE-014 à 019) : la varian
 - Notes : Tests : `pages/InstallFromFiche.test.ts`.
 
 HRT-109 : `InstallSettings` (« Voir tous les réglages ») est sous la carte des questions.
+- Revue UX du 2026-10-24 (constat 16) : expose `focusName()` ; la page y met le curseur à l'arrivée, comme le formulaire de déploiement.

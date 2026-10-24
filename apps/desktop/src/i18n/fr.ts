@@ -1555,6 +1555,9 @@ export const fr = {
     diskNeeded: "{size} nécessaires pour installer ce jeu.",
     diskUnproven:
       "Espace nécessaire : non vérifié. Hearth ne peut pas dire de combien le jeu a besoin.",
+    resNothingKnown:
+      "Hearth ne connaît pas les besoins de ce jeu en processeur, en mémoire ni en espace disque.",
+    resThisServerHas: "Votre serveur offre {cpu} et {memory} de mémoire.",
     // Téléchargements, premier démarrage
     downloadKnown:
       "Au premier démarrage, ce programme télécharge environ {size} de {what} depuis {source}. Cela peut prendre longtemps.",
@@ -1646,6 +1649,10 @@ export const fr = {
     secretHint: "Il est masqué ici et n'est jamais écrit dans le journal d'activité.",
     charsetFileStem: "Lettres, chiffres, tirets et soulignés seulement.",
     charsetArgSafe: "Lettres sans accent, chiffres, points, tirets, soulignés et deux-points.",
+    character: {
+      accented: "la lettre accentuée « {character} »",
+      other: "le caractère « {character} »",
+    },
     yes: "Oui",
     no: "Non",
     fixAnswers: "Corrigez les champs signalés pour continuer.",
@@ -1659,7 +1666,8 @@ export const fr = {
       tooShort: "Ce texte doit faire au moins {min} caractères.",
       tooLong: "Ce texte ne peut pas dépasser {max} caractères.",
       multiline: "Ce texte doit tenir sur une seule ligne.",
-      charset: "Ce texte contient un caractère que ce jeu ne sait pas lire : {character}",
+      charset: "Ce texte contient un caractère que ce jeu ne sait pas lire : {name}.",
+      charsetSuggest: "Essayez « {suggestion} ».",
       charsetBare: "Ce texte contient un caractère que ce jeu ne sait pas lire.",
       notInteger: "Écrivez un nombre entier.",
       range: "Le nombre doit être compris entre {min} et {max}.",
@@ -1906,7 +1914,7 @@ export const fr = {
       bounds: "le nombre est hors des bornes de la fiche.",
       choice: "ce choix n'est pas proposé par la fiche.",
       charset: "ce texte contient un caractère non permis.",
-      charsetChar: "ce texte contient un caractère non permis : {character}",
+      charsetChar: "ce texte contient un caractère non permis : {name}.",
       length: "la longueur de ce texte n'est pas permise.",
       frozen: "ce réglage est figé dans le monde.",
       imposed: "ce réglage est imposé par la fiche.",
