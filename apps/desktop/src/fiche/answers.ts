@@ -71,6 +71,9 @@ export function answerIssue(question: FicheQuestion, value: string): AnswerIssue
       if (length) return length;
       if (/[\r\n]/.test(value)) return { code: "multiline" };
       const withSuggestion = (character: string | null): AnswerIssue => {
+        // Un secret, quel que soit son genre, ne cite aucun caractère et ne propose aucune correction : la correction
+        // rendrait le mot de passe presque tel quel (BR-FICHE-017).
+        if (question.secret) return { code: "charset", character: null, suggestion: null };
         // La correction n'est proposée que si elle passe elle-même les contrôles de la question.
         const fixed = correctedText(question.charset, value);
         const suggestion = fixed !== null && lengthIssue(question, fixed) === null ? fixed : null;

@@ -120,6 +120,7 @@ export function charsetHint(question: FicheQuestion): string | null {
   return null;
 }
 
+// FIX:01M5PYVP4V48YGH36AYS43Q31V
 /** Le caractère refusé dit en mots, puis la correction si on en connaît une (constat 5 de la revue UX du 24/10). */
 function charsetText(character: string | null, suggestion: string | null): string {
   if (character === null) return t("fiche.answerIssue.charsetBare");

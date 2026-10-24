@@ -4,6 +4,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M5PYVP4V48YGH36AYS43Q31V](./FIX-01M5PYVP4V48YGH36AYS43Q31V.md) | Le message d'un caractère refusé s'arrêtait sur deux points quand le caractère était une espace (HRT-102) | 2026-10-24 |
 | [FIX-01M5P0Q7C3N8T5W2R9XK4D6HJE](./FIX-01M5P0Q7C3N8T5W2R9XK4D6HJE.md) | Le test de mise à jour de l'agent tombait au hasard quand `systemctl kill` sortait en erreur sur le cgroup (HRT-206) | 2026-10-24 |
 | [FIX-01M5NYA5W781YW5NFQ7W1JGR98](./FIX-01M5NYA5W781YW5NFQ7W1JGR98.md) | Une opération de déploiement ou de cycle de vie était annoncée terminée avant l'écriture de son entrée au journal d'activité (HRT-101) | 2026-10-24 |
 | [FIX-01M5A5VG2H1ESNN212NNMT2PP0](./FIX-01M5A5VG2H1ESNN212NNMT2PP0.md) | Le client proposait Arrêter, Redémarrer et Démarrer sur un service créé hors de Hearth et non adopté, puis répondait « Ce service n'existe plus. » (HRT-65) | 2026-10-19 |

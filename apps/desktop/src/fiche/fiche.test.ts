@@ -98,9 +98,9 @@ describe("les réponses, jugées sur ce que la fiche dit (BR-FICHE-016, 017)", (
     const line = question({ charset: "line", maxLen: 5 });
     expect(answerIssue(line, "")).toBeNull();
     expect(answerIssue(line, "a\nb")).toEqual({ code: "multiline" });
-    expect(answerIssue(line, "a​b")).toEqual({
+    expect(answerIssue(line, "a\u200Bb")).toEqual({
       code: "charset",
-      character: "​",
+      character: "\u200B",
       suggestion: null,
     });
   });

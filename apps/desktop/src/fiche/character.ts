@@ -1,4 +1,4 @@
-import { t } from "@/i18n";
+import { type MessageKey, t } from "@/i18n";
 
 /**
  * Dire un caractère refusé en mots, et proposer le texte corrigé (revue UX 2026-10-24, constat 5). Une espace ne se
@@ -6,51 +6,59 @@ import { t } from "@/i18n";
  * pures, sans E/S ; la correction ne vient que d'un texte non secret, jamais d'un mot de passe.
  */
 
-const NAMES: Record<string, string> = {
-  " ": "l'espace",
-  "\t": "la tabulation",
-  "\u00A0": "l'espace insécable",
-  "!": "le point d'exclamation",
-  "?": "le point d'interrogation",
-  ".": "le point",
-  ",": "la virgule",
-  ";": "le point-virgule",
-  ":": "les deux-points",
-  "'": "l'apostrophe",
-  "\u2019": "l'apostrophe",
-  '"': "le guillemet",
-  "«": "le guillemet ouvrant",
-  "»": "le guillemet fermant",
-  "-": "le tiret",
-  _: "le souligné",
-  "/": "la barre oblique",
-  "\\": "la barre oblique inverse",
-  "|": "la barre verticale",
-  "(": "la parenthèse ouvrante",
-  ")": "la parenthèse fermante",
-  "[": "le crochet ouvrant",
-  "]": "le crochet fermant",
-  "{": "l'accolade ouvrante",
-  "}": "l'accolade fermante",
-  "<": "le signe inférieur",
-  ">": "le signe supérieur",
-  "@": "l'arobase",
-  "#": "le dièse",
-  "&": "l'esperluette",
-  "*": "l'astérisque",
-  "+": "le signe plus",
-  "=": "le signe égal",
-  "%": "le signe pourcentage",
-  $: "le dollar",
-  "~": "le tilde",
-  "^": "l'accent circonflexe",
-  "`": "l'accent grave",
+/** Caractère visible ou espace courante → clé de `fiche.character.names` (les textes sont dans `fr.ts`). */
+const KEYS: Record<string, string> = {
+  " ": "space",
+  "\t": "tab",
+  "\u00A0": "nbsp",
+  "!": "exclamation",
+  "?": "question",
+  ".": "period",
+  ",": "comma",
+  ";": "semicolon",
+  ":": "colon",
+  "'": "apostrophe",
+  "\u2019": "apostrophe",
+  '"': "quote",
+  "«": "guillemetOpen",
+  "»": "guillemetClose",
+  "-": "hyphen",
+  _: "underscore",
+  "/": "slash",
+  "\\": "backslash",
+  "|": "pipe",
+  "(": "parenOpen",
+  ")": "parenClose",
+  "[": "bracketOpen",
+  "]": "bracketClose",
+  "{": "braceOpen",
+  "}": "braceClose",
+  "<": "less",
+  ">": "greater",
+  "@": "at",
+  "#": "hash",
+  "&": "ampersand",
+  "*": "asterisk",
+  "+": "plus",
+  "=": "equals",
+  "%": "percent",
+  $: "dollar",
+  "~": "tilde",
+  "^": "caret",
+  "`": "backtick",
 };
 
-/** Le caractère dit en mots (« l'espace », « le point d'exclamation »), ou la lettre entre guillemets si elle n'a pas de nom. */
+/** Un caractère qu'on ne voit pas (contrôle, format, séparateur) : il se nomme par son code. */
+const INVISIBLE = /^[\p{Cc}\p{Cf}\p{Z}]$/u;
+
+/** Le caractère dit en mots (« l'espace », « le point d'exclamation »), ou par son code s'il est invisible. */
 export function characterName(character: string): string {
-  const known = NAMES[character];
-  if (known !== undefined) return known;
+  const key = KEYS[character];
+  if (key !== undefined) return t(`fiche.character.names.${key}` as MessageKey);
+  if (INVISIBLE.test(character)) {
+    const code = (character.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
+    return t("fiche.character.invisible", { code: `U+${code}` });
+  }
   if (/\p{L}/u.test(character) && character.normalize("NFD") !== character) {
     return t("fiche.character.accented", { character });
   }

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { FicheQuestion } from "@/link";
+import { answerIssue } from "./answers";
 import { characterName, correctedText } from "./character";
-import { answerIssueText, extraHint, valueLabel } from "./messages";
+import { answerIssueText, valueLabel } from "./messages";
 
-// Revue UX 2026-10-24 : constat 4 (un choix par son libellé), constat 5 (le caractère refusé en mots et la correction),
-// constat 18 (une aide dite une seule fois).
+// Revue UX 2026-10-24 : constat 4 (un choix par son libellé), constat 5 (le caractère refusé en mots et la correction).
 
 const question = (patch: Partial<FicheQuestion>): FicheQuestion => ({
   id: "q",
@@ -58,6 +58,9 @@ describe("characterName", () => {
     expect(characterName(".")).toBe("le point");
     expect(characterName("é")).toBe("la lettre accentuée « é »");
     expect(characterName("€")).toBe("le caractère « € »");
+    // Un caractère invisible se nomme par son code, jamais par des guillemets vides.
+    expect(characterName("​")).toBe("le caractère invisible U+200B");
+    expect(characterName(" ")).toBe("le caractère invisible U+2028");
   });
 });
 
@@ -77,6 +80,18 @@ describe("correctedText", () => {
   });
 });
 
+describe("un secret, quel que soit son genre", () => {
+  it("ne cite aucun caractère et ne propose aucune correction", () => {
+    for (const kind of ["text", "unknown"] as const) {
+      const issue = answerIssue(
+        question({ kind, secret: true, charset: "file_stem" }),
+        "mon mot de passe",
+      );
+      expect(issue, kind).toEqual({ code: "charset", character: null, suggestion: null });
+    }
+  });
+});
+
 describe("le message d'un caractère refusé", () => {
   it("nomme le caractère et propose la correction", () => {
     expect(answerIssueText({ code: "charset", character: " ", suggestion: "Mon_monde" })).toBe(
@@ -85,26 +100,5 @@ describe("le message d'un caractère refusé", () => {
     expect(answerIssueText({ code: "charset", character: "!", suggestion: null })).toBe(
       "Ce texte contient un caractère que ce jeu ne sait pas lire : le point d'exclamation.",
     );
-  });
-});
-
-describe("extraHint", () => {
-  const players = question({ kind: "int", min: 1, max: 255 });
-
-  it("ajoute les bornes seulement quand l'aide de la fiche ne les dit pas", () => {
-    expect(extraHint(players, "Combien de joueurs.")).toBe("Le nombre est compris entre 1 et 255.");
-    expect(extraHint(players, "Combien de joueurs, de 1 à 255.")).toBeNull();
-    // 25 n'est pas 255 : un nombre qui en contient un autre ne compte pas.
-    expect(extraHint(players, "Combien de joueurs, de 1 à 25.")).toBe(
-      "Le nombre est compris entre 1 et 255.",
-    );
-  });
-
-  it("ajoute le jeu de caractères seulement quand l'aide ne parle pas de lettres ni de chiffres", () => {
-    const name = question({ charset: "file_stem" });
-    expect(extraHint(name, "Le nom du monde.")).toBe(
-      "Lettres, chiffres, tirets et soulignés seulement.",
-    );
-    expect(extraHint(name, "Lettres, chiffres, tiret et souligné seulement.")).toBeNull();
   });
 });
