@@ -33,8 +33,8 @@ die() {
 }
 
 DIED=0
-# shellcheck source=lib.sh
-. /deploy/e2e/lib.sh
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
 trap 'report_exit $?' EXIT
 
 run() {

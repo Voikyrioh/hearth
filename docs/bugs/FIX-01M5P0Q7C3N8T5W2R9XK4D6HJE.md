@@ -8,7 +8,7 @@ date_correction: 2026-10-24
 # FIX-01M5P0Q7C3N8T5W2R9XK4D6HJE : `systemctl kill` en erreur arrêtait le scénario de mise à jour
 
 ## Symptôme
-Le pas « Mise à jour de l'agent à distance de bout en bout » du job `agent-install` échouait par intermittence (runs 39948183610, 40071073313, branche ci/HRT-168). Journal du run 40071073313 : `Sending signal SIGKILL to process 1873 (tokio-rt-worker) on client request`, `Failed to kill unit hearth-agent.service: Failed to send signal SIGKILL to auxiliary processes: Input/output error`, `Main process exited, code=killed`, puis `erreur : docker exec a échoué (exit status: 1)`.
+Le pas « Mise à jour de l'agent à distance de bout en bout » du job `agent-install` échouait par intermittence (runs 39948183610, 40071073313, et la branche ci/HRT-168). Journal du run 40071073313 : `Sending signal SIGKILL to process 1873 (tokio-rt-worker) on client request`, `Failed to kill unit hearth-agent.service: Failed to send signal SIGKILL to auxiliary processes: Input/output error`, `Main process exited, code=killed`, puis `erreur : docker exec a échoué (exit status: 1)`.
 
 ## Cause root
 Défaut du test, pas du produit. Le SIGKILL est celui du scénario (section 6, « agent tué pendant le téléchargement »), voulu. `systemctl kill` envoie le signal au processus principal puis parcourt le cgroup ; sur le systemd du conteneur jetable, ce parcours sort en EIO quand un fil disparaît, et la commande rend 1 alors que l'agent est bien tué. Sous `set -eu`, le script s'arrêtait sans `die` : aucune sortie, d'où le seul « docker exec a échoué ». L'agent avait déjà conclu proprement (« reprise par un superviseur », « Succeeded ») avant.
