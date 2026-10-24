@@ -72,6 +72,40 @@ pub fn run(fs: &dyn SafeFs, uid: u32, gid: u32) {
     assert_eq!(root.remove_tree(&rel("world")), Err(FsError::NotFound));
     assert_eq!(root.measure(&RelPath::root(), BUDGET).unwrap().items, 0);
 
+    // Effacement borné (HRT-85) : un arbre part avec ses dossiers, le suivi dit combien, la racine reste ;
+    // une cible absente est dite absente, jamais la racine.
+    root.mkdir(&rel("data/deep"), dir).unwrap();
+    root.write_atomic(&rel("data/a"), b"a", file).unwrap();
+    root.write_atomic(&rel("data/deep/b"), b"b", file).unwrap();
+    let mut seen = Vec::new();
+    let erased = root
+        .erase_tree(&rel("data"), &mut |removed| seen.push(removed))
+        .unwrap();
+    assert_eq!((erased.removed, erased.left), (4, 0), "{erased:?}");
+    assert_eq!(erased.first_error, None);
+    assert_eq!(seen.last().copied(), Some(4), "le suivi dit le total");
+    assert_eq!(
+        root.erase_tree(&rel("data"), &mut |_| {}).unwrap_err(),
+        FsError::NotFound
+    );
+    assert_eq!(
+        root.erase_tree(&RelPath::root(), &mut |_| {}).unwrap_err(),
+        FsError::Refused
+    );
+    // Une racine vide se retire sans rien toucher ; pleine, elle reste.
+    root.write_atomic(&rel("stay"), b"s", file).unwrap();
+    assert_eq!(fs.remove_empty_service_root(&key), Ok(false));
+    assert_eq!(root.read_bounded(&rel("stay"), 16).unwrap(), b"s");
+    root.remove_tree(&rel("stay")).unwrap();
+    let empty = ServiceKey::parse("u_empty").unwrap();
+    fs.ensure_service_root(&empty).unwrap();
+    assert_eq!(fs.remove_empty_service_root(&empty), Ok(true));
+    assert!(matches!(
+        fs.open_service_root(&empty),
+        Err(FsError::NotFound)
+    ));
+    assert_eq!(fs.remove_empty_service_root(&empty), Ok(false));
+
     // Le voisin n'est pas touché par la suppression de la racine d'un service.
     let other = ServiceKey::parse("u_other").unwrap();
     let other_root = fs.ensure_service_root(&other).unwrap();

@@ -97,6 +97,19 @@ pub struct Measure {
     pub partial: bool,
 }
 
+/// Ce qu'un effacement borné a fait (`BR-DEL-030`). Le geste ne s'arrête pas à la première
+/// erreur : il retire tout ce qui part et compte ce qui reste, que l'appelant dit sans le rejouer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Erased {
+    /// Éléments retirés (fichiers, liens, dossiers), le dossier visé compris.
+    pub removed: u64,
+    /// Éléments qui n'ont pas pu partir (droits refusés, système de fichiers en lecture seule, point de
+    /// montage, profondeur au-delà de la borne). Chaque élément resté est compté une fois.
+    pub left: u64,
+    /// La première erreur rencontrée, pour la trace seulement : jamais un chemin.
+    pub first_error: Option<FsError>,
+}
+
 /// Accès aux racines de service.
 pub trait SafeFs: Send + Sync {
     /// Ouvre `<données>/services/<clé>/` ; le dossier doit exister.
@@ -108,6 +121,12 @@ pub trait SafeFs: Send + Sync {
     /// Retire tout le contenu de la racine du service PUIS la racine elle-même (`BR-DEL-007`) ; c'est
     /// le seul geste qui retire une racine. Un lien est retiré comme lien, aucun montage franchi.
     fn remove_service_root(&self, key: &ServiceKey) -> Result<(), FsError>;
+
+    /// Retire la racine du service SI ELLE EST VIDE (`unlinkat` du dossier, qui refuse un dossier non vide) :
+    /// `true` si elle est partie, `false` si elle contient encore quelque chose (un dossier conservé parce
+    /// qu'un autre conteneur l'utilise, une donnée qui n'a pas pu être effacée) ou n'existe plus. Ne
+    /// touche jamais un contenu.
+    fn remove_empty_service_root(&self, key: &ServiceKey) -> Result<bool, FsError>;
 }
 
 /// Une racine de service ouverte. Chaque geste ouvre chaque composant depuis le descripteur de son
@@ -130,4 +149,20 @@ pub trait ServiceRoot: Send + Sync {
 
     /// Retire un fichier, un lien ou un arbre. Jamais la racine (`Refused`).
     fn remove_tree(&self, rel: &RelPath) -> Result<(), FsError>;
+
+    /// Efface un arbre sous la racine pour une suppression de service (`BR-DEL-007`,
+    /// `BR-DEL-030`) : mêmes garanties que [`Self::remove_tree`] (un lien est retiré comme lien, aucun montage
+    /// franchi, 64 niveaux, jamais la racine), et en plus :
+    /// - **mémoire bornée** quel que soit le nombre d'entrées d'un dossier (les noms se lisent par lots, HRT-179) ;
+    /// - **faible priorité** : le geste tourne sur un fil à part dont la priorité est abaissée, sans gêner les
+    ///   autres services ;
+    /// - **suivi** : `progress` reçoit le nombre d'éléments retirés jusqu'ici, après chaque lot ;
+    /// - **jamais d'arrêt à la première erreur** : ce qui part part, ce qui reste est compté (`Erased::left`).
+    ///
+    /// `NotFound` si le dossier visé n'existe pas (rien à effacer).
+    fn erase_tree(
+        &self,
+        rel: &RelPath,
+        progress: &mut (dyn FnMut(u64) + Send),
+    ) -> Result<Erased, FsError>;
 }

@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use rustix::process::{getegid, geteuid};
 
-use super::unix::{UnixRoot, open_service_root, remove_service_root};
+use super::unix::{UnixRoot, open_service_root, remove_empty_service_root, remove_service_root};
 use crate::application::ports::{FsError, Ownership, Perms};
 use crate::domain::files::RelPath;
 use crate::domain::services::ServiceKey;
@@ -541,6 +541,190 @@ fn a_directory_swapped_for_a_link_during_removal_never_deletes_outside() {
         });
         for _ in 0..1500u32 {
             let _ = f.root.remove(&rel("victim"));
+        }
+        stop.store(true, Ordering::Relaxed);
+    });
+    assert_outside_intact(&f.outside);
+}
+
+// -----------------------------------------------------------------------------------------------
+// Suppression d'un service (HRT-85, HRT-179) : effacement par lots, suivi, faible priorité
+// -----------------------------------------------------------------------------------------------
+
+/// Le « nice » du fil appelant, lu dans `/proc/thread-self/stat` (champ 19 ; le nom du processus peut
+/// contenir des espaces : on compte après la dernière parenthèse).
+fn nice_of_this_thread() -> i64 {
+    let stat = std::fs::read_to_string("/proc/thread-self/stat").unwrap();
+    let after = &stat[stat.rfind(')').unwrap() + 2..];
+    after.split(' ').nth(16).unwrap().parse().unwrap()
+}
+
+#[test]
+fn erase_tree_counts_what_it_removes_and_reports_progress() {
+    let f = fixture();
+    f.root.make_dirs(&rel("data/deep"), perms(0o750)).unwrap();
+    f.root
+        .write_file(&rel("data/a"), b"a", perms(0o600))
+        .unwrap();
+    f.root
+        .write_file(&rel("data/deep/b"), b"b", perms(0o600))
+        .unwrap();
+    let mut seen = Vec::new();
+    let erased = f
+        .root
+        .erase(&rel("data"), &mut |removed| seen.push(removed), true)
+        .unwrap();
+    assert_eq!(
+        (erased.removed, erased.left, erased.first_error),
+        (4, 0, None)
+    );
+    assert_eq!(seen.last().copied(), Some(4));
+    assert!(!f.root_path.join("data").exists());
+    assert!(f.root_path.is_dir(), "la racine reste");
+    assert_eq!(
+        f.root.erase(&rel("data"), &mut |_| {}, true),
+        Err(FsError::NotFound)
+    );
+    assert_eq!(
+        f.root.erase(&RelPath::root(), &mut |_| {}, true),
+        Err(FsError::Refused)
+    );
+}
+
+#[test]
+fn erase_tree_unlinks_links_as_links_and_never_touches_the_outside() {
+    let f = fixture();
+    f.root.make_dirs(&rel("t/sub"), perms(0o750)).unwrap();
+    symlink(&f.outside, f.root_path.join("t/to-dir")).unwrap();
+    symlink(&f.outside, f.root_path.join("t/sub/to-dir-deep")).unwrap();
+    symlink(f.outside.join("precious"), f.root_path.join("t/to-file")).unwrap();
+    let erased = f.root.erase(&rel("t"), &mut |_| {}, true).unwrap();
+    assert_eq!((erased.removed, erased.left), (5, 0));
+    assert!(!f.root_path.join("t").exists());
+    assert_outside_intact(&f.outside);
+    // Un lien visé directement : seul le lien part.
+    symlink(&f.outside, f.root_path.join("out")).unwrap();
+    f.root.erase(&rel("out"), &mut |_| {}, true).unwrap();
+    assert!(std::fs::symlink_metadata(f.root_path.join("out")).is_err());
+    assert_outside_intact(&f.outside);
+}
+
+/// HRT-179 : un dossier de dizaines de milliers d'entrées s'efface par lots (le suivi est appelé à chaque
+/// lot : jamais tout le dossier d'un coup en mémoire) et rien ne reste.
+#[test]
+fn a_huge_directory_is_erased_batch_by_batch() {
+    let f = fixture();
+    f.root.make_dirs(&rel("big"), perms(0o750)).unwrap();
+    let big = f.root_path.join("big");
+    let count = 50_000u64;
+    for index in 0..count {
+        std::fs::write(big.join(format!("f{index}")), b"").unwrap();
+    }
+    let mut calls = 0u64;
+    let erased = f
+        .root
+        .erase(&rel("big"), &mut |_| calls += 1, true)
+        .unwrap();
+    assert_eq!((erased.removed, erased.left), (count + 1, 0));
+    assert!(
+        calls >= count / super::unix::erase::BATCH as u64,
+        "{calls} lots seulement pour {count} entrées"
+    );
+    assert!(!big.exists());
+}
+
+/// BR-DEL-030 : l'effacement tourne sur un fil dont la priorité est abaissée ; le fil appelant n'est pas touché.
+#[test]
+fn erasing_runs_on_a_low_priority_thread_and_leaves_the_caller_alone() {
+    let f = fixture();
+    f.root.make_dirs(&rel("data"), perms(0o750)).unwrap();
+    f.root
+        .write_file(&rel("data/a"), b"a", perms(0o600))
+        .unwrap();
+    let before = nice_of_this_thread();
+    let mut during = Vec::new();
+    f.root
+        .erase(
+            &rel("data"),
+            &mut |_| during.push(nice_of_this_thread()),
+            true,
+        )
+        .unwrap();
+    assert!(!during.is_empty());
+    assert!(during.iter().all(|nice| *nice == 19), "{during:?}");
+    assert_eq!(nice_of_this_thread(), before);
+}
+
+/// BR-DEL-030 : ce qui refuse de partir est compté et dit ; le reste part ; aucune boucle sans fin.
+#[test]
+fn what_refuses_to_go_is_counted_and_the_rest_is_erased() {
+    if rustix::process::geteuid().is_root() {
+        return; // root passe outre les droits : le piège n'existe pas
+    }
+    let f = fixture();
+    f.root.make_dirs(&rel("data/locked"), perms(0o750)).unwrap();
+    f.root
+        .write_file(&rel("data/locked/stay"), b"s", perms(0o600))
+        .unwrap();
+    f.root
+        .write_file(&rel("data/go"), b"g", perms(0o600))
+        .unwrap();
+    let locked = f.root_path.join("data/locked");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let erased = f.root.erase(&rel("data"), &mut |_| {}, true).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(erased.left, 1, "{erased:?}");
+    assert!(erased.first_error.is_some());
+    assert!(!f.root_path.join("data/go").exists());
+    assert!(locked.join("stay").exists());
+}
+
+#[test]
+fn a_mount_point_is_left_in_place_and_counted_by_the_erasure() {
+    let f = fixture();
+    f.root.make_dirs(&rel("m/inner"), perms(0o750)).unwrap();
+    f.root
+        .write_file(&rel("m/inner/f"), b"x", perms(0o600))
+        .unwrap();
+    let wrong = open_service_root(&f.data, &f.key, false).unwrap();
+    let wrong = wrong.with_dev(f.root.dev() + 1);
+    let erased = wrong.erase(&rel("m"), &mut |_| {}, true).unwrap();
+    assert_eq!((erased.removed, erased.left), (0, 1));
+    assert_eq!(erased.first_error, Some(FsError::CrossesDevice));
+    assert!(f.root_path.join("m/inner/f").exists());
+}
+
+#[test]
+fn an_empty_service_root_is_removed_and_a_full_one_never() {
+    let f = fixture();
+    f.root.write_file(&rel("keep"), b"x", perms(0o600)).unwrap();
+    assert_eq!(remove_empty_service_root(&f.data, &f.key), Ok(false));
+    assert!(f.root_path.join("keep").exists());
+    std::fs::remove_file(f.root_path.join("keep")).unwrap();
+    assert_eq!(remove_empty_service_root(&f.data, &f.key), Ok(true));
+    assert!(!f.root_path.exists());
+    assert_eq!(remove_empty_service_root(&f.data, &f.key), Ok(false));
+    assert!(f.data.join("services").is_dir());
+}
+
+/// Course : le dossier visé est remplacé par un lien vers l'extérieur pendant l'effacement par lots.
+#[test]
+fn a_directory_swapped_for_a_link_during_erasure_never_deletes_outside() {
+    let f = fixture();
+    let stop = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let target = f.root_path.join("victim");
+            while !stop.load(Ordering::Relaxed) {
+                let _ = std::fs::remove_file(&target);
+                let _ = std::fs::create_dir(&target);
+                let _ = std::fs::create_dir(target.join("inner"));
+                let _ = std::fs::remove_dir_all(&target);
+                let _ = symlink(&f.outside, &target);
+            }
+        });
+        for _ in 0..1500u32 {
+            let _ = f.root.erase(&rel("victim"), &mut |_| {}, true);
         }
         stop.store(true, Ordering::Relaxed);
     });

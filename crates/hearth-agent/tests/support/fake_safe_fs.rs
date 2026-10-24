@@ -5,10 +5,11 @@
 //! ces pièges ne se testent que contre le vrai (`tests/safe_fs.rs`, `infrastructure/fs/tests_unix.rs`).
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::collections::BTreeSet;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
-use hearth_agent::application::ports::{FsError, Measure, Perms, SafeFs, ServiceRoot};
+use hearth_agent::application::ports::{Erased, FsError, Measure, Perms, SafeFs, ServiceRoot};
 use hearth_agent::domain::files::RelPath;
 use hearth_agent::domain::services::ServiceKey;
 
@@ -22,9 +23,23 @@ enum Node {
 /// `racine de service -> (chemin relatif -> noeud)`.
 type Tree = BTreeMap<String, Node>;
 
+/// Les crochets de test d'un effacement (HRT-85) : un chemin qui refuse de partir, une pause, un journal.
+#[derive(Debug, Default)]
+struct EraseHooks {
+    /// Chemins relatifs qui « refusent de partir » (droits refusés) : l'arbre dessous reste aussi.
+    stuck: BTreeSet<String>,
+    /// L'effacement attend ici tant que `released` est faux.
+    held: bool,
+    /// Chaque chemin dont l'effacement est demandé, dans l'ordre.
+    calls: Vec<String>,
+    /// Combien de fois la racine d'un service a été retirée vide.
+    empty_root_removals: u32,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct FakeSafeFs {
     roots: Arc<Mutex<BTreeMap<String, Tree>>>,
+    hooks: Arc<(Mutex<EraseHooks>, Condvar)>,
 }
 
 impl FakeSafeFs {
@@ -63,6 +78,54 @@ impl FakeSafeFs {
     /// Le service a-t-il une racine ?
     pub fn has_root(&self, key: &ServiceKey) -> bool {
         self.lock().contains_key(key.as_str())
+    }
+
+    fn hooks(&self) -> std::sync::MutexGuard<'_, EraseHooks> {
+        self.hooks.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Ce chemin refuse de partir à l'effacement (droits refusés), lui et tout ce qu'il contient.
+    pub fn refuse_to_erase(&self, rel: &str) {
+        self.hooks().stuck.insert(rel.to_owned());
+    }
+
+    /// Suspend les effacements jusqu'à `release_erasure` : de quoi regarder l'état « en cours de suppression ».
+    pub fn hold_erasure(&self) {
+        self.hooks().held = true;
+    }
+
+    pub fn release_erasure(&self) {
+        self.hooks().held = false;
+        self.hooks.1.notify_all();
+    }
+
+    /// Les chemins dont l'effacement a été demandé, dans l'ordre.
+    pub fn erase_calls(&self) -> Vec<String> {
+        self.hooks().calls.clone()
+    }
+
+    /// Combien de fois la racine d'un service a été retirée parce qu'elle était vide.
+    pub fn empty_root_removals(&self) -> u32 {
+        self.hooks().empty_root_removals
+    }
+
+    /// Crée un dossier (et ses parents) avec un fichier dedans : de quoi semer des données de service.
+    pub fn seed_file(&self, key: &ServiceKey, rel: &str, bytes: &[u8]) {
+        let mut roots = self.lock();
+        let tree = roots.entry(key.as_str().to_owned()).or_default();
+        let mut path = String::new();
+        let parts: Vec<&str> = rel.split('/').collect();
+        for (index, part) in parts.iter().enumerate() {
+            if !path.is_empty() {
+                path.push('/');
+            }
+            path.push_str(part);
+            if index + 1 == parts.len() {
+                tree.insert(path.clone(), Node::File(bytes.to_vec(), (0, 0, 0o644)));
+            } else {
+                tree.entry(path.clone()).or_insert(Node::Dir);
+            }
+        }
     }
 }
 
@@ -104,6 +167,20 @@ impl SafeFs for FakeSafeFs {
             fs: self.clone(),
             key: key.as_str().to_owned(),
         }))
+    }
+
+    fn remove_empty_service_root(&self, key: &ServiceKey) -> Result<bool, FsError> {
+        let mut roots = self.lock();
+        match roots.get(key.as_str()) {
+            None => Ok(false),
+            Some(tree) if !tree.is_empty() => Ok(false),
+            Some(_) => {
+                roots.remove(key.as_str());
+                drop(roots);
+                self.hooks().empty_root_removals += 1;
+                Ok(true)
+            }
+        }
     }
 
     fn ensure_service_root(&self, key: &ServiceKey) -> Result<Box<dyn ServiceRoot>, FsError> {
@@ -215,5 +292,72 @@ impl ServiceRoot for FakeRoot {
             tree.retain(|p, _| p != &path && !p.starts_with(&below));
             Ok(())
         })
+    }
+
+    fn erase_tree(
+        &self,
+        rel: &RelPath,
+        progress: &mut (dyn FnMut(u64) + Send),
+    ) -> Result<Erased, FsError> {
+        if rel.is_root() {
+            return Err(FsError::Refused);
+        }
+        {
+            let mut hooks = self.fs.hooks();
+            hooks.calls.push(rel.to_string());
+            while hooks.held {
+                hooks = self
+                    .fs
+                    .hooks
+                    .1
+                    .wait(hooks)
+                    .unwrap_or_else(PoisonError::into_inner);
+            }
+        }
+        let stuck: Vec<String> = self.fs.hooks().stuck.iter().cloned().collect();
+        let report = self.with(|tree| {
+            parent_must_be_dir(tree, rel)?;
+            let path = rel.to_string();
+            if !tree.contains_key(&path) {
+                return Err(FsError::NotFound);
+            }
+            let below = format!("{path}/");
+            let in_tree = |p: &String| p == &path || p.starts_with(&below);
+            // Ce qui refuse de partir garde aussi ses parents (un dossier non vide ne se retire pas).
+            let mut kept: BTreeSet<String> = BTreeSet::new();
+            for p in tree.keys().filter(|p| in_tree(p)) {
+                let blocked = stuck
+                    .iter()
+                    .any(|s| p == s || p.starts_with(&format!("{s}/")));
+                if blocked {
+                    kept.insert(p.clone());
+                    let mut ancestor = p.as_str();
+                    while let Some((parent, _)) = ancestor.rsplit_once('/') {
+                        kept.insert(parent.to_owned());
+                        ancestor = parent;
+                    }
+                }
+            }
+            let doomed: Vec<String> = tree
+                .keys()
+                .filter(|p| in_tree(p) && !kept.contains(*p))
+                .cloned()
+                .collect();
+            let left = stuck
+                .iter()
+                .filter(|s| tree.contains_key(*s) && in_tree(s))
+                .count() as u64;
+            for p in &doomed {
+                tree.remove(p);
+            }
+            Ok(Erased {
+                removed: doomed.len() as u64,
+                left,
+                first_error: (left > 0)
+                    .then_some(FsError::Io(std::io::ErrorKind::PermissionDenied)),
+            })
+        })?;
+        progress(report.removed);
+        Ok(report)
     }
 }

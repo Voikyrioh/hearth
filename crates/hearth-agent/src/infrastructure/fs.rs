@@ -18,14 +18,17 @@
 //!   dépendre du filtre d'appels système de l'unité. Un montage « bind » du même système de fichiers
 //!   garde le même périphérique et n'est donc pas vu.
 //! - Hors Linux (poste de développement Windows), rien ne s'écrit : `FsError::Unsupported`.
+//! - La faible priorité d'un effacement (`erase_tree`, HRT-85) est un « nice » de 19 posé sur un fil dédié, pas
+//!   une classe d'entrée-sortie `idle` (`ioprio_set` n'est pas exposé par `rustix`, et `libc` est interdit
+//!   avec `unsafe`) : le noyau en déduit la priorité d'entrée-sortie des ordonnanceurs qui la lisent.
 
 use std::path::PathBuf;
 #[cfg(unix)]
 use std::time::Duration;
 
-use crate::application::ports::{FsError, SafeFs, ServiceRoot};
 #[cfg(unix)]
-use crate::application::ports::{Measure, Perms};
+use crate::application::ports::{Erased, Measure, Perms};
+use crate::application::ports::{FsError, SafeFs, ServiceRoot};
 #[cfg(unix)]
 use crate::domain::files::RelPath;
 use crate::domain::services::ServiceKey;
@@ -67,6 +70,10 @@ impl SafeFs for SystemSafeFs {
     fn remove_service_root(&self, key: &ServiceKey) -> Result<(), FsError> {
         unix::remove_service_root(&self.data_dir, key)
     }
+
+    fn remove_empty_service_root(&self, key: &ServiceKey) -> Result<bool, FsError> {
+        unix::remove_empty_service_root(&self.data_dir, key)
+    }
 }
 
 #[cfg(not(unix))]
@@ -81,6 +88,10 @@ impl SafeFs for SystemSafeFs {
     }
 
     fn remove_service_root(&self, _key: &ServiceKey) -> Result<(), FsError> {
+        Err(FsError::Unsupported)
+    }
+
+    fn remove_empty_service_root(&self, _key: &ServiceKey) -> Result<bool, FsError> {
         Err(FsError::Unsupported)
     }
 }
@@ -105,5 +116,13 @@ impl ServiceRoot for unix::UnixRoot {
 
     fn remove_tree(&self, rel: &RelPath) -> Result<(), FsError> {
         self.remove(rel)
+    }
+
+    fn erase_tree(
+        &self,
+        rel: &RelPath,
+        progress: &mut (dyn FnMut(u64) + Send),
+    ) -> Result<Erased, FsError> {
+        self.erase(rel, progress, true)
     }
 }

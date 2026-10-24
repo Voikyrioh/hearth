@@ -20,10 +20,14 @@ use rustix::fs::{
 use rustix::io::Errno;
 
 use super::SERVICES_DIR;
-use crate::application::ports::{FsError, Measure, Perms};
+use crate::application::ports::{Erased, FsError, Measure, Perms};
 use crate::domain::files::{MAX_DEPTH, RelPath};
 use crate::domain::services::ServiceKey;
 use crate::infrastructure::dir_fd::{self, CREATE_FILE, OPEN_DIR, is_trusted};
+
+pub(super) mod erase;
+
+use erase::Eraser;
 
 /// Désigner un objet SANS l'ouvrir (`O_PATH`) : aucun effet d'ouverture sur un périphérique ou un tube,
 /// un lien est désigné lui-même, jamais suivi. Son type se juge ensuite sur ce descripteur.
@@ -149,75 +153,39 @@ pub(super) fn open_service_root(
     Ok(UnixRoot { fd, dev })
 }
 
-/// `BR-DEL-007` : vide la racine du service PUIS la retire, sans sortir de `services/<clé>`.
+/// `BR-DEL-007` : vide la racine du service PUIS la retire, sans sortir de `services/<clé>`. Continue après
+/// une erreur et rend la première (`left > 0`) : rien n'est retiré par-dessus ce qui est resté.
 pub(super) fn remove_service_root(data_dir: &Path, key: &ServiceKey) -> Result<(), FsError> {
     let name = check_key(key)?;
     let (services, dev) = open_services_dir(data_dir, false)?;
     let root = open_dir_on(&services, name, dev)?;
     check_trusted(&root)?;
-    empty_dir(&root, dev, 0)?;
+    let mut quiet = |_: u64| {};
+    let mut eraser = Eraser::new(dev, &mut quiet);
+    eraser.contents(&root, 0);
+    let report = eraser.finish();
+    if report.left > 0 || report.first_error.is_some() {
+        return Err(report.first_error.unwrap_or(FsError::Refused));
+    }
     drop(root);
     unlinkat(&services, name, AtFlags::REMOVEDIR).map_err(fs_error)?;
     fsync(&services).map_err(fs_error)
 }
 
-/// Les noms d'un dossier (hors `.` et `..`), lus en entier avant d'agir : retirer pendant qu'on lit
-/// fait sauter des entrées.
-fn names_of(dir: &OwnedFd) -> Result<Vec<CString>, FsError> {
-    let mut out = Vec::new();
-    for entry in Dir::read_from(dir).map_err(fs_error)? {
-        let entry = entry.map_err(fs_error)?;
-        let name = entry.file_name();
-        if name.to_bytes() != b"." && name.to_bytes() != b".." {
-            out.push(name.to_owned());
+/// `BR-DEL-007` : retire la racine du service si elle est vide, sans toucher à un contenu.
+pub(super) fn remove_empty_service_root(
+    data_dir: &Path,
+    key: &ServiceKey,
+) -> Result<bool, FsError> {
+    let name = check_key(key)?;
+    let (services, _) = open_services_dir(data_dir, false)?;
+    match unlinkat(&services, name, AtFlags::REMOVEDIR) {
+        Ok(()) => {
+            fsync(&services).map_err(fs_error)?;
+            Ok(true)
         }
-    }
-    Ok(out)
-}
-
-/// Vide un dossier par descripteur : un lien est retiré comme lien, jamais suivi ; un montage n'est pas
-/// franchi. Continue après une erreur et rend la première.
-fn empty_dir(dir: &OwnedFd, dev: u128, depth: usize) -> Result<(), FsError> {
-    let mut first_error = None;
-    for name in names_of(dir)? {
-        if let Err(error) = remove_entry(dir, &name, dev, depth) {
-            first_error.get_or_insert(error);
-        }
-    }
-    first_error.map_or(Ok(()), Err)
-}
-
-fn remove_entry(dir: &OwnedFd, name: &CStr, dev: u128, depth: usize) -> Result<(), FsError> {
-    let stat = match statat(dir, name, AtFlags::SYMLINK_NOFOLLOW) {
-        Ok(stat) => stat,
-        Err(Errno::NOENT) => return Ok(()),
-        Err(errno) => return Err(fs_error(errno)),
-    };
-    if file_type(&stat) != FileType::Directory {
-        return unlink_file(dir, name);
-    }
-    if depth >= MAX_DEPTH {
-        return Err(FsError::Refused);
-    }
-    match openat(dir, name, OPEN_DIR, Mode::empty()) {
-        Ok(child) => {
-            if dev_of(&fstat(&child).map_err(fs_error)?) != dev {
-                return Err(FsError::CrossesDevice);
-            }
-            empty_dir(&child, dev, depth + 1)?;
-            drop(child);
-            unlinkat(dir, name, AtFlags::REMOVEDIR).map_err(fs_error)
-        }
-        // Remplacé par autre chose qu'un dossier entre-temps : on retire CE nom, sans le suivre.
-        Err(Errno::NOTDIR | Errno::LOOP) => unlink_file(dir, name),
-        Err(Errno::NOENT) => Ok(()),
-        Err(errno) => Err(fs_error(errno)),
-    }
-}
-
-fn unlink_file(dir: &OwnedFd, name: &CStr) -> Result<(), FsError> {
-    match unlinkat(dir, name, AtFlags::empty()) {
-        Ok(()) | Err(Errno::NOENT) => Ok(()),
+        // Absente, ou encore pleine : rien n'est retiré.
+        Err(Errno::NOENT | Errno::NOTEMPTY | Errno::EXIST) => Ok(false),
         Err(errno) => Err(fs_error(errno)),
     }
 }
@@ -347,11 +315,46 @@ impl UnixRoot {
     }
 
     pub(super) fn remove(&self, rel: &RelPath) -> Result<(), FsError> {
+        let mut quiet = |_: u64| {};
+        let report = self.erase(rel, &mut quiet, false)?;
+        if report.left > 0 || report.first_error.is_some() {
+            return Err(report.first_error.unwrap_or(FsError::Refused));
+        }
+        Ok(())
+    }
+
+    /// Efface l'arbre `rel` (HRT-85) : voir [`erase::Eraser`]. `low_priority` : sur un fil dédié dont la
+    /// priorité est abaissée (la suppression d'un service), sinon sur le fil appelant.
+    pub(super) fn erase(
+        &self,
+        rel: &RelPath,
+        progress: &mut (dyn FnMut(u64) + Send),
+        low_priority: bool,
+    ) -> Result<Erased, FsError> {
         let (parent, leaf) = self.parent_of(rel)?;
         let name = CString::new(leaf).map_err(|_| FsError::Refused)?;
         statat(&parent, name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW).map_err(fs_error)?;
-        remove_entry(&parent, &name, self.dev, rel.depth())?;
-        fsync(&parent).map_err(fs_error)
+        let (dev, depth) = (self.dev, rel.depth());
+        let work = move |parent: OwnedFd, name: CString, progress: &mut (dyn FnMut(u64) + Send)| {
+            let mut eraser = Eraser::new(dev, progress);
+            eraser.erase_entry(&parent, &name, depth);
+            let report = eraser.finish();
+            // Le retrait du nom doit survivre à une coupure : `fsync` du dossier parent.
+            let _ = fsync(&parent);
+            report
+        };
+        if !low_priority {
+            return Ok(work(parent, name, progress));
+        }
+        std::thread::scope(|scope| {
+            scope
+                .spawn(move || {
+                    erase::lower_priority();
+                    work(parent, name, progress)
+                })
+                .join()
+        })
+        .map_err(|_| FsError::Io(io::ErrorKind::Other))
     }
 }
 
