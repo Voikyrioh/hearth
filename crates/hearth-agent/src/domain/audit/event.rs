@@ -248,6 +248,16 @@ pub enum Target {
         memory_bytes: u64,
         agreements: Vec<ClientName>,
     },
+    /// Des réglages de serveur de jeu enregistrés (HRT-108, BR-FICHE-053) : le service, le NOMBRE de réglages
+    /// changés, les noms techniques de ceux qui ne sont pas des secrets, et si un mot de passe a changé.
+    /// **Aucune valeur** : le type n'a pas de champ pour elle. `raw_file` : le fichier brut a été retouché à la main.
+    GameSettings {
+        service: ClientName,
+        changed: Vec<ClientName>,
+        count: u32,
+        password_changed: bool,
+        raw_file: bool,
+    },
     /// Une fiche visée par une demande refusée avant de connaître le service (fiche inconnue, empreinte
     /// changée, contrat non accepté...) : son identifiant, nettoyé et borné.
     Fiche(ClientName),
@@ -405,6 +415,33 @@ impl Target {
                 if !agreements.is_empty() {
                     let titles: Vec<&str> = agreements.iter().map(ClientName::as_str).collect();
                     text.push_str(&format!(", contrats acceptés : {}", titles.join(", ")));
+                }
+                Some(text)
+            }
+            Self::GameSettings {
+                service,
+                changed,
+                count,
+                password_changed,
+                raw_file,
+            } => {
+                if *raw_file {
+                    return Some(format!(
+                        "service {} : fichier de réglages modifié à la main",
+                        service.as_str()
+                    ));
+                }
+                let mut text = match count {
+                    0 => format!("service {} : aucun réglage changé", service.as_str()),
+                    1 => format!("service {} : 1 réglage changé", service.as_str()),
+                    n => format!("service {} : {n} réglages changés", service.as_str()),
+                };
+                if !changed.is_empty() {
+                    let names: Vec<&str> = changed.iter().map(ClientName::as_str).collect();
+                    text.push_str(&format!(" ({})", names.join(", ")));
+                }
+                if *password_changed {
+                    text.push_str(", mot de passe modifié");
                 }
                 Some(text)
             }
@@ -1059,6 +1096,33 @@ mod tests {
         assert_eq!(
             Reason::TooManyAttempts { retry_after_s: 60 }.text(),
             "trop de tentatives, attente de 60 s"
+        );
+    }
+
+    #[test]
+    fn a_game_settings_entry_names_the_changed_settings_and_never_a_value() {
+        let name = |text: &str| ClientName::parse(text).unwrap();
+        let entry = Target::GameSettings {
+            service: name("mon-terraria"),
+            changed: vec![name("motd"), name("max_players")],
+            count: 3,
+            password_changed: true,
+            raw_file: false,
+        };
+        assert_eq!(
+            entry.text().unwrap(),
+            "service mon-terraria : 3 réglages changés (motd, max_players), mot de passe modifié"
+        );
+        let raw = Target::GameSettings {
+            service: name("mon-terraria"),
+            changed: Vec::new(),
+            count: 0,
+            password_changed: false,
+            raw_file: true,
+        };
+        assert_eq!(
+            raw.text().unwrap(),
+            "service mon-terraria : fichier de réglages modifié à la main"
         );
     }
 

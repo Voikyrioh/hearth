@@ -71,7 +71,7 @@ fn invalid(field: &'static str, reason: &'static str) -> DeployError {
 }
 
 /// Le code stable d'une raison de refus d'une réponse (jamais le texte reçu).
-fn reason_code(reason: &SettingReason) -> &'static str {
+pub(crate) fn reason_code(reason: &SettingReason) -> &'static str {
     match reason {
         SettingReason::Bounds => "bounds",
         SettingReason::Choice => "choice",

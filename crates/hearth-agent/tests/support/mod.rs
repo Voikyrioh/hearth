@@ -19,6 +19,7 @@ pub mod fake_host;
 pub mod fake_random;
 pub mod fake_safe_fs;
 pub mod fake_supervisor;
+pub mod game;
 pub mod https;
 pub mod probe;
 pub mod tmp;

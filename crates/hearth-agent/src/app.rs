@@ -23,6 +23,7 @@ use crate::application::deployments::{DeployContext, DeployTimings, Deployments,
 use crate::application::elevation::Elevations;
 use crate::application::folders::FolderFacts;
 use crate::application::game_phase::GamePhases;
+use crate::application::game_settings::GameSettings;
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
@@ -83,9 +84,9 @@ use crate::infrastructure::security_feed::BroadcastSecurityFeed;
 use crate::infrastructure::services_key::FileServicesKeyStore;
 use crate::infrastructure::sqlite::{
     Database, DatabaseError, ServiceDatabase, SqliteAccountRepo, SqliteAttackModeRepo,
-    SqliteAuditRepo, SqliteDeviceRepo, SqliteKnownAddressRepo, SqliteLoginAttemptRepo,
-    SqliteOpJournal, SqliteOperationRepo, SqliteServiceRepo, SqliteSessionRepo, SqliteSpecRepo,
-    SqliteStore,
+    SqliteAuditRepo, SqliteDeviceRepo, SqliteGameSettingsRepo, SqliteKnownAddressRepo,
+    SqliteLoginAttemptRepo, SqliteOpJournal, SqliteOperationRepo, SqliteServiceRepo,
+    SqliteSessionRepo, SqliteSpecRepo, SqliteStore,
 };
 use crate::infrastructure::supervisor::{NoSupervisor, ProcSystemd};
 use crate::infrastructure::system::gpu;
@@ -943,6 +944,16 @@ pub async fn start_engined(
         .clone()
         .unwrap_or_else(|| Arc::new(CatalogService::embedded(engine.catalog.include_preview)));
     catalog.record_refused(services.audit_sink.as_ref()).await;
+    // Les réglages d'un serveur de jeu (HRT-108) : le fichier du jeu par `SafeFs`, les valeurs voulues en base.
+    let game_settings = GameSettings::new(
+        catalog.clone(),
+        foundations.specs.clone(),
+        Arc::new(SqliteGameSettingsRepo::new(database.pool().clone())),
+        safe_fs.clone(),
+        foundations.ops.locks().clone(),
+        services.audit_sink.clone(),
+        adapters.clock.clone(),
+    );
     let deployments = Deployments::new(
         registry.clone(),
         foundations.ops.clone(),
@@ -1005,6 +1016,7 @@ pub async fn start_engined(
         service_lifecycle,
         deployments,
         catalog,
+        game_settings,
         stream,
         erasure_pending: database.erasure_pending(),
     });
