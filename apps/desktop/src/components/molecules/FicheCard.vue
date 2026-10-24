@@ -67,9 +67,6 @@ const delivered = computed(() =>
   border-radius: var(--radius-card);
   background: var(--card);
   box-shadow: var(--card-edge);
-}
-
-.fcard {
   cursor: pointer;
 }
 

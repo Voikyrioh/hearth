@@ -100,7 +100,7 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
       <p class="sheet__muted">{{ t("fiche.foldersNote") }}</p>
     </DashCard>
 
-    <FicheResourcesCard :detail="detail" :capacity="capacity" @source="emit('source', $event)" />
+    <FicheResourcesCard :detail="detail" :capacity="capacity" :nothing-known="nothingKnown" @source="emit('source', $event)" />
 
     <DashCard v-if="!nothingKnown" :title="t('fiche.cardDisk')" data-fiche-disk>
       <p class="sheet__line" data-disk-needed>{{ diskNeededText(diskNeed) }}</p>

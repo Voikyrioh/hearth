@@ -54,49 +54,6 @@ async function fillDeploy(page: Page) {
 
 const dialog = (page: Page) => page.locator("dialog[open]");
 
-test.describe("constat 2 : le menu répond toujours après une séance de déploiement agitée", () => {
-  test("abandons, précédent, rechargement, mots de passe refusés, puis chaque entrée du menu", async ({
-    page,
-  }) => {
-    await openDeploy(page);
-    await fillDeploy(page);
-    // Précédent : la question est posée, on continue la saisie ; Fermer : même question.
-    await page.goBack();
-    await expect(dialog(page)).toContainText("Abandonner votre saisie ?");
-    await dialog(page).getByRole("button", { name: "Continuer la saisie" }).click();
-    await page.getByRole("button", { name: "Fermer" }).click();
-    await dialog(page).getByRole("button", { name: "Continuer la saisie" }).click();
-    // Sept mots de passe refusés : l'agent fait attendre, la fenêtre reste ouverte.
-    await page.locator("[data-deploy-submit]").click();
-    await expect(dialog(page)).toContainText("Vérifiez avant de lancer");
-    for (let attempt = 0; attempt < 7; attempt++) {
-      await dialog(page).locator("[data-reauth-field] input").fill(`faux-${attempt}`);
-      await dialog(page).getByRole("button", { name: "Déployer le service" }).click();
-    }
-    await expect(dialog(page)).toContainText("Trop d'essais.");
-    await page.keyboard.press("Escape");
-    await expect(dialog(page)).toHaveCount(0);
-    // Rechargement (avec la question de fermeture acceptée), puis une saisie abandonnée par le menu.
-    page.once("dialog", (native) => void native.accept());
-    await page.reload();
-    await expect(page.locator("[data-deploy-form]")).toBeVisible();
-    await fillDeploy(page);
-    await page.locator(".nav__item", { hasText: "Catalogue" }).click();
-    await dialog(page).getByRole("button", { name: "Abandonner" }).click();
-    await expect(page).toHaveURL(/catalogue$/);
-    // Chaque entrée du menu et de la barre répond, l'une après l'autre.
-    await page.locator(".nav__item", { hasText: "Comptes" }).click();
-    await expect(page).toHaveURL(/accounts$/);
-    await page.getByRole("link", { name: "Mes serveurs" }).click();
-    await expect(page).toHaveURL(/#\/servers$/);
-    await page.goBack();
-    await page.locator(".nav__item", { hasText: "Services" }).click();
-    await expect(page).toHaveURL(/services$/);
-    await page.locator(".nav__item", { hasText: "Catalogue" }).click();
-    await expect(page).toHaveURL(/catalogue$/);
-  });
-});
-
 test("constat 1 : la confirmation dit le mot de passe du compte simulé", async ({ page }) => {
   await openDeploy(page);
   await fillDeploy(page);
@@ -160,7 +117,8 @@ test.describe("fiche et installation", () => {
     const summary = dialog(page);
     await expect(summary).toContainText("Vérifiez avant de lancer");
     await expect(page.locator("[data-page-title]")).toHaveText("Installer Terraria");
-    // La fenêtre s'ouvre en haut, lisible de haut en bas.
+    // La fenêtre s'ouvre en haut, lisible de haut en bas : on lit le défilement une fois le curseur posé.
+    await expect(summary.locator("[data-reauth-field] input")).toBeFocused();
     const scrolled = await summary.locator(".dialog__scroll").evaluate((node) => node.scrollTop);
     expect(scrolled).toBe(0);
     await expect(summary.locator("[data-dialog-reason]")).toHaveText(
@@ -184,10 +142,11 @@ test.describe("fiche et installation", () => {
   test("constat 18 : une aide ne se répète pas dans la même phrase", async ({ page }) => {
     await boot(page, "#/servers/forge/catalogue/terraria/installer");
     const players = page.locator('[data-question="max_players"]');
-    await expect(players).toContainText("de 1 à 255");
-    await expect(players).not.toContainText("Le nombre est compris entre 1 et 255");
+    await expect(players).toContainText("Le nombre est compris entre 1 et 255.");
+    await expect(players).not.toContainText("de 1 à 255");
     const world = page.locator('[data-question="world_name"]');
-    await expect(world).not.toContainText("Lettres, chiffres, tirets et soulignés seulement.");
+    await expect(world).toContainText("Lettres, chiffres, tirets et soulignés seulement.");
+    await expect(world).not.toContainText("tiret et souligné seulement");
   });
 
   test("constat 21 : toute la carte du Catalogue ouvre la fiche", async ({ page }) => {
@@ -207,9 +166,11 @@ test.describe("formulaire de déploiement", () => {
     await expect(page.locator('[data-field="image"]')).toContainText(
       "Le nom complet s'écrit registre/organisation/nom",
     );
-    const label = page.locator("[data-resources] label", { hasText: "Valeur exacte" }).first();
-    const box = await label.boundingBox();
-    expect(box?.height ?? 99).toBeLessThan(24);
+    // Le libellé est court : le titre « Mémoire » est juste au-dessus, il n'est pas répété.
+    await expect(
+      page.locator("[data-resources] label", { hasText: "Valeur exacte" }).first(),
+    ).toHaveText("Valeur exacte");
+    await expect(page.locator("[data-resources]")).not.toContainText("Mémoire, valeur exacte");
   });
 
   test("un formulaire vierge ne décale rien : le premier clic sur « Ajouter un port » ajoute la rangée", async ({

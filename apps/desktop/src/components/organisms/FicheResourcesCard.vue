@@ -4,7 +4,7 @@ import HIcon from "@/components/atoms/HIcon.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import DashCard from "@/components/molecules/DashCard.vue";
 import ProofTag from "@/components/molecules/ProofTag.vue";
-import { coverage, minimumVerdicts, noFigureAtAll } from "@/fiche/fit";
+import { coverage, minimumVerdicts } from "@/fiche/fit";
 import { coverageText, minimumText } from "@/fiche/messages";
 import { proofOf, proofUrl, proven } from "@/fiche/proof";
 import { t } from "@/i18n";
@@ -23,6 +23,8 @@ const props = defineProps<{
   detail: FicheDetail;
   /** Les bornes de la machine ; `null` : pas encore lues (la colonne « Ce serveur » le dit). */
   capacity: EngineCapacity | null;
+  /** Aucun chiffre prouvé nulle part (`fiche/fit.ts::noFigureAtAll`, calculé par la fiche) : une phrase au lieu du tableau. */
+  nothingKnown: boolean;
 }>();
 
 const emit = defineEmits<{ source: [resource: "cpu" | "memory" | "disk"] }>();
@@ -73,8 +75,6 @@ const rows = computed<Row[]>(() => {
   ];
 });
 
-/** Aucun chiffre prouvé nulle part : une phrase au lieu d'un tableau d'absences (revue UX 2026-10-24, constat 19). */
-const nothingKnown = computed(() => noFigureAtAll(props.detail));
 const serverHas = computed(() =>
   props.capacity
     ? t("fiche.resThisServerHas", {
