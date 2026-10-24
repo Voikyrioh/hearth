@@ -22,7 +22,7 @@ catalog/
 ├── translate.rs      → fiche + variante + réponses + secrets + contrats donnent un `ServiceSpecDraft` ; interface du validateur du déploiement ordinaire (`DeploymentValidator`, implémentée par `domain::services::deploy::OrdinaryDeployment`, branchée par `domain::services::from_fiche`, HRT-101)
 ├── generate.rs       → un secret tiré par l'agent (HRT-101) : `secret_from_bytes` / `draw_secret` transforment des octets (le port `SecretRandom`) en secret `alnum` de la longueur déclarée, octets biaisés rejetés, abandon plutôt que boucle ; aucun tirage ici
 ├── readiness.rs      → le signe « le jeu est prêt » (sous-chaîne LITTÉRALE, lignes postérieures au lancement seulement, jamais un signe `untested`) et les phases d'un serveur de jeu (`phase_of`, `ReadyRule`) — HRT-101, BR-FICHE-028, 056
-└── embedded.rs       → la table des fiches embarquées, engendrée par `build.rs` (`include!` de `OUT_DIR`) ; `offered_with(include_preview)` : les fiches `published`, plus les `preview` dans une construction d'essai (`HEARTH_PREVIEW_FICHES`, HRT-101)
+└── embedded.rs       → la table des fiches embarquées, engendrée par `build.rs` (`include!` de `OUT_DIR`) ; `keep_offered(fiches, include_preview)` (la seule porte, appelée par `CatalogService`) : les fiches `published`, plus les `preview` dans une construction d'essai (`HEARTH_PREVIEW_FICHES`, HRT-101)
 ```
 
 Tests : `test_support.rs` (une fiche minimale et une fiche riche, dont les fiches piégées sont dérivées d'UNE modification), `tests_fiches.rs` (format fermé, I1 à I9, cohérence, Terraria, `ids.lock`), `tests_state.rs` (réglages, écart, arrêt), `tests_translate.rs` (traduction et test de propriété à graine fixe), `architecture_guard.rs`.

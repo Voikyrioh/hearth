@@ -74,6 +74,20 @@ pub enum FromFicheError {
     Spec(SpecError),
 }
 
+impl FromFicheError {
+    /// Un code fixe par variante, sans jamais de contenu : ce que les messages internes et les traces peuvent dire.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Name(_) => "name",
+            Self::Ordinary(_) => "ordinary",
+            Self::Folder => "folder",
+            Self::FileFolder => "file_folder",
+            Self::AnswerId => "answer_id",
+            Self::Spec(_) => "spec",
+        }
+    }
+}
+
 /// Ce que la demande apporte en plus du brouillon.
 pub struct InstallInputs<'a> {
     pub fiche: &'a Fiche,

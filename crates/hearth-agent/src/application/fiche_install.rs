@@ -88,6 +88,23 @@ fn reason_code(reason: &SettingReason) -> &'static str {
     }
 }
 
+/// Un code fixe par variante de `TranslateError`, jamais son contenu (un nom de variable, un identifiant).
+fn translate_code(error: &TranslateError) -> &'static str {
+    match error {
+        TranslateError::PlatformUnavailable => "platform_unavailable",
+        TranslateError::UnknownVariant(_) => "unknown_variant",
+        TranslateError::AgreementRequired(_) => "agreement_required",
+        TranslateError::Setting(_) => "setting",
+        TranslateError::GeneratedSecretMissing(_) => "generated_secret_missing",
+        TranslateError::GeneratedSecretInvalid(_) => "generated_secret_invalid",
+        TranslateError::PortRefused { .. } => "port_refused",
+        TranslateError::EnvConflict(_) => "env_conflict",
+        TranslateError::DeriveSourceMissing(_) => "derive_source_missing",
+        TranslateError::ArgumentRefused { .. } => "argument_refused",
+        TranslateError::FileValueRefused { .. } => "file_value_refused",
+    }
+}
+
 impl FicheInstaller {
     pub fn new(
         catalog: Arc<CatalogService>,
@@ -218,7 +235,11 @@ impl FicheInstaller {
             TranslateError::PortRefused { .. } => invalid("source.ports", "refused"),
             // Jamais `{error:?}` : une erreur de traduction peut porter un nom de variable de la fiche. Le message ne
             // dit que la fiche, la trace de l'erreur interne est écrite par la route.
-            _ => DeployError::Internal(format!("fiche {} non traduite", fiche.id())),
+            other => DeployError::Internal(format!(
+                "fiche {} non traduite ({})",
+                fiche.id(),
+                translate_code(&other)
+            )),
         })?;
 
         // 7. Les limites sont obligatoires comme pour une image à la main.
@@ -293,7 +314,11 @@ impl FicheInstaller {
             match error {
                 FromFicheError::Name(found) => DeployError::Invalid(found),
                 // Le détail (un code `champ:raison`) n'est pas répété : le message ne dit que la fiche.
-                _ => DeployError::Internal(format!("fiche {} non jugée", fiche.id())),
+                other => DeployError::Internal(format!(
+                    "fiche {} non jugée ({})",
+                    fiche.id(),
+                    other.code()
+                )),
             }
         })?;
 

@@ -7,7 +7,10 @@
 //! **État du branchement (HRT-101)** : `begin` est appelé au démarrage d'une installation (`Deployments`). `refresh`
 //! (vérification périodique), la lecture de la phase par le client (champ `game` de `ServiceItem`) et `forget` (à la
 //! suppression d'un service créé par Hearth, HRT-85) n'ont pas encore d'appelant : aucune route de suppression ni
-//! projection dans la liste n'existe dans `main`. Suivi : ticket « phases d'un serveur de jeu : projection et oubli ».
+//! projection dans la liste n'existe dans `main`. Suivi : HRT-197.
+//!
+//! **Limite** : le moteur ne filtre `since` qu'à la SECONDE ; la vérification suivante relit donc les lignes de
+//! la dernière seconde déjà lue (sans effet : le signe n'y était pas, et `ready_since` ne compte qu'une fois).
 //!
 //! Le signe « prêt » est cherché dans les seules lignes du journal du jeu écrites à partir du lancement
 //! (`domain::catalog::readiness`), comme une sous-chaîne littérale. Le texte d'une ligne est du contenu sensible :
@@ -44,6 +47,8 @@ struct Entry {
 pub struct GamePhases {
     engine: Arc<dyn ContainerEngine>,
     clock: Arc<dyn Clock>,
+    /// Le temps qu'une vérification peut prendre (5 s en production).
+    budget: Duration,
     entries: Mutex<HashMap<String, Entry>>,
 }
 
@@ -61,6 +66,7 @@ impl GamePhases {
         Arc::new(Self {
             engine,
             clock,
+            budget: CHECK_BUDGET,
             entries: Mutex::new(HashMap::new()),
         })
     }
@@ -140,10 +146,12 @@ impl GamePhases {
                 tty: false,
             },
         );
-        // (heure du signe s'il est vu, heure de la dernière ligne lue)
-        let outcome = tokio::time::timeout(CHECK_BUDGET, async {
+        // L'avancement vit HORS du futur borné par le délai : si le délai coupe la lecture, ce qui a été lu avant
+        // reste acquis et la vérification suivante repart plus loin.
+        let mut found: Option<i64> = None;
+        let mut last = from_ms;
+        let _ = tokio::time::timeout(self.budget, async {
             let mut read = 0_usize;
-            let mut last = from_ms;
             while let Some(item) = stream.next().await {
                 let Ok(line) = item else { break };
                 if let Some(at) = ready_since(
@@ -151,7 +159,9 @@ impl GamePhases {
                     started_ms,
                     std::iter::once((line.at_ms, line.text.as_str())),
                 ) {
-                    return (Some(at), line.at_ms);
+                    found = Some(at);
+                    last = last.max(line.at_ms);
+                    break;
                 }
                 last = last.max(line.at_ms);
                 read += 1;
@@ -159,18 +169,14 @@ impl GamePhases {
                     break;
                 }
             }
-            (None, last)
         })
-        .await
-        .ok();
+        .await;
         drop(stream);
         let mut inner = self.lock();
         let entry = inner.get_mut(key.as_str())?;
-        if let Some((found, last)) = outcome {
-            entry.last_read_ms = entry.last_read_ms.max(last);
-            if let Some(at) = found {
-                entry.ready_ms = Some(at);
-            }
+        entry.last_read_ms = entry.last_read_ms.max(last);
+        if let Some(at) = found {
+            entry.ready_ms = Some(at);
         }
         Some(self.phase_for(entry))
     }

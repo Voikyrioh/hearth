@@ -55,7 +55,9 @@ pub fn keep_offered(fiches: Vec<Fiche>, include_preview: bool) -> Vec<Fiche> {
         .collect()
 }
 
-/// Les fiches embarquées proposées par une construction qui a (ou n'a pas) la porte d'essai.
+/// Les fiches embarquées proposées par une construction qui a (ou n'a pas) la porte d'essai (tests seulement :
+/// l'application passe par `CatalogService`).
+#[cfg(test)]
 pub fn offered_with(include_preview: bool) -> Vec<Fiche> {
     keep_offered(load_all().0, include_preview)
 }

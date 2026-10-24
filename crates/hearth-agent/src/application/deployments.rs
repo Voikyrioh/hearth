@@ -425,14 +425,20 @@ impl Deployments {
         }
     }
 
+    /// L'espace libre sous ce chemin, lu hors de la tâche asynchrone. `None` : la mesure a échoué, jamais lue
+    /// comme « beaucoup de place » ni comme « plein ».
+    async fn free_bytes_at(&self, dir: String) -> Option<u64> {
+        let free_space = self.free_space.clone();
+        tokio::task::spawn_blocking(move || free_space.free_bytes(Path::new(&dir)))
+            .await
+            .ok()?
+            .ok()
+    }
+
     /// L'espace libre où le moteur range ses images (`BR-DEPLOY-018`).
     async fn disk(&self, info: Option<&EngineInfo>) -> Option<DiskCheck> {
         let dir = info?.storage_dir.clone()?;
-        let free_space = self.free_space.clone();
-        let free = tokio::task::spawn_blocking(move || free_space.free_bytes(Path::new(&dir)))
-            .await
-            .ok()?
-            .ok()?;
+        let free = self.free_bytes_at(dir).await?;
         Some(DiskCheck {
             free_bytes: free,
             low: free < LOW_DISK_BYTES,
@@ -445,12 +451,7 @@ impl Deployments {
     /// ni comme « plein »).
     async fn install_free_space(&self, info: Option<&EngineInfo>) -> Option<u64> {
         let images = self.disk(info).await.map(|disk| disk.free_bytes);
-        let root = self.context.services_root.clone();
-        let free_space = self.free_space.clone();
-        let data = tokio::task::spawn_blocking(move || free_space.free_bytes(Path::new(&root)))
-            .await
-            .ok()
-            .and_then(Result::ok);
+        let data = self.free_bytes_at(self.context.services_root.clone()).await;
         match (images, data) {
             (Some(images), Some(data)) => Some(images.min(data)),
             (images, data) => images.or(data),
