@@ -149,13 +149,11 @@ fn state_over_rig(
         env.clock.clone(),
         Arc::new(hearth_agent::infrastructure::ids::UlidGen),
         Arc::new(hearth_agent::infrastructure::created_objects::FsCreatedObjects::new([])),
-    ));
-    ops.bind_audit(
         Arc::new(hearth_agent::infrastructure::sqlite::SqliteStore::new(
             env.db.pool().clone(),
         )),
         env.trail.clone(),
-    );
+    ));
     // Les conteneurs que l'agent crée sont consignés dans la vraie base (HRT-68).
     let repo = Arc::new(
         hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(env.db.pool().clone()),

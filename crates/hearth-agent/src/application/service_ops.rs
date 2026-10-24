@@ -11,7 +11,7 @@
 //! geste sur un service ou ses données.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -213,21 +213,30 @@ pub struct ServiceOps {
     /// s'envoyer dans l'ordre inverse de leur lecture : un abonné ne reçoit jamais un état plus ancien
     /// APRÈS un plus récent (revue de la PR 94).
     publishing: AsyncMutex<()>,
-    /// Le magasin et la diffusion du journal d'activité, branchés à l'assemblage (`bind_audit`).
-    audit: OnceLock<(Arc<dyn Store>, Arc<AuditTrail>)>,
+    /// Le magasin et la diffusion du journal d'activité : une clôture ou un constat écrit son entrée dans la
+    /// transaction de l'opération (jamais regroupée : ce n'est pas un refus répété, BR-AUDIT-007).
+    store: Arc<dyn Store>,
+    trail: Arc<AuditTrail>,
 }
 
-/// L'entrée du journal d'activité d'une clôture ou d'un constat, écrite avec lui (`finish_with`).
-pub struct JournalEntry {
+/// Un événement du journal d'activité sans sa date : la date est celle de la transaction qui l'écrit avec
+/// l'issue ou la cause (`finish_with`, `annotate_with`).
+pub struct AuditDraft {
     pub actor: Actor,
     pub action: AuditAction,
     pub target: Target,
     pub outcome: Outcome,
 }
 
-impl JournalEntry {
-    fn event(self, at: OffsetDateTime) -> AuditEvent {
-        AuditEvent::new(at, self.actor, self.action, self.target, self.outcome)
+impl AuditDraft {
+    fn event(&self, at: OffsetDateTime) -> AuditEvent {
+        AuditEvent::new(
+            at,
+            self.actor.clone(),
+            self.action,
+            self.target.clone(),
+            self.outcome.clone(),
+        )
     }
 }
 
@@ -238,6 +247,8 @@ impl ServiceOps {
         clock: Arc<dyn Clock>,
         ids: Arc<dyn IdGen>,
         objects: Arc<dyn CreatedObjects>,
+        store: Arc<dyn Store>,
+        trail: Arc<AuditTrail>,
     ) -> Self {
         let (feed, _) = broadcast::channel(FEED_CAPACITY);
         Self {
@@ -250,7 +261,8 @@ impl ServiceOps {
             index: Mutex::new(OpsIndex::new()),
             progress_gate: Mutex::new(HashMap::new()),
             publishing: AsyncMutex::new(()),
-            audit: OnceLock::new(),
+            store,
+            trail,
         }
     }
 
@@ -566,47 +578,31 @@ impl ServiceOps {
     }
 
     /// Pose, après coup, une cause sur une réussite qui n'en a pas (HRT-64, BR-LIFE-005, BR-LIFE-011) et
-    /// prévient les abonnés. `false` : rien n'a changé. Sans entrée de journal d'activité : voir
-    /// [`Self::annotate_with`].
-    pub async fn annotate(&self, id: &str, cause: Cause) -> Result<bool, OpError> {
-        self.annotate_with(id, cause, None).await
-    }
-
-    /// Comme [`Self::annotate`], avec l'entrée du journal d'activité de ce constat : la cause et l'entrée sont
-    /// écrites dans UNE transaction, puis l'état est annoncé (flux et projection). `GET /operations/...` lit
-    /// le journal des opérations : il ne voit la cause qu'avec son entrée (HRT-101). `false` : rien n'a
-    /// changé, aucune entrée n'est écrite.
+    /// prévient les abonnés. La cause et l'entrée du journal d'activité de ce constat sont écrites dans UNE
+    /// transaction, puis l'état est annoncé (flux et projection) : `GET /operations/...` lit le journal des
+    /// opérations et ne voit la cause qu'avec son entrée (HRT-101). `false` : rien n'a changé, aucune entrée
+    /// n'est écrite.
     pub async fn annotate_with(
         &self,
         id: &str,
         cause: Cause,
-        entry: Option<JournalEntry>,
+        draft: AuditDraft,
     ) -> Result<bool, OpError> {
-        let Some((entry, store, trail)) = self.with_audit(entry) else {
-            let written = self
-                .journal
-                .annotate_cause(id, cause, self.clock.now())
-                .await?;
-            if written {
-                self.publish(id).await;
-            }
-            return Ok(written);
-        };
         let now = self.clock.now();
-        let mut tx = store.begin().await?;
+        let mut tx = self.store.begin().await?;
         if !tx.service_ops().annotate_cause(id, cause, now).await? {
             return Ok(false);
         }
         let mut pending = Pending::default();
-        pending.record(&mut *tx, entry.event(now)).await?;
+        pending.record(&mut *tx, draft.event(now)).await?;
         tx.commit().await?;
-        pending.publish(&trail);
+        pending.publish(&self.trail);
         self.publish(id).await;
         Ok(true)
     }
 
-    /// Clôt l'opération dans un statut terminal et rend ses verrous. Sans entrée de journal d'activité : voir
-    /// [`Self::finish_with`].
+    /// Clôt l'opération dans un statut terminal, sans entrée au journal d'activité, et rend ses verrous. Le
+    /// même chemin que [`Self::finish_with`].
     pub async fn finish(
         &self,
         id: &str,
@@ -616,31 +612,47 @@ impl ServiceOps {
         self.finish_with(id, to, cause, None).await
     }
 
-    /// Comme [`Self::finish`], avec l'entrée du journal d'activité de l'issue : la transition et l'entrée sont
-    /// écrites dans UNE transaction (une transition refusée n'écrit rien), puis l'issue est annoncée (flux et
-    /// projection) et les verrous rendus, dans cet ordre : `GET /operations/...`, qui lit le journal des
-    /// opérations, ne voit l'issue qu'avec son entrée, et une autre opération du service n'est acceptée
-    /// qu'après l'annonce de celle-ci (HRT-101).
+    /// Clôt l'opération dans un statut terminal avec l'entrée du journal d'activité de l'issue. La transition
+    /// et l'entrée sont écrites dans UNE transaction (une transition refusée n'écrit rien) : `GET
+    /// /operations/...`, qui lit le journal des opérations, ne voit l'issue qu'avec son entrée. Puis, dans cet
+    /// ordre : les verrous sont rendus, l'issue est annoncée (flux et projection), comme `move_to` et `settle`
+    /// (HRT-101).
+    ///
+    /// Si l'écriture de l'entrée échoue, l'opération n'est pas laissée `running` avec son verrou alors que le
+    /// geste a eu lieu : elle est close sans entrée, dans une seconde transaction, et l'échec est tracé.
     pub async fn finish_with(
         &self,
         id: &str,
         to: OpStatus,
         cause: Option<Cause>,
-        entry: Option<JournalEntry>,
+        draft: Option<AuditDraft>,
     ) -> Result<(), OpError> {
         if !to.is_terminal() {
             return Err(OpError::IllegalTransition);
         }
-        let Some((entry, store, trail)) = self.with_audit(entry) else {
-            let op = self
-                .journal
-                .get(id)
-                .await?
-                .ok_or(OpError::NoSuchOperation)?;
-            return self.move_to(id, op.status, to, cause).await;
-        };
+        match self.close(id, to, cause, draft.as_ref()).await {
+            Err(OpError::Storage(error)) if draft.is_some() => {
+                tracing::error!(
+                    %error,
+                    operation = id,
+                    "entrée du journal d'activité non écrite : l'opération est close sans elle"
+                );
+                self.close(id, to, cause, None).await
+            }
+            other => other,
+        }
+    }
+
+    /// La clôture dans une transaction : statut, entrée éventuelle, puis verrous et annonce.
+    async fn close(
+        &self,
+        id: &str,
+        to: OpStatus,
+        cause: Option<Cause>,
+        draft: Option<&AuditDraft>,
+    ) -> Result<(), OpError> {
         let now = self.clock.now();
-        let mut tx = store.begin().await?;
+        let mut tx = self.store.begin().await?;
         let op = tx
             .service_ops()
             .get(id)
@@ -653,34 +665,14 @@ impl ServiceOps {
             .transition(id, op.status, to, cause, None, now)
             .await?;
         let mut pending = Pending::default();
-        pending.record(&mut *tx, entry.event(now)).await?;
-        tx.commit().await?;
-        pending.publish(&trail);
-        self.publish(id).await;
-        self.locks.with(|table| table.release_all_of(id));
-        Ok(())
-    }
-
-    /// L'entrée et les moyens de l'écrire dans la transaction. Une entrée demandée sans journal branché est
-    /// une erreur de câblage : tracée, et l'opération se clôt quand même, sans entrée.
-    fn with_audit(
-        &self,
-        entry: Option<JournalEntry>,
-    ) -> Option<(JournalEntry, Arc<dyn Store>, Arc<AuditTrail>)> {
-        let entry = entry?;
-        match self.audit.get() {
-            Some((store, trail)) => Some((entry, store.clone(), trail.clone())),
-            None => {
-                tracing::error!("journal d'activité non branché sur les opérations de service");
-                None
-            }
+        if let Some(draft) = draft {
+            pending.record(&mut *tx, draft.event(now)).await?;
         }
-    }
-
-    /// Branche le journal d'activité (le magasin et la diffusion) : `finish_with` et `annotate_with` y
-    /// écrivent leur entrée dans la transaction de l'opération. À appeler une fois, à l'assemblage.
-    pub fn bind_audit(&self, store: Arc<dyn Store>, trail: Arc<AuditTrail>) {
-        let _ = self.audit.set((store, trail));
+        tx.commit().await?;
+        pending.publish(&self.trail);
+        self.locks.with(|table| table.release_all_of(id));
+        self.publish(id).await;
+        Ok(())
     }
 
     /// Demande une décision au compte : `running` → `awaiting_decision` avec les choix offerts.

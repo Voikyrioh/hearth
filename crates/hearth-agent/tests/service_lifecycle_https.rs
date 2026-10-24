@@ -741,6 +741,50 @@ async fn a_service_that_stops_right_after_its_start_is_noted_on_the_finished_act
     );
 }
 
+/// L'issue est lisible (GET) avec son entrée du journal, et le verrou est déjà rendu : l'action suivante du
+/// même service n'est jamais refusée (409), sans attente (HRT-101).
+#[tokio::test]
+async fn the_next_action_is_never_refused_once_the_previous_outcome_can_be_read() {
+    let b = bench().await;
+    let (key, _id) = publish(&b, "terraria", RunState::Running).await;
+    for round in 0..20 {
+        let stop = b.accepted("stop", &key).await;
+        let operation = b.finished(&stop.action_id).await;
+        assert_eq!(operation.status, OperationStatus::Succeeded, "{round}");
+        let journal = b.journal().await;
+        assert_eq!(journal.len(), 2 * round + 1, "{round} {journal:?}");
+        let start = b.accepted("start", &key).await;
+        let operation = b.finished(&start.action_id).await;
+        assert_eq!(operation.status, OperationStatus::Succeeded, "{round}");
+        let journal = b.journal().await;
+        assert_eq!(journal.len(), 2 * round + 2, "{round} {journal:?}");
+    }
+}
+
+/// Si l'entrée du journal d'activité ne peut pas s'écrire, l'action est close sans elle : elle ne reste pas
+/// `running` avec son verrou alors que le geste a eu lieu (HRT-101).
+#[tokio::test]
+async fn an_action_whose_journal_entry_cannot_be_written_is_closed_without_it_and_frees_the_service()
+ {
+    let b = bench().await;
+    let (key, _id) = publish(&b, "terraria", RunState::Running).await;
+    sqlx::query(
+        "CREATE TRIGGER refuse_audit BEFORE INSERT ON audit_events
+         BEGIN SELECT RAISE(ABORT, 'journal indisponible'); END",
+    )
+    .execute(b.env.db.pool())
+    .await
+    .unwrap();
+    let stop = b.accepted("stop", &key).await;
+    let operation = b.finished(&stop.action_id).await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+    assert!(b.journal().await.is_empty());
+    // Le verrou est rendu : l'action suivante est acceptée.
+    let start = b.accepted("start", &key).await;
+    let operation = b.finished(&start.action_id).await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+}
+
 #[tokio::test]
 async fn a_service_that_comes_back_alone_after_a_stop_is_told_and_one_that_stays_stopped_is_not() {
     let b = bench().await;

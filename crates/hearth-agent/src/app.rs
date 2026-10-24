@@ -379,7 +379,21 @@ pub async fn service_foundations(
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
 ) -> Result<ServiceFoundations, AppError> {
-    service_foundations_observed(data_dir, database, clock, ids, &UnobservedState).await
+    // Un journal d'activité propre au socle : personne n'en suit la diffusion dans ces assemblages.
+    let store: Arc<dyn Store> = Arc::new(SqliteStore::new(database.pool().clone()));
+    let maintenance = Arc::new(MaintenanceService::new(store.clone(), clock.clone()));
+    let feed: Arc<dyn AuditFeed> = Arc::new(BroadcastAuditFeed::new());
+    let trail = Arc::new(AuditTrail::new(feed, maintenance));
+    service_foundations_observed(
+        data_dir,
+        database,
+        clock,
+        ids,
+        &UnobservedState,
+        store,
+        trail,
+    )
+    .await
 }
 
 /// Où l'agent range, sous son dossier de données, ce que les opérations créent pour elles-mêmes et qu'une
@@ -403,6 +417,8 @@ pub async fn service_foundations_observed(
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
     observer: &dyn ServiceObserver,
+    store: Arc<dyn Store>,
+    trail: Arc<AuditTrail>,
 ) -> Result<ServiceFoundations, AppError> {
     let spec_repo = Arc::new(SqliteSpecRepo::new(database.pool().clone()));
     let vault = Arc::new(SecretVault::new(
@@ -434,6 +450,9 @@ pub async fn service_foundations_observed(
             (ObjectRoot::Backups, data_dir.join(BACKUPS_DIR)),
             (ObjectRoot::Staging, data_dir.join(STAGING_DIR)),
         ])),
+        // Une clôture ou un constat écrit son entrée du journal d'activité dans sa transaction.
+        store,
+        trail,
     ));
     // La reprise ne doit JAMAIS empêcher l'agent de démarrer : c'est lui qui sert à réparer le serveur.
     // Si même la liste des opérations non terminées est illisible, les fonctions de service restent
@@ -813,12 +832,10 @@ pub async fn start_engined(
         adapters.clock.clone(),
         adapters.ids.clone(),
         &observer,
+        services.store.clone(),
+        services.trail.clone(),
     )
     .await?;
-    // Les clôtures et constats d'opérations écrivent leur entrée du journal d'activité dans leur transaction.
-    foundations
-        .ops
-        .bind_audit(services.store.clone(), services.trail.clone());
     let service_ops_sweep =
         tasks::spawn_service_ops_sweep(foundations.ops.clone(), tasks::SERVICE_OPS_SWEEP_PERIOD);
     let hello = HelloService::new(

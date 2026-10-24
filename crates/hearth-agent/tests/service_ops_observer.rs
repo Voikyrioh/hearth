@@ -114,15 +114,43 @@ async fn bench() -> Bench {
     }
 }
 
+/// Le magasin et la diffusion du journal d'activité qu'une clôture écrit dans sa transaction.
+fn audit_parts(
+    db: &Database,
+    clock: Arc<dyn hearth_agent::application::ports::Clock>,
+) -> (
+    Arc<dyn hearth_agent::application::ports::Store>,
+    Arc<hearth_agent::application::audit::AuditTrail>,
+) {
+    let store: Arc<dyn hearth_agent::application::ports::Store> = Arc::new(
+        hearth_agent::infrastructure::sqlite::SqliteStore::new(db.pool().clone()),
+    );
+    let maintenance = Arc::new(
+        hearth_agent::application::maintenance::MaintenanceService::new(store.clone(), clock),
+    );
+    let feed: Arc<dyn hearth_agent::application::ports::AuditFeed> =
+        Arc::new(hearth_agent::infrastructure::audit_feed::BroadcastAuditFeed::new());
+    (
+        store,
+        Arc::new(hearth_agent::application::audit::AuditTrail::new(
+            feed,
+            maintenance,
+        )),
+    )
+}
+
 impl Bench {
     /// L'agent « démarre » : de nouveaux verrous, le même journal, cet observateur.
     fn ops(&self) -> ServiceOps {
+        let (store, trail) = audit_parts(&self.db, Arc::new(TestClock));
         ServiceOps::new(
             Arc::new(SqliteOpJournal::new(self.db.pool().clone())) as Arc<dyn OpJournal>,
             Arc::new(OpLocks::new()),
             Arc::new(TestClock),
             self.ids.clone(),
             Arc::new(FsCreatedObjects::new([])),
+            store,
+            trail,
         )
     }
 

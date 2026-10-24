@@ -48,7 +48,7 @@ use super::ports::{
     Ownership, Perms, PullProgress, SafeFs, SecretRandom, ServiceContainers,
 };
 use super::service_lifecycle::reason_of;
-use super::service_ops::{AcceptRequest, JournalEntry, OpError, ServiceOps};
+use super::service_ops::{AcceptRequest, AuditDraft, OpError, ServiceOps};
 use super::service_specs::{ServiceSpecs, SpecServiceError};
 use super::services::ServicesRegistry;
 use crate::application::ports::Progress;
@@ -1235,7 +1235,7 @@ impl Deployments {
                 &job.id,
                 finish.status,
                 finish.cause,
-                self.entry(job, &finish),
+                self.draft(job, &finish),
             )
             .await
         {
@@ -1258,7 +1258,7 @@ impl Deployments {
 
     /// Une entrée au journal d'activité (`BR-DEPLOY-025`) : le compte, le service, l'image et la version, les
     /// ports du serveur, le nombre de variables, la commande oui ou non, l'issue et sa cause typée.
-    fn entry(&self, job: &Job, finish: &Finish) -> Option<JournalEntry> {
+    fn draft(&self, job: &Job, finish: &Finish) -> Option<AuditDraft> {
         let (Some(service), Some(image)) = (
             ClientName::parse(&job.name),
             ClientName::parse(&job.reference),
@@ -1300,7 +1300,7 @@ impl Deployments {
                 stopped_right_after_start: stopped,
             },
         };
-        Some(JournalEntry {
+        Some(AuditDraft {
             actor: job.actor.clone(),
             action: OpKind::Deploy.audit_action(),
             target,

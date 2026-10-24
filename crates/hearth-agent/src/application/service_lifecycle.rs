@@ -41,7 +41,7 @@ use super::ports::{
     AuditSink, Clock, ContainerEngine, EngineError, ServiceIntents, ServiceSupervisor, StopIntent,
     SupervisorError,
 };
-use super::service_ops::{AcceptRequest, InterruptedAction, JournalEntry, OpError, ServiceOps};
+use super::service_ops::{AcceptRequest, AuditDraft, InterruptedAction, OpError, ServiceOps};
 use super::services::{Driver, LifecycleTarget, ServicesRegistry};
 use crate::domain::audit::{Actor, ClientName, LifecycleNote, Outcome, Reason, Target};
 use crate::domain::ops::{
@@ -744,10 +744,10 @@ impl ServiceLifecycle {
         // FIX:01M5NYA5W781YW5NFQ7W1JGR98 L'issue et l'entrée du journal d'activité sont écrites dans UNE
         // transaction, puis annoncées : une transition refusée n'écrit pas de ligne, et qui lit l'issue (flux
         // ou GET) relit un journal complet.
-        let entry = self.entry(job, finish.status, finish.cause);
+        let draft = self.draft(job, finish.status, finish.cause);
         match self
             .ops
-            .finish_with(&job.id, finish.status, finish.cause, entry)
+            .finish_with(&job.id, finish.status, finish.cause, draft)
             .await
         {
             Ok(()) => {}
@@ -773,7 +773,7 @@ impl ServiceLifecycle {
 
     /// Une entrée au journal d'activité : le compte, le service (son nom), le geste, l'issue et sa cause
     /// typée (`BR-LIFE-018`).
-    fn entry(&self, job: &Job, status: OpStatus, cause: Option<Cause>) -> Option<JournalEntry> {
+    fn draft(&self, job: &Job, status: OpStatus, cause: Option<Cause>) -> Option<AuditDraft> {
         let service = ClientName::parse(&job.target.name)?;
         let (outcome, note) = match (status, cause) {
             (OpStatus::Succeeded, Some(Cause::ForcedStop)) => {
@@ -785,7 +785,7 @@ impl ServiceLifecycle {
                 LifecycleNote::Plain,
             ),
         };
-        Some(JournalEntry {
+        Some(AuditDraft {
             actor: job.actor.clone(),
             action: job.gesture.kind().audit_action(),
             target: Target::ServiceLifecycle { service, note },
@@ -850,7 +850,10 @@ impl ServiceLifecycle {
             // Une cause n'en remplace pas une autre : la surveillance ne dit rien d'une action forcée.
             // FIX:01M5NYA5W781YW5NFQ7W1JGR98 La cause et son entrée du journal d'activité sont écrites dans
             // UNE transaction, puis annoncées.
-            let entry = ClientName::parse(name).map(|service| JournalEntry {
+            let Some(service) = ClientName::parse(name) else {
+                return;
+            };
+            let draft = AuditDraft {
                 actor,
                 action: kind.audit_action(),
                 target: Target::ServiceLifecycle {
@@ -858,11 +861,9 @@ impl ServiceLifecycle {
                     note: LifecycleNote::Plain,
                 },
                 outcome: Outcome::Failed(reason_of(cause)),
-            });
-            match self.ops.annotate_with(id, cause, entry).await {
-                Ok(true) => {}
-                Ok(false) => {}
-                Err(error) => tracing::warn!(%error, "constat de surveillance non noté"),
+            };
+            if let Err(error) = self.ops.annotate_with(id, cause, draft).await {
+                tracing::warn!(%error, "constat de surveillance non noté");
             }
             return;
         }
