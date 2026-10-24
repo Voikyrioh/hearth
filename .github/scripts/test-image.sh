@@ -107,5 +107,6 @@ docker build --quiet --tag localhost:5000/busybox:1.36 "$build" >/dev/null
 docker push --quiet localhost:5000/busybox:1.36 >/dev/null
 docker rmi localhost:5000/busybox:1.36 >/dev/null
 docker builder prune --force >/dev/null 2>&1 || true
+docker image prune --force >/dev/null 2>&1 || true
 rm -rf "$build"
 echo "registre local prêt : localhost:5000/busybox:1.36 (couche propre de 6 Mo, absente du démon)"

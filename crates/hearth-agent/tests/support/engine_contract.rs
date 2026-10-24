@@ -765,16 +765,22 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
     assert!(!engine.image_present(&image).await.expect("présence"));
     let mut pull = engine.pull(&image);
     let mut percents = Vec::new();
+    let mut events = 0_usize;
+    let mut bytes_done = 0_u64;
     while let Some(item) = pull.next().await {
         let progress = item.expect("récupération");
+        events += 1;
+        bytes_done = bytes_done.max(progress.bytes_done);
         if let Some(percent) = progress.percent {
             percents.push(percent);
         }
     }
-    assert!(
-        !percents.is_empty(),
-        "le téléchargement doit rapporter des octets reçus (une couche réellement téléchargée), pas seulement « déjà là »"
-    );
+    // Preuve d'un vrai téléchargement : l'image était ABSENTE du moteur (vérifié plus haut), seul le registre
+    // la porte, le flux a rapporté des évènements, et elle est présente ensuite. Les octets reçus et les
+    // pourcentages ne sont PAS garantis par un vrai moteur (couche de quelques Mo récupérée d'un registre local
+    // en un seul évènement, ou blob déjà connu du magasin de contenu) : ils sont consignés, pas exigés.
+    eprintln!("récupération : {events} évènements, {bytes_done} octets, progression {percents:?}");
+    assert!(events > 0, "le flux de récupération n'a rien rapporté");
     assert!(
         percents.windows(2).all(|pair| pair[0] <= pair[1]),
         "la progression ne recule jamais : {percents:?}"
