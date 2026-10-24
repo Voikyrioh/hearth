@@ -212,6 +212,20 @@ test.describe("formulaire de déploiement", () => {
     expect(box?.height ?? 99).toBeLessThan(24);
   });
 
+  test("un formulaire vierge ne décale rien : le premier clic sur « Ajouter un port » ajoute la rangée", async ({
+    page,
+  }) => {
+    await openDeploy(page);
+    await page.getByRole("button", { name: "Ajouter un port" }).click();
+    await expect(page.locator("[data-port-row]")).toHaveCount(1);
+    await expect(page.getByText("Le nom est requis")).toHaveCount(0);
+    // Dès qu'on tape puis qu'on quitte le champ, l'erreur revient.
+    await page.getByLabel("Nom du service").fill("a");
+    await page.getByLabel("Nom du service").fill("");
+    await page.getByLabel("Nom du service").blur();
+    await expect(page.getByText("Le nom est requis")).toBeVisible();
+  });
+
   test("constat 12 : « Utiliser le port » est un bouton avec un bord, hors de l'encart", async ({
     page,
   }) => {
