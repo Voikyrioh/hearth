@@ -4,7 +4,7 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 
 **Actes d'administration** (HRT-28) : les routes qui modifient (hors déconnexion et hors retrait d'un poste, qui garde son contrat) acceptent un membre `reauth` (mot de passe + preuve de clé d'usage `0x05`) ; l'agent l'EXIGE depuis HRT-30 (`GET /security` : `admin_reauth.required: true`) ; sans `reauth`, `426 INCOMPATIBLE_VERSION` « client trop ancien ». Voir [sécurité](./security.md).
 
-45 endpoints : session, postes de confiance, sécurité, comptes, mesures, services (moteur de conteneurs), audit, mises à jour.
+47 endpoints : session, postes de confiance, sécurité, comptes, mesures, services (moteur de conteneurs), audit, mises à jour.
 
 | Groupe | Méthode | Route | Rôle | Description |
 |---|---|---|---|---|
@@ -29,6 +29,8 @@ Endpoints `/api/v1` (JSON, HTTPS). Authentification par Bearer token en en-tête
 | **Services** | POST | [`/deployments/check`](./services.md) | droit « gérer les services » | Constats du formulaire (nom, ports, dossiers, disque, image présente), sans secret, sans écriture, non journalisée (BR-DEPLOY-033) |
 | **Services** | GET | [`/engine/capacity`](./services.md) | user+ | Bornes de la machine (processeurs, mémoire, réserve) et limites déjà engagées, en totaux (HRT-68) |
 | **Services** | GET | [`/catalog`](./catalog.md) | user+ | Les fiches de serveurs de jeu que l'agent propose (HRT-101, ADR-0050) : carte de chaque fiche, fiches écartées au chargement (dossier et invariant). Une fiche `preview` n'y est que dans une construction d'essai |
+| **Services** | GET | [`/services/{key}/delete-preview`](./service-delete.md) | services | La fenêtre de suppression (HRT-85) : dossiers gérés par Hearth, taille mesurée en 10 s, sort de chacun (effaçable, partagé, non vérifiable), dossiers du serveur et volumes conservés |
+| **Services** | DELETE | [`/services/{key}`](./service-delete.md) | services + acte `0x14` | Supprime un service créé par Hearth (HRT-85) : conteneur sans ses volumes, description et valeurs scellées ; les données ne partent que sur demande (nom retapé), après le conteneur, à faible priorité ; `202 { operation_id }` |
 | **Services** | GET | [`/services/{key}/game-secret`](./game-services.md) | services | Le mot de passe du serveur de jeu, lu dans la description chiffrée (HRT-103, BR-JEU-025) : réussite consignée AVANT la valeur (`service.game.password.reveal`), refus faute du droit consigné, `Cache-Control: no-store`, absent si le serveur n'en a pas |
 | **Services** | GET | [`/services/{key}/settings`](./game-settings.md) | services | Les valeurs voulues des réglages d'un serveur de jeu, l'état du fichier, les écarts avec le fichier du jeu et les réglages que la fiche ne connaît pas ; jamais la valeur d'un secret (HRT-108) |
 | **Services** | POST | [`/services/{key}/settings/analyze`](./game-settings.md) | services | Lit un texte collé et juge chaque réglage ; n'écrit rien, ne garde rien (HRT-108) |

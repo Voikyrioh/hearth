@@ -184,7 +184,6 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         // existante la plus proche ; la route qui les rendra peut en préciser une plus fine.
         // Conflit d'état ou d'écriture : la demande n'a plus lieu d'être telle quelle.
         ErrorCode::SpecConflict // la description a changé depuis sa lecture
-        | ErrorCode::ServiceAdopted // service non créé par Hearth : geste impossible
         | ErrorCode::NameBeingDeleted // nom réservé par une suppression en cours
         | ErrorCode::LimitRefusedLive // limite refusée à chaud par le moteur
         | ErrorCode::LimitsChanged // limites modifiées depuis la lecture
@@ -225,6 +224,8 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         ErrorCode::FicheUnknown => Some(Outcome::Failed(Reason::FicheUnknown)), // fiche non proposée
         ErrorCode::FicheChanged => Some(Outcome::Failed(Reason::FicheChanged)), // fiche changée depuis l'affichage
         ErrorCode::AgreementRequired => Some(Outcome::Failed(Reason::AgreementRequired)), // contrat non accepté
+        // Supprimer un service créé hors de Hearth, même adopté : jamais (HRT-85, BR-DEL-002), cause « service adopté ».
+        ErrorCode::ServiceAdopted => Some(Outcome::Failed(Reason::ServiceAdopted)),
         // Démarrer, arrêter, redémarrer (HRT-64, BR-LIFE-018) : une cause typée par refus, dans la liste fermée.
         ErrorCode::ServiceBusy => Some(Outcome::Failed(Reason::ActionInProgress)), // une opération tient déjà le service
         ErrorCode::ServiceAlreadyInState => Some(Outcome::Failed(Reason::AlreadyInState)), // déjà dans l'état demandé

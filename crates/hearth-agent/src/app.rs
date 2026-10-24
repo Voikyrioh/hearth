@@ -19,6 +19,7 @@ use crate::application::accounts::AccountService;
 use crate::application::attack_mode::AttackModeService;
 use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
 use crate::application::catalog::CatalogService;
+use crate::application::delete::{DeleteContext, DeleteTimings, ServiceDeletion};
 use crate::application::deployments::{DeployContext, DeployTimings, Deployments, FolderGuard};
 use crate::application::elevation::Elevations;
 use crate::application::folders::FolderFacts;
@@ -209,6 +210,8 @@ pub struct EngineParts {
     pub free_space: Arc<dyn FreeSpace>,
     /// Les délais d'un déploiement (HRT-68) ; les tests les raccourcissent.
     pub deploy: DeployTimings,
+    /// Les délais d'une suppression de service (HRT-85) ; les tests les raccourcissent.
+    pub delete: DeleteTimings,
     /// Les dossiers de données des services (HRT-145, HRT-68). `None` : le vrai, sous le dossier de données de
     /// l'agent ; les tests y posent un faux en mémoire.
     pub safe_fs: Option<Arc<dyn SafeFs>>,
@@ -224,6 +227,9 @@ pub struct CatalogParts {
     pub random: Arc<dyn SecretRandom>,
     /// Un catalogue donné (tests : fiches de fabrication) à la place des fiches embarquées.
     pub service: Option<Arc<CatalogService>>,
+    /// Les phases d'un serveur de jeu, tenues par l'installation (qui les commence) ET par la suppression (qui les
+    /// oublie, HRT-85, HRT-197). `None` : les siennes ; les tests y posent les leurs pour les lire.
+    pub phases: Option<Arc<GamePhases>>,
 }
 
 impl CatalogParts {
@@ -233,6 +239,7 @@ impl CatalogParts {
             include_preview: crate::build_info::PREVIEW_FICHES,
             random: Arc::new(OsSecretRandom),
             service: None,
+            phases: None,
         }
     }
 }
@@ -257,6 +264,7 @@ impl EngineParts {
             host_ports: Arc::new(SystemHostPorts::new()),
             free_space: Arc::new(SystemHost),
             deploy: DeployTimings::production(),
+            delete: DeleteTimings::production(),
             safe_fs: None,
             catalog: CatalogParts::production(),
         }
@@ -964,6 +972,29 @@ pub async fn start_engined(
         adapters.clock.clone(),
         engine.lifecycle.game,
     ));
+    // Les phases d'un serveur de jeu installé depuis une fiche : un seul registre, partagé entre l'installation (qui
+    // les commence) et la suppression (qui les oublie, HRT-197).
+    let phases = engine
+        .catalog
+        .phases
+        .clone()
+        .unwrap_or_else(|| GamePhases::new(container_engine.clone(), adapters.clock.clone()));
+    // Supprimer un service (HRT-85) : le conteneur et la description partent, les données restent sauf demande.
+    let service_deletion = ServiceDeletion::new(
+        registry.clone(),
+        foundations.ops.clone(),
+        foundations.specs.clone(),
+        container_engine.clone(),
+        service_repo.clone(),
+        service_repo.clone(),
+        safe_fs.clone(),
+        phases.clone(),
+        adapters.clock.clone(),
+        DeleteContext {
+            services_root: services_root.clone(),
+            timings: engine.delete,
+        },
+    );
     let deployments = Deployments::new(
         registry.clone(),
         foundations.ops.clone(),
@@ -984,7 +1015,7 @@ pub async fn start_engined(
         },
         catalog.clone(),
         engine.catalog.random.clone(),
-        GamePhases::new(container_engine.clone(), adapters.clock.clone()),
+        phases,
     );
     let service_logs = Arc::new(ServiceLogs::new(
         registry.clone(),
@@ -1025,6 +1056,7 @@ pub async fn start_engined(
         service_ops,
         service_lifecycle,
         deployments,
+        service_deletion,
         catalog,
         game_settings,
         stream,

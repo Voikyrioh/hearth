@@ -98,8 +98,7 @@ impl ActKind {
     /// en la retirant d'ici. Tant qu'un acte est ici, aucune route ne le porte, aucune requête ne peut le
     /// produire, et le test de `ROUTES` le sait. `0x13` (`ServiceUpdate`), `0x15` à `0x18`, `0x1A` et `0x1C`
     /// sont réservés par la conception et ne sont pas encore déclarés.
-    pub const DECLARED_WITHOUT_ROUTE: [ActKind; 3] =
-        [Self::ServiceDelete, Self::BackupCreate, Self::BackupDelete];
+    pub const DECLARED_WITHOUT_ROUTE: [ActKind; 2] = [Self::BackupCreate, Self::BackupDelete];
 
     /// L'octet du code de l'acte dans le message signé. `0x09` est réservé (jamais utilisé : le retrait
     /// d'un poste garde l'usage `0x04`).
@@ -774,6 +773,14 @@ pub const ROUTES: &[RouteAct] = &[
         kinds: &[ActKind::ServiceRestart],
         contract: Contract::Reauth,
     },
+    // Supprimer un service (HRT-85, BR-DEL-012) : la clé du service est la cible signée, les deux cases
+    // (`data`, `backups`) sont les paramètres signés ; jamais couvert par l'élévation, même sans case cochée.
+    RouteAct {
+        method: "DELETE",
+        pattern: "/services/{key}",
+        kinds: &[ActKind::ServiceDelete],
+        contract: Contract::Reauth,
+    },
     // Enregistrer les réglages d'un serveur de jeu (HRT-108, ADR-0051, BR-FICHE-048) : la clé du service est la
     // cible signée ; couvert par l'élévation.
     RouteAct {
@@ -872,14 +879,14 @@ mod tests {
             // Une route ET une seule, ou « déclaré, route à venir » : jamais les deux, jamais aucun.
             assert_eq!(routed + waiting, 1, "{kind:?}");
         }
-        // Vingt-deux actes en 0x05 : dix-neuf ont leur route (dont deux pour le mode attaque), trois sont
-        // déclarés pour les tranches suivantes ; dix-huit routes d'acte (dont le retrait d'un poste, sous son
+        // Vingt-deux actes en 0x05 : vingt ont leur route (dont deux pour le mode attaque), deux sont
+        // déclarés pour les tranches suivantes ; dix-neuf routes d'acte (dont le retrait d'un poste, sous son
         // contrat) en plus du réglage de fréquence.
-        assert_eq!(in_routes.len(), 19);
-        assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 3);
+        assert_eq!(in_routes.len(), 20);
+        assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 2);
         assert_eq!(
             ROUTES.iter().filter(|r| r.pattern != "/me/reauth").count(),
-            18
+            19
         );
     }
 
@@ -1214,6 +1221,10 @@ mod tests {
             assert_eq!(route.kinds, &[kind]);
             assert_eq!(route.contract, Contract::Reauth);
         }
+        // Supprimer un service (HRT-85) : une route, la clé du service dans le chemin, la confirmation du socle.
+        let delete = route_act("DELETE", "/services/{key}").expect("supprimer");
+        assert_eq!(delete.kinds, &[ActKind::ServiceDelete]);
+        assert_eq!(delete.contract, Contract::Reauth);
         for kind in ActKind::DECLARED_WITHOUT_ROUTE {
             assert!(
                 ROUTES.iter().all(|route| !route.kinds.contains(&kind)),

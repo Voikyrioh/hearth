@@ -5,6 +5,7 @@
 
 use hearth_proto::api::deploy::CAPABILITY_SERVICE_DEPLOY;
 use hearth_proto::api::game_settings::CAPABILITY_GAME_SETTINGS;
+use hearth_proto::api::service_delete::CAPABILITY_SERVICE_DELETE;
 use hearth_proto::api::service_logs::CAPABILITY_SERVICE_LOGS;
 use hearth_proto::api::service_ops::CAPABILITY_SERVICE_OPS;
 use hearth_proto::api::service_ops::{CAPABILITY_CATALOG, CAPABILITY_GAME_SERVICES};
@@ -67,6 +68,8 @@ impl HelloService {
                     // Un serveur de jeu au quotidien (HRT-103) : l'arrêt qui enregistre le monde (suite d'étapes de la
                     // fiche, décision « Arrêter quand même » ou « Annuler ») et `GET /services/{key}/game-secret`.
                     CAPABILITY_GAME_SERVICES,
+                    // Supprimer un service (HRT-85) : `GET /services/{key}/delete-preview` et `DELETE /services/{key}`.
+                    CAPABILITY_SERVICE_DELETE,
                 ],
             },
         }
@@ -123,7 +126,8 @@ mod tests {
                 "service-deploy",
                 "catalog",
                 "game-settings",
-                "game-services"
+                "game-services",
+                "service-delete"
             ]
         );
     }

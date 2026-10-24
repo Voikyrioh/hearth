@@ -131,6 +131,16 @@ fn choice(body: Option<&Value>) -> Result<OperationChoice, Unreadable> {
     }
 }
 
+/// Une case du corps (`erase_data`, `erase_backups`) : absente, elle est décochée ; présente, elle doit être un
+/// booléen, sinon le corps n'est pas un acte (l'agent lit le même corps et refuse de même).
+fn flag(body: Option<&Value>, field: &str) -> Result<bool, Unreadable> {
+    match body.and_then(|body| body.get(field)) {
+        None => Ok(false),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(Unreadable),
+    }
+}
+
 /// Les clés d'une adoption (`keys`, un tableau de textes) : un corps dont une entrée n'est pas un texte
 /// n'est pas un acte.
 fn keys(body: Option<&Value>) -> Result<Vec<&str>, Unreadable> {
@@ -210,9 +220,17 @@ fn build<'a>(
                 serde_json::from_value(body.cloned().ok_or(Unreadable)?).map_err(|_| Unreadable)?;
             AdminAct::game_settings_save(id, &request)
         }
+        // Supprimer un service (HRT-85, BR-DEL-012) : la clé du service, lue du chemin, est la cible signée ; les
+        // deux cases du corps (données, sauvegardes) sont les paramètres signés. Le nom retapé ne se signe pas :
+        // l'agent le compare à celui qu'il connaît.
+        ActKind::ServiceDelete => AdminAct::ServiceDelete {
+            target: id,
+            data: flag(body, "erase_data")?,
+            backups: flag(body, "erase_backups")?,
+        },
         // Déclarés pour les tranches suivantes, sans route dans `ROUTES` : aucune requête ne peut les viser
         // (`route_of` ne lit que `ROUTES`). Le lot qui ajoute leur route écrit ici comment les reconstruire.
-        ActKind::ServiceDelete | ActKind::BackupCreate | ActKind::BackupDelete => {
+        ActKind::BackupCreate | ActKind::BackupDelete => {
             return Err(Unreadable);
         }
     })
@@ -258,6 +276,7 @@ mod tests {
             "/me/reauth" => json!({ "password": "each" }),
             "/services/adopt" => json!({ "keys": ["c_0123abcd", "u_docker-x.service"] }),
             "/operations/services/{id}/decision" => json!({ "choice": "keep" }),
+            "/services/{key}" => json!({ "erase_data": true, "confirm_name": "terraria" }),
             "/services/{key}/settings" => json!({
                 "base_rev": 2, "file_stamp": "ab", "origin": "form", "effect": "restart",
                 "changes": [{ "id": "motd", "action": "set", "value": "Salut" }]
@@ -534,6 +553,37 @@ mod tests {
             "/operations/services/a b",
         ] {
             assert_eq!(classify("DELETE", path, None), Ok(Route::Free), "{path}");
+        }
+    }
+
+    #[test]
+    fn deleting_a_service_signs_its_key_and_the_two_boxes_and_never_the_retyped_name() {
+        let key = "h_01J9ZY0G3Q8M2K6W4T7V5N1B9D";
+        let path = format!("/services/{key}");
+        let body = json!({ "erase_data": true, "confirm_name": "terraria", "reauth": { "x": 1 } });
+        let Ok(Route::Act(act)) = classify("DELETE", &path, Some(&body)) else {
+            panic!("acte attendu");
+        };
+        assert_eq!(act.kind(), ActKind::ServiceDelete);
+        assert_eq!(act.target(), key);
+        assert_eq!(act.params(), vec![b"1".to_vec(), b"0".to_vec()]);
+        // Sans case, un corps vide : les deux paramètres valent zéro.
+        let empty = json!({});
+        let Ok(Route::Act(act)) = classify("DELETE", &path, Some(&empty)) else {
+            panic!("acte attendu");
+        };
+        assert_eq!(act.params(), vec![b"0".to_vec(), b"0".to_vec()]);
+        // Une case qui n'est pas un booléen n'est pas un acte : l'agent refuse le même corps.
+        for bad in [
+            json!({ "erase_data": "yes" }),
+            json!({ "erase_backups": 1 }),
+            json!({ "erase_data": null }),
+        ] {
+            assert_eq!(
+                classify("DELETE", &path, Some(&bad)),
+                Err(Unreadable),
+                "{bad}"
+            );
         }
     }
 

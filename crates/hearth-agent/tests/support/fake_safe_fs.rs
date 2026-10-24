@@ -89,9 +89,12 @@ impl FakeSafeFs {
         self.hooks().stuck.insert(rel.to_owned());
     }
 
-    /// Suspend les effacements jusqu'à `release_erasure` : de quoi regarder l'état « en cours de suppression ».
-    pub fn hold_erasure(&self) {
+    /// Suspend les effacements jusqu'à `release_erasure` ou jusqu'à la chute du jeton rendu : de quoi regarder
+    /// l'état « en cours de suppression ». Le jeton relâche tout seul, même si le test échoue avant de le faire
+    /// (sinon le fil bloqué du faux ferait attendre la fin du test pour toujours).
+    pub fn hold_erasure(&self) -> ErasureHold {
         self.hooks().held = true;
+        ErasureHold(self.clone())
     }
 
     pub fn release_erasure(&self) {
@@ -126,6 +129,15 @@ impl FakeSafeFs {
                 tree.entry(path.clone()).or_insert(Node::Dir);
             }
         }
+    }
+}
+
+/// L'effacement est suspendu tant que ce jeton existe.
+pub struct ErasureHold(FakeSafeFs);
+
+impl Drop for ErasureHold {
+    fn drop(&mut self) {
+        self.0.release_erasure();
     }
 }
 

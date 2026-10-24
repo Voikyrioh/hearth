@@ -51,15 +51,16 @@ use crate::application::ports::{
     ServiceRepo, ServiceSupervisor, StopIntent, StoreError, SupervisedRecord, SupervisorError,
 };
 use crate::domain::audit::{Actor, AdoptionCause, AuditAction, ClientName, Outcome, Target};
+use crate::domain::services::delete::FolderUse;
 use crate::domain::services::image::ImageName;
 use crate::domain::services::logs::{LogContainer, LogOrigin, LogTarget};
 use crate::domain::services::{
-    Adoption, Announced, Debounce, Derived, EngineProbe, EngineState, Holder, KeyKind, Observation,
-    PortProtocol, ProbeOutcome, RunState, ServiceKey, ServiceStateKind, StartWindow, Transition,
-    TransitionKind, UnitLookup, UnitName, UnitStatus, Visibility, classify_probe, compare_names,
-    confirmation_expired, derive_state, derive_supervised, gone_long_enough, honour_stop_request,
-    lapsed, overlay_transition, stop_grace_s, unit_answered, unit_is_gone, unread_unit_adoptions,
-    visibility_of,
+    Adoption, Announced, Debounce, Derived, EngineProbe, EngineState, Holder, KeyKind, MountType,
+    Observation, PortProtocol, ProbeOutcome, RunState, ServiceKey, ServiceStateKind, StartWindow,
+    Transition, TransitionKind, UnitLookup, UnitName, UnitStatus, Visibility, classify_probe,
+    compare_names, confirmation_expired, derive_state, derive_supervised, gone_long_enough,
+    honour_stop_request, lapsed, overlay_transition, stop_grace_s, unit_answered, unit_is_gone,
+    unread_unit_adoptions, visibility_of,
 };
 
 /// Capacité de la diffusion : un abonné qui prend plus de 64 lots de retard relit un instantané.
@@ -1879,6 +1880,48 @@ impl ServicesRegistry {
             }
             Some(Visibility::Hidden) | None => Holder::Unmanaged,
         }
+    }
+
+    /// Ce que les AUTRES conteneurs du serveur montent (HRT-85, BR-DEL-008) : pour chacun, ses dossiers du
+    /// serveur et si la liste est entière. Tous les conteneurs comptent, en marche ou arrêtés, créés par Hearth,
+    /// adoptés ou non ; seuls ceux du service `own` sont exclus. Un conteneur créé hors de Hearth et non adopté
+    /// n'a pas de nom ici (`Holder::Unmanaged`, BR-ADOPT-002). **Lecture réservée à la suppression** : jamais
+    /// diffusée, jamais gardée.
+    pub fn folder_users(&self, own: &ServiceKey) -> Vec<FolderUse> {
+        let inner = self.lock();
+        inner
+            .containers
+            .values()
+            .filter(|observation| {
+                key_of(&inner.owners, &inner.hearth_ids, observation).as_ref() != Some(own)
+            })
+            .map(|observation| FolderUse {
+                holder: Self::holder_of(&inner, observation),
+                sources: observation
+                    .mounts
+                    .iter()
+                    .filter(|mount| mount.kind == MountType::Folder)
+                    .map(|mount| mount.source.clone())
+                    .collect(),
+                complete: observation.mounts_omitted == 0,
+            })
+            .collect()
+    }
+
+    /// Combien de volumes du moteur (pas des dossiers) les conteneurs de ce service montent : la suppression
+    /// les garde et le dit (HRT-85, BR-DEL-006).
+    pub fn volume_count(&self, key: &ServiceKey) -> u32 {
+        let inner = self.lock();
+        let count = inner
+            .containers
+            .values()
+            .filter(|observation| {
+                key_of(&inner.owners, &inner.hearth_ids, observation).as_ref() == Some(key)
+            })
+            .flat_map(|observation| observation.mounts.iter())
+            .filter(|mount| mount.kind == MountType::Volume)
+            .count();
+        u32::try_from(count).unwrap_or(u32::MAX)
     }
 
     /// Les conteneurs non gérés que le moteur connaît en ce moment, un par clé (le conteneur qui tourne,

@@ -25,6 +25,7 @@ mod operations;
 mod reauth;
 mod security;
 mod server;
+mod service_delete;
 mod service_ops;
 mod services;
 mod sessions;
@@ -44,6 +45,7 @@ use tracing::Level;
 
 use crate::application::accounts::AccountService;
 use crate::application::audit::AuditService;
+use crate::application::delete::ServiceDeletion;
 use crate::application::deployments::Deployments;
 use crate::application::game_settings::GameSettings;
 use crate::application::hello::HelloService;
@@ -93,6 +95,8 @@ pub struct AppState {
     pub service_lifecycle: Arc<ServiceLifecycle>,
     /// Déployer une image et les bornes de la machine (HRT-68, ADR-0039).
     pub deployments: Arc<Deployments>,
+    /// Supprimer un service (HRT-85) : la fenêtre de suppression et l'acte `0x14`.
+    pub service_deletion: Arc<ServiceDeletion>,
     /// Les fiches de serveurs de jeu que cet agent propose (HRT-101, ADR-0050).
     pub catalog: Arc<crate::application::catalog::CatalogService>,
     /// Les réglages d'un serveur de jeu : lire, analyser un texte collé, enregistrer (HRT-108, ADR-0051).
@@ -398,6 +402,27 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: true,
         audit: Some(AuditAction::ServiceDeploy),
         route: || post(deployments::create),
+    },
+    // Supprimer un service (HRT-85, ADR-0045, BR-DEL-*) : la fenêtre « Supprimer {nom} ? » se bâtit sur une
+    // consultation du droit « gérer les services » (dossiers, tailles, sort de chacun ; seul un refus est consigné) ;
+    // supprimer est un acte d'administration confirmé (`ServiceDelete` `0x14`, jamais couvert par l'élévation).
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/delete-preview",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::ServiceDelete),
+        route: || get(service_delete::preview),
+    },
+    Endpoint {
+        method: Method::DELETE,
+        path: "/services/{key}",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceDelete),
+        route: || delete(service_delete::delete),
     },
     // Le catalogue des fiches de serveurs de jeu (HRT-101, ADR-0050) : une consultation ouverte à tout compte
     // authentifié, sans effet ni journal (BR-FICHE-001 à 004). Installer passe par `POST /deployments`.
@@ -958,6 +983,10 @@ mod tests {
         ("POST", "/services/{key}/start", Service),
         ("POST", "/services/{key}/stop", Service),
         ("POST", "/services/{key}/restart", Service),
+        // Supprimer un service (HRT-85) : la fenêtre se bâtit sur une consultation du même droit ; supprimer est un
+        // acte confirmé (`0x14`).
+        ("GET", "/services/{key}/delete-preview", Service),
+        ("DELETE", "/services/{key}", Service),
         // Les opérations de service (HRT-144) : lire est ouvert à tout compte (la visibilité du service est
         // jugée par `ServiceOpAccess`), annuler et décider exigent le droit et la confirmation de l'acte.
         ("GET", "/operations/services/{id}", OpenRead),
@@ -1142,7 +1171,9 @@ mod tests {
             service_routes,
             [
                 ("DELETE", "/operations/services/{id}"),
+                ("DELETE", "/services/{key}"),
                 ("GET", "/services/external"),
+                ("GET", "/services/{key}/delete-preview"),
                 ("GET", "/services/{key}/env"),
                 ("GET", "/services/{key}/game-secret"),
                 ("GET", "/services/{key}/settings"),

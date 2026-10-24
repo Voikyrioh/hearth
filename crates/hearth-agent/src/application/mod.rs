@@ -4,6 +4,7 @@ pub mod accounts;
 pub mod attack_mode;
 pub mod audit;
 pub mod catalog;
+pub mod delete;
 pub mod deployments;
 pub mod elevation;
 pub mod fiche_install;
