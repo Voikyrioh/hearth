@@ -76,6 +76,12 @@ pub trait Harness: Send + Sync {
     fn image(&self) -> String;
     /// Retire l'image du serveur pour forcer une récupération (sans effet si elle n'y est pas).
     async fn forget_image(&self, image: &str);
+    /// Les couches (empreintes `diff_id`, `RootFS.Layers`) de l'image dans le serveur, `None` si le décor ne sait
+    /// pas les lire ou si l'image n'y est pas. Sert à prouver un vrai téléchargement sans dépendre du rapport de
+    /// progression du moteur.
+    async fn image_layers(&self, _image: &str) -> Option<Vec<String>> {
+        None
+    }
     /// Une image que le registre ne connaît pas.
     fn missing_image(&self) -> String;
     /// Une version qui n'existe pas dans le dépôt de `image()`.
@@ -775,16 +781,26 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
             percents.push(percent);
         }
     }
-    // Preuve d'un vrai téléchargement : l'image était ABSENTE du moteur (vérifié plus haut) et l'une de ses
-    // couches n'existe que dans le registre (la CI la pose dans le registre local, jamais dans le démon,
-    // HRT-168) : des octets sont donc reçus. Sans cette garantie (registre public), l'image absente puis
-    // présente reste la preuve et les octets ne sont pas exigés.
+    // Preuve d'un vrai téléchargement (HRT-168). L'image était ABSENTE du moteur (vérifié plus haut) et l'une de
+    // ses couches n'existe que dans le registre : la CI la pose dans le registre local sans que le démon la voie
+    // jamais et donne son `diff_id` dans `HEARTH_TEST_PULL_LAYER`. Après la récupération, les couches de l'image
+    // doivent la contenir. On ne s'appuie PAS sur les octets ni les pourcentages : un moteur dont le magasin
+    // d'images est containerd (Docker 29, runners GitHub) ne rapporte pas `progressDetail`, donc 0 octet et
+    // aucun pourcentage pour un vrai téléchargement. Ces statistiques sont consignées, jamais exigées.
     eprintln!("récupération : {events} évènements, {bytes_done} octets, progression {percents:?}");
     assert!(events > 0, "le flux de récupération n'a rien rapporté");
-    if std::env::var("HEARTH_TEST_PULL_REPO").is_ok_and(|repo| !repo.trim().is_empty()) {
+    let expected_layer = std::env::var("HEARTH_TEST_PULL_LAYER")
+        .ok()
+        .map(|layer| layer.trim().to_owned())
+        .filter(|layer| !layer.is_empty());
+    if let Some(layer) = &expected_layer {
+        let layers = harness
+            .image_layers(&image)
+            .await
+            .expect("les couches de l'image récupérée");
         assert!(
-            bytes_done > 0 && !percents.is_empty(),
-            "la couche propre du registre local doit être téléchargée : {events} évènements, {bytes_done} octets, {percents:?}"
+            layers.contains(layer),
+            "la couche propre du registre {layer} doit être dans l'image récupérée : {layers:?}"
         );
     }
     assert!(

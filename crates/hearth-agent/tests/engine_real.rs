@@ -150,6 +150,26 @@ impl Harness for RealHarness {
         let _ = Command::new("docker").args(["rmi", image]).output();
     }
 
+    async fn image_layers(&self, image: &str) -> Option<Vec<String>> {
+        let output = Command::new("docker")
+            .args(["image", "inspect", "--format", "{{json .RootFS.Layers}}", image])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let layers = text
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .split(',')
+            .map(|layer| layer.trim().trim_matches('"').to_owned())
+            .filter(|layer| !layer.is_empty())
+            .collect();
+        Some(layers)
+    }
+
     fn missing_image(&self) -> String {
         format!("{}/hearth-contract-nope:1", pull_repo())
     }

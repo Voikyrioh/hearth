@@ -173,4 +173,6 @@ push_blob "envoyer la config" "$work/cfg2.json" "$cfg2_digest"
 jq -c --arg cd "$cfg2_digest" --argjson cs "$cfg2_size" --arg ld "$layer_digest" --argjson ls "$layer_size" --arg lt "$layer_type" \
   '.config.digest = $cd | .config.size = $cs | .layers += [{"mediaType":$lt,"size":$ls,"digest":$ld}]' "$work/m.json" > "$work/m2.json" || fail "manifeste" "jq a échoué"
 http "envoyer le manifeste" "201" /tmp/hearth-put.out -X PUT -H "Content-Type: $kind" --data-binary "@$work/m2.json" "$REG/v2/$REPO/manifests/$TAGNAME"
+# Le diff_id de la couche propre : le contrat vérifie qu'elle est dans l'image récupérée par le moteur.
+if [ -n "${GITHUB_ENV:-}" ]; then echo "HEARTH_TEST_PULL_LAYER=$diff_id" >> "$GITHUB_ENV"; fi
 echo "registre local prêt : localhost:5000/$REPO:$TAGNAME (couche propre de 6 Mo posée dans le registre, jamais vue du démon)"
