@@ -1916,16 +1916,10 @@ impl ServicesRegistry {
                         .collect(),
                     identities: Vec::new(),
                     ancestry: Vec::new(),
-                    // Un conteneur dont l'inspection a échoué n'a aucun montage lu : on ne sait pas.
-                    complete: observation.mounts_omitted == 0 && !Self::is_unread(observation),
+                    complete: observation.mounts_omitted == 0,
                 })
                 .collect(),
         )
-    }
-
-    /// Un conteneur que la liste montre mais dont l'inspection a échoué (`Observation::unreadable`).
-    fn is_unread(observation: &Observation) -> bool {
-        observation.run_state == RunState::Unknown && observation.created_at.is_none()
     }
 
     /// Combien de volumes du moteur (pas des dossiers) les conteneurs de ce service montent : la suppression

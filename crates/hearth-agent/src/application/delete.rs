@@ -344,8 +344,10 @@ impl ServiceDeletion {
         };
         let split = split_mounts(body, &self.context.services_root, key.as_str());
         let mut fates = Vec::with_capacity(split.managed.len());
+        // Un seul budget de lecture pour TOUS les dossiers de la demande (fenêtre ou acceptation).
+        let deadline = Instant::now() + self.context.timings.resolve_budget;
         for folder in &split.managed {
-            fates.push(self.fate_now(key, &folder.host_path).await);
+            fates.push(self.fate_now(key, &folder.host_path, deadline).await);
         }
         Judged { split, fates }
     }
@@ -353,12 +355,17 @@ impl ServiceDeletion {
     /// Le sort d'un dossier géré MAINTENANT : la liste des autres conteneurs est lue à cet instant ; chemins
     /// canoniques, identité (périphérique, inode) du dossier ET de tous ses parents, des deux côtés, dans les deux
     /// sens (parent monté, enfant monté) ; au moindre doute (liste absente ou pas relue, chemin qu'on ne peut pas
-    /// lire, lecture trop longue), le dossier est conservé (BR-DEL-008).
-    async fn fate_now(&self, key: &ServiceKey, host_path: &str) -> Fate {
+    /// lire, lecture trop longue), le dossier est conservé (BR-DEL-008). `deadline` : l'instant au-delà duquel on
+    /// ne lit plus rien (la réponse est `Unverifiable`), vérifié avant chaque lecture dans le fil lui-même.
+    async fn fate_now(&self, key: &ServiceKey, host_path: &str, deadline: Instant) -> Fate {
         let users = self.registry.folder_users(key);
         let paths = Arc::clone(&self.host_paths);
         let host_path = host_path.to_owned();
+        let limit = deadline.into_std();
         let work = tokio::task::spawn_blocking(move || {
+            if std::time::Instant::now() >= limit {
+                return Fate::Unverifiable;
+            }
             let own = see(paths.as_ref(), &host_path, true);
             if own.unreadable {
                 return Fate::Unverifiable;
@@ -367,12 +374,18 @@ impl ServiceDeletion {
                 paths: own.names,
                 lineage: own.lineage,
             };
-            let resolved: Option<Vec<FolderUse>> = users.map(|list| {
-                list.into_iter()
-                    .map(|mut other| {
+            let mut resolved: Option<Vec<FolderUse>> = None;
+            if let Some(list) = users {
+                let mut done = Vec::with_capacity(list.len());
+                for mut other in list {
+                    {
                         let (mut sources, mut identities, mut ancestry) =
                             (Vec::new(), Vec::new(), Vec::new());
                         for source in &other.sources {
+                            // L'échéance est passée : on s'arrête là, rien n'est prouvé.
+                            if std::time::Instant::now() >= limit {
+                                return Fate::Unverifiable;
+                            }
                             let seen = see(paths.as_ref(), source, false);
                             sources.extend(seen.names);
                             identities.extend(seen.lineage.first().copied());
@@ -386,13 +399,14 @@ impl ServiceDeletion {
                         other.sources = sources;
                         other.identities = identities;
                         other.ancestry = ancestry;
-                        other
-                    })
-                    .collect()
-            });
+                    }
+                    done.push(other);
+                }
+                resolved = Some(done);
+            }
             fate_of(&own, resolved.as_deref())
         });
-        match tokio::time::timeout(self.context.timings.resolve_budget, work).await {
+        match tokio::time::timeout_at(deadline, work).await {
             Ok(Ok(fate)) => fate,
             _ => Fate::Unverifiable,
         }
@@ -904,7 +918,12 @@ impl ServiceDeletion {
                 halted = true;
                 break;
             }
-            if self.fate_now(&job.key, &target.folder.host_path).await != Fate::Erase {
+            let resolve_by = Instant::now() + timings.resolve_budget;
+            if self
+                .fate_now(&job.key, &target.folder.host_path, resolve_by)
+                .await
+                != Fate::Erase
+            {
                 // Devenu partagé (ou impossible à vérifier) depuis la fenêtre : conservé, et dit comme ce qui
                 // reste (`data_not_erased`), jamais passé sous silence.
                 tracing::warn!(
@@ -1094,7 +1113,10 @@ impl ServiceDeletion {
             }
             Ok(false) => {}
             Err(error) => {
-                tracing::error!(%error, "suppression interrompue : classement « à vérifier » impossible");
+                // Jamais `failed` : on ne sait pas où en était le geste. L'opération reste `running` avec son
+                // verrou ; le prochain démarrage la classe (`recover`).
+                tracing::error!(%error, "suppression interrompue : classement « à vérifier » impossible, l'opération reste en cours jusqu'au prochain démarrage");
+                return;
             }
         }
         let cancelling = self.is_cancelling(id).await;

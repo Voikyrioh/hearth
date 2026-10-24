@@ -2,6 +2,7 @@
 //! tous ses parents, chacun borné dans le temps (un partage réseau mort ne fait pas pendre une suppression).
 
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -11,26 +12,51 @@ use crate::domain::services::delete::FileId;
 /// Le temps laissé à la lecture d'un chemin (parents compris).
 const READ_TIMEOUT: Duration = Duration::from_secs(3);
 
+/// Combien de lectures peuvent être en cours (ou coincées sur un système de fichiers mort) en même temps. Au-delà,
+/// aucun fil n'est lancé : la réponse est « illisible ».
+const MAX_READERS: usize = 8;
+
+/// Les fils de lecture vivants : un fil coincé sur un partage mort reste compté jusqu'à son retour.
+static READERS: AtomicUsize = AtomicUsize::new(0);
+
+/// Rend sa place à la fin du fil, même sur une panique.
+struct Slot(&'static AtomicUsize);
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemHostPaths;
 
 impl HostPaths for SystemHostPaths {
     fn resolve(&self, path: &str) -> Resolved {
         let owned = path.to_owned();
-        within(READ_TIMEOUT, move || read(&owned)).unwrap_or(Resolved::Unreadable)
+        within(&READERS, MAX_READERS, READ_TIMEOUT, move || read(&owned))
+            .unwrap_or(Resolved::Unreadable)
     }
 }
 
 /// Fait `work` sur un fil à part et n'attend que `timeout`. `None` : pas de réponse à temps (le fil reste pris
 /// par l'appel bloqué, l'agent ne l'attend plus).
 fn within<T: Send + 'static>(
+    readers: &'static AtomicUsize,
+    max: usize,
     timeout: Duration,
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Option<T> {
+    if readers.fetch_add(1, Ordering::SeqCst) >= max {
+        readers.fetch_sub(1, Ordering::SeqCst);
+        return None;
+    }
+    let slot = Slot(readers);
     let (sender, receiver) = mpsc::channel();
     std::thread::Builder::new()
         .name("host-paths".into())
         .spawn(move || {
+            let _slot = slot;
             let _ = sender.send(work());
         })
         .ok()?;
@@ -77,13 +103,34 @@ mod tests {
     #[test]
     fn a_read_that_never_answers_is_given_up_on_not_waited_for() {
         let started = std::time::Instant::now();
-        let answer = within(Duration::from_millis(100), || {
+        static READERS: AtomicUsize = AtomicUsize::new(0);
+        let answer = within(&READERS, 8, Duration::from_millis(100), || {
             std::thread::sleep(Duration::from_secs(5));
             1
         });
         assert_eq!(answer, None);
         assert!(started.elapsed() < Duration::from_secs(2));
-        assert_eq!(within(Duration::from_secs(5), || 7), Some(7));
+        assert_eq!(within(&READERS, 8, Duration::from_secs(5), || 7), Some(7));
+    }
+
+    #[test]
+    fn stuck_readers_are_bounded_beyond_the_limit_no_thread_is_started() {
+        static READERS: AtomicUsize = AtomicUsize::new(0);
+        for _ in 0..2 {
+            assert_eq!(
+                within(&READERS, 2, Duration::from_millis(20), || {
+                    std::thread::sleep(Duration::from_millis(600));
+                }),
+                None
+            );
+        }
+        // Deux lectures coincées tiennent les deux places : la troisième n'est même pas lancée.
+        let started = std::time::Instant::now();
+        assert_eq!(within(&READERS, 2, Duration::from_secs(5), || 1), None);
+        assert!(started.elapsed() < Duration::from_millis(300));
+        // Les fils coincés finissent : les places reviennent.
+        std::thread::sleep(Duration::from_millis(900));
+        assert_eq!(within(&READERS, 2, Duration::from_secs(5), || 1), Some(1));
     }
 
     #[test]

@@ -168,8 +168,9 @@ pub fn fate_of(own: &OwnFolder, others: Option<&[FolderUse]>) -> Fate {
     for other in others {
         // Par le nom (lexical et canonique) ou par l'identité, dans les DEUX sens : le dossier est un montage de
         // l'autre ou sous l'un de ses parents (sa propre identité est dans la lignée de la source, ou
-        // l'inverse). Les parents communs (`/`, la racine de données) ne comptent pas : on ne compare la lignée
-        // de chaque côté qu'à l'identité propre de l'autre.
+        // l'inverse). Un parent simplement COMMUN et non monté (`/`, la racine de données) ne fait pas un partage :
+        // on ne cherche que l'identité propre de chaque côté dans la lignée de l'autre. Un parent MONTÉ par un
+        // autre conteneur, même `/`, EST un partage (il voit notre dossier) : voulu, conservé.
         let same_place = other
             .sources
             .iter()
