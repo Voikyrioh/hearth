@@ -119,7 +119,34 @@ pub struct AgreementView {
     pub sentence: String,
 }
 
+/// Le genre de valeur d'une question : ce que le client doit afficher comme champ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionKind {
+    Text,
+    Secret,
+    Int,
+    Bool,
+    Choice,
+    IdList,
+    Opaque,
+    /// Un genre d'une version plus récente : le client montre un champ texte et l'agent juge.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Un choix d'une question de genre `choice`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChoiceView {
+    pub value: String,
+    pub label: String,
+}
+
 /// Une question d'installation (réglage essentiel non imposé).
+///
+/// Le genre, les bornes et les choix sont ceux de la fiche : le client n'en invente aucun (HRT-102). Tous les
+/// champs ajoutés par HRT-102 ont une valeur par défaut, pour qu'un agent plus ancien reste lisible.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuestionView {
     pub id: String,
@@ -129,6 +156,37 @@ pub struct QuestionView {
     /// La valeur proposée ; absente pour un secret.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed: Option<String>,
+    #[serde(default)]
+    pub kind: QuestionKind,
+    /// Les choix d'une question de genre `choice` ; pour `bool`, les deux valeurs que le jeu comprend (activé, puis
+    /// désactivé).
+    #[serde(default)]
+    pub choices: Vec<ChoiceView>,
+    /// Bornes d'un entier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<i64>,
+    /// Longueurs permises d'un texte ou d'un secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_len: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_len: Option<u32>,
+    /// Jeu de caractères d'un texte : `line`, `file_stem` ou `arg_safe`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charset: Option<String>,
+    /// « Ne pourra plus être changé après la création du monde ».
+    #[serde(default)]
+    pub frozen_after_creation: bool,
+    /// Les variantes pour lesquelles la question existe ; vide : toutes.
+    #[serde(default)]
+    pub variants: Vec<String>,
+    /// Le genre d'un secret : `game_password`, `admin_password` ou `server_token` ; absent pour un autre genre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_kind: Option<String>,
+    /// L'adresse où l'utilisateur crée un jeton de serveur (genre `secret` d'un jeton).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obtain_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -159,6 +217,68 @@ pub struct ResourcesView {
     pub disk: DiskNeed,
 }
 
+/// Un téléchargement que le programme du jeu fait lui-même au premier démarrage (BR-FICHE-010).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DownloadView {
+    /// Ce qui est téléchargé (« fichiers de jeu »).
+    pub what: String,
+    /// D'où (nom lisible de la source).
+    pub source: String,
+    /// La taille quand la fiche la connaît ; sa preuve est `evidence`.
+    pub bytes: Option<u64>,
+    pub evidence: EvidenceView,
+}
+
+/// Le premier démarrage d'une fiche (BR-FICHE-056) : sa durée annoncée, ce qu'il télécharge, ses repères.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FirstStartView {
+    /// Au-delà, Hearth ne peut plus dire si le jeu est prêt.
+    pub ready_timeout_s: u32,
+    /// Le jeu génère un monde au premier démarrage.
+    pub world_generation: bool,
+    #[serde(default)]
+    pub downloads: Vec<DownloadView>,
+    /// Les libellés des étapes que Hearth sait reconnaître dans les journaux du jeu.
+    #[serde(default)]
+    pub stages: Vec<String>,
+}
+
+/// Comment le monde est enregistré à l'arrêt (BR-JEU-002).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorldSavedView {
+    /// L'image enregistre le monde quand elle reçoit le signal d'arrêt.
+    ByImageOnSignal,
+    /// Hearth envoie la suite d'étapes de la fiche.
+    BySequence,
+    /// Le jeu ne l'enregistre pas en s'arrêtant.
+    NotSaved,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// La façon d'arrêter le jeu.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StopView {
+    pub grace_s: u32,
+    #[serde(default)]
+    pub world_saved: WorldSavedView,
+    /// La suite d'étapes a été essayée sur la vraie image ; sinon Hearth ne l'envoie pas.
+    #[serde(default)]
+    pub sequence_tested: bool,
+}
+
+/// Un réglage que la fiche pose sans que l'utilisateur l'ait choisi (BR-JEU-039).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImposedView {
+    pub label: String,
+    /// La valeur posée ; absente quand elle est tirée, dérivée ou secrète.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    pub why: String,
+}
+
 /// Réponse de `GET /catalog/{id}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FicheDetail {
@@ -180,6 +300,15 @@ pub struct FicheDetail {
     #[serde(default)]
     pub questions: Items<QuestionView>,
     pub resources: ResourcesView,
+    /// Le premier démarrage (HRT-102) ; absent d'un agent plus ancien.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_start: Option<FirstStartView>,
+    /// La façon d'arrêter le jeu (HRT-102) ; absente d'un agent plus ancien.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop: Option<StopView>,
+    /// Les réglages posés par la fiche, avec leur raison (HRT-102).
+    #[serde(default)]
+    pub imposed: Items<ImposedView>,
 }
 
 #[cfg(test)]

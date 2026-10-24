@@ -39,9 +39,12 @@ Réponse (`FicheDetail`) :
 | `ports` | `id`, `container`, `protocol` (`tcp`, `udp`), `role`, `publish` (`always`, `optional`, `never`), `default_host` |
 | `folders` | `id`, `role`, `target` (chemin DANS le service), `backup`. Jamais un chemin du serveur |
 | `agreements` | `id`, `title`, `url`, `sentence` : les contrats à accepter (BR-FICHE-058) |
-| `questions` | Les réglages essentiels non imposés : `id`, `label`, `help`, `secret`, `proposed` (jamais pour un secret) |
+| `questions` | Les réglages essentiels non imposés, huit au plus : `id`, `label`, `help`, `secret`, `proposed` (jamais pour un secret) et, depuis HRT-102, tout ce qu'il faut pour les poser sans rien inventer : `kind` (`text`, `secret`, `int`, `bool`, `choice`, `id_list`, `opaque` ; un genre plus récent se lit `unknown`), `choices` (`value`, `label` ; pour `bool`, les deux valeurs du jeu, activé puis désactivé), `min`, `max` (entier), `min_len`, `max_len`, `charset` (`line`, `file_stem`, `arg_safe`), `frozen_after_creation`, `variants` (vide : toutes), `secret_kind` (`game_password`, `admin_password`, `server_token`) et `obtain_url` |
 | `resources` | `cpu`, `memory`, `disk`, chacun avec son minimum, sa recommandation et sa **preuve** (`evidence` : `measured`, `measured_idle`, `{ "publisher": { "url": … } }`, `unmeasured`) : aucun chiffre sans preuve (BR-FICHE-008) |
+| `first_start` | Le premier démarrage (HRT-102, BR-FICHE-010, 056) : `ready_timeout_s`, `world_generation`, `downloads` (`what`, `source`, `bytes`, `evidence`), `stages` (les libellés que Hearth reconnaît dans les journaux). Absent d'un agent plus ancien |
+| `stop` | La façon d'arrêter le jeu (HRT-102, BR-JEU-002) : `grace_s`, `world_saved` (`by_image_on_signal`, `by_sequence`, `not_saved` ; une valeur plus récente se lit `unknown`), `sequence_tested`. Absent d'un agent plus ancien |
+| `imposed` | Les réglages que la fiche pose à la place de l'utilisateur (HRT-102, BR-JEU-039) : `label`, `value` (absente quand elle est tirée, calculée ou secrète), `why` |
 
 ## Règles
 
-BR-FICHE-001 à 004, 006, 007, 008.
+BR-FICHE-001 à 004, 006, 007, 008, 010, 016, 056. Le client (HRT-102) lit ces deux routes par `read_catalog` et `read_fiche` de la coquille ; une fiche inconnue de l'agent se lit « inconnue », jamais comme une panne.

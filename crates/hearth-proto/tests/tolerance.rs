@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use hearth_proto::admin_act::TrustLevel;
 use hearth_proto::api::accounts::{AccountInfo, RoleName};
 use hearth_proto::api::audit::{OriginKindName, OutcomeName};
-use hearth_proto::api::catalog::{EvidenceView, FicheStatus};
+use hearth_proto::api::catalog::{EvidenceView, FicheStatus, QuestionKind, WorldSavedView};
 use hearth_proto::api::deploy::{
     DeployPlace, DeployProtocol, DeploySource, MountStatus, NameStatus, PortStatus,
 };
@@ -175,6 +175,8 @@ fn enums() -> Vec<Entry> {
         entry!("api/game_settings.rs::ValueState", Tolerant, ValueState),
         entry!("api/catalog.rs::FicheStatus", Tolerant, FicheStatus),
         entry!("api/catalog.rs::EvidenceView", Tolerant, EvidenceView),
+        entry!("api/catalog.rs::QuestionKind", Tolerant, QuestionKind),
+        entry!("api/catalog.rs::WorldSavedView", Tolerant, WorldSavedView),
         entry!("api/deploy.rs::NameStatus", Tolerant, NameStatus),
         entry!("api/deploy.rs::PortStatus", Tolerant, PortStatus),
         entry!("api/deploy.rs::MountStatus", Tolerant, MountStatus),
