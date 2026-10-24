@@ -9,6 +9,7 @@ mod accounts;
 mod agent_update;
 mod attempt;
 mod audit;
+mod catalog;
 mod device;
 mod events;
 mod persist;
