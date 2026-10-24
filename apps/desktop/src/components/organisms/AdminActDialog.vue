@@ -119,9 +119,10 @@ watch(
     const active = document.activeElement;
     if (active instanceof HTMLInputElement || active instanceof HTMLSelectElement) return;
     const first = firstActField();
+    // FIX:01M5PYVP4WFPG3YMVV68T041R4
     // Sans défilement : un récapitulatif s'ouvre en haut pour être relu de haut en bas (revue UX 2026-10-24, constat 15).
     if (first) first.focus({ preventScroll: true });
-    else if (reauth.needsPassword.value) field.value?.focus();
+    else if (reauth.needsPassword.value) field.value?.focus({ preventScroll: true });
   },
 );
 

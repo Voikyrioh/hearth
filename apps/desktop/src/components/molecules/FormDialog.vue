@@ -65,6 +65,7 @@ watch(
     if (open) {
       await nextTick();
       dialog.value?.showModal();
+      // FIX:01M5PYVP4WFPG3YMVV68T041R4
       // Ouverte en haut : un récapitulatif se lit de haut en bas, quel que soit l'élément qui prend le focus.
       const scroller = dialog.value?.querySelector<HTMLElement>(".dialog__scroll");
       if (scroller) scroller.scrollTop = 0;
