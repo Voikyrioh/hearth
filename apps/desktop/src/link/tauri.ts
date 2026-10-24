@@ -58,6 +58,15 @@ import {
   toDeviceRemovalOutcome,
   toTrustedDevices,
 } from "./devices";
+import {
+  type AnalyzeOutcome,
+  type GameSettingsRead,
+  type SaveOutcome,
+  type SaveSettingsRequest,
+  toAnalyzeOutcome,
+  toGameSettingsRead,
+  toSaveOutcome,
+} from "./gameSettings";
 import { type LogMessage, type LogReading, toLogMessage } from "./logs";
 import { type MachineEvent, toHistory, toMetrics, toView } from "./machine";
 import {
@@ -666,6 +675,26 @@ export class TauriLinkBridge implements LinkBridge {
     key: string,
   ): Promise<void> {
     unwrap(await commands.openFicheLink(serverId, ficheId, kind, key));
+  }
+
+  // Les réglages d'un serveur de jeu (HRT-109) : deux lectures et un acte confirmé.
+  async readGameSettings(serverId: string, key: string): Promise<GameSettingsRead> {
+    return toGameSettingsRead(unwrap(await commands.readGameSettings(serverId, key)));
+  }
+
+  async analyzeGameSettings(serverId: string, key: string, text: string): Promise<AnalyzeOutcome> {
+    return toAnalyzeOutcome(unwrap(await commands.analyzeGameSettings(serverId, key, text)));
+  }
+
+  async saveGameSettings(
+    serverId: string,
+    key: string,
+    request: SaveSettingsRequest,
+    adminPassword: string | null,
+  ): Promise<SaveOutcome> {
+    return toSaveOutcome(
+      unwrap(await commands.saveGameSettings(serverId, key, request, adminPassword)),
+    );
   }
 
   async installFiche(

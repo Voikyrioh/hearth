@@ -10,6 +10,12 @@ import type {
   DeployRequest,
 } from "./deploy";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
+import type {
+  AnalyzeOutcome,
+  GameSettingsRead,
+  SaveOutcome,
+  SaveSettingsRequest,
+} from "./gameSettings";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
 import type {
@@ -408,6 +414,34 @@ export interface LinkBridge {
    * Hearth ne contacte jamais cette adresse lui-même.
    */
   openFicheLink(serverId: string, ficheId: string, kind: FicheLinkKind, key: string): Promise<void>;
+
+  // Les réglages d'un serveur de jeu (HRT-109, ADR-0051, BR-FICHE-037 à 053). Les libellés, bornes et choix viennent de
+  // la fiche (`readFiche`) ; ici, les VALEURS voulues et l'état du fichier. Un secret n'est jamais rendu.
+
+  /**
+   * Les réglages voulus et l'état du fichier d'un service (`GET /services/{key}/settings`) : une lecture, qui exige le
+   * droit « gérer les services ». `absent` : ce service n'a pas de réglages de jeu (pas né d'une fiche, ou agent plus
+   * ancien), jamais une panne. Hors « Connecté » : échec `not_connected`.
+   */
+  readGameSettings(serverId: string, key: string): Promise<GameSettingsRead>;
+  /**
+   * Lit un texte collé et dit, réglage par réglage, ce qu'il apporterait (`POST /services/{key}/settings/analyze`) :
+   * une consultation, rien n'est écrit. Le texte peut porter un mot de passe : il ne traverse que cet appel, est lu par
+   * l'agent puis oublié, jamais gardé ni tracé (BR-FICHE-052).
+   */
+  analyzeGameSettings(serverId: string, key: string, text: string): Promise<AnalyzeOutcome>;
+  /**
+   * Enregistre des réglages (`PUT /services/{key}/settings`) : un acte d'administration confirmé, couvert par
+   * l'élévation de cinq minutes (`adminPassword` : `null` sous l'élévation, jamais gardé). L'agent ne redémarre rien
+   * (BR-JEU-035) : redémarrer est `pilotService`. Jamais rejoué : un résultat inconnu (lien coupé avant la réponse) se
+   * relit sur le fichier. Sans le droit « gérer les services » : échec `missing_services_right`.
+   */
+  saveGameSettings(
+    serverId: string,
+    key: string,
+    request: SaveSettingsRequest,
+    adminPassword: string | null,
+  ): Promise<SaveOutcome>;
 
   /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
   setDisplayedServer(serverId: string | null): Promise<void>;

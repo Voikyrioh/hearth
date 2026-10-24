@@ -52,6 +52,9 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
     // Annuler une opération (le déploiement qui récupère son image) : couvert par l'élévation (BR-DEPLOY-016).
     case "operation_cancel":
       return true;
+    // Enregistrer les réglages d'un jeu : couvert par l'élévation de cinq minutes (HRT-108).
+    case "game_settings_save":
+      return true;
     case "account_password":
     case "agent_update":
     case "attack_mode_enable":
@@ -86,6 +89,7 @@ function isPiloting(kind: AdminActKind): boolean {
     case "reauth_setting":
     case "service_deploy":
     case "operation_cancel":
+    case "game_settings_save":
       return false;
   }
 }
