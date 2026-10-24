@@ -628,12 +628,14 @@ impl ServiceLifecycle {
                 self.refresh(job).await;
                 Finish::failed(Cause::StepFailed)
             }
-            end @ (GameStopEnd::Failed(_) | GameStopEnd::StopRefused(_)) => {
+            end => {
                 journal(self.ops.failed(&job.id, game_step::STOP).await, "failed");
                 let failure = match end {
                     GameStopEnd::Failed(error) => OrderFailure::from_engine(error),
                     GameStopEnd::StopRefused(failure) => failure,
-                    _ => OrderFailure::Refused,
+                    GameStopEnd::Stopped { .. } | GameStopEnd::Closed | GameStopEnd::NotWritten => {
+                        unreachable!("traité par les bras précédents")
+                    }
                 };
                 let finish = failure.finish();
                 // L'ordre n'a pas eu lieu (refusé, service disparu) : rien n'a été arrêté. Un résultat inconnu

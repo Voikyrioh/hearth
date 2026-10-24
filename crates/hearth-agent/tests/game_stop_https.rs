@@ -905,11 +905,14 @@ async fn a_cut_between_the_exit_order_and_the_engine_stop_leaves_the_wanted_stop
     let id = b.gesture("stop", &server).await;
     b.until(&id, |_| b.calls(&server).contains(&stop(&server, 10)))
         .await;
-    let intents: Vec<(String,)> = sqlx::query_as("SELECT service_key FROM service_intents")
-        .fetch_all(b.env.db.pool())
-        .await
-        .unwrap();
-    assert_eq!(intents.len(), 1, "l'arrêt voulu est en base avant l'ordre");
+    // L'étape `stop` est écrite au journal AVANT l'ordre au moteur (le registre peut défaire seul l'arrêt voulu en
+    // base dès qu'il voit le jeu tourner : seule l'étape du journal est un repère stable).
+    let before = b.operation(&id).await;
+    assert!(
+        before.steps.iter().any(|s| s.step == "stop"
+            && s.state == hearth_proto::api::service_ops::StepStateView::Intent),
+        "{before:?}"
+    );
     let calls = b.calls(&server);
     let ops = b.agent.ops();
     let observer = hearth_agent::infrastructure::ops_observer::UnobservedState;
@@ -932,15 +935,27 @@ async fn a_cut_between_the_exit_order_and_the_engine_stop_leaves_the_wanted_stop
         .find(|view| view.key == server.key)
         .map(|view| view.derived.state)
         .expect("service publié");
-    assert!(
-        matches!(
-            state,
-            hearth_agent::domain::services::ServiceStateKind::Running
-                | hearth_agent::domain::services::ServiceStateKind::Stopping
-                | hearth_agent::domain::services::ServiceStateKind::Stopped
-        ),
-        "{state:?}"
+    // Le jeu n'est pas sorti et l'arrêt du moteur pend : « Arrêt en cours », jamais « En erreur ».
+    assert_eq!(
+        state,
+        hearth_agent::domain::services::ServiceStateKind::Stopping
     );
+    // Le jeu tourne toujours : le registre défait seul l'arrêt voulu écrit avant l'ordre (BR-LIFE-010), il n'en reste
+    // rien en base APRÈS la coupure, et rien n'est renvoyé.
+    // Le registre défait seul l'arrêt voulu quand il voit le jeu tourner (BR-LIFE-010) : après la coupure il n'en reste
+    // rien en base, et rien n'est renvoyé.
+    let started = Instant::now();
+    loop {
+        let after: Vec<(String,)> = sqlx::query_as("SELECT service_key FROM service_intents")
+            .fetch_all(b.env.db.pool())
+            .await
+            .unwrap();
+        if after.is_empty() {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(5), "{after:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     let steps: Vec<_> = operation.steps.iter().map(|s| s.step.as_str()).collect();
     assert!(steps.contains(&"stop"), "{steps:?}");
 }
