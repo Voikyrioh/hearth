@@ -153,5 +153,5 @@ cargo xtask release-upload --confirm   # dépose : fichiers de la version, relec
 - `hearth-proto` : aucun type de framework, aucune E/S.
 - Le client ne parle à l'agent que par `hearth-link`. L'interface web n'ouvre aucune connexion réseau.
 - Interface (`apps/desktop/src`) : Composition API et `<script setup lang="ts">`, Atomic design, zéro `style=` en ligne, SVG en composants atomes, jetons CSS uniquement (`styles/tokens.css`), textes dans `i18n/fr.ts`.
-- Textes d'interface : français, tutoiement, pas de tiret cadratin.
+- Textes d'interface : français, vouvoiement et impératif (règle de Voiky depuis le 14/10), phrases complètes, jamais de tiret cadratin.
 - Git : une branche par ticket (`feat/HRT-nn-slug`), PR, pas de push direct sur `main`. Gel des commits en heures ouvrées (voir hub).
