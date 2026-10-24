@@ -194,6 +194,16 @@ jobs:
           HEARTH_LOG_RATE_SECONDS: "60"
           HEARTH_TEST_PULL_REPO: localhost:5000
         run: cargo test -p hearth-agent --test engine_real -- --ignored --test-threads=1 --nocapture
+      # HRT-168 : la suite de contrat n'interroge plus le registre public, donc ses textes d'erreur
+      # (`pull access denied`, `repository does not exist`, `manifest unknown`, reconnus par `translate_pull`)
+      # y sont confirmés ICI, hors du chemin bloquant : un quota ou une panne du registre ne fait pas échouer le job.
+      - name: Textes d'erreur du registre public (non bloquant)
+        continue-on-error: true
+        run: |
+          out="$(docker pull public.ecr.aws/docker/library/hearth-contract-nope:1 2>&1 || true)"; echo "$out"
+          printf '%s' "$out" | grep -Eiq 'pull access denied|repository does not exist' || { echo "::warning::texte inattendu (nom inconnu) : mettre à jour la table de translate_pull"; exit 1; }
+          out="$(docker pull public.ecr.aws/docker/library/busybox:hearth-no-such-tag 2>&1 || true)"; echo "$out"
+          printf '%s' "$out" | grep -Eiq 'manifest unknown|not found' || { echo "::warning::texte inattendu (version inconnue) : mettre à jour la table de translate_pull"; exit 1; }
       # HRT-68 (BR-DEPLOY-021) : un service créé par Hearth (`unless-stopped`) revient quand le démon du runner
       # redémarre (`sudo systemctl restart docker`), sauf celui qu'on a arrêté à la main.
       - name: Un service créé par Hearth revient après le redémarrage du démon

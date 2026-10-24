@@ -40,7 +40,8 @@ const PREFIX: &str = "hearth-contract";
 fn pull_repo() -> String {
     std::env::var("HEARTH_TEST_PULL_REPO")
         .ok()
-        .filter(|repo| !repo.trim().is_empty())
+        .map(|repo| repo.trim().to_owned())
+        .filter(|repo| !repo.is_empty())
         .unwrap_or_else(|| "public.ecr.aws/docker/library".to_owned())
 }
 

@@ -772,6 +772,10 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
         }
     }
     assert!(
+        !percents.is_empty(),
+        "le téléchargement doit rapporter des octets reçus (une couche réellement téléchargée), pas seulement « déjà là »"
+    );
+    assert!(
         percents.windows(2).all(|pair| pair[0] <= pair[1]),
         "la progression ne recule jamais : {percents:?}"
     );

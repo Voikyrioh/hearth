@@ -13,7 +13,12 @@ runs:
     - id: fetch
       shell: bash
       run: .github/scripts/test-image.sh "${{ runner.temp }}/test-image"
-    - if: steps.restore.outputs.cache-hit != 'true'
+    - id: complete
+      shell: bash
+      run: |
+        dir="${{ runner.temp }}/test-image"
+        if [ -s "$dir/busybox.tar" ] && [ -s "$dir/registry.tar" ]; then echo "complete=true" >> "$GITHUB_OUTPUT"; else echo "::warning::cache non sauvé : archives manquantes ou vides"; fi
+    - if: steps.restore.outputs.cache-hit != 'true' && steps.complete.outputs.complete == 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/test-image

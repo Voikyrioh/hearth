@@ -22,9 +22,32 @@ IMAGES=(
 )
 TRANSIENT='toomanyrequests|too many requests|rate exceeded|rate limit|bad gateway|service unavailable|gateway timeout|tls handshake timeout|i/o timeout|context deadline exceeded|connection reset|connection refused|unexpected eof|temporary failure in name resolution'
 
+save_archive() {
+  local tag="$1" file="$2"
+  mkdir -p "$DIR"
+  # Écrite à côté puis renommée : une archive vide ou coupée ne part jamais dans le cache.
+  if docker save --output "$file.part" "$tag" && [ -s "$file.part" ]; then
+    mv "$file.part" "$file"
+  else
+    rm -f "$file.part"
+    echo "::warning::$tag : archive non écrite (le cache ne sera pas rempli)"
+  fi
+}
+
+# Présente par l'EMPREINTE (RepoDigests), pas seulement par le tag. Une image rechargée d'une archive perd ses
+# RepoDigests : elle n'est donc jamais prise pour présente ici, seulement par le chemin de l'archive ci-dessous
+# (archive écrite par ce script après un téléchargement par empreinte, sous une clé qui suit ce fichier).
+has_digest() {
+  docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$1" 2>/dev/null | grep -q "@$2\$"
+}
+
 provide() {
-  local tag="$1" repo="$2" digest="$3" file="$DIR/$2.tar"
-  if docker image inspect "$tag" >/dev/null 2>&1; then echo "$repo : déjà présente"; return 0; fi
+  local tag="$1" repo="$2" digest="$3" file="$DIR/$2.tar" ERRORS=""
+  if has_digest "$tag" "$digest"; then
+    echo "$repo : déjà présente (empreinte vérifiée)"
+    [ -s "$file" ] || save_archive "$tag" "$file"
+    return 0
+  fi
   if [ -s "$file" ]; then
     if load_err="$(docker load --input "$file" 2>&1)" && docker image inspect "$tag" >/dev/null 2>&1; then
       echo "$repo : chargée depuis le cache de la CI"; return 0
@@ -41,14 +64,7 @@ provide() {
     for attempt in 1 2 3; do
       if out="$(docker pull --quiet "$ref" 2>&1)"; then
         docker tag "$ref" "$tag"
-        mkdir -p "$DIR"
-        # Écrite à côté puis renommée : une archive vide ou coupée ne part jamais dans le cache.
-        if docker save --output "$file.part" "$tag" && [ -s "$file.part" ]; then
-          mv "$file.part" "$file"
-        else
-          rm -f "$file.part"
-          echo "::warning::$repo : archive non écrite (le cache ne sera pas rempli)"
-        fi
+        save_archive "$tag" "$file"
         echo "$repo : téléchargée depuis $src par empreinte (essai $attempt)"
         return 0
       fi
@@ -67,10 +83,8 @@ provide() {
   return 1
 }
 
-ERRORS=""
 for entry in "${IMAGES[@]}"; do
   IFS='|' read -r tag repo digest <<<"$entry"
-  ERRORS=""
   provide "$tag" "$repo" "$digest"
 done
 
@@ -84,6 +98,14 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 curl -fsS http://localhost:5000/v2/ >/dev/null || { echo "::error::registre local localhost:5000 injoignable (défaut de la préparation, pas du code testé)"; exit 1; }
-docker tag "public.ecr.aws/docker/library/busybox:1.36" localhost:5000/busybox:1.36
+# L'image du registre local porte UNE COUCHE PROPRE (6 Mo incompressibles) que le démon n'a pas : après le
+# push on la retire du démon (image et couche), pour que le « pull » du contrat télécharge de vrais octets
+# (progression, abandon) au lieu de répondre « Already exists ».
+build="$(mktemp -d)"
+printf 'FROM public.ecr.aws/docker/library/busybox:1.36\nRUN head -c 6000000 /dev/urandom > /hearth-layer\n' > "$build/Dockerfile"
+docker build --quiet --tag localhost:5000/busybox:1.36 "$build" >/dev/null
 docker push --quiet localhost:5000/busybox:1.36 >/dev/null
-echo "registre local prêt : localhost:5000/busybox:1.36"
+docker rmi localhost:5000/busybox:1.36 >/dev/null
+docker builder prune --force >/dev/null 2>&1 || true
+rm -rf "$build"
+echo "registre local prêt : localhost:5000/busybox:1.36 (couche propre de 6 Mo, absente du démon)"

@@ -61,6 +61,12 @@ pub fn translate_pull(error: &Error) -> EngineError {
 /// Le texte d'une erreur de téléchargement, reconnu par morceaux connus de Docker et de Podman. L'ordre compte :
 /// la limite de débit et le disque plein d'abord (ils masquent le reste), puis la plateforme, la version, le
 /// registre, enfin l'image.
+///
+/// Source des textes (HRT-168) : la suite de contrat récupère son image chez un registre LOCAL (`registry:2`),
+/// dont les textes sont ceux de la distribution (`manifest unknown`, `name unknown`). Les textes du registre
+/// public (`pull access denied`, `repository does not exist`) ne sont plus confirmés par la suite bloquante :
+/// l'étape non bloquante « Textes d'erreur du registre public » du job `engine` de la CI les relit chez ECR
+/// (`continue-on-error`) ; si elle devient rouge, relire cette table.
 fn pull_text(message: &str) -> Option<EngineError> {
     let text = message.to_lowercase();
     let has = |needles: &[&str]| needles.iter().any(|needle| text.contains(needle));
