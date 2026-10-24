@@ -8,7 +8,7 @@ Les bornes (`capacity`) viennent de `GET /engine/capacity` (`resources/capacity.
 
 Le fil reste en octets (`memoryBytes`) et en millicœurs (`cpuMillis`) ; une valeur vide ou refusée vaut `null`. Pas de crans nommés (`MemoryTiers`), de jauge du total engagé ni de consommation : ils arrivent avec HRT-122 et HRT-89.
 
-- Props : `capacity` (`EngineCapacity | null`), `modelValue` (`Resources`), `recommended` (`{ bytes, proof: "measured" | "publisher" } | null`), `disabled`
+- Props : `capacity` (`EngineCapacity | null`), `modelValue` (`Resources`), `recommended` (`{ bytes, proof: "measured" | "measured_idle" | "publisher" } | null`), `memoryNote` (un texte à la place de « Hearth n'a pas de chiffre pour ce programme » quand `recommended` est `null` : une fiche dont la mémoire n'est pas prouvée le dit avec ses mots, HRT-102), `cpuNote` (une ligne sous le curseur de processeur), `disabled`
 - Événements et slots : `update:modelValue` (`Resources`)
 - Envoi : le composant ne le juge pas. L'appelant, qui a `capacity` et la valeur, garde son bouton d'envoi inactif tant que `resources/ready.ts::resourcesIssue(capacity, valeur)` n'est pas `null` (la raison, `capacity`, `memory` ou `cpu`, lui dit quoi afficher).
 - Notes : Tests : `components/organisms/resourceSliders.test.ts`. Règles pures : `src/resources/`.

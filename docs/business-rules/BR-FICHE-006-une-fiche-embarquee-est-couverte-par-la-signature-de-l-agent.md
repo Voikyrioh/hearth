@@ -18,18 +18,22 @@ Une fiche n'a pas de signature propre. Une fiche que le chargeur refuse fait ÉC
 - `crates/hearth-agent/build.rs::embed_fiches`
 - `crates/hearth-agent/src/domain/catalog/embedded.rs::{EmbeddedFiche::load, load_all}`
 - `xtask/src/catalog_check.rs::check_texts (`cargo xtask catalog-check`)`
+- `apps/desktop/src/pages/Catalogue.vue`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/loading/model.rs::tests::the_digest_of_a_fiche_covers_both_files_with_their_lengths`
 - `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_digest`
 - `xtask/src/catalog_check.rs::tests::a_missing_lock_and_a_fiche_the_loader_refuses_are_reported_by_name`
+- `apps/desktop/src/pages/Catalogue.test.ts`
 
 ## Cas limites
 - `rerun-if-changed=catalog` relance `build.rs` quand un fichier du dossier du catalogue change, `ids.lock` compris : sans coût pour une compilation ordinaire, qui ne touche pas ce dossier.
 - L'instantané de la fiche gardé par chaque service et sa revalidation au démarrage sont posés par HRT-101.
+- Le pied de la liste dit « {n} fiche(s) écartée(s) : leur contenu n'est pas accepté. Mettez Hearth à jour ou réinstallez-le. » sans montrer ni dossier ni invariant.
 
 ## Règles liées
 - BR-FICHE-005, BR-FICHE-007
 
 ## Historique
 - 2026-10-13 — création (HRT-113, format de fiche version 2, domaine pur).
+- 2026-10-24 — côté client (HRT-102).

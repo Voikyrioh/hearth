@@ -7,3 +7,4 @@ La progression d'un déploiement (HRT-69, BR-DEPLOY-016, 019, 020, 028) : une fe
 - Props : `open`, `serverId`, `name`, `operation`, `ended`, `unknown`, `service`, `performCancel`
 - Événements : `background`, `modify`, `logs`, `stop`, `close`
 - Notes : posé par `pages/DeployService.vue`. Tests : `pages/DeployFlow.test.ts`, `e2e/hrt69-deploy.spec.ts`.
+- `installing` (HRT-102) : l'installation d'un serveur de jeu depuis une fiche suit le même parcours ; seul le titre change (« Installation de {nom} »).

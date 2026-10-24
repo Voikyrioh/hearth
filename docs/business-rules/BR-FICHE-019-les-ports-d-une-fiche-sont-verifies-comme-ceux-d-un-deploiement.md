@@ -17,9 +17,13 @@ Chaque port publié de la fiche prend le numéro choisi par l'utilisateur (sinon
 - `crates/hearth-agent/src/domain/catalog/settings_state.rs::chosen_host_port`
 - `crates/hearth-agent/src/domain/catalog/translate.rs::translate`
 - `crates/hearth-agent/src/application/deployments.rs::Deployments::check_ports_for`
+- `apps/desktop/src/fiche/ports.ts`
+- `apps/desktop/src/components/molecules/FichePortField.vue`
 
 ## Vérification
 - `crates/hearth-agent/tests/fiche_install_https.rs::a_rich_install_writes_each_file_with_the_declared_owner_and_never_wider_than_0640`
+- `apps/desktop/src/fiche/fiche.test.ts`
+- `apps/desktop/src/pages/InstallFromFiche.test.ts`
 
 ## Cas limites
 - Le décalage d'un groupe de ports liés et les messages sont portés par le formulaire (HRT-102).
@@ -29,3 +33,4 @@ Chaque port publié de la fiche prend le numéro choisi par l'utilisateur (sinon
 
 ## Historique
 - 2026-10-24 — création (HRT-101).
+- 2026-10-24 — côté client (HRT-102).

@@ -37,6 +37,11 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`StaleSurface`](./StaleSurface.md) — Enveloppe des données périmées (désaturées et datées).
 - [`ToastStack`](./ToastStack.md) — Notifications empilées (3 visibles, compteur).
 - [`ConfirmDialog`](./ConfirmDialog.md) — Confirmation modale (piège à focus, défaut sûr).
+- [`ProofTag`](./ProofTag.md) — D'où vient un chiffre de ressource d'une fiche : mesuré, au repos, éditeur, non vérifié (HRT-102).
+- [`FicheCard`](./FicheCard.md) — Une fiche dans la liste du Catalogue (HRT-102).
+- [`QuestionField`](./QuestionField.md) — Une question d'installation dans le champ de son genre, lue dans la fiche (HRT-102).
+- [`VariantChoice`](./VariantChoice.md) — Le choix de la variante d'une fiche (HRT-102).
+- [`FichePortField`](./FichePortField.md) — Un port d'une fiche : le port du serveur, le constat de l'agent, le port libre proposé (HRT-102).
 - [`FormDialog`](./FormDialog.md) — Fenêtre de formulaire (champs figés pendant l'envoi, erreur dans la fenêtre).
 - [`PasswordRules`](./PasswordRules.md) — Critères du mot de passe en direct (coche ou croix et texte).
 - [`ReleaseNotesDialog`](./ReleaseNotesDialog.md) — Notes de version en texte brut (boîte modale).
@@ -117,6 +122,14 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`DisksCard`](./DisksCard.md) — Section Disques (suit les montages).
 - [`TemperaturesCard`](./TemperaturesCard.md) — Section Températures (ou explication sans sonde).
 - [`ResourceSliders`](./ResourceSliders.md) — Mémoire et processeur à la création d'un service, bornes de la machine, jamais « sans limite » (HRT-146).
+- [`FicheResourcesCard`](./FicheResourcesCard.md) — Processeur, mémoire et disque d'une fiche contre la machine, chaque chiffre avec sa preuve (HRT-102).
+- [`FicheSheet`](./FicheSheet.md) — Les cartes de lecture de la fiche d'un jeu (HRT-102).
+- [`ImposedDialog`](./ImposedDialog.md) — Ce que la fiche impose, réglage par réglage (HRT-102).
+- [`AgreementDialog`](./AgreementDialog.md) — La fenêtre du contrat de licence, « Je refuse » et « J'accepte » (HRT-102).
+- [`FicheSummaryDialog`](./FicheSummaryDialog.md) — « Vérifiez avant de lancer » d'une installation depuis une fiche (HRT-102).
+- [`InstallAnswers`](./InstallAnswers.md) — Les « Réponses » de l'installation (HRT-102).
+- [`InstallResources`](./InstallResources.md) — Les « Ressources » de l'installation (HRT-102).
+- [`FirstStartPanel`](./FirstStartPanel.md) — Le premier démarrage long : des faits, jamais un pourcentage (HRT-102).
 
 ## Gabarits
 
@@ -132,6 +145,9 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`Security`](./Security.md) — Sécurité : « Mode attaque » (carte) et tes postes de confiance (liste, retrait avec mot de passe).
 - [`Audit`](./Audit.md) — Journal d'activité (à venir).
 - [`DeployService`](./DeployService.md) — « Déployer un service » : formulaire en page, récapitulatif, progression, abandon (HRT-69).
+- [`Catalogue`](./Catalogue.md) — Les serveurs de jeu que l'agent propose (HRT-102).
+- [`FicheDetail`](./FicheDetail.md) — La fiche d'un jeu et ses deux boutons d'installation (HRT-102).
+- [`InstallFromFiche`](./InstallFromFiche.md) — Installer un serveur de jeu depuis une fiche en trois étapes (HRT-102).
 - [`Settings`](./Settings.md) — Réglages.
 
 ## Règle partagée
