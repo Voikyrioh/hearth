@@ -655,12 +655,17 @@ impl Bench {
                         .is_some_and(|t| {
                             t.state == hearth_agent::domain::services::ServiceStateKind::Running
                         });
-                    let idle = self
-                        .state
-                        .service_ops
-                        .ops()
-                        .with_index(|index| index.busy(&parsed).is_none());
-                    if running && idle {
+                    // Le déploiement est FINI dans le journal (la surveillance de fin comprise), pas seulement en marche.
+                    let unfinished: i64 = sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM service_ops
+                         WHERE service_key = ?
+                           AND status NOT IN ('succeeded', 'failed', 'cancelled', 'rolled_back', 'interrupted')",
+                    )
+                    .bind(&key)
+                    .fetch_one(self.env.db.pool())
+                    .await
+                    .unwrap();
+                    if running && unfinished == 0 {
                         break;
                     }
                     assert!(
@@ -1015,6 +1020,27 @@ async fn a_proof_for_another_act_target_account_session_or_replayed_is_refused_a
         let member = b.member(who, &spec, PASSWORD).await;
         let first = b.send(who, &spec, Some(member.clone()), current).await;
         assert!(first.status.is_success(), "{kind:?} : {:?}", first.body);
+        // Une suppression répond `202` et finit à l'arrière-plan : la base de comparaison est prise une fois finie.
+        if kind == ActKind::ServiceDelete {
+            let started = std::time::Instant::now();
+            loop {
+                let unfinished: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM service_ops
+                     WHERE status NOT IN ('succeeded', 'failed', 'cancelled', 'rolled_back', 'interrupted')",
+                )
+                .fetch_one(b.env.db.pool())
+                .await
+                .unwrap();
+                if unfinished == 0 {
+                    break;
+                }
+                assert!(
+                    started.elapsed() < std::time::Duration::from_secs(10),
+                    "la suppression ne finit pas"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        }
         let before = b.snapshot().await;
         let verifications = b.env.hasher.verifications();
         let replay = b.send(who, &spec, Some(member), current).await;

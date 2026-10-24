@@ -1223,6 +1223,15 @@ async fn an_agent_restarting_in_the_middle_of_an_erasure_never_resumes_it_and_as
         op.step.as_deref() == Some("erase")
     })
     .await;
+    // L'effacement est bien commencé (le faux est entré dans `erase_tree` et attend).
+    let started = Instant::now();
+    while b.safe_fs.erase_calls().is_empty() {
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "l'effacement ne commence pas"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     assert_eq!(b.safe_fs.erase_calls().len(), 1);
     // L'agent s'arrête là (coupure) : un autre démarre sur la même base et les mêmes dossiers.
     let mut parts = parts_supervised(
