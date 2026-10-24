@@ -323,6 +323,79 @@ pub struct ImposedView {
     pub why: String,
 }
 
+/// Le niveau d'un réglage : les essentiels sont les questions de l'installation, les courants s'ajoutent dans la vue
+/// « Courants » de l'onglet, les avancés derrière « Tout afficher » (BR-FICHE-037, BR-FICHE-045).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LevelView {
+    Essential,
+    Common,
+    Advanced,
+    /// Un niveau d'une version plus récente : le client le traite comme avancé (montré derrière « Tout afficher »).
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Un thème en mots simples (BR-FICHE-041) : les réglages d'une fiche sont rangés par thème, dans l'ordre `order`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThemeView {
+    pub id: String,
+    pub label: String,
+    pub order: u32,
+}
+
+/// Le jeu de caractères d'un identifiant de liste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemCharsetView {
+    Digits,
+    Slug,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Ce que la fiche dit d'une liste d'identifiants (BR-FICHE-037) : le séparateur, le jeu de caractères d'un
+/// identifiant et leur nombre maximal. Le client n'en invente aucun.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListView {
+    pub item_charset: ItemCharsetView,
+    pub separator: String,
+    pub max_items: u32,
+}
+
+/// Un réglage du catalogue de la fiche (HRT-109, BR-FICHE-037) : tout ce qu'il faut pour le montrer et le régler sans
+/// rien inventer. `question` porte le contrôle (genre, bornes, choix, jeu de caractères, valeur proposée) : c'est le
+/// même objet que celui d'une question d'installation. Un réglage imposé n'est jamais une question.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingView {
+    pub question: QuestionView,
+    /// Le nom technique du jeu, montré en petit (BR-FICHE-041).
+    pub key: String,
+    /// L'identifiant du thème.
+    pub theme: String,
+    #[serde(default)]
+    pub level: LevelView,
+    /// La valeur par défaut du jeu ; absente : « non vérifiée » (BR-FICHE-037, BR-FICHE-057), Hearth n'écrit alors pas
+    /// ce réglage tant qu'on ne le règle pas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_default: Option<String>,
+    /// Imposé par la fiche : la raison. Un réglage imposé est montré, jamais modifiable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imposed_why: Option<String>,
+    /// Les versions du jeu où le réglage existe (BR-FICHE-049).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaced_by: Option<String>,
+    /// Pour une liste d'identifiants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list: Option<ListView>,
+}
+
 /// Réponse de `GET /catalog/{id}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FicheDetail {
@@ -353,6 +426,12 @@ pub struct FicheDetail {
     /// Les réglages posés par la fiche, avec leur raison (HRT-102).
     #[serde(default)]
     pub imposed: Items<ImposedView>,
+    /// Les thèmes en mots simples (HRT-109) ; vide d'un agent plus ancien.
+    #[serde(default)]
+    pub themes: Items<ThemeView>,
+    /// Le catalogue complet de réglages de la fiche, imposés compris (HRT-109) ; vide d'un agent plus ancien.
+    #[serde(default)]
+    pub settings: Items<SettingView>,
 }
 
 #[cfg(test)]

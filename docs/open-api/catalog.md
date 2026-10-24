@@ -44,7 +44,9 @@ Réponse (`FicheDetail`) :
 | `first_start` | Le premier démarrage (HRT-102, BR-FICHE-010, 056) : `ready_timeout_s`, `world_generation`, `downloads` (`what`, `source`, `bytes`, `evidence`), `stages` (les libellés que Hearth reconnaît dans les journaux). Absent d'un agent plus ancien |
 | `stop` | La façon d'arrêter le jeu (HRT-102, BR-JEU-002) : `grace_s`, `world_saved` (`by_image_on_signal`, `by_sequence`, `not_saved` ; une valeur plus récente se lit `unknown`), `sequence_tested`. Absent d'un agent plus ancien |
 | `imposed` | Les réglages que la fiche pose à la place de l'utilisateur (HRT-102, BR-JEU-039) : `label`, `value` (absente quand elle est tirée, calculée ou secrète), `why` |
+| `themes` | Les thèmes en mots simples (HRT-109, BR-FICHE-041), dans l'ordre de la fiche : `id`, `label`, `order`. Vide d'un agent plus ancien |
+| `settings` | Le catalogue COMPLET de réglages de la fiche, imposés compris (HRT-109, BR-FICHE-037). Un élément : `question` (le contrôle, de la même forme qu'une entrée de `questions` : `id`, `label`, `help`, `kind`, `choices`, bornes, `proposed`, `frozen_after_creation`, `secret`…), `key` (le nom technique du jeu), `theme`, `level` (`essential`, `common`, `advanced` ; une valeur plus récente se lit `unknown`), `game_default` (absent : « non vérifié », jamais pour un secret), `imposed_why`, `since`, `until`, `replaced_by` (versions du jeu) et `list` (`item_charset`, `separator`, `max_items` d'une liste d'identifiants). Les valeurs voulues et l'état du fichier ne passent pas ici : [`game-settings`](./game-settings.md). Vide d'un agent plus ancien |
 
 ## Règles
 
-BR-FICHE-001 à 004, 006, 007, 008, 010, 016, 056. Le client (HRT-102) lit ces deux routes par `read_catalog` et `read_fiche` de la coquille ; une fiche inconnue de l'agent se lit « inconnue », jamais comme une panne.
+BR-FICHE-001 à 004, 006, 007, 008, 010, 016, 037, 041, 056. Le client (HRT-102) lit ces deux routes par `read_catalog` et `read_fiche` de la coquille ; une fiche inconnue de l'agent se lit « inconnue », jamais comme une panne.

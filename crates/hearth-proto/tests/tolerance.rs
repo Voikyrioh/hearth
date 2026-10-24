@@ -27,8 +27,8 @@ use hearth_proto::admin_act::TrustLevel;
 use hearth_proto::api::accounts::{AccountInfo, RoleName};
 use hearth_proto::api::audit::{OriginKindName, OutcomeName};
 use hearth_proto::api::catalog::{
-    CharsetView, EvidenceView, FicheStatus, PortMappingView, QuestionKind, SecretKindView,
-    WorldSavedView,
+    CharsetView, EvidenceView, FicheStatus, ItemCharsetView, LevelView, PortMappingView,
+    QuestionKind, SecretKindView, WorldSavedView,
 };
 use hearth_proto::api::deploy::{
     DeployPlace, DeployProtocol, DeploySource, MountStatus, NameStatus, PortStatus,
@@ -183,6 +183,8 @@ fn enums() -> Vec<Entry> {
         entry!("api/catalog.rs::PortMappingView", Tolerant, PortMappingView),
         entry!("api/catalog.rs::CharsetView", Tolerant, CharsetView),
         entry!("api/catalog.rs::SecretKindView", Tolerant, SecretKindView),
+        entry!("api/catalog.rs::LevelView", Tolerant, LevelView),
+        entry!("api/catalog.rs::ItemCharsetView", Tolerant, ItemCharsetView),
         entry!("api/deploy.rs::NameStatus", Tolerant, NameStatus),
         entry!("api/deploy.rs::PortStatus", Tolerant, PortStatus),
         entry!("api/deploy.rs::MountStatus", Tolerant, MountStatus),
