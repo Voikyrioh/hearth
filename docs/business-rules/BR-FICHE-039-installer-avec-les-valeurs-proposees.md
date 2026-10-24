@@ -22,7 +22,7 @@ Règle portée par le client (HRT-102). Le second bouton de la fiche ouvre l'ins
 - `apps/desktop/src/pages/FicheDetail.test.ts::« Installer » (BR-FICHE-012, 033, 039)`
 
 ## Cas limites
-- Le choix de la mise à jour automatique du jeu (BR-FICHE-066) n'est pas dans cette version.
+- Le choix de la mise à jour automatique du jeu relève de HRT-128 : il n'est pas dans cette version.
 
 ## Règles liées
 BR-FICHE-014, BR-FICHE-058

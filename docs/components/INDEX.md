@@ -41,6 +41,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`FicheCard`](./FicheCard.md) — Une fiche dans la liste du Catalogue (HRT-102).
 - [`QuestionField`](./QuestionField.md) — Une question d'installation dans le champ de son genre, lue dans la fiche (HRT-102).
 - [`VariantChoice`](./VariantChoice.md) — Le choix de la variante d'une fiche (HRT-102).
+- [`PortNotes`](./PortNotes.md) — Les notes sous un port du serveur : avertissement, port sous 1024, port libre proposé par l'agent (HRT-69, HRT-102).
 - [`FichePortField`](./FichePortField.md) — Un port d'une fiche : le port du serveur, le constat de l'agent, le port libre proposé (HRT-102).
 - [`FormDialog`](./FormDialog.md) — Fenêtre de formulaire (champs figés pendant l'envoi, erreur dans la fenêtre).
 - [`PasswordRules`](./PasswordRules.md) — Critères du mot de passe en direct (coche ou croix et texte).

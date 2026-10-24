@@ -18,7 +18,7 @@ Règle partagée entre HRT-102 et HRT-109. Le récapitulatif compte les réponse
 - `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
 
 ## Vérification
-- `apps/desktop/src/fiche/fiche.test.ts::compte ce qui diffère de ce que la fiche propose`
+- `apps/desktop/src/fiche/fiche.test.ts::ce qui diffère de ce que la fiche propose (BR-FICHE-040)`
 
 ## Cas limites
 - Un réglage figé à la création du monde porte la mention de BR-FICHE-016.
