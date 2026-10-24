@@ -13,14 +13,14 @@ use crate::error::LinkError;
 const CATALOG_PATH: &str = "/catalog";
 
 /// Longueur maximale de l'identifiant d'une fiche (comme `MAX_FICHE_TOKEN_CHARS` du fil).
-const FICHE_ID_MAX_LEN: usize = 64;
+const STABLE_ID_MAX_LEN: usize = 64;
 
 /// Un identifiant stable (de fiche, de question, de contrat, de port) est un mot court : minuscules, chiffres, tiret et souligné ;
 /// tout autre texte n'est pas un identifiant, ne part pas et n'est jamais répété. UNE seule définition, pour la
 /// liaison et pour la coquille.
 pub fn is_stable_id(id: &str) -> bool {
     !id.is_empty()
-        && id.len() <= FICHE_ID_MAX_LEN
+        && id.len() <= STABLE_ID_MAX_LEN
         && id
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')

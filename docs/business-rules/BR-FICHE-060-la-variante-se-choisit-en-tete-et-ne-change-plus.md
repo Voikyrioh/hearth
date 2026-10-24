@@ -22,7 +22,7 @@ Règle portée par le client (HRT-102). Quand la fiche a plusieurs variantes, la
 ## Vérification
 - `apps/desktop/src/pages/InstallFromFiche.test.ts::la variante (BR-FICHE-060)`
 - `apps/desktop/src/fiche/fiche.test.ts::ne pose que les questions de la variante choisie, et n'envoie que les réponses non vides`
-- `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::liste de variantes vide refusée (Motif::ListeDeVariantesVide)`
+- `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::coherence_proposed_values_and_arguments_are_valid_for_their_type`
 
 ## Cas limites
 - L'agent refuse une réponse d'une autre variante (`SETTING_REFUSED`, raison `variant`).

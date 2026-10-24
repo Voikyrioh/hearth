@@ -100,7 +100,7 @@ export function toInstallRequest(
     variant: draft.variant,
     answers: answersToSend(visibleQuestions(detail, draft.variant), draft.answers),
     agreements: [...choices.agreements],
-    ports: readable.map(({ id, deploy }) => ({ id, hostPort: deploy.hostPort })),
+    ports: readable.map(({ port, deploy }) => ({ id: port.id, hostPort: deploy.hostPort })),
     optionalPorts: published.filter((port) => port.publish === "optional").map((port) => port.id),
     resources: { memoryBytes: resources.memoryBytes, cpuMillis: resources.cpuMillis },
     accept: { ...choices.accept },

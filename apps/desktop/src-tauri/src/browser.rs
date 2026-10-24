@@ -3,7 +3,7 @@
 
 use std::process::Command;
 
-/// Une adresse que l'on peut faire ouvrir : `https`, un nom de domaine (un point), aucun identifiant dans l'adresse,
+/// Une adresse que l'on peut faire ouvrir : `https`, un vrai nom de domaine (jamais une adresse IP, ni IPv4 ni IPv6), aucun identifiant dans l'adresse,
 /// 2 048 caractères au plus, et seulement des caractères sans effet sur la ligne de commande de l'Explorateur (ni
 /// espace, ni guillemet, ni virgule ni point-virgule, que l'Explorateur lit comme des séparateurs).
 pub fn is_safe_https_url(url: &str) -> bool {
@@ -14,10 +14,36 @@ pub fn is_safe_https_url(url: &str) -> bool {
     url.len() <= 2048
         && !authority.is_empty()
         && !authority.contains('@')
-        && authority.contains('.')
+        && is_domain_name(host_of(authority))
         && url
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"-._~:/?#=&%+!".contains(&b))
+}
+
+/// Le nom d'hôte de l'autorité (sans le port).
+fn host_of(authority: &str) -> &str {
+    if authority.starts_with('[') {
+        return authority;
+    }
+    authority.split(':').next().unwrap_or("")
+}
+
+/// Un vrai nom de domaine : au moins deux étiquettes de lettres, chiffres et tirets, une dernière étiquette qui n'est
+/// pas un nombre (ce qui écarte `192.168.1.1`) ; un crochet (IPv6) ou un deux-points restant le refuse.
+fn is_domain_name(host: &str) -> bool {
+    let labels: Vec<&str> = host.split('.').collect();
+    labels.len() >= 2
+        && labels.iter().all(|label| {
+            !label.is_empty()
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+        && labels
+            .last()
+            .is_some_and(|tld| tld.bytes().any(|b| b.is_ascii_alphabetic()))
 }
 
 /// Ouvre `url` dans le navigateur ; `false` : l'adresse est refusée par la garde ou le lancement a échoué.
@@ -41,6 +67,14 @@ mod tests {
             "https:///x",
             "https://user:pass@example.org/",
             "https://localhost/x",
+            "https://192.168.1.1/",
+            "https://127.0.0.1:8080/x",
+            "https://[::1]/",
+            "https://[2001:db8::1]:443/",
+            "https://1.2.3.4.5/",
+            "https://-a.example.org/",
+            "https://example..org/",
+            "https://exa_mple.org/",
             "https://example.org/a b",
             "https://example.org/\"x",
             "https://example.org/^calc",

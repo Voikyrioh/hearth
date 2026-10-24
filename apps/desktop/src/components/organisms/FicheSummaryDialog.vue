@@ -90,12 +90,7 @@ const published = computed(() =>
 );
 const folders = computed(() => forVariant(props.detail.folders, props.draft.variant));
 /** Les ports qui partent : le port du serveur choisi et celui du service, tels que la demande les dit. */
-const portLines = computed(() =>
-  readableHostPorts(published.value, props.draft.hostPorts).flatMap(({ id, deploy }) => {
-    const port = published.value.find((item) => item.id === id);
-    return port ? [{ port, deploy }] : [];
-  }),
-);
+const portLines = computed(() => readableHostPorts(published.value, props.draft.hostPorts));
 const variant = computed(() =>
   props.detail.variants.find((item) => item.id === props.draft.variant),
 );

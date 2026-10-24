@@ -129,11 +129,11 @@ export function useFicheInstall(
   const portVerdicts = computed(() => {
     const map = new Map<string, PortVerdict>();
     if (!draft.value) return map;
-    for (const { id, deploy } of readableHostPorts(published.value, draft.value.hostPorts)) {
+    for (const { port, deploy } of readableHostPorts(published.value, draft.value.hostPorts)) {
       const found = check.value?.ports.find(
         (item) => item.hostPort === deploy.hostPort && item.protocol === deploy.protocol,
       );
-      map.set(id, portVerdict(found));
+      map.set(port.id, portVerdict(found));
     }
     return map;
   });

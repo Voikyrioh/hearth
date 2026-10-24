@@ -218,8 +218,8 @@ describe("les ports d'une fiche (BR-FICHE-019)", () => {
     expect(containerPortOf(mods as (typeof fiche.ports)[number], 7778)).toBe(7778);
     const published = publishedPorts(fiche.ports, [], "modded");
     expect(
-      readableHostPorts(published, { mods_port: "7778" }).map(({ id, deploy }) => [
-        id,
+      readableHostPorts(published, { mods_port: "7778" }).map(({ port, deploy }) => [
+        port.id,
         deploy.hostPort,
         deploy.containerPort,
       ]),

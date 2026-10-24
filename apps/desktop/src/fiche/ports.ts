@@ -72,13 +72,13 @@ export function parseHostPort(text: string): { port: number } | { issue: HostPor
 export function readableHostPorts(
   published: readonly FichePort[],
   hostPorts: Readonly<Record<string, string>>,
-): { id: string; deploy: DeployPort }[] {
-  const out: { id: string; deploy: DeployPort }[] = [];
+): { port: FichePort; deploy: DeployPort }[] {
+  const out: { port: FichePort; deploy: DeployPort }[] = [];
   for (const port of published) {
     const parsed = parseHostPort(hostPorts[port.id] ?? startingHostPort(port));
     if ("port" in parsed) {
       out.push({
-        id: port.id,
+        port,
         deploy: {
           hostPort: parsed.port,
           containerPort: containerPortOf(port, parsed.port),
@@ -97,7 +97,8 @@ export function duplicateHostPorts(
 ): Set<string> {
   const seen = new Map<string, string>();
   const dup = new Set<string>();
-  for (const { id, deploy } of readableHostPorts(published, hostPorts)) {
+  for (const { port, deploy } of readableHostPorts(published, hostPorts)) {
+    const id = port.id;
     const key = `${deploy.protocol}/${deploy.hostPort}`;
     const other = seen.get(key);
     if (other !== undefined) {
