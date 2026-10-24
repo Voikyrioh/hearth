@@ -17,12 +17,15 @@ Une réponse de type texte reste dans le jeu de caractères de son réglage (`li
 - `crates/hearth-agent/src/domain/catalog/settings_state.rs::validate_text`
 - `crates/hearth-agent/src/domain/catalog/loading/value.rs::first_refused_char`
 - `crates/hearth-agent/src/application/fiche_install.rs::FicheInstaller::prepare`
+- `apps/desktop/src/fiche/answers.ts::answerIssue`
 
 ## Vérification
 - `crates/hearth-agent/tests/fiche_install_https.rs::an_invalid_answer_is_refused_naming_the_character_never_the_value`
+- `apps/desktop/src/fiche/fiche.test.ts`
 
 ## Règles liées
 - BR-FICHE-016, BR-FICHE-007
 
 ## Historique
 - 2026-10-24 — création (HRT-101).
+- 2026-10-24 — côté client (HRT-102).

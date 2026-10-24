@@ -289,7 +289,7 @@ describe("hors ligne (HRT-12)", () => {
 
   it("dims and dates EVERY page of a server from the layout, none can forget it (BR-RESIL-007)", async () => {
     const { bridge, router, wrapper } = await boot("/servers/forge/dashboard");
-    for (const name of ["dashboard", "services", "accounts", "audit", "security"]) {
+    for (const name of ["dashboard", "services", "catalogue", "accounts", "audit", "security"]) {
       await router.push(`/servers/forge/${name}`);
       await flushPromises();
       expect(wrapper.findAll('[data-stale="true"]'), `${name} connecté`).toHaveLength(0);
@@ -309,10 +309,14 @@ describe("hors ligne (HRT-12)", () => {
       .filter((route) => route.path.startsWith("/servers/:id/") && route.name)
       .map((route) => String(route.name));
     // Le formulaire de déploiement (HRT-69) est gardé par la route : sa couverture est dans `DeployService.test.ts`.
+    // La fiche d'un jeu et son installation (HRT-102) sont couvertes par `FicheDetail.test.ts` et `InstallFromFiche.test.ts`.
     expect(pages.sort()).toEqual([
       "accounts",
       "audit",
+      "catalogue",
       "dashboard",
+      "fiche",
+      "fiche-install",
       "security",
       "services",
       "services-deploy",

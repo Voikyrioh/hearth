@@ -16,5 +16,5 @@ pub use error::{InputField, LinkError, RefusalReason};
 pub use manager::{
     AccountsRead, Acted, ActionOutcome, ActionRequest, AuditExportFile, EventStream, LinkConfig,
     LinkManager, LogEnd, LogOutput, LoginInfo, NewServer, OperationActResult, Ports, ProbeResult,
-    ReauthState, ServerUpdate, ServiceLogReader, ServiceRightsRead,
+    ReauthState, ServerUpdate, ServiceLogReader, ServiceRightsRead, is_stable_id,
 };

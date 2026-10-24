@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-install-fiche"
+description = "Enables the install_fiche command without any pre-configured scope."
+commands.allow = ["install_fiche"]
+
+[[permission]]
+identifier = "deny-install-fiche"
+description = "Denies the install_fiche command without any pre-configured scope."
+commands.deny = ["install_fiche"]

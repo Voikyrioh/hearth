@@ -719,6 +719,11 @@ pub(super) fn check_variant_refs(
     at: &str,
     ids: &[String],
 ) -> Result<(), FicheRefusee> {
+    // `only_variants = []` n'est pas « toutes » : l'absence du champ l'est. Une liste vide serait lue de deux façons
+    // (par la fiche, par le client), donc elle est refusée (BR-FICHE-060).
+    if ids.is_empty() {
+        return Err(refuse(fichier, at, Motif::ListeDeVariantesVide));
+    }
     for id in ids {
         if !file.variant.iter().any(|v| &v.id == id) {
             return Err(refuse(

@@ -124,6 +124,8 @@ pub enum Motif {
         canal: String,
         cle: String,
     },
+    /// `only_variants = []` : « toutes » s'écrit en omettant le champ (BR-FICHE-060).
+    ListeDeVariantesVide,
     ReferenceInconnue {
         genre: &'static str,
         id: String,
@@ -216,6 +218,7 @@ impl Motif {
             IdentifiantInvalide { .. }
             | IdentifiantEnDouble { .. }
             | CleEnDouble { .. }
+            | ListeDeVariantesVide
             | ReferenceInconnue { .. }
             | TropDEssentiels { .. }
             | ValeurProposeeInvalide { .. }
@@ -275,6 +278,7 @@ impl Motif {
             IdentifiantInvalide { ou } => format!("identifiant invalide ({ou}) : minuscules, chiffres, tirets"),
             IdentifiantEnDouble { genre, id } => format!("{genre} `{id}` déclaré deux fois"),
             CleEnDouble { canal, cle } => format!("la clé `{cle}` est réglée deux fois dans le canal `{canal}`"),
+            ListeDeVariantesVide => "`only_variants` est vide : pour toutes les variantes, omettez le champ".into(),
             ReferenceInconnue { genre, id } => format!("{genre} `{id}` introuvable"),
             TropDEssentiels { trouve } => format!("{trouve} réglages `essential` pour 8 au plus (BR-FICHE-038)"),
             ValeurProposeeInvalide { reglage, raison } => format!("la valeur proposée ou par défaut du réglage `{reglage}` est invalide : {raison}"),

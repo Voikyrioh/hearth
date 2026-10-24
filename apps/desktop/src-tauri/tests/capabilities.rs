@@ -391,6 +391,19 @@ const EXPECTED: &[(&str, &str)] = &[
         "serverId: string, opId: string, adminPassword: string | null",
     ),
     ("readEngineCapacity", "serverId: string"),
+    // HRT-102 : le Catalogue (deux lectures ouvertes à tout compte), l'installation depuis une fiche (le même acte
+    // confirmé qu'un déploiement) et l'ouverture d'une adresse DE LA FICHE : l'interface ne donne jamais l'adresse, la
+    // coquille la relit dans la fiche chez l'agent (genre et identifiant seulement).
+    ("readCatalog", "serverId: string"),
+    ("readFiche", "serverId: string, fiche: string"),
+    (
+        "installFiche",
+        "serverId: string, installation: FicheInstallRequestDto, adminPassword: string | null",
+    ),
+    (
+        "openFicheLink",
+        "serverId: string, fiche: string, kind: FicheLinkKind, key: string",
+    ),
 ];
 
 /// Les commandes qui portent UN ACTE D'ADMINISTRATION, avec le paramètre qui porte le mot de passe de
@@ -414,6 +427,7 @@ const ADMIN_COMMANDS: &[(&str, &str)] = &[
     ("serviceStop", "adminPassword"),
     ("serviceRestart", "adminPassword"),
     ("deployService", "adminPassword"),
+    ("installFiche", "adminPassword"),
     ("cancelServiceOperation", "adminPassword"),
 ];
 
@@ -474,6 +488,9 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "ackServiceOperations",
     "deployCheck",
     "readEngineCapacity",
+    "readCatalog",
+    "readFiche",
+    "openFicheLink",
 ];
 
 /// Toute commande exposée est soit un acte d'administration de la liste fermée (avec son mot de passe de

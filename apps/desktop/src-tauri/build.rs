@@ -75,6 +75,10 @@ const COMMANDS: &[&str] = &[
     "deploy_service",
     "cancel_service_operation",
     "read_engine_capacity",
+    "read_catalog",
+    "read_fiche",
+    "install_fiche",
+    "open_fiche_link",
 ];
 
 fn main() {

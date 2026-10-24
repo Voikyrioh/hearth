@@ -10,6 +10,8 @@ use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use tauri::State;
 
+use super::catalog;
+use super::catalog_dto::{CatalogDto, FicheInstallRequestDto, FicheLinkKind, FicheReadDto};
 use super::deploy;
 use super::deploy_dto::{
     CancelOutcome, DeployCheckDto, DeployCheckInputDto, DeployOutcome, DeployRequestDto,
@@ -171,4 +173,66 @@ pub async fn read_engine_capacity(
 ) -> Result<EngineCapacityDto, LinkFailure> {
     let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
     deploy::capacity(link.manager(), &id).await
+}
+
+/// Les fiches de serveurs de jeu que cet agent propose (`GET /catalog`) : une lecture, ouverte à tout compte,
+/// jamais journalisée (BR-FICHE-001).
+#[tauri::command]
+#[specta::specta]
+pub async fn read_catalog(
+    link: Runtime_<'_>,
+    server_id: String,
+) -> Result<CatalogDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    catalog::list(link.manager(), &id).await
+}
+
+/// Le détail d'une fiche (`GET /catalog/{id}`), avec son empreinte. Une fiche que l'agent ne propose pas se lit
+/// `unknown`, ce n'est pas une panne.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_fiche(
+    link: Runtime_<'_>,
+    server_id: String,
+    fiche: String,
+) -> Result<FicheReadDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    catalog::fiche(link.manager(), &id, &fiche).await
+}
+
+/// Installe un serveur de jeu depuis une fiche (`POST /deployments` avec un membre `source`) : le même acte
+/// d'administration confirmé que le déploiement d'une image, JAMAIS couvert par l'élévation (le mot de passe à
+/// chaque fois), jamais rejoué. La valeur d'une réponse (mot de passe du serveur, jeton) n'est ni tracée ni gardée.
+/// Sans le droit « gérer les services » : `MissingServicesRight`.
+#[tauri::command]
+#[specta::specta]
+pub async fn install_fiche(
+    link: Runtime_<'_>,
+    server_id: String,
+    installation: FicheInstallRequestDto,
+    admin_password: Option<String>,
+) -> Result<DeployOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let admin_password = admin_password.map(Secret::new);
+    catalog::install(link.manager(), &id, installation, admin_password.as_ref()).await
+}
+
+/// Ouvre dans le navigateur de l'utilisateur une adresse que la FICHE porte (le contrat de licence, le site où créer un
+/// jeton de serveur, la source d'un chiffre de l'éditeur). L'adresse n'est jamais fournie par la page : la coquille relit
+/// la fiche chez l'agent et ne retient qu'une adresse que la garde de `browser` accepte. Hearth ne contacte jamais cette
+/// adresse lui-même.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_fiche_link(
+    link: Runtime_<'_>,
+    server_id: String,
+    fiche: String,
+    kind: FicheLinkKind,
+    key: String,
+) -> Result<(), LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    match catalog::link(link.manager(), &id, &fiche, kind, &key).await? {
+        Some(url) if crate::browser::open_in_browser(&url) => Ok(()),
+        _ => Err(LinkFailure::Internal),
+    }
 }

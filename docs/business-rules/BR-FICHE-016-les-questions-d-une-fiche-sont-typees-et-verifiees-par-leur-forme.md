@@ -15,10 +15,14 @@ Une question est un réglage essentiel du catalogue de la fiche (texte, secret, 
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/catalog/settings_state.rs::{validate_text, resolve_install}`
+- `apps/desktop/src/fiche/answers.ts`
+- `apps/desktop/src/components/molecules/QuestionField.vue`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_state.rs (réponses refusées par type et bornes)`
 - `crates/hearth-agent/tests/fiche_install_https.rs::an_invalid_answer_is_refused_naming_the_character_never_the_value`
+- `apps/desktop/src/fiche/fiche.test.ts`
+- `apps/desktop/src/pages/InstallFromFiche.test.ts`
 
 ## Cas limites
 - Les types « jeton de serveur » et « mot de passe de console » relèvent de HRT-120.
@@ -28,3 +32,4 @@ Une question est un réglage essentiel du catalogue de la fiche (texte, secret, 
 
 ## Historique
 - 2026-10-24 — création (HRT-101).
+- 2026-10-24 — côté client (HRT-102).

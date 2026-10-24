@@ -76,6 +76,10 @@
     "allow-deploy-service",
     "allow-cancel-service-operation",
     "allow-read-engine-capacity",
+    "allow-read-catalog",
+    "allow-read-fiche",
+    "allow-install-fiche",
+    "allow-open-fiche-link",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

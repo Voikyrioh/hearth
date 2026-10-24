@@ -15,9 +15,14 @@ Règle de vocabulaire, portée par le client (HRT-102) : la seule phrase sur la 
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/plan.rs::plan_from_spec`
+- `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
+- `apps/desktop/src/pages/FicheDetail.vue`
+- `apps/desktop/src/fiche/copy.test.ts`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/services/plan.rs::the_plan_has_no_field_for_the_options_a_privileged_service_would_need`
+- `apps/desktop/src/fiche/copy.test.ts`
+- `apps/desktop/src/pages/FicheDetail.test.ts::dit la phrase de confiance, jamais « isolé » ni « sûr »`
 
 ## Cas limites
 - Le vocabulaire est au client (HRT-102).
@@ -27,3 +32,4 @@ Règle de vocabulaire, portée par le client (HRT-102) : la seule phrase sur la 
 
 ## Historique
 - 2026-10-24 — création (HRT-101).
+- 2026-10-24 — côté client (HRT-102).

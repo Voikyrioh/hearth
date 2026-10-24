@@ -5,8 +5,7 @@ import HIcon from "@/components/atoms/HIcon.vue";
 import HInput from "@/components/atoms/HInput.vue";
 import HSelect from "@/components/atoms/HSelect.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
-import HTag from "@/components/atoms/HTag.vue";
-import Callout from "@/components/molecules/Callout.vue";
+import PortNotes from "@/components/molecules/PortNotes.vue";
 import type { PortRow } from "@/deploy/draft";
 import type { PortVerdict } from "@/deploy/messages";
 import { t } from "@/i18n";
@@ -106,30 +105,12 @@ const clean = computed(
         <HIcon name="close" size="sm" />
       </HButton>
     </div>
-    <div v-if="clean && (verdict.warning || privileged)" class="port__notes">
-      <Callout v-if="verdict.warning" tone="warn" inline data-port-warning>
-        {{ verdict.warning }}
-        <HTag v-if="verdict.reserved" tone="warn">{{ t("deploy.portToConfirm") }}</HTag>
-      </Callout>
-      <Callout v-if="privileged" tone="warn" inline data-port-privileged>
-        {{ t("deploy.portPrivileged") }}
-      </Callout>
-    </div>
-    <div v-if="verdict.error && verdict.suggested !== null" class="port__notes">
-      <Callout tone="info" inline data-port-suggested>
-        {{ t("deploy.portSuggested", { port: verdict.suggested }) }}
-        <template #actions>
-          <HButton
-            variant="secondary"
-            size="sm"
-            data-port-use
-            @click="$emit('suggest', verdict.suggested as number)"
-          >
-            {{ t("deploy.portUseSuggested", { port: verdict.suggested }) }}
-          </HButton>
-        </template>
-      </Callout>
-    </div>
+    <PortNotes
+      :verdict="verdict"
+      :privileged="privileged"
+      :clean="clean"
+      @suggest="$emit('suggest', $event)"
+    />
   </div>
 </template>
 
@@ -157,9 +138,4 @@ const clean = computed(
   padding-inline-end: var(--space-3);
 }
 
-.port__notes {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
 </style>

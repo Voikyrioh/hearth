@@ -261,6 +261,30 @@ export const commands = {
 	 *  BR-DEPLOY-038) : une lecture.
 	 */
 	readEngineCapacity: (serverId: string) => typedError<EngineCapacityDto, LinkFailure>(__TAURI_INVOKE("read_engine_capacity", { serverId })),
+	/**
+	 *  Les fiches de serveurs de jeu que cet agent propose (`GET /catalog`) : une lecture, ouverte à tout compte,
+	 *  jamais journalisée (BR-FICHE-001).
+	 */
+	readCatalog: (serverId: string) => typedError<CatalogDto, LinkFailure>(__TAURI_INVOKE("read_catalog", { serverId })),
+	/**
+	 *  Le détail d'une fiche (`GET /catalog/{id}`), avec son empreinte. Une fiche que l'agent ne propose pas se lit
+	 *  `unknown`, ce n'est pas une panne.
+	 */
+	readFiche: (serverId: string, fiche: string) => typedError<FicheReadDto, LinkFailure>(__TAURI_INVOKE("read_fiche", { serverId, fiche })),
+	/**
+	 *  Installe un serveur de jeu depuis une fiche (`POST /deployments` avec un membre `source`) : le même acte
+	 *  d'administration confirmé que le déploiement d'une image, JAMAIS couvert par l'élévation (le mot de passe à
+	 *  chaque fois), jamais rejoué. La valeur d'une réponse (mot de passe du serveur, jeton) n'est ni tracée ni gardée.
+	 *  Sans le droit « gérer les services » : `MissingServicesRight`.
+	 */
+	installFiche: (serverId: string, installation: FicheInstallRequestDto, adminPassword: string | null) => typedError<DeployOutcome, LinkFailure>(__TAURI_INVOKE("install_fiche", { serverId, installation, adminPassword })),
+	/**
+	 *  Ouvre dans le navigateur de l'utilisateur une adresse que la FICHE porte (le contrat de licence, le site où créer un
+	 *  jeton de serveur, la source d'un chiffre de l'éditeur). L'adresse n'est jamais fournie par la page : la coquille relit
+	 *  la fiche chez l'agent et ne retient qu'une adresse que la garde de `browser` accepte. Hearth ne contacte jamais cette
+	 *  adresse lui-même.
+	 */
+	openFicheLink: (serverId: string, fiche: string, kind: FicheLinkKind, key: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("open_fiche_link", { serverId, fiche, kind, key })),
 };
 
 /* Types */
@@ -684,6 +708,14 @@ export type CapabilitiesDto = {
 	temps: boolean,
 };
 
+/**  La réponse de `GET /catalog`. */
+export type CatalogDto = {
+	fiches: FicheCardDto[],
+	refused: RefusedFicheDto[],
+	/**  Les fiches d'une version plus récente que ce client, illisibles ici : comptées, jamais montrées. */
+	unreadable: number,
+};
+
 export type CpuInfoDto = {
 	model: string,
 	physicalCores: number | null,
@@ -788,7 +820,22 @@ export type DeployProtocolDto = "tcp" | "udp";
 /**  Pourquoi l'agent a refusé le déploiement, avant tout geste (rien n'est créé). Des CODES, jamais un texte. */
 export type DeployRefusal = { kind: "wrong_password" } | { kind: "password_required" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "busy" } | { kind: "engine_unavailable"; engine: EngineStateDto | null } | 
 /**  Une valeur du formulaire n'est pas valable : le champ et la raison (code stable de l'agent). */
-{ kind: "invalid"; field: DeployFieldDto; reason: string } | { kind: "setting_refused" } | { kind: "limits_required" } | { kind: "name_taken" } | { kind: "name_being_deleted" } | { kind: "port_in_use"; port: number; protocol: DeployProtocolDto; status: PortStatusDto; holder: string | null; suggested: number | null } | { kind: "deploy_limit" } | { kind: "no_space"; freeBytes: number | null } | { kind: "other" };
+{ kind: "invalid"; field: DeployFieldDto; reason: string } | { kind: "setting_refused" } | { kind: "limits_required" } | { kind: "name_taken" } | { kind: "name_being_deleted" } | { kind: "port_in_use"; port: number; protocol: DeployProtocolDto; status: PortStatusDto; holder: string | null; suggested: number | null } | { kind: "deploy_limit" } | { kind: "no_space"; freeBytes: number | null } | 
+/**  Installer depuis une fiche (HRT-102) : la fiche n'est pas proposée par cet agent. */
+{ kind: "fiche_unknown" } | 
+/**  La fiche n'est plus celle que le client a lue (version ou empreinte). */
+{ kind: "fiche_changed" } | 
+/**  Des contrats de la fiche ne sont pas acceptés (identifiants). */
+{ kind: "agreement_required"; ids: string[] } | 
+/**
+ *  Une réponse est refusée : la question (si c'est une de la fiche), la raison (code stable) et au plus UN
+ *  caractère refusé, jamais la valeur.
+ */
+{ kind: "answer_refused"; id: string | null; reason: string; character: string | null } | 
+/**  La machine est trop petite pour un minimum MESURÉ (`cpu` en millicœurs, `memory` en octets). */
+{ kind: "host_too_small"; lack: FicheLackDto; needed: number | null; has: number | null } | 
+/**  L'espace libre est sous le besoin mesuré de l'installation : aucune case ne permet de passer outre. */
+{ kind: "no_space_to_install"; neededBytes: number | null; freeBytes: number | null; missingBytes: number | null } | { kind: "other" };
 
 /**  La demande de déploiement. */
 export type DeployRequestDto = {
@@ -914,6 +961,224 @@ export type EnvVariableDto = {
 	name: HiddenText,
 	value: HiddenText,
 };
+
+export type FicheAgreementDto = {
+	id: string,
+	title: string,
+	url: string,
+	sentence: string,
+};
+
+/**  La réponse à une question de la fiche. La valeur peut être un secret. */
+export type FicheAnswerDto = {
+	id: string,
+	value: string,
+};
+
+/**  Une fiche dans la liste. */
+export type FicheCardDto = {
+	id: string,
+	name: string,
+	summary: string,
+	version: number,
+	status: FicheStatusDto,
+	installable: boolean,
+};
+
+/**  Le jeu de caractères d'un texte. */
+export type FicheCharsetDto = "line" | "file_stem" | "arg_safe" | "unknown";
+
+export type FicheChoiceDto = {
+	value: string,
+	label: string,
+};
+
+export type FicheCpuNeedDto = {
+	minMillis: number | null,
+	recommendedMillis: number | null,
+	evidence: FicheEvidenceDto,
+};
+
+/**  Le détail d'une fiche (`GET /catalog/{id}`). */
+export type FicheDetailDto = {
+	card: FicheCardDto,
+	digest: string,
+	image: FicheImageDto,
+	ownerUid: number,
+	ownerGid: number,
+	variants: FicheVariantDto[],
+	ports: FichePortDto[],
+	folders: FicheFolderDto[],
+	agreements: FicheAgreementDto[],
+	questions: FicheQuestionDto[],
+	resources: FicheResourcesDto,
+	firstStart: FicheFirstStartDto | null,
+	stop: FicheStopDto | null,
+	imposed: FicheImposedDto[],
+	/**
+	 *  Des éléments d'une version plus récente que ce client, illisibles ici : une fiche incomplète pour ce
+	 *  client ne s'installe pas.
+	 */
+	unreadable: number,
+};
+
+export type FicheDiskNeedDto = {
+	installBytes: number | null,
+	evidence: FicheEvidenceDto,
+};
+
+/**  Un téléchargement que le programme du jeu fait lui-même au premier démarrage (BR-FICHE-010). */
+export type FicheDownloadDto = {
+	what: string,
+	source: string,
+	bytes: number | null,
+	evidence: FicheEvidenceDto,
+};
+
+/**  D'où vient un chiffre de ressource (BR-FICHE-008). */
+export type FicheEvidenceDto = { kind: "measured" } | { kind: "measured_idle" } | { kind: "publisher"; url: string } | { kind: "unmeasured" } | { kind: "unknown" };
+
+/**  Le premier démarrage d'une fiche (BR-FICHE-056). */
+export type FicheFirstStartDto = {
+	readyTimeoutSeconds: number,
+	worldGeneration: boolean,
+	downloads: FicheDownloadDto[],
+	stages: string[],
+};
+
+export type FicheFolderDto = {
+	id: string,
+	role: string,
+	target: string,
+	backup: boolean,
+	onlyVariants: string[],
+};
+
+export type FicheImageDto = {
+	repository: string,
+	tag: string,
+	digest: string | null,
+};
+
+/**  Un réglage posé par la fiche, avec sa raison (BR-JEU-039). */
+export type FicheImposedDto = {
+	label: string,
+	value: string | null,
+	why: string,
+};
+
+/**  La demande d'installation depuis une fiche (membre `source` de `POST /deployments`, BR-FICHE-013). */
+export type FicheInstallRequestDto = {
+	name: string,
+	fiche: string,
+	version: number,
+	digest: string,
+	variant: string | null,
+	answers: FicheAnswerDto[],
+	/**  Les contrats que l'utilisateur a acceptés par un geste (identifiants). */
+	agreements: string[],
+	ports: FichePortChoiceDto[],
+	optionalPorts: string[],
+	resources: DeployResourcesDto,
+	accept: DeployAcceptDto,
+};
+
+/**  Ce qui manque à la machine pour un minimum MESURÉ : le processeur (millicœurs) ou la mémoire (octets). */
+export type FicheLackDto = "cpu" | "memory";
+
+/**  Quelle adresse de la fiche s'ouvre (`open_fiche_link`) : jamais l'adresse elle-même. */
+export type FicheLinkKind = 
+/**  Le contrat de licence, par l'identifiant du contrat. */
+"agreement" | 
+/**  Le site où créer un jeton de serveur, par l'identifiant de la question. */
+"token" | 
+/**  La source d'un chiffre de l'éditeur : `cpu`, `memory` ou `disk`. */
+"evidence";
+
+export type FicheMemoryNeedDto = {
+	minBytes: number | null,
+	recommendedBytes: number | null,
+	evidence: FicheEvidenceDto,
+};
+
+/**  Un port de la fiche et le port du serveur choisi. */
+export type FichePortChoiceDto = {
+	id: string,
+	hostPort: number,
+};
+
+export type FichePortDto = {
+	id: string,
+	container: number,
+	/**  `tcp` ou `udp`. */
+	protocol: string,
+	/**  `game`, `query`, `voice`, `web_admin`, `remote_console` ou `other`. */
+	role: string,
+	/**  `always`, `optional` ou `never`. */
+	publish: string,
+	defaultHost: number | null,
+	mapping: FichePortMappingDto,
+	onlyVariants: string[],
+};
+
+/**  Comment le port du serveur se relie au port du service. */
+export type FichePortMappingDto = "nat" | "same_number" | "unknown";
+
+/**  Une question d'installation, avec ce qu'il faut pour la poser sans rien inventer. */
+export type FicheQuestionDto = {
+	id: string,
+	label: string,
+	help: string,
+	secret: boolean,
+	proposed: string | null,
+	kind: FicheQuestionKindDto,
+	choices: FicheChoiceDto[],
+	min: number | null,
+	max: number | null,
+	minLen: number | null,
+	maxLen: number | null,
+	charset: FicheCharsetDto | null,
+	frozenAfterCreation: boolean,
+	variants: string[],
+	/**  `game_password`, `admin_password` ou `server_token` pour un secret. */
+	secretKind: FicheSecretKindDto | null,
+	obtainUrl: string | null,
+};
+
+export type FicheQuestionKindDto = "text" | "secret" | "int" | "bool" | "choice" | "id_list" | "opaque" | "unknown";
+
+/**
+ *  Le résultat de la lecture d'une fiche : trouvée, ou inconnue de cet agent (`FICHE_UNKNOWN`, y compris une fiche
+ *  d'essai sur un agent publié).
+ */
+export type FicheReadDto = { kind: "found"; fiche: FicheDetailDto } | { kind: "unknown" };
+
+export type FicheResourcesDto = {
+	cpu: FicheCpuNeedDto,
+	memory: FicheMemoryNeedDto,
+	disk: FicheDiskNeedDto,
+};
+
+/**  Le genre d'un secret. */
+export type FicheSecretKindDto = "game_password" | "admin_password" | "server_token" | "unknown";
+
+export type FicheStatusDto = "published" | "preview" | "unknown";
+
+/**  La façon d'arrêter le jeu (BR-JEU-002). */
+export type FicheStopDto = {
+	graceSeconds: number,
+	worldSaved: FicheWorldSavedDto,
+	sequenceTested: boolean,
+};
+
+export type FicheVariantDto = {
+	id: string,
+	label: string,
+	help: string,
+	default: boolean,
+};
+
+export type FicheWorldSavedDto = "by_image_on_signal" | "by_sequence" | "not_saved" | "unknown";
 
 /**
  *  Le certificat présenté n'est plus celui qui a été confirmé (BR-CONN-003). Les empreintes sont
@@ -1336,6 +1601,12 @@ export type ReauthStateDto = {
 	 *  (BR-COMPAT-001), jamais « normal » par défaut.
 	 */
 	trust: TrustLevelDto | null,
+};
+
+/**  Une fiche que l'agent a écartée : son dossier et l'invariant violé, jamais un contenu. */
+export type RefusedFicheDto = {
+	dir: string,
+	invariant: string,
 };
 
 export type RestartDto = "unless_stopped" | "always" | "on_failure" | "none" | "supervisor" | "unknown";
