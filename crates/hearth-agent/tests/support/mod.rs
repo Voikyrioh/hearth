@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub mod api;
+pub mod audit;
 pub mod crash;
 pub mod device;
 pub mod engine;
@@ -287,11 +288,8 @@ pub async fn env() -> Env {
     let session_repo = Arc::new(SqliteSessionRepo::new(db.pool().clone()));
     let tokens: Arc<dyn TokenGen> = Arc::new(OsTokenGen);
     let feed = Arc::new(BroadcastAuditFeed::new());
-    let maintenance = Arc::new(MaintenanceService::new(store.clone(), clock.clone()));
-    let trail = Arc::new(hearth_agent::application::audit::AuditTrail::new(
-        feed.clone() as Arc<dyn AuditFeed>,
-        maintenance.clone(),
-    ));
+    let (maintenance, trail) =
+        hearth_agent::app::audit_trail(&store, clock.clone(), feed.clone() as Arc<dyn AuditFeed>);
     let audit_recorder = Arc::new(hearth_agent::application::audit::AuditRecorder::new(
         store.clone(),
         clock.clone(),

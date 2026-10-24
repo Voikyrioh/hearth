@@ -355,18 +355,8 @@ impl OpJournal for SqliteOpJournal {
         cause: Cause,
         at: OffsetDateTime,
     ) -> Result<bool, JournalError> {
-        let at = format_date(RESOURCE, at)?;
-        let done = sqlx::query(
-            "UPDATE service_ops SET cause = ?, updated_at = ?
-              WHERE id = ? AND status = 'succeeded' AND cause = ''",
-        )
-        .bind(cause.as_str())
-        .bind(at)
-        .bind(id)
-        .execute(&self.pool)
-        .await
-        .map_err(storage(RESOURCE))?;
-        Ok(done.rows_affected() == 1)
+        let mut conn = self.pool.acquire().await.map_err(storage(RESOURCE))?;
+        do_annotate(&mut conn, id, cause, at).await
     }
 
     async fn expired_decisions(
@@ -551,6 +541,27 @@ where
         .collect()
 }
 
+/// Pose la cause d'une réussite qui n'en a pas, sur le bassin OU dans une transaction.
+async fn do_annotate(
+    db: &mut sqlx::SqliteConnection,
+    id: &str,
+    cause: Cause,
+    at: OffsetDateTime,
+) -> Result<bool, JournalError> {
+    let at = format_date(RESOURCE, at)?;
+    let done = sqlx::query(
+        "UPDATE service_ops SET cause = ?, updated_at = ?
+          WHERE id = ? AND status = 'succeeded' AND cause = ''",
+    )
+    .bind(cause.as_str())
+    .bind(at)
+    .bind(id)
+    .execute(db)
+    .await
+    .map_err(storage(RESOURCE))?;
+    Ok(done.rows_affected() == 1)
+}
+
 /// Le changement de statut par comparaison-et-échange, sur le bassin OU dans une transaction.
 async fn do_transition(
     db: &mut sqlx::SqliteConnection,
@@ -622,5 +633,14 @@ impl ServiceOpTx for SqliteUnitOfWork {
         at: OffsetDateTime,
     ) -> Result<(), JournalError> {
         do_transition(&mut self.tx, id, from, to, cause, decision, at).await
+    }
+
+    async fn annotate_cause(
+        &mut self,
+        id: &str,
+        cause: Cause,
+        at: OffsetDateTime,
+    ) -> Result<bool, JournalError> {
+        do_annotate(&mut self.tx, id, cause, at).await
     }
 }

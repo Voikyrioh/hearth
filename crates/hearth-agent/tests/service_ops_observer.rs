@@ -5,6 +5,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/audit.rs"]
+mod audit;
+
 #[path = "support/tmp.rs"]
 mod tmp;
 
@@ -117,12 +120,15 @@ async fn bench() -> Bench {
 impl Bench {
     /// L'agent « démarre » : de nouveaux verrous, le même journal, cet observateur.
     fn ops(&self) -> ServiceOps {
+        let (store, trail) = audit::audit_parts(&self.db, Arc::new(TestClock));
         ServiceOps::new(
             Arc::new(SqliteOpJournal::new(self.db.pool().clone())) as Arc<dyn OpJournal>,
             Arc::new(OpLocks::new()),
             Arc::new(TestClock),
             self.ids.clone(),
             Arc::new(FsCreatedObjects::new([])),
+            store,
+            trail,
         )
     }
 
