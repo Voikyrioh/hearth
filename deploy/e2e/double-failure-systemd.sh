@@ -206,6 +206,8 @@ wait_for "le contrôle commence" 30 phase_is checking
 kills=0
 while [ "$kills" -lt 12 ]; do
     if systemctl is-active --quiet "$UNIT_SUP"; then
+        # Voulu : `systemctl kill` toléré ici (|| true). La boucle tue l'unité entre deux relances,
+        # où `kill_main` attendrait 2 s un pid qui n'existe pas encore ; le EIO ne casse rien.
         systemctl kill --signal=SIGKILL "$UNIT_SUP" >/dev/null 2>&1 || true
         kills=$((kills + 1))
         sleep 3
