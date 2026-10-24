@@ -1,6 +1,6 @@
 import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
-import { getLinkBridge } from "@/link";
+import { type FicheLinkKind, getLinkBridge } from "@/link";
 import { useToastsStore } from "@/stores/toasts";
 
 /**
@@ -14,7 +14,7 @@ export function useFicheLinks(serverId: () => string, ficheId: () => string) {
   const toasts = useToastsStore();
 
   async function open(
-    kind: "agreement" | "token" | "evidence",
+    kind: FicheLinkKind,
     key: string,
     options: { notify?: boolean } = {},
   ): Promise<boolean> {
@@ -24,7 +24,7 @@ export function useFicheLinks(serverId: () => string, ficheId: () => string) {
     } catch (error) {
       logUiError(error, "fiche:link");
       if (options.notify !== false) {
-        toasts.push({ kind: "error", message: t("fiche.agreementOpenFailed") });
+        toasts.push({ kind: "error", message: t("fiche.linkOpenFailed") });
       }
       return false;
     }

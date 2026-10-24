@@ -230,7 +230,7 @@ export function rich(): FicheDetail {
         id: "mods_port",
         container: 25575,
         protocol: "tcp",
-        role: "remote_console",
+        role: "voice",
         publish: "always",
         defaultHost: 25575,
         mapping: "same_number",

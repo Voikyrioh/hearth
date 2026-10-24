@@ -56,6 +56,9 @@ export type SecretKind = "game_password" | "admin_password" | "server_token" | "
 /** Comment le port du serveur se relie à celui du service : `same_number`, le jeu annonce son port, les deux valent le même nombre. */
 export type PortMapping = "nat" | "same_number" | "unknown";
 
+/** Quelle adresse de la fiche s'ouvre (jamais l'adresse elle-même : la coquille la relit dans la fiche). */
+export type FicheLinkKind = "agreement" | "token" | "evidence";
+
 export type QuestionKind =
   | "text"
   | "secret"

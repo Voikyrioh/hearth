@@ -33,6 +33,7 @@ import type { LinkBridge } from "./bridge";
 import {
   type Catalog,
   type FicheInstallRequest,
+  type FicheLinkKind,
   type FicheRead,
   toCatalog,
   toFicheInstallRequestDto,
@@ -661,7 +662,7 @@ export class TauriLinkBridge implements LinkBridge {
   async openFicheLink(
     serverId: string,
     ficheId: string,
-    kind: "agreement" | "token" | "evidence",
+    kind: FicheLinkKind,
     key: string,
   ): Promise<void> {
     unwrap(await commands.openFicheLink(serverId, ficheId, kind, key));

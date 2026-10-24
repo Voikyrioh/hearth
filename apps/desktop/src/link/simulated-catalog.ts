@@ -19,6 +19,10 @@ import { rich, terraria } from "./simulated-fiches";
  * qui passe ici passerait contre l'agent ; le simulateur n'est pas plus indulgent que lui. Les règles de valeur sont
  * écrites ICI, à part de celles du client (`fiche/answers.ts`) : si le client se trompe, ce juge le dit.
  *
+ * Les règles de valeur, de variante et de port sont écrites ICI à part, À LA MAIN, et volontairement : ce simulateur
+ * est le juge indépendant des règles du client (`fiche/answers.ts`, `fiche/ports.ts`, `fiche/fit.ts`). S'il les importait,
+ * une erreur du client serait aussi une erreur du juge et aucun test ne la verrait.
+ *
  * La fiche simulée est Terraria, dans la forme réelle de `GET /catalog/{id}` ; `addRich()` ajoute une fiche d'essai
  * qui porte tout ce qu'une fiche peut offrir. Jamais livré (derrière `import.meta.env.DEV`).
  */

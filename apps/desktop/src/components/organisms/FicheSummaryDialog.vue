@@ -13,7 +13,7 @@ import type { ActReport } from "@/composables/useReauth";
 import { portVerdict, refusalText } from "@/deploy/messages";
 import { changedAnswers, currentAnswer } from "@/fiche/answers";
 import { type AttentionPoint, acceptOf, allValidated, attentionPoints } from "@/fiche/attention";
-import { type FicheDraft, shownHostPort } from "@/fiche/draft";
+import type { FicheDraft } from "@/fiche/draft";
 import { registryOf } from "@/fiche/image";
 import {
   attentionText,
@@ -25,10 +25,10 @@ import {
   registryText,
   stopTexts,
 } from "@/fiche/messages";
-import { containerPortOf, forVariant, parseHostPort, publishedPorts } from "@/fiche/ports";
+import { forVariant, publishedPorts, readableHostPorts } from "@/fiche/ports";
 import { proofOf } from "@/fiche/proof";
 import { t } from "@/i18n";
-import type { DeployCheck, FicheDetail, FichePort, FicheQuestion } from "@/link";
+import type { DeployCheck, FicheDetail, FicheQuestion } from "@/link";
 import { type EngineCapacity, formatCpu, formatMemory } from "@/resources";
 import { formatSize } from "@/serviceOps/messages";
 
@@ -89,11 +89,13 @@ const published = computed(() =>
   publishedPorts(props.detail.ports, props.draft.optionalPorts, props.draft.variant),
 );
 const folders = computed(() => forVariant(props.detail.folders, props.draft.variant));
-/** Le port du service pour le port du serveur choisi : celui de la fiche, ou le même nombre quand le jeu annonce son port. */
-function containerShown(port: FichePort): number {
-  const parsed = parseHostPort(shownHostPort(props.draft, port));
-  return "port" in parsed ? containerPortOf(port, parsed.port) : port.container;
-}
+/** Les ports qui partent : le port du serveur choisi et celui du service, tels que la demande les dit. */
+const portLines = computed(() =>
+  readableHostPorts(published.value, props.draft.hostPorts).flatMap(({ id, deploy }) => {
+    const port = published.value.find((item) => item.id === id);
+    return port ? [{ port, deploy }] : [];
+  }),
+);
 const variant = computed(() =>
   props.detail.variants.find((item) => item.id === props.draft.variant),
 );
@@ -261,15 +263,15 @@ function refusal(refused: { kind: string }): string | undefined {
         <dt>{{ t("fiche.sumPorts") }}</dt>
         <dd data-sum-ports>
           <ul class="sum__list">
-            <li v-for="port in published" :key="port.id" class="sum__mono">
+            <li v-for="line in portLines" :key="line.port.id" class="sum__mono">
               {{
                 t("deploy.summaryPortRow", {
-                  host: shownHostPort(draft, port),
-                  container: containerShown(port),
-                  protocol: port.protocol.toUpperCase(),
+                  host: line.deploy.hostPort,
+                  container: line.deploy.containerPort,
+                  protocol: line.deploy.protocol.toUpperCase(),
                 })
               }}
-              <span class="sum__plain">({{ portRoleText(port.role) }})</span>
+              <span class="sum__plain">({{ portRoleText(line.port.role) }})</span>
             </li>
           </ul>
           <span class="sum__note" data-sum-exposed>{{ t("deploy.portExposed") }}</span>

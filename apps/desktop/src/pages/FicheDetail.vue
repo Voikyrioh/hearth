@@ -90,7 +90,6 @@ function install(proposed: boolean) {
 }
 
 const links = useFicheLinks(serverId, ficheId);
-const openLink = (kind: "agreement" | "token" | "evidence", key: string) => links.open(kind, key);
 
 const imposedOpen = ref(false);
 const delivered = computed(() =>
@@ -187,8 +186,8 @@ const delivered = computed(() =>
       <FicheSheet
         :detail="detail"
         :capacity="capacity"
-        @source="openLink('evidence', $event)"
-        @agreement="openLink('agreement', $event)"
+        @source="links.open('evidence', $event)"
+        @agreement="links.open('agreement', $event)"
         @imposed="imposedOpen = true"
       />
 

@@ -115,7 +115,16 @@ fn reason_code(details: &Value) -> String {
 /// Un identifiant de fiche, de question ou de contrat, tel que la liaison le définit ; tout autre texte n'est jamais
 /// répété.
 fn stable_id(text: &str) -> Option<String> {
-    hearth_link::is_fiche_id(text).then(|| text.to_owned())
+    hearth_link::is_stable_id(text).then(|| text.to_owned())
+}
+
+/// Ce qui manque à la machine, dit par l'agent : un autre mot n'est pas un manque.
+fn lack_of(text: &str) -> Option<FicheLackDto> {
+    match text {
+        "cpu" => Some(FicheLackDto::Cpu),
+        "memory" => Some(FicheLackDto::Memory),
+        _ => None,
+    }
 }
 
 /// Les contrats nommés dans un refus : au plus ce que la fiche peut en porter.
@@ -261,21 +270,18 @@ pub fn interpret_deploy(status: u16, body: &Value) -> Result<DeployOutcome, Link
                 .map(String::from),
         }),
         ErrorCode::HostTooSmall => match (
-            details.get("lack").and_then(Value::as_str),
+            details
+                .get("lack")
+                .and_then(Value::as_str)
+                .and_then(lack_of),
             number::<u64>(details, "needed"),
             number::<u64>(details, "has"),
         ) {
-            (Some(lack @ ("cpu" | "memory")), Some(needed), Some(has)) => {
-                refused(DeployRefusal::HostTooSmall {
-                    lack: if lack == "cpu" {
-                        FicheLackDto::Cpu
-                    } else {
-                        FicheLackDto::Memory
-                    },
-                    needed: needed as f64,
-                    has: has as f64,
-                })
-            }
+            (Some(lack), Some(needed), Some(has)) => refused(DeployRefusal::HostTooSmall {
+                lack,
+                needed: needed as f64,
+                has: has as f64,
+            }),
             _ => refused(DeployRefusal::Other),
         },
         _ => refused(DeployRefusal::Other),

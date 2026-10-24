@@ -1,7 +1,7 @@
 import type { EngineCapacity } from "@/resources";
 import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
-import type { Catalog, FicheInstallRequest, FicheRead } from "./catalog";
+import type { Catalog, FicheInstallRequest, FicheLinkKind, FicheRead } from "./catalog";
 import type {
   CancelOutcome,
   DeployCheck,
@@ -407,12 +407,7 @@ export interface LinkBridge {
    * la coquille la relit dans la fiche chez l'agent et refuse tout ce qui n'est pas une adresse `https` ordinaire.
    * Hearth ne contacte jamais cette adresse lui-même.
    */
-  openFicheLink(
-    serverId: string,
-    ficheId: string,
-    kind: "agreement" | "token" | "evidence",
-    key: string,
-  ): Promise<void>;
+  openFicheLink(serverId: string, ficheId: string, kind: FicheLinkKind, key: string): Promise<void>;
 
   /** Le serveur affiché dans la fenêtre (`null` : aucun) : l'icône de la zone de notification le suit (BR-RESIL-016). */
   setDisplayedServer(serverId: string | null): Promise<void>;

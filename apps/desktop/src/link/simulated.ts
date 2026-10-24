@@ -3,7 +3,7 @@ import type { EngineCapacity } from "@/resources";
 import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
-import type { Catalog, FicheInstallRequest, FicheRead } from "./catalog";
+import type { Catalog, FicheInstallRequest, FicheLinkKind, FicheRead } from "./catalog";
 import type {
   CancelOutcome,
   DeployCheck,
@@ -626,7 +626,7 @@ export class SimulatedLinkBridge implements LinkBridge {
   async openFicheLink(
     serverId: string,
     ficheId: string,
-    kind: "agreement" | "token" | "evidence",
+    kind: FicheLinkKind,
     key: string,
   ): Promise<void> {
     this.requireServer(serverId);

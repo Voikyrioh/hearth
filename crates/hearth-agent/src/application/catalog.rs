@@ -203,6 +203,7 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
                     PortMapping::Nat => PortMappingView::Nat,
                     PortMapping::SameNumber => PortMappingView::SameNumber,
                 },
+                // Jamais `Some([])` : le chargeur le refuse (`Motif::ListeDeVariantesVide`), `None` dit « toutes ».
                 only_variants: p.only_variants.clone().unwrap_or_default(),
             })
             .collect::<Vec<_>>()

@@ -13,7 +13,7 @@ import { shownHostPort } from "@/fiche/draft";
 import { answerIssueText } from "@/fiche/messages";
 import { optionalPorts, startingHostPort } from "@/fiche/ports";
 import { t } from "@/i18n";
-import type { FichePort } from "@/link";
+import type { FicheLinkKind, FichePort } from "@/link";
 
 // Les « Réponses » de l'installation d'un serveur de jeu (HRT-102, BR-FICHE-014 à 019) : la variante (quand la fiche en a
 // plusieurs), le nom du service (proposé par la fiche), les questions de la fiche (huit au plus, chacune dans le champ de
@@ -23,7 +23,7 @@ import type { FichePort } from "@/link";
 // pris, port tenu) viennent de l'agent et sont immédiats. Le serveur refait chaque contrôle au lancement.
 const props = defineProps<{ install: FicheInstallState }>();
 
-const emit = defineEmits<{ link: [kind: "token", key: string] }>();
+const emit = defineEmits<{ link: [kind: FicheLinkKind, key: string] }>();
 
 const detail = computed(() => props.install.detail.value);
 const draft = computed(() => props.install.draft.value);

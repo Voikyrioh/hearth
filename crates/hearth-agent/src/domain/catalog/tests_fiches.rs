@@ -1363,6 +1363,14 @@ fn coherence_proposed_values_and_arguments_are_valid_for_their_type() {
         )),
         Motif::ReferenceInconnue { .. }
     ));
+    // Une liste de variantes vide est refusée : « toutes » s'écrit en omettant le champ (BR-FICHE-060).
+    assert_eq!(
+        *motif(&bad_rich_settings(
+            "only_variants = [\"bedrock\"]",
+            "only_variants = []"
+        )),
+        Motif::ListeDeVariantesVide
+    );
     // Mondes et contrôles croisés.
     assert!(matches!(
         motif(&bad_rich(

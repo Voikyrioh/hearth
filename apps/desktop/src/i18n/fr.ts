@@ -1723,7 +1723,7 @@ export const fr = {
     agreementLead: "Lisez le contrat avant de répondre.",
     agreementAccept: "J'accepte",
     agreementRefuse: "Je refuse",
-    agreementOpenFailed: "Hearth n'a pas pu ouvrir le navigateur. Réessayez.",
+    linkOpenFailed: "Hearth n'a pas pu ouvrir le navigateur. Réessayez.",
     // Refus de l'agent
     refusals: {
       ficheUnknown: "Cette fiche n'est plus proposée par ce serveur.",

@@ -38,7 +38,7 @@ const emit = defineEmits<{ accept: []; refuse: []; read: [] }>();
       {{ t("fiche.agreementRead") }}
     </HButton>
     <p v-if="openFailed" class="agree__failed" role="alert" data-agreement-failed>
-      {{ t("fiche.agreementOpenFailed") }}
+      {{ t("fiche.linkOpenFailed") }}
     </p>
     <template #actions>
       <HButton variant="secondary" class="agree__button" data-agreement-refuse @click="emit('refuse')">
