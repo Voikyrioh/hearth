@@ -51,6 +51,7 @@ test("coquille avec deux serveurs", async ({ page }) => {
   await expect(nav.getByRole("link")).toHaveText([
     "Tableau de bord",
     "Services",
+    "Catalogue",
     "Comptes",
     "Journal d'activité",
     "Sécurité",
@@ -59,7 +60,12 @@ test("coquille avec deux serveurs", async ({ page }) => {
   // Le serveur en lecture seule n'a ni « Comptes » ni « Journal d'activité » (mais « Sécurité »).
   await rail.locator('a[data-server="salon"]').click();
   await expect(page).toHaveURL(/#\/servers\/salon\/dashboard$/);
-  await expect(nav.getByRole("link")).toHaveText(["Tableau de bord", "Services", "Sécurité"]);
+  await expect(nav.getByRole("link")).toHaveText([
+    "Tableau de bord",
+    "Services",
+    "Catalogue",
+    "Sécurité",
+  ]);
   await page.goto("/?nodev#/servers/salon/accounts");
   await expect(page).toHaveURL(/#\/servers\/salon\/dashboard$/);
 

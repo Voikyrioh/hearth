@@ -75,7 +75,12 @@ test("l'entrée « Services » est la deuxième de la navigation, pour les deux 
   // Lecture seule : l'entrée est là aussi (le serveur « salon »).
   await page.goto("/?nodev#/servers/salon/dashboard");
   await expect(page.locator(".nav__item").nth(1)).toHaveText("Services");
-  await expect(page.locator(".nav__item")).toHaveText(["Tableau de bord", "Services", "Sécurité"]);
+  await expect(page.locator(".nav__item")).toHaveText([
+    "Tableau de bord",
+    "Services",
+    "Catalogue",
+    "Sécurité",
+  ]);
 });
 
 test("la carte du moteur d'abord, puis la liste triée, à 1366, 1920 et 2560", async ({ page }) => {
