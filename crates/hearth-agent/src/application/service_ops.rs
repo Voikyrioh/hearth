@@ -342,6 +342,18 @@ impl ServiceOps {
         self.publish(id).await;
     }
 
+    /// Si le journal dit l'opération terminale, rend ses verrous et annonce l'issue (projection comprise) ;
+    /// sinon ne touche à rien. Pour qui voit l'index dire « occupé » alors que l'issue est déjà lisible.
+    pub async fn settle_if_terminal(&self, id: &str) -> bool {
+        match self.journal.get(id).await {
+            Ok(Some(record)) if record.status.is_terminal() => {
+                self.settle(id).await;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Retire ce qu'une opération ANNULÉE avait créé pour elle-même (archive partielle, dossier d'import ou
     /// d'attente : `cleanup_on_cancel`), objet par objet, revérifié par son numéro d'inode. Après le
     /// changement de statut, jamais avant : une annulation refusée n'a rien détruit. Idempotent ; un objet
@@ -405,29 +417,50 @@ impl ServiceOps {
         true
     }
 
+    fn try_lock(&self, request: &AcceptRequest, id: &str) -> Result<(), Refusal> {
+        let service = request.service.as_str();
+        self.locks.with(|table| -> Result<(), Refusal> {
+            table.acquire_exclusive(service, id, request.kind)?;
+            if let Some(name) = &request.reserve_name
+                && let Err(refusal) = table.reserve_name(name, id, request.kind)
+            {
+                table.release_all_of(id);
+                return Err(refusal);
+            }
+            if request.heavy_io
+                && let Err(refusal) = table.acquire_heavy_io(service, id)
+            {
+                table.release_all_of(id);
+                return Err(refusal);
+            }
+            Ok(())
+        })
+    }
+
+    /// Rend les verrous des opérations que le journal dit terminales (lecture seule du journal).
+    async fn release_stale_locks(&self) {
+        let holders = self.locks.with(|table| table.holders());
+        for holder in holders {
+            if let Ok(Some(record)) = self.journal.get(&holder).await
+                && record.status.is_terminal()
+            {
+                self.locks.with(|table| table.release_all_of(&holder));
+            }
+        }
+    }
+
     /// Accepte une opération : prend les verrous (service exclusif, nom, place lourde), écrit la ligne
     /// `accepted`. Si l'écriture échoue, les verrous sont rendus. Rend l'identifiant.
     pub async fn accept(&self, request: AcceptRequest) -> Result<String, OpError> {
         let id = self.ids.new_id();
-        let service = request.service.as_str();
-        self.locks
-            .with(|table| -> Result<(), Refusal> {
-                table.acquire_exclusive(service, &id, request.kind)?;
-                if let Some(name) = &request.reserve_name
-                    && let Err(refusal) = table.reserve_name(name, &id, request.kind)
-                {
-                    table.release_all_of(&id);
-                    return Err(refusal);
-                }
-                if request.heavy_io
-                    && let Err(refusal) = table.acquire_heavy_io(service, &id)
-                {
-                    table.release_all_of(&id);
-                    return Err(refusal);
-                }
-                Ok(())
-            })
-            .map_err(OpError::Locked)?;
+        // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+        // Un verrou dont l'opération est déjà terminale dans le journal n'est plus qu'en retard sur sa
+        // libération (commit, puis verrous rendus : deux temps). Un lecteur qui a vu l'issue ne doit pas
+        // être refusé : on rend ces verrous périmés et on réessaie une fois.
+        if self.try_lock(&request, &id).is_err() {
+            self.release_stale_locks().await;
+            self.try_lock(&request, &id).map_err(OpError::Locked)?;
+        }
         let new = NewOp {
             id: id.clone(),
             op_key: request.op_key,

@@ -219,6 +219,20 @@ impl LockTable {
         false
     }
 
+    /// Les identifiants des opérations qui tiennent un verrou, un nom ou la place lourde.
+    pub fn holders(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .services
+            .values()
+            .filter_map(|lock| lock.exclusive.as_ref().map(|(op, _)| op.clone()))
+            .chain(self.names.values().map(|(op, _)| op.clone()))
+            .chain(self.heavy_io.as_ref().map(|(_, op)| op.clone()))
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// Rend TOUT ce que tient une opération (fin d'opération, quel que soit le chemin).
     pub fn release_all_of(&mut self, op: &str) {
         let services: Vec<String> = self

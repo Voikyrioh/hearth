@@ -381,6 +381,42 @@ async fn the_unique_index_is_the_belt_when_the_memory_lock_has_a_defect() {
     assert_eq!(status(&env, &first).await.status, OpStatus::Accepted);
 }
 
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+#[tokio::test]
+async fn a_lock_whose_operation_is_already_terminal_in_the_journal_never_refuses_the_next_action() {
+    let env = Env::new().await;
+    let first = running(&env, 1, OpKind::Update).await;
+    // L'issue est écrite (lisible par un GET) mais les verrous ne sont pas encore rendus : la fenêtre
+    // entre le commit et la libération.
+    env.journal
+        .transition(
+            &first,
+            OpStatus::Running,
+            OpStatus::Succeeded,
+            None,
+            None,
+            env.clock.now(),
+        )
+        .await
+        .unwrap();
+    env.ops
+        .locks()
+        .with(|table| assert_eq!(table.held_services(), 1));
+    let next = env
+        .ops
+        .accept(request(service(1), OpKind::Stop))
+        .await
+        .unwrap();
+    assert_ne!(next, first);
+    // Une opération encore en cours garde, elle, son verrou.
+    let refused = env
+        .ops
+        .accept(request(service(1), OpKind::Start))
+        .await
+        .unwrap_err();
+    assert!(matches!(refused, OpError::Locked(_)), "{refused:?}");
+}
+
 #[tokio::test]
 async fn a_name_being_deleted_is_reserved_and_a_file_write_is_refused_under_an_exclusive_lock() {
     let env = Env::new().await;
