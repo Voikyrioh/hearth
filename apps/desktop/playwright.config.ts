@@ -55,6 +55,7 @@ export default defineConfig({
         "hrt65-lifecycle.spec.ts",
         "hrt69-deploy.spec.ts",
         "hrt102-catalogue.spec.ts",
+        "hrt109-reglages.spec.ts",
         "hrt63-detail.spec.ts",
         "hrt67-logs.spec.ts",
         "hrt67-shell.spec.ts",

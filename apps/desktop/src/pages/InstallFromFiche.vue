@@ -353,6 +353,7 @@ const name = computed(() => safeText(detail.value?.card.name ?? ""));
         :detail="detail"
         :draft="draft"
         :questions="install.questions.value"
+        :extras="install.extras.value"
         :capacity="install.capacity.value"
         :check="flow.summaryCheck.value"
         :force-low-disk="flow.forceLowDisk.value"

@@ -1,4 +1,4 @@
-import type { FicheDetail, FicheQuestion } from "@/link";
+import type { FicheDetail, FicheQuestion, FicheSetting } from "@/link";
 
 /**
  * Les questions d'installation d'une fiche (HRT-102, BR-FICHE-016, BR-FICHE-017, BR-FICHE-038), des fonctions pures sans
@@ -140,4 +140,44 @@ export function changedAnswers(
   return questions.filter(
     (question) => currentAnswer(question, answers) !== startingAnswer(question),
   );
+}
+
+/**
+ * Les réglages de la fiche qui ne sont PAS des questions de l'installation (HRT-109, BR-FICHE-040) : ceux que « Voir
+ * tous les réglages » ajoute. Ni un réglage imposé, ni un réglage essentiel (c'est une question, posée plus haut), ni un
+ * réglage d'une autre variante. Ils prennent la valeur proposée par la fiche tant qu'on n'y touche pas.
+ */
+export function extraSettings(detail: FicheDetail, variant: string | null): FicheSetting[] {
+  return detail.settings.filter(
+    (setting) =>
+      setting.imposedWhy === null &&
+      setting.level !== "essential" &&
+      (setting.question.variants.length === 0 ||
+        (variant !== null && setting.question.variants.includes(variant))),
+  );
+}
+
+/** Les réponses des réglages en plus : seulement ceux auxquels la personne a touché (une valeur vide, posée, part vide). */
+export function extraAnswersToSend(
+  extras: readonly FicheSetting[],
+  answers: Readonly<Record<string, string>>,
+): { id: string; value: string }[] {
+  const out: { id: string; value: string }[] = [];
+  for (const setting of extras) {
+    const value = answers[setting.question.id];
+    if (value !== undefined) out.push({ id: setting.question.id, value });
+  }
+  return out;
+}
+
+/** Les réglages en plus dont la valeur diffère de celle que la fiche propose (BR-FICHE-040) ; un secret saisi compte. */
+export function changedExtras(
+  extras: readonly FicheSetting[],
+  answers: Readonly<Record<string, string>>,
+): FicheSetting[] {
+  return extras.filter((setting) => {
+    const value = answers[setting.question.id];
+    if (value === undefined) return false;
+    return value !== (setting.question.secret ? "" : (setting.question.proposed ?? ""));
+  });
 }

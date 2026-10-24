@@ -25,6 +25,11 @@ const props = defineProps<{
   /** Le défaut à montrer sous le champ (déjà en phrase) ; `undefined` : aucun. */
   error?: string;
   disabled?: boolean;
+  /**
+   * Un secret DÉFINI sur le serveur dont la valeur n'est jamais lue (onglet « Réglages », HRT-109) : un champ vide veut
+   * alors dire « inchangé », pas « aucun mot de passe » ; les avertissements d'un champ vide ne s'appliquent pas.
+   */
+  secretKept?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -50,12 +55,14 @@ const openGame = computed(
   () =>
     props.question.secretKind === "game_password" &&
     props.modelValue === "" &&
+    props.secretKept !== true &&
     props.error === undefined,
 );
 const tokenNeeded = computed(
   () =>
     props.question.secretKind === "server_token" &&
     (props.question.minLen ?? 0) > 0 &&
+    props.secretKept !== true &&
     props.modelValue === "",
 );
 
