@@ -270,7 +270,9 @@ export class SimulatedLinkBridge implements LinkBridge {
       (id, key, busy) => this.services.setBusy(id, key, busy),
       this.now,
     );
-    this.deploys = new SimulatedDeploys(this.services, this.serviceOps, this.now);
+    this.deploys = new SimulatedDeploys(this.services, this.serviceOps, this.now, (id) =>
+      this.machine.hostOf(id),
+    );
     this.catalog = new SimulatedCatalog(this.deploys);
     this.gameSettings = new SimulatedGameSettings(this.catalog);
     // Un service installé depuis une fiche a ses réglages dès que l'agent l'accepte.
@@ -1184,13 +1186,13 @@ export class SimulatedLinkBridge implements LinkBridge {
   }
 
   /** Mot de passe actuel de l'utilisateur de ce serveur (celui que la confirmation compare). */
-  private own(serverId: string): string {
-    return this.ownPasswords.get(serverId) ?? "Correct-Horse-9";
   /** Le mot de passe que ce simulateur attend pour le compte connecté (affiché par `DevPasswordHint`, jamais livré). */
   simulatedPassword(serverId: string): string {
     return this.own(serverId);
   }
 
+  private own(serverId: string): string {
+    return this.ownPasswords.get(serverId) ?? "Correct-Horse-9";
   }
 
   // --- Confirmation des actes (HRT-30) ---

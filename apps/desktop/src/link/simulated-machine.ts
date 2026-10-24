@@ -246,6 +246,23 @@ export class SimulatedMachine {
     return this.track(serverId).machine;
   }
 
+  /**
+   * Ce que la machine d'un serveur offre à un déploiement : ses processeurs, sa mémoire et l'espace libre du premier
+   * disque (celui du tableau de bord). Une seule source pour le tableau de bord, les curseurs de ressources et la fiche
+   * d'un jeu, comme sur le vrai serveur (revue UX 2026-10-24, constat 3).
+   */
+  hostOf(serverId: string): { cpus: number; memoryBytes: number; freeDiskBytes: number } {
+    const track = this.track(serverId);
+    const machine = track.machine;
+    const first = machine.disks[0];
+    const usedPercent = this.value(track, "disk", 41);
+    return {
+      cpus: machine.cpu.logicalCores,
+      memoryBytes: machine.memoryTotalBytes,
+      freeDiskBytes: first ? Math.round((first.totalBytes * (100 - usedPercent)) / 100) : 0,
+    };
+  }
+
   /** Remplace l'identité de la machine (sans carte, sans sonde, deux disques…) et l'annonce. */
   setMachine(serverId: string, machine: MachineInfo): void {
     this.track(serverId).machine = machine;

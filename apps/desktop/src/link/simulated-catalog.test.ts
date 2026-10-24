@@ -226,6 +226,7 @@ describe("refuser comme l'agent, dans l'ordre", () => {
 
   it("LIMITS_REQUIRED et bornes de la machine, comme un déploiement ordinaire", async () => {
     const sim = bridge();
+    sim.deploys.setCapacity("forge", { cpus: 4, memoryBytes: 16 * GIB });
     const detail = await detailOf(sim, "terraria");
     expect(
       await refused(

@@ -92,6 +92,10 @@ export class SimulatedDeploys {
     private readonly services: SimulatedServices,
     private readonly ops: SimulatedServiceOps,
     private readonly now: () => number,
+    /** La machine du serveur (la même que celle du tableau de bord) ; sans elle, 4 processeurs, 16 Gio et 200 Gio libres. */
+    private readonly hostOf: (
+      serverId: string,
+    ) => { cpus: number; memoryBytes: number; freeDiskBytes: number } | null = () => null,
   ) {}
 
   // ── Ce que le serveur sait (pilotable) ───────────────────────────────────────────────────────
@@ -155,8 +159,13 @@ export class SimulatedDeploys {
   /** `GET /engine/capacity`, lu comme le lit la coquille. */
   capacity(serverId: string): EngineCapacity | null {
     if (this.failCapacity) throw new Error("capacité illisible");
+    const host = this.hostOf(serverId) ?? { cpus: 4, memoryBytes: 16 * GIB };
     const wire = this.capacities.get(serverId) ?? {
-      host: { cpus: 4, memory_bytes: 16 * GIB, reserve_bytes: GIB },
+      host: {
+        cpus: host.cpus,
+        memory_bytes: host.memoryBytes,
+        reserve_bytes: Math.max(GIB, Math.floor(host.memoryBytes / 20)),
+      },
       committed: {
         memory: { managed_running: 0, unmanaged_running: 0, managed_all: 0, unmanaged_all: 0 },
       },
@@ -204,7 +213,7 @@ export class SimulatedDeploys {
   }
 
   private disk(serverId: string): { freeBytes: number; low: boolean } {
-    const freeBytes = this.disks.get(serverId) ?? 200 * GIB;
+    const freeBytes = this.disks.get(serverId) ?? this.hostOf(serverId)?.freeDiskBytes ?? 200 * GIB;
     return { freeBytes, low: freeBytes < LOW_DISK_BYTES };
   }
 
