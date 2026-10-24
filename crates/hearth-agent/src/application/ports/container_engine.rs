@@ -233,6 +233,14 @@ pub trait ContainerEngine: Send + Sync {
     /// échec au démarrage (BR-DEPLOY-019).
     async fn remove(&self, id: &str) -> Result<(), EngineError>;
 
+    /// Supprime un conteneur ARRÊTÉ en gardant tout ce qui n'est pas lui (HRT-85, `BR-DEL-004`, `BR-DEL-006`) : ni
+    /// ses volumes (même anonymes : ce sont des données du service, la suppression ne perd rien sans un choix
+    /// explicite), ni les dossiers montés. Ses journaux partent avec lui, c'est le moteur qui les tient. **Ne force
+    /// jamais** : un conteneur qui tourne (ou reparti) est refusé (`Refused`), l'arrêt est la tâche de l'appelant.
+    /// Absent : réussit (le but est atteint). Distincte de [`Self::remove`], qui nettoie un déploiement échoué
+    /// (volumes anonymes compris) : les deux gestes n'ont pas les mêmes garanties.
+    async fn remove_keeping_volumes(&self, id: &str) -> Result<(), EngineError>;
+
     /// Les bornes de la machine et le dossier des images (HRT-68).
     async fn info(&self) -> Result<EngineInfo, EngineError>;
 }

@@ -51,3 +51,7 @@ Un service déployé depuis Hearth doit être reconnu comme tel, repartir après
 - Migration `0015` (`service_containers`). Aucune directive de l'unité systemd ne change.
 - Causes d'opération ajoutées : `image_not_found`, `tag_not_found`, `image_private_or_missing`, `registry_unreachable`, `registry_rate_limited`, `platform_mismatch`, `disk_full`, `name_taken`.
 - `SECURITY.md` : le pilotage du moteur donne root à tout compte qui a le droit de gérer les services.
+
+## Amendement 2026-10-24 (HRT-85) : supprimer un service ne retire que le conteneur
+
+`ContainerEngine::remove` (volumes anonymes compris, forcé) ne sert qu'à nettoyer un déploiement échoué (BR-DEPLOY-019). La **suppression d'un service** (BR-DEL-004) utilise `ContainerEngine::remove_keeping_volumes` : `DELETE /containers/{id}?v=false&force=false`. Les volumes du moteur, même anonymes, sont des données du service : ils restent (BR-DEL-006), listés par la fenêtre de suppression. Un conteneur qui tourne est refusé (409, `Refused`) au lieu d'être coupé : l'arrêt est fait avant, avec le délai de grâce du service, jamais remplacé par une coupure silencieuse. Les journaux du moteur partent avec le conteneur (BR-DEL-004). Suite de contrat : `engine_contract.rs::deploys`.

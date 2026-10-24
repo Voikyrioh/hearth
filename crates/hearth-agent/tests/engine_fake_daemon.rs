@@ -267,6 +267,52 @@ async fn the_whole_probe_is_bounded_by_one_delay_not_one_per_exchange() {
     assert!(took < Duration::from_millis(1100), "{took:?}");
 }
 
+/// HRT-85 : supprimer un service ne perd aucune donnée sans choix explicite. Le faux démon dit ce que l'adaptateur
+/// a demandé : `v=false` (volumes gardés, même anonymes) et `force=false` (un conteneur qui tourne est refusé).
+#[tokio::test]
+async fn removing_for_a_deletion_keeps_the_volumes_and_never_forces() {
+    let daemon = FakeDaemon::start().await;
+    let running = DaemonContainer::new("running", "running");
+    let running_id = running.id.clone();
+    daemon.put(running);
+    let stopped = DaemonContainer::new("stopped", "exited");
+    let stopped_id = stopped.id.clone();
+    daemon.put(stopped);
+    let engine = engine_of(&daemon);
+    assert_eq!(
+        engine.remove_keeping_volumes(&running_id).await,
+        Err(hearth_agent::application::ports::EngineError::Refused)
+    );
+    assert!(daemon.container(&running_id).is_some(), "rien n'est coupé");
+    engine
+        .remove_keeping_volumes(&stopped_id)
+        .await
+        .expect("arrêté : supprimé");
+    assert!(daemon.container(&stopped_id).is_none());
+    let queries = daemon.delete_queries();
+    assert_eq!(queries.len(), 2, "{queries:?}");
+    for query in &queries {
+        assert!(
+            !query.contains("v=true") && !query.contains("v=1"),
+            "{query}"
+        );
+        assert!(
+            !query.contains("force=true") && !query.contains("force=1"),
+            "{query}"
+        );
+    }
+    // Le nettoyage d'un déploiement échoué, lui, garde son geste d'avant (volumes anonymes compris, forcé).
+    let failed = DaemonContainer::new("failed", "created");
+    let failed_id = failed.id.clone();
+    daemon.put(failed);
+    engine.remove(&failed_id).await.expect("supprimé");
+    let last = daemon.delete_queries().pop().expect("requête");
+    assert!(
+        last.contains("v=true") && last.contains("force=true"),
+        "{last}"
+    );
+}
+
 #[tokio::test]
 async fn a_container_the_daemon_cannot_describe_is_unreadable_not_a_failed_list() {
     // Une inspection qui échoue pour un conteneur (ici, une réponse qui n'est pas du JSON attendu :
