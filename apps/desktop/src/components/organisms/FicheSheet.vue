@@ -6,6 +6,7 @@ import HIcon from "@/components/atoms/HIcon.vue";
 import DashCard from "@/components/molecules/DashCard.vue";
 import ProofTag from "@/components/molecules/ProofTag.vue";
 import FicheResourcesCard from "@/components/organisms/FicheResourcesCard.vue";
+import { noFigureAtAll } from "@/fiche/fit";
 import { registryOf } from "@/fiche/image";
 import {
   boundsText,
@@ -18,6 +19,7 @@ import {
   portRoleText,
   registryText,
   stopTexts,
+  valueLabel,
 } from "@/fiche/messages";
 import { proofOf, proofUrl, proven } from "@/fiche/proof";
 import { t } from "@/i18n";
@@ -44,6 +46,8 @@ const image = computed(() => props.detail.image);
 const registry = computed(() => registryText(registryOf(image.value.repository)));
 const firstStart = computed(() => props.detail.firstStart);
 const disk = computed(() => props.detail.resources.disk);
+/** Aucun besoin connu : la carte Ressources le dit une fois, la carte Espace disque ne le redit pas. */
+const nothingKnown = computed(() => noFigureAtAll(props.detail));
 const diskNeed = computed(() => proven(disk.value.installBytes, disk.value.evidence));
 const stop = computed(() => (props.detail.stop ? stopTexts(props.detail.stop) : []));
 const downloads = computed(() => firstStart.value?.downloads ?? []);
@@ -96,9 +100,9 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
       <p class="sheet__muted">{{ t("fiche.foldersNote") }}</p>
     </DashCard>
 
-    <FicheResourcesCard :detail="detail" :capacity="capacity" @source="emit('source', $event)" />
+    <FicheResourcesCard :detail="detail" :capacity="capacity" :nothing-known="nothingKnown" @source="emit('source', $event)" />
 
-    <DashCard :title="t('fiche.cardDisk')" data-fiche-disk>
+    <DashCard v-if="!nothingKnown" :title="t('fiche.cardDisk')" data-fiche-disk>
       <p class="sheet__line" data-disk-needed>{{ diskNeededText(diskNeed) }}</p>
       <ProofTag
         :proof="proofOf(disk.evidence)"
@@ -150,7 +154,7 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
             <span class="sheet__muted">{{ kindText(question.kind) }}</span>
             <span class="sheet__line">
               <template v-if="question.proposed !== null">
-                {{ t("fiche.proposedValue", { value: safeText(question.proposed) }) }}
+                {{ t("fiche.proposedValue", { value: valueLabel(question, question.proposed) }) }}
               </template>
               <template v-else>{{ t("fiche.noProposedValue") }}</template>
             </span>

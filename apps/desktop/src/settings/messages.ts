@@ -1,4 +1,5 @@
 import { safeText } from "@/audit/text";
+import { characterName } from "@/fiche/character";
 import { answerIssueText } from "@/fiche/messages";
 import { type MessageKey, t } from "@/i18n";
 import type { FicheSetting, ImportState, SaveRefusal, SettingEffect } from "@/link";
@@ -116,7 +117,7 @@ function settingRefusalText(
   const key = REFUSED_REASONS[refusal.reason];
   let why: string;
   if (refusal.reason === "charset" && refusal.character !== null) {
-    why = t("gameSettings.refusedReason.charsetChar", { character: safeText(refusal.character) });
+    why = t("gameSettings.refusedReason.charsetChar", { name: characterName(refusal.character) });
   } else {
     why = t(key ?? "gameSettings.refusedReason.other");
   }

@@ -11,7 +11,7 @@ const link = useLinkStore();
 
 <template>
   <header class="head">
-    <h1 class="head__title">{{ title }}</h1>
+    <h1 class="head__title" data-page-title>{{ title }}</h1>
     <span class="head__gap" />
     <div v-if="$slots.actions" class="head__actions"><slot name="actions" /></div>
     <LinkStatePill v-if="serverId" :state="link.stateOf(serverId)" />

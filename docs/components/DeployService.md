@@ -6,3 +6,4 @@ La page « Déployer un service » (HRT-69) : le formulaire en page (`DeployForm
 
 - Aucune prop. Parcours : `composables/useDeployForm.ts` (saisie, constats), `composables/useDeployFlow.ts` (récapitulatif, envoi, progression).
 - Tests : `pages/DeployService.test.ts`, `pages/DeployFlow.test.ts`, `e2e/hrt69-deploy.spec.ts`.
+- Revue UX du 2026-10-24 (constat 7) : rechargement avec une saisie en cours : question native `beforeunload` (`composables/useUnloadGuard.ts`, posée par `composables/useLeaveGuard.ts`, qui porte toute la sortie de la page : Fermer, Échap, précédent, menu, rechargement), comme « Fermer », Échap, précédent et le menu posent « Abandonner votre saisie ? ».

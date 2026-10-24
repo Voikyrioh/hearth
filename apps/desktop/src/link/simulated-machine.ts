@@ -14,6 +14,8 @@ const HISTORY_CAP = 300;
 
 /** Mesure qu'un test ou le panneau de développement peut pousser dans un niveau d'alerte. */
 export type Pinnable = "cpu" | "mem" | "disk" | "gpuMem" | "gpuTemp" | "temp";
+/** Part du premier disque prise au naturel (le niveau « normal » d'un disque piloté). */
+export const DISK_USED_PERCENT = 41;
 
 /**
  * Valeur représentative de chaque niveau, par mesure. Ce ne sont PAS les seuils (qui vivent dans
@@ -24,7 +26,7 @@ export type Pinnable = "cpu" | "mem" | "disk" | "gpuMem" | "gpuTemp" | "temp";
 const PINNED_VALUE: Record<Pinnable, Record<Level, number>> = {
   cpu: { normal: 25, attention: 88, critical: 97 },
   mem: { normal: 30, attention: 88, critical: 97 },
-  disk: { normal: 41, attention: 88, critical: 97 },
+  disk: { normal: DISK_USED_PERCENT, attention: 88, critical: 97 },
   gpuMem: { normal: 30, attention: 88, critical: 97 },
   gpuTemp: { normal: 52, attention: 83, critical: 93 },
   temp: { normal: 48, attention: 83, critical: 93 },
@@ -246,6 +248,23 @@ export class SimulatedMachine {
     return this.track(serverId).machine;
   }
 
+  /**
+   * Ce que la machine d'un serveur offre à un déploiement : ses processeurs, sa mémoire et l'espace libre du premier
+   * disque (celui du tableau de bord). Une seule source pour le tableau de bord, les curseurs de ressources et la fiche
+   * d'un jeu, comme sur le vrai serveur (revue UX 2026-10-24, constat 3).
+   */
+  hostOf(serverId: string): { cpus: number; memoryBytes: number; freeDiskBytes: number } {
+    const track = this.track(serverId);
+    const machine = track.machine;
+    const first = machine.disks[0];
+    const usedPercent = this.value(track, "disk", DISK_USED_PERCENT);
+    return {
+      cpus: machine.cpu.logicalCores,
+      memoryBytes: machine.memoryTotalBytes,
+      freeDiskBytes: first ? Math.round((first.totalBytes * (100 - usedPercent)) / 100) : 0,
+    };
+  }
+
   /** Remplace l'identité de la machine (sans carte, sans sonde, deux disques…) et l'annonce. */
   setMachine(serverId: string, machine: MachineInfo): void {
     this.track(serverId).machine = machine;
@@ -289,7 +308,8 @@ export class SimulatedMachine {
         mount: disk.mount,
         totalBytes: disk.totalBytes,
         usedBytes: Math.round(
-          (disk.totalBytes * (disk === first ? this.value(track, "disk", 41) : 18)) / 100,
+          (disk.totalBytes * (disk === first ? this.value(track, "disk", DISK_USED_PERCENT) : 18)) /
+            100,
         ),
       })),
       net: {

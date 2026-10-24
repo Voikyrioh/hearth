@@ -41,7 +41,7 @@ function terrariaView(patch: Partial<GameSettingsView> = {}): GameSettingsView {
   const detail = terraria();
   return {
     rev: 0,
-    fiche: { id: "terraria", version: 2, digest: detail.digest },
+    fiche: { id: "terraria", version: detail.card.version, digest: detail.digest },
     fileState: "ok",
     fileStamp: "stamp",
     fileChanged: false,

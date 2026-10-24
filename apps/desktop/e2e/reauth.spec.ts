@@ -136,7 +136,7 @@ test("un mot de passe faux reste sous le champ, la fenêtre reste ouverte, le ch
   await open.getByLabel("Confirme le nouveau mot de passe").fill(GOOD);
   await open.getByLabel("Votre mot de passe").fill("Faux-Mot-De-Passe-1");
   await open.getByRole("button", { name: "Changer le mot de passe" }).click();
-  await expect(open.getByText("Mot de passe actuel incorrect.")).toBeVisible();
+  await expect(open.getByText("Mot de passe incorrect.")).toBeVisible();
   await expect(open.getByLabel("Votre mot de passe")).toHaveValue("");
   await expect(dialog(page)).toHaveCount(1);
 });

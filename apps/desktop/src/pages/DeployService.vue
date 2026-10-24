@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { onBeforeRouteLeave, type RouteLocationNormalized, useRouter } from "vue-router";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import ConfirmDialog from "@/components/molecules/ConfirmDialog.vue";
 import DeployForm from "@/components/organisms/DeployForm.vue";
@@ -11,6 +10,7 @@ import ServiceLifecycleDialog from "@/components/organisms/ServiceLifecycleDialo
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { useDeployFlow } from "@/composables/useDeployFlow";
 import { useDeployForm } from "@/composables/useDeployForm";
+import { useLeaveGuard } from "@/composables/useLeaveGuard";
 import { useNeedsLink } from "@/composables/useNeedsLink";
 import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
@@ -29,7 +29,6 @@ import { useServicesStore } from "@/stores/services";
 // renvoyés vers la liste ; un moteur qui n'est pas « prêt » laisse le formulaire s'ouvrir et l'explique (BR-DEPLOY-027).
 // La saisie vit en mémoire seulement (`stores/deployForm.ts`) : jamais dans l'adresse ni sur le disque, effacée au
 // lancement réussi et à l'abandon. Fermer un formulaire rempli demande « Abandonner votre saisie ? ».
-const router = useRouter();
 const { server, isConnected } = useCurrentServer();
 const services = useServicesStore();
 const operations = useServiceOpsStore();
@@ -62,13 +61,16 @@ const formRef = ref<InstanceType<typeof DeployForm> | null>(null);
 function focusField(field: DeployField) {
   formRef.value?.focusField(field);
 }
+const guard = useLeaveGuard({
+  dirty: () => isFilled(form.draft.value),
+  launching: () => flow.launch.value !== null,
+  home: () => ({ name: "services", params: { id: serverId() } }),
+  wipe: () => form.wipe(),
+});
 const flow = useDeployFlow({
   serverId,
   form,
-  navigate: (to) => {
-    allowLeave = true;
-    void router.push(to);
-  },
+  navigate: (to) => void guard.leave(to),
   focusField,
 });
 
@@ -98,55 +100,7 @@ const reason = computed(() =>
 );
 
 // ── Fermer, abandonner ──────────────────────────────────────────────────────────────────────────
-let allowLeave = false;
-const abandonOpen = ref(false);
-let pendingLeave: RouteLocationNormalized | null = null;
-
-onBeforeRouteLeave((to) => {
-  if (allowLeave || flow.launch.value !== null) return true;
-  if (!isFilled(form.draft.value)) return true;
-  pendingLeave = to;
-  abandonOpen.value = true;
-  return false;
-});
-
-function requestClose() {
-  if (isFilled(form.draft.value)) {
-    pendingLeave = null;
-    abandonOpen.value = true;
-    return;
-  }
-  allowLeave = true;
-  void router.push({ name: "services", params: { id: serverId() } });
-}
-
-function abandon() {
-  form.wipe();
-  abandonOpen.value = false;
-  allowLeave = true;
-  void router.push(pendingLeave ?? { name: "services", params: { id: serverId() } });
-}
-
-function keepTyping() {
-  abandonOpen.value = false;
-  pendingLeave = null;
-}
-
-/** Échap hors d'un champ ferme le formulaire (design, écran F) ; dans un champ ou une fenêtre ouverte, rien. */
-function onKey(event: KeyboardEvent) {
-  if (event.key !== "Escape" || document.querySelector("dialog[open]")) return;
-  const target = event.target;
-  if (
-    target instanceof HTMLElement &&
-    (target.isContentEditable || ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName))
-  ) {
-    return;
-  }
-  requestClose();
-}
-onMounted(() => document.addEventListener("keydown", onKey));
 onBeforeUnmount(() => {
-  document.removeEventListener("keydown", onKey);
   // Quitter la page efface la saisie de la mémoire (BR-DEPLOY-029).
   form.wipe();
 });
@@ -156,8 +110,7 @@ onBeforeUnmount(() => {
 watch(door, (now) => {
   if (now.kind === "hidden") {
     if (flow.launch.value === null && entry.value !== undefined) {
-      allowLeave = true;
-      void router.replace({ name: "services", params: { id: serverId() } });
+      void guard.leave({ name: "services", params: { id: serverId() } }, true);
     }
   }
 });
@@ -175,7 +128,7 @@ const progressOpen = computed(() => flow.launch.value !== null);
 <template>
   <div class="dep" data-deploy-page>
     <Teleport defer to="#header-actions">
-      <HButton variant="secondary" data-deploy-close-page @click="requestClose">
+      <HButton variant="secondary" data-deploy-close-page @click="guard.requestClose">
         {{ t("deploy.close") }}
       </HButton>
     </Teleport>
@@ -228,14 +181,14 @@ const progressOpen = computed(() => flow.launch.value !== null);
     />
 
     <ConfirmDialog
-      :open="abandonOpen"
+      :open="guard.abandonOpen.value"
       :title="t('deploy.abandonTitle')"
       :message="t('deploy.abandonText')"
       :confirm-label="t('deploy.abandon')"
       :cancel-label="t('deploy.keepTyping')"
       destructive
-      @confirm="abandon"
-      @cancel="keepTyping"
+      @confirm="guard.abandon"
+      @cancel="guard.keepTyping"
     />
 
     <ServiceLifecycleDialog

@@ -7,3 +7,4 @@ Le champ « Ton mot de passe » de la confirmation d'un acte (HRT-30) : `HPasswo
 - Props : `modelValue`, `label?`, `help?`, `error?`
 - Événements et slots : `update:modelValue` ; expose `focus()`
 - Notes : Tests via `components/organisms/adminAct.test.ts`.
+- `focus(options?)` : `{ preventScroll: true }` à l'ouverture d'une fenêtre (un récapitulatif reste ouvert en haut, revue UX du 2026-10-24, constat 15), sans option après un mot de passe refusé.

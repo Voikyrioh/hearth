@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { onBeforeRouteLeave, type RouteLocationNormalized, useRoute, useRouter } from "vue-router";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
@@ -20,7 +20,9 @@ import { useCurrentServer } from "@/composables/useCurrentServer";
 import { useDeployFlow } from "@/composables/useDeployFlow";
 import { useFicheInstall } from "@/composables/useFicheInstall";
 import { useFicheLinks } from "@/composables/useFicheLinks";
+import { useLeaveGuard } from "@/composables/useLeaveGuard";
 import { useNeedsLink } from "@/composables/useNeedsLink";
+import { usePageTitle } from "@/composables/usePageTitle";
 import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { deployDoor } from "@/deploy/availability";
@@ -41,7 +43,6 @@ import { useServicesStore } from "@/stores/services";
 // l'abandon (BR-FICHE-034). L'adresse `?proposees=1` (« Installer avec les valeurs proposées ») ouvre la fenêtre aussitôt
 // que la fiche et les bornes de la machine sont lues ; un champ à corriger la ramène à la page.
 const route = useRoute();
-const router = useRouter();
 const { server, isConnected } = useCurrentServer();
 const services = useServicesStore();
 const operations = useServiceOpsStore();
@@ -79,14 +80,18 @@ const install = useFicheInstall(
 const agentVersion = useAgentVersion(serverId);
 const answers = ref<InstanceType<typeof InstallAnswers> | null>(null);
 
-let allowLeave = false;
+const edited = () => drafts.edited(serverId(), ficheId());
+const back = () => ({ name: "fiche" as const, params: { id: serverId(), fiche: ficheId() } });
+const guard = useLeaveGuard({
+  dirty: edited,
+  launching: () => flow.launch.value !== null,
+  home: back,
+  wipe: () => install.wipe(),
+});
 const flow = useDeployFlow({
   serverId,
   source: install.flowSource,
-  navigate: (to) => {
-    allowLeave = true;
-    void router.push(to);
-  },
+  navigate: (to) => void guard.leave(to),
   focusField: () => undefined,
   focusQuestion: (id) => answers.value?.focusQuestion(id),
 });
@@ -168,57 +173,38 @@ watch(
   { immediate: true },
 );
 
+// ── Le curseur dans le premier champ (revue UX 2026-10-24, constat 16) ───────────────────────────
+// Comme le formulaire de déploiement : on arrive, on tape. Pas pour « Installer avec les valeurs proposées », dont la
+// fenêtre prend le focus.
+let focusedFirst = false;
+watch(
+  () => [detail.value, draft.value] as const,
+  async ([loaded, current]) => {
+    if (focusedFirst || !loaded || !current || route.query.proposees === "1") return;
+    focusedFirst = true;
+    await nextTick();
+    answers.value?.focusName();
+  },
+  { immediate: true },
+);
+
 // ── Fermer, abandonner ──────────────────────────────────────────────────────────────────────────
-const abandonOpen = ref(false);
-let pendingLeave: RouteLocationNormalized | null = null;
-const edited = () => drafts.edited(serverId(), ficheId());
-const back = () => ({ name: "fiche" as const, params: { id: serverId(), fiche: ficheId() } });
-
-onBeforeRouteLeave((to) => {
-  if (allowLeave || flow.launch.value !== null) return true;
-  if (!edited()) return true;
-  pendingLeave = to;
-  abandonOpen.value = true;
-  return false;
-});
-
-function requestClose() {
-  if (edited()) {
-    pendingLeave = null;
-    abandonOpen.value = true;
+/**
+ * « Retour » ou Échap sur le récapitulatif ouvert par « Installer avec les valeurs proposées » ramène à la fiche, d'où on
+ * vient, tant que rien n'a été saisi : le formulaire en trois étapes n'a jamais été demandé (revue UX 2026-10-24,
+ * constat 20). Une saisie déjà commencée, ou un refus qui a ramené à la page, reste sur la page.
+ */
+const proposedEntry = route.query.proposees === "1";
+function closeSummary() {
+  if (proposedEntry && !edited()) {
+    install.wipe();
+    void guard.leave(back());
     return;
   }
-  allowLeave = true;
-  void router.push(back());
+  flow.closeSummary();
 }
 
-function abandon() {
-  install.wipe();
-  abandonOpen.value = false;
-  allowLeave = true;
-  void router.push(pendingLeave ?? back());
-}
-
-function keepTyping() {
-  abandonOpen.value = false;
-  pendingLeave = null;
-}
-
-/** Échap hors d'un champ ferme la page ; dans un champ ou une fenêtre ouverte, rien. */
-function onKey(event: KeyboardEvent) {
-  if (event.key !== "Escape" || document.querySelector("dialog[open]")) return;
-  const target = event.target;
-  if (
-    target instanceof HTMLElement &&
-    (target.isContentEditable || ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName))
-  ) {
-    return;
-  }
-  requestClose();
-}
-onMounted(() => document.addEventListener("keydown", onKey));
 onBeforeUnmount(() => {
-  document.removeEventListener("keydown", onKey);
   // Quitter la page efface la saisie de la mémoire (BR-FICHE-034).
   install.wipe();
 });
@@ -227,8 +213,7 @@ onBeforeUnmount(() => {
 // et le dit : le serveur a refusé, la saisie n'est pas perdue (BR-FICHE-035).
 watch(door, (now) => {
   if (now.kind === "hidden" && flow.launch.value === null && entry.value !== undefined) {
-    allowLeave = true;
-    void router.replace(back());
+    void guard.leave(back(), true);
   }
 });
 
@@ -251,12 +236,14 @@ const steps = computed(() => [
 ]);
 const progressOpen = computed(() => flow.launch.value !== null);
 const name = computed(() => safeText(detail.value?.card.name ?? ""));
+// Un seul titre, à chaque étape : « Installer Terraria » (revue UX 2026-10-24, constat 17).
+usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value }) : null));
 </script>
 
 <template>
   <div class="inst" data-install-page>
     <Teleport defer to="#header-actions">
-      <HButton variant="secondary" data-install-close @click="requestClose">
+      <HButton variant="secondary" data-install-close @click="guard.requestClose">
         {{ t("fiche.close") }}
       </HButton>
     </Teleport>
@@ -291,7 +278,6 @@ const name = computed(() => safeText(detail.value?.card.name ?? ""));
     </div>
 
     <template v-else>
-      <h2 class="inst__title" data-install-title>{{ t("fiche.installTitle", { name }) }}</h2>
       <StepTrail :steps="steps" :current="install.step.value - 1" :label="t('fiche.stepsLabel')" />
 
       <Callout v-if="refusalVisible" tone="error" role="alert" data-install-refusal>
@@ -359,7 +345,7 @@ const name = computed(() => safeText(detail.value?.card.name ?? ""));
         :force-low-disk="flow.forceLowDisk.value"
         :agent-version="agentVersion"
         :perform="flow.perform"
-        @close="flow.closeSummary()"
+        @close="closeSummary"
         @agree="install.agreed.value = $event"
         @imposed="imposedOpen = true"
       />
@@ -385,14 +371,14 @@ const name = computed(() => safeText(detail.value?.card.name ?? ""));
     />
 
     <ConfirmDialog
-      :open="abandonOpen"
+      :open="guard.abandonOpen.value"
       :title="t('deploy.abandonTitle')"
       :message="t('deploy.abandonText')"
       :confirm-label="t('deploy.abandon')"
       :cancel-label="t('deploy.keepTyping')"
       destructive
-      @confirm="abandon"
-      @cancel="keepTyping"
+      @confirm="guard.abandon"
+      @cancel="guard.keepTyping"
     />
 
     <ServiceLifecycleDialog
@@ -423,14 +409,6 @@ const name = computed(() => safeText(detail.value?.card.name ?? ""));
   display: flex;
   flex-direction: column;
   gap: var(--card-gap);
-}
-
-.inst__title {
-  margin: 0;
-  font-family: var(--font-title);
-  font-size: var(--fs-h3);
-  font-weight: var(--fw-semibold);
-  overflow-wrap: anywhere;
 }
 
 .inst__bar {

@@ -266,6 +266,8 @@ describe("le formulaire (BR-DEPLOY-002 à 007, 014)", () => {
       ],
     ];
     for (const [name, value, text] of cases) {
+      // Un champ vide ne se plaint qu'une fois quelque chose saisi (un formulaire vierge ne décale rien).
+      if (value === "") await type(wrapper, name, "x");
       await type(wrapper, name, value);
       await blur(wrapper, name);
       expect(wrapper.get(`[data-field="${name}"] [role="alert"]`).text(), `${name} ${value}`).toBe(

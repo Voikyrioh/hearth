@@ -14,6 +14,7 @@ import SessionsClosedNotice from "@/components/organisms/SessionsClosedNotice.vu
 import { formatClock } from "@/composables/format";
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { providePageData } from "@/composables/usePageData";
+import { providePageTitle } from "@/composables/usePageTitle";
 import { useResumeMinutes } from "@/composables/useResumeMinutes";
 import { t } from "@/i18n";
 import { alertVisible, modeOn, modeUnknown } from "@/link";
@@ -36,6 +37,7 @@ const link = useLinkStore();
 const updates = useUpdatesStore();
 const { server, state, lastContactAt } = useCurrentServer();
 const pageHasData = providePageData();
+const pageTitle = providePageTitle();
 const stale = computed(() => state.value !== "connected");
 const event = computed(() => (server.value ? link.eventOf(server.value.id) : undefined));
 // HRT-133 : qui a fermé les sessions de ce compte, dit une seule fois (BR-ACCT-019).
@@ -50,7 +52,7 @@ watch(
 );
 onBeforeUnmount(() => servers.setCurrent(null));
 
-const title = computed(() => (route.meta.title ? t(route.meta.title) : ""));
+const title = computed(() => pageTitle.value ?? (route.meta.title ? t(route.meta.title) : ""));
 
 // Sécurité : l'état connu du serveur affiché (le bandeau garde ce qu'il sait quand le lien tombe).
 const securityEntry = computed(() => (server.value ? security.of(server.value.id) : undefined));

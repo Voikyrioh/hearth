@@ -58,6 +58,7 @@ pub fn check_texts(
             gap.explication()
         ));
     }
+    problems.extend(help_repeats(dir, &loaded));
     match lock {
         None => problems.push(format!("fiche `{dir}` : ids.lock manquant (le registre des identifiants de réglage est obligatoire)")),
         Some(bytes) => match ids_lock::parse(bytes) {
@@ -70,6 +71,76 @@ pub fn check_texts(
         },
     }
     problems
+}
+
+/// L'aide d'un réglage ne redit ni le jeu de caractères ni les bornes : le client les dit lui-même d'après le type de
+/// la question (« Le nombre est compris entre 1 et 255. », « Lettres, chiffres… »). Redites dans l'aide, elles se
+/// répètent dans la même phrase (ADR-0050, revue UX du 24/10, constat 18).
+fn help_repeats(dir: &str, loaded: &loading::model::Fiche) -> Vec<String> {
+    let mut problems = Vec::new();
+    for setting in &loaded.settings {
+        let help = setting.help.to_lowercase();
+        if help.contains("caractère") || help.contains("lettres, chiffres") {
+            problems.push(format!(
+                "fiche `{dir}` : réglage `{}` : l'aide parle de caractère(s) ; le client dit déjà le jeu de caractères (ADR-0050)",
+                setting.id
+            ));
+        }
+        if let loading::model::ValueSpec::Int {
+            min: Some(min),
+            max: Some(max),
+        } = &setting.spec
+            && contains_number(&help, *min)
+            && contains_number(&help, *max)
+        {
+            problems.push(format!(
+                "fiche `{dir}` : réglage `{}` : l'aide redit les bornes {min} et {max} ; le client les dit déjà (ADR-0050)",
+                setting.id
+            ));
+        }
+    }
+    problems
+}
+
+/// Le nombre écrit tel quel dans le texte, sans chiffre collé avant ou après.
+fn contains_number(text: &str, number: impl ToString) -> bool {
+    let text = &without_thousands_separators(text);
+    let needle = number.to_string();
+    text.match_indices(&needle).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + needle.len()..].chars().next();
+        !before.is_some_and(|c| c.is_ascii_digit()) && !after.is_some_and(|c| c.is_ascii_digit())
+    })
+}
+
+/// « 65 535 » s'écrit aussi « 65535 » : une espace, insécable ou fine, entre deux chiffres est un séparateur de milliers.
+fn without_thousands_separators(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    for (at, &c) in chars.iter().enumerate() {
+        let separator = matches!(c, ' ' | '\u{00A0}' | '\u{202F}');
+        let between_digits = at > 0
+            && chars[at - 1].is_ascii_digit()
+            && chars.get(at + 1).is_some_and(char::is_ascii_digit);
+        if !(separator && between_digits) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Le contenu d'une fiche change son empreinte : la version doit monter (ADR-0050). `base` : version et empreinte de
+/// la branche principale, `now` : les vôtres.
+pub fn check_version_against_base(dir: &str, base: (u64, &str), now: (u64, &str)) -> Vec<String> {
+    if base.1 != now.1 && now.0 <= base.0 {
+        return vec![format!(
+            "fiche `{dir}` : son contenu a changé (empreinte {} au lieu de {}) mais sa version reste {} : augmentez `version` dans fiche.toml (ADR-0050)",
+            &now.1[..12.min(now.1.len())],
+            &base.1[..12.min(base.1.len())],
+            now.0
+        )];
+    }
+    Vec::new()
 }
 
 /// `ids.lock` ne décroît jamais : chaque identifiant du registre de la branche principale reste dans le registre
@@ -105,9 +176,14 @@ pub fn check_against_base(
 /// Le registre de la branche principale (`origin/main`, sinon `main`), lu par git sans réseau ; `None` si git ou
 /// la référence manque (le contrôle est alors sauté, et dit).
 fn base_lock(dir: &str) -> Option<Vec<u8>> {
+    base_file(dir, "ids.lock")
+}
+
+/// Un fichier de la fiche sur la branche principale (même lecture que `base_lock`).
+fn base_file(dir: &str, name: &str) -> Option<Vec<u8>> {
     for reference in ["origin/main", "main"] {
         let output = std::process::Command::new("git")
-            .args(["show", &format!("{reference}:{CATALOG_DIR}/{dir}/ids.lock")])
+            .args(["show", &format!("{reference}:{CATALOG_DIR}/{dir}/{name}")])
             .output()
             .ok()?;
         if output.status.success() {
@@ -182,6 +258,37 @@ pub fn run(args: &[String]) -> ExitCode {
                         "catalog-check : fiche `{dir}` : pas de registre sur la branche principale (ou git muet), comparaison sautée"
                     );
                 }
+                match (
+                    base_file(dir, "fiche.toml"),
+                    base_file(dir, "settings.toml"),
+                ) {
+                    (Some(base_fiche), Some(base_settings)) => {
+                        match (
+                            load(Origin::Embedded, &base_fiche, &base_settings),
+                            load(Origin::Embedded, &fiche, &settings),
+                        ) {
+                            (Ok(base), Ok(now)) => {
+                                let (base_digest, now_digest) = (
+                                    loading::model::hex(&base.digest),
+                                    loading::model::hex(&now.digest),
+                                );
+                                problems.extend(check_version_against_base(
+                                    dir,
+                                    (u64::from(base.file.version), &base_digest),
+                                    (u64::from(now.file.version), &now_digest),
+                                ));
+                            }
+                            (Err(_), _) => println!(
+                                "catalog-check : fiche `{dir}` : la fiche de la branche principale ne passe pas le chargeur de cette branche, comparaison de version sautée"
+                            ),
+                            // La fiche de cette branche ne se charge pas : `check_texts` le reproche plus bas.
+                            (_, Err(_)) => {}
+                        }
+                    }
+                    _ => println!(
+                        "catalog-check : fiche `{dir}` : pas de fiche sur la branche principale (ou git muet), comparaison de version sautée"
+                    ),
+                }
                 problems.extend(check_texts(
                     dir,
                     &fiche,
@@ -253,6 +360,52 @@ mod tests {
         );
         let retired = ids_lock::parse(reactivated.as_bytes()).expect("registre");
         assert_eq!(check_against_base("terraria", &retired, &base).len(), 1);
+    }
+
+    #[test]
+    fn a_help_that_repeats_the_bounds_or_the_character_set_is_refused() {
+        let with_bounds = SETTINGS.replace(
+            "Combien de joueurs peuvent être connectés en même temps.",
+            "Combien de joueurs peuvent être connectés en même temps, de 1 à 255.",
+        );
+        assert_ne!(with_bounds, SETTINGS);
+        let problems = check(&with_bounds, LOCK, false);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("`max_players`") && p.contains("bornes")),
+            "{problems:?}"
+        );
+        let with_charset = SETTINGS.replace(
+            "Il nomme aussi le fichier du monde.",
+            "Il nomme aussi le fichier du monde : lettres, chiffres, tiret et souligné seulement.",
+        );
+        assert_ne!(with_charset, SETTINGS);
+        let problems = check(&with_charset, LOCK, false);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("`world_name`") && p.contains("caractères")),
+            "{problems:?}"
+        );
+        // 25 n'est pas 255 : un nombre qui en contient un autre ne compte pas.
+        assert!(!contains_number("de 1 à 2550", 255));
+        // Séparateurs de milliers : espace simple, insécable ou fine.
+        assert!(contains_number("jusqu'à 65 535.", 65535));
+        assert!(contains_number("jusqu'à 65\u{00A0}535.", 65535));
+        assert!(contains_number("jusqu'à 65\u{202F}535.", 65535));
+        assert!(!contains_number("de 1 à 65 5350", 65535));
+        assert!(contains_number("de 1 à 255.", 255));
+    }
+
+    #[test]
+    fn a_changed_content_with_the_same_version_is_refused() {
+        let base = (3, "aaaaaaaaaaaaaaaa");
+        assert!(check_version_against_base("terraria", base, base).is_empty());
+        assert!(check_version_against_base("terraria", base, (4, "bbbbbbbbbbbbbbbb")).is_empty());
+        let problems = check_version_against_base("terraria", base, (3, "bbbbbbbbbbbbbbbb"));
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("augmentez `version`"), "{problems:?}");
     }
 
     #[test]

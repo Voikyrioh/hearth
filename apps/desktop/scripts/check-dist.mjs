@@ -12,6 +12,9 @@ const FORBIDDEN = [
   "Simulation du lien",
   "nas-salon",
   "192.168.1.120",
+  // Rappel du mot de passe du compte simulé (DevPasswordHint) : jamais dans le build livré.
+  "Correct-Horse-9",
+  "Simulateur : le mot de passe",
   // Page de diagnostic du build de test (mode e2e) : jamais dans le build livré.
   "diagnostic-crash",
   "Diagnostic rétabli",

@@ -68,13 +68,15 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   await shoot(page, page, "catalogue-liste");
 
   await page.getByRole("button", { name: "Voir la fiche de Terraria" }).click();
-  await expect(page.locator("[data-fiche-name]")).toHaveText("Terraria");
-  await expect(page.locator("[data-fiche-resources]")).toContainText("Non vérifié");
+  await expect(page.locator("[data-page-title]")).toHaveText("Terraria");
+  await expect(page.locator("[data-fiche-resources] [data-res-none]")).toContainText(
+    "Hearth ne connaît pas les besoins de ce jeu",
+  );
   await expect(page.locator("[data-fiche-page]")).not.toContainText(/compte exig/i);
   await shoot(page, page, "catalogue-fiche");
 
   await page.locator("[data-fiche-install]").click();
-  await expect(page.locator("[data-install-title]")).toHaveText("Installer Terraria");
+  await expect(page.locator("[data-page-title]")).toHaveText("Installer Terraria");
   await expect(page.locator('[data-field="name"] input')).toHaveValue("terraria");
   await page.getByLabel("Mot de passe du serveur").fill("hunter2-jeu");
   await page.getByLabel("Nombre de joueurs").fill("12");
@@ -119,7 +121,7 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   expect(received).toMatchObject({
     name: "terraria",
     fiche: "terraria",
-    version: 2,
+    version: 3,
     ports: [{ id: "game", hostPort: 7777 }],
   });
 });
@@ -197,10 +199,13 @@ test("« Installer avec les valeurs proposées » ouvre aussitôt la fenêtre, e
   await page.locator("[data-fiche-install-proposed]").click();
   const dialog = page.locator("dialog[open]");
   await expect(dialog).toContainText("Vérifiez avant de lancer");
+  // Sans rien avoir saisi, « Retour » ramène à la fiche, d'où l'on vient (revue UX du 24/10, constat 20).
   await dialog.getByRole("button", { name: "Retour" }).click();
+  await expect(page.locator("[data-fiche-page]")).toBeVisible();
+  await page.locator("[data-fiche-install]").click();
   await page.getByLabel("Message d'accueil").fill("Bienvenue");
   await page.locator("[data-install-close]").click();
   await expect(page.locator("dialog[open]")).toContainText("Abandonner votre saisie ?");
   await page.getByRole("button", { name: "Abandonner" }).click();
-  await expect(page.locator("[data-fiche-name]")).toHaveText("Terraria");
+  await expect(page.locator("[data-page-title]")).toHaveText("Terraria");
 });

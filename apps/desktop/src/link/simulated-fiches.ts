@@ -1,6 +1,11 @@
 import { GIB } from "@/resources";
 import type { FicheDetail, FicheQuestion, FicheSetting, FicheTheme } from "./catalog";
-import { TERRARIA_DIGEST, TERRARIA_SETTINGS, TERRARIA_THEMES } from "./simulated-terraria-settings";
+import {
+  TERRARIA_DIGEST,
+  TERRARIA_SETTINGS,
+  TERRARIA_THEMES,
+  TERRARIA_VERSION,
+} from "./simulated-terraria-settings";
 
 /**
  * Les fiches du pont SIMULÉ (navigateur de développement, Vitest, Playwright). Jamais livré (derrière
@@ -48,7 +53,7 @@ export function terraria(): FicheDetail {
       id: "terraria",
       name: "Terraria",
       summary: "Le serveur officiel de Terraria, sans mod.",
-      version: 2,
+      version: TERRARIA_VERSION,
       status: "preview",
       installable: true,
     },
