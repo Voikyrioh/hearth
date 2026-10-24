@@ -48,6 +48,11 @@ const props = withDefaults(
     cancelLabel?: string;
     /** Fenêtre large (640 px), pour un récapitulatif (HRT-69). */
     wide?: boolean;
+    /**
+     * Une question à poser AVANT l'acte, une fois le bouton pressé (le contrat de licence d'une fiche, HRT-102) : `false`
+     * annule l'envoi sans rien perdre (le mot de passe saisi reste dans son champ, rien n'est parti).
+     */
+    beforeSubmit?: () => Promise<boolean>;
     /** Lance l'acte avec le mot de passe saisi (`null` : délai ouvert). */
     perform: (adminPassword: string | null) => Promise<ActReport>;
     /** Le texte d'un refus qui n'est pas celui de la confirmation ; `undefined` : la fenêtre n'en montre pas. */
@@ -60,6 +65,7 @@ const props = withDefaults(
     passwordLabel: undefined,
     cancelLabel: undefined,
     wide: false,
+    beforeSubmit: undefined,
     refusalText: undefined,
   },
 );
@@ -157,6 +163,7 @@ const canSend = computed(
 
 async function submit() {
   if (sending.value) return;
+  if (props.beforeSubmit && !(await props.beforeSubmit())) return;
   error.value = undefined;
   passwordError.value = undefined;
   notice.value = undefined;
