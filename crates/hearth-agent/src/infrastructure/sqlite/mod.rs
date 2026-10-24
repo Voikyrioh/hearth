@@ -308,12 +308,12 @@ fn is_missing_table(error: &sqlx::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn the_closing_gate_waits_at_least_as_long_as_the_database() {
-        assert!(crate::application::closing_gates::CLOSING_GATE_WAIT >= super::BUSY_TIMEOUT);
+        assert!(crate::application::closing_gates::CLOSING_GATE_WAIT >= BUSY_TIMEOUT);
     }
-
-    use super::*;
 
     #[test]
     fn the_database_name_is_the_one_the_purge_knows() {

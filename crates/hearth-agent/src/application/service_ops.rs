@@ -423,7 +423,8 @@ impl ServiceOps {
     /// La porte de clôture d'un service : à tenir AVANT toute transition vers un statut terminal et jusqu'à
     /// la fin de [`Self::publish`] (verrous rendus, projection, annonce). Un client qui a lu l'issue (le
     /// `GET` lit le journal) puis demande l'action suivante n'est ainsi jamais refusé par un état en retard.
-    /// Les transitions non terminales ne la prennent pas. Ne jamais attendre une autre porte en la tenant.
+    /// Les transitions non terminales de ce service ne la prennent pas (l'accès, lui, la prend toujours). Ne
+    /// jamais attendre une autre porte en la tenant.
     pub async fn closing(&self, service: &ServiceKey) -> ClosingGuard {
         self.gates.close(service).await
     }
