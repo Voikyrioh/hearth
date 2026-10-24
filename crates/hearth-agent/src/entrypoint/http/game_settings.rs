@@ -41,12 +41,12 @@ fn settings_error(error: SettingsError) -> ApiError {
         SettingsError::NotFound => not_found(),
         SettingsError::Conflict { by, at } => ApiError(ErrorBody::with_details(
             ErrorCode::SettingsConflict,
-            "Les réglages ont changé depuis que tu les as lus. Relis-les et recommence.",
+            "Les réglages ont changé depuis que vous les avez lus. Relisez-les, puis recommencez.",
             serde_json::json!({ "by": by, "at": at.and_then(|date| super::wire::date(date).ok()) }),
         )),
         SettingsError::FileChanged { ids } => ApiError(ErrorBody::with_details(
             ErrorCode::SettingsFileChanged,
-            "Le fichier de réglages a changé. Relis-le et choisis, réglage par réglage.",
+            "Le fichier de réglages a changé depuis que vous l'avez lu. Relisez-le, puis choisissez, réglage par réglage, ce que vous gardez.",
             serde_json::json!({ "ids": ids }),
         )),
         SettingsError::FileUnreadable { reason, line } => ApiError(ErrorBody::with_details(
@@ -70,12 +70,12 @@ fn settings_error(error: SettingsError) -> ApiError {
         )),
         SettingsError::EffectMismatch => ApiError(ErrorBody::with_details(
             ErrorCode::SettingsConflict,
-            "L'effet annoncé n'est pas celui de ces changements. Relis les réglages et recommence.",
+            "L'effet annoncé n'est pas celui de ces changements. Relisez les réglages, puis recommencez.",
             serde_json::json!({ "reason": "effect" }),
         )),
         SettingsError::Busy => ApiError::new(
             ErrorCode::OperationInProgress,
-            "Une action est en cours sur ce service. Réessaie quand elle est finie.",
+            "Une action est en cours sur ce service. Réessayez quand elle sera finie.",
         ),
         SettingsError::SecretsUnreadable => ApiError::new(
             ErrorCode::InternalError,

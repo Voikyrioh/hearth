@@ -21,10 +21,10 @@ use support::{Env, env};
 
 const SENTINEL: &str = "Sentinelle-use-case-55Rt";
 
-fn request(rev: u32, changes: Vec<(&str, &str)>) -> SaveSettingsRequest {
+fn request(rev: u32, stamp: &str, changes: Vec<(&str, &str)>) -> SaveSettingsRequest {
     SaveSettingsRequest {
         base_rev: rev,
-        file_stamp: None,
+        file_stamp: stamp.to_owned(),
         origin: SaveOrigin::Form,
         effect: SettingEffect::Restart,
         changes: changes
@@ -55,12 +55,19 @@ async fn a_vanished_file_is_recreated_from_the_wanted_values_secret_included_and
     let (state, rig) = bench(&env).await;
     let key = support::game::terraria_service(&env, &rig.safe_fs, 1).await;
     let actor = Actor::command_line();
+    let stamp = state
+        .game_settings
+        .view(&key)
+        .await
+        .unwrap()
+        .file_stamp
+        .unwrap();
     state
         .game_settings
         .save(
             &key,
             &actor,
-            &request(0, vec![("motd", "Bonjour"), ("password", SENTINEL)]),
+            &request(0, &stamp, vec![("motd", "Bonjour"), ("password", SENTINEL)]),
         )
         .await
         .expect("enregistré");
@@ -115,9 +122,16 @@ async fn two_saves_with_the_same_base_revision_cannot_both_win() {
     let (state, rig) = bench(&env).await;
     let key = support::game::terraria_service(&env, &rig.safe_fs, 1).await;
     let actor = Actor::command_line();
+    let stamp = state
+        .game_settings
+        .view(&key)
+        .await
+        .unwrap()
+        .file_stamp
+        .unwrap();
     let (first, second) = (
-        request(0, vec![("motd", "A")]),
-        request(0, vec![("motd", "B")]),
+        request(0, &stamp, vec![("motd", "A")]),
+        request(0, &stamp, vec![("motd", "B")]),
     );
     let (a, b) = tokio::join!(
         state.game_settings.save(&key, &actor, &first),
@@ -147,8 +161,59 @@ async fn a_service_that_is_not_a_game_server_has_no_settings() {
     assert!(matches!(
         state
             .game_settings
-            .save(&key, &Actor::command_line(), &request(0, Vec::new()))
+            .save(&key, &Actor::command_line(), &request(0, "x", Vec::new()))
             .await,
         Err(SettingsError::NotFound)
     ));
+}
+
+#[tokio::test]
+async fn a_second_agent_that_lost_the_race_refuses_and_never_restores_the_file_of_the_winner() {
+    use hearth_agent::application::game_settings::GameSettings;
+    let env = env().await;
+    let (state, rig) = bench(&env).await;
+    let key = support::game::terraria_service(&env, &rig.safe_fs, 1).await;
+    let actor = Actor::command_line();
+    // Deux cas d'usage qui ne partagent pas leur exclusion (deux processus) sur la même base et les mêmes fichiers.
+    let other = GameSettings::new(
+        Arc::new(hearth_agent::application::catalog::CatalogService::embedded(true)),
+        support::game::specs_of(&env),
+        Arc::new(
+            hearth_agent::infrastructure::sqlite::SqliteGameSettingsRepo::new(
+                env.db.pool().clone(),
+            ),
+        ),
+        rig.safe_fs.clone(),
+        Arc::new(hearth_agent::application::service_ops::OpLocks::new()),
+        env.audit_sink.clone(),
+        env.clock.clone(),
+    );
+    let stamp = state
+        .game_settings
+        .view(&key)
+        .await
+        .unwrap()
+        .file_stamp
+        .unwrap();
+    let (first, second) = (
+        request(0, &stamp, vec![("motd", "A")]),
+        request(0, &stamp, vec![("motd", "B")]),
+    );
+    let (a, b) = tokio::join!(
+        state.game_settings.save(&key, &actor, &first),
+        other.save(&key, &actor, &second),
+    );
+    assert!([&a, &b].iter().any(|o| o.is_ok()), "{a:?} {b:?}");
+    for lost in [&a, &b].into_iter().filter(|o| o.is_err()) {
+        assert!(
+            matches!(
+                lost,
+                Err(SettingsError::FileChanged { .. } | SettingsError::Conflict { .. })
+            ),
+            "{lost:?}"
+        );
+    }
+    // Le fichier porte un enregistrement abouti ou celui du perdant, jamais l'ancien contenu remis par-dessus.
+    let file = String::from_utf8(support::game::file_of(&rig.safe_fs, &key)).unwrap();
+    assert!(file.contains("motd=A") || file.contains("motd=B"), "{file}");
 }

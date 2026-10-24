@@ -17,6 +17,7 @@ Hearth ne retouche que la valeur du réglage demandé : tout le reste du fichier
 - `crates/hearth-agent/src/domain/catalog/formats/ (`set` et `unset` ne touchent que leur entrée)`
 - `crates/hearth-agent/src/domain/catalog/settings_state.rs::drift`
 
+- `crates/hearth-agent/src/domain/catalog/settings_state.rs::looks_secret`
 - `crates/hearth-agent/src/domain/catalog/settings_io.rs::plan_save` (HRT-108 : la retouche ne touche que les valeurs demandées ; les « autres réglages » se changent ou se retirent par leur clé)
 - `crates/hearth-agent/src/application/game_settings.rs::GameSettings::view` (HRT-108 : les réglages inconnus sont rendus, la valeur d'un nom qui ressemble à un secret est masquée)
 
@@ -31,7 +32,7 @@ Hearth ne retouche que la valeur du réglage demandé : tout le reste du fichier
 - `crates/hearth-agent/tests/game_settings_https.rs::the_other_settings_of_the_file_can_be_changed_or_removed_and_a_secret_looking_one_is_masked`
 
 ## Cas limites
-- Le masquage à l'affichage (nom qui contient PASSWORD, PASS, SECRET, TOKEN ou KEY) est livré par HRT-108. **Écart avec la spécification** : la valeur d'un réglage inconnu n'est pas copiée « chiffrée » côté serveur, elle ne vit que dans le fichier du jeu (droits `0600`, propriétaire de la fiche) : une seconde copie scellée ne servirait qu'à la divergence. Les gestes d'une restauration, d'un changement de version du jeu et d'une mise à jour de la fiche (versions précédentes de fichier, HRT-110/121) rejouent le même plan et gardent donc l'inconnu.
+- Le masquage à l'affichage (nom qui contient PASS, SECRET, TOKEN ou KEY, sans tenir compte de la casse : `settings_state::looks_secret`, dans le domaine à côté de `drift`) est livré par HRT-108. **Écart avec la spécification** : la valeur d'un réglage inconnu n'est pas copiée « chiffrée » côté serveur, elle ne vit que dans le fichier du jeu (droits `0600`, propriétaire de la fiche) : une seconde copie scellée ne servirait qu'à la divergence. Les gestes d'une restauration, d'un changement de version du jeu et d'une mise à jour de la fiche (versions précédentes de fichier, HRT-110/121) rejouent le même plan et gardent donc l'inconnu.
 
 ## Règles liées
 - BR-FICHE-046, BR-FICHE-048

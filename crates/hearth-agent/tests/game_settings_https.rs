@@ -521,6 +521,32 @@ async fn no_secret_value_is_readable_in_the_database_the_views_or_the_error_bodi
 }
 
 #[tokio::test]
+async fn a_save_without_the_file_stamp_is_refused_with_a_typed_error_and_writes_nothing() {
+    let b = bench().await;
+    let key = b.install().await;
+    let before = b.file(&key);
+    let body = json!({
+        "base_rev": 0, "origin": "form", "effect": "restart",
+        "changes": [Bench::change("motd", "Sans empreinte")]
+    });
+    let reply = b
+        .agent
+        .request("PUT", &Bench::path(&key, "settings"))
+        .token(&b.ada.token)
+        .json(&body)
+        .send()
+        .await;
+    assert_eq!(
+        (reply.status, code(&reply).as_str()),
+        (422, "VALIDATION_ERROR"),
+        "{}",
+        reply.text
+    );
+    assert_eq!(b.file(&key), before);
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_stale_revision_is_a_conflict_and_the_file_is_untouched() {
     let b = bench().await;
     let key = b.install().await;

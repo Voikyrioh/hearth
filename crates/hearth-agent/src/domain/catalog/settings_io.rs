@@ -12,7 +12,7 @@ use super::formats::{ConfigFormat, Refused, Unreadable};
 use super::loading::model::Fiche;
 use super::settings_state::{
     Applied, Change, Context, Drift, Effect, Reason, Refusal, SettingsState, Slot, apply_changes,
-    drift,
+    drift, validate_text,
 };
 use crate::domain::secret::Secret;
 
@@ -45,8 +45,9 @@ pub enum SaveFailure {
 /// Ce qu'un enregistrement fait : l'état à garder, les octets à écrire (ou rien), les secrets à sceller.
 pub struct SavePlan {
     pub state: SettingsState,
-    /// `None` : le fichier ne change pas, rien n'est écrit (BR-FICHE-048).
-    pub file: Option<Vec<u8>>,
+    /// `None` : le fichier ne change pas, rien n'est écrit (BR-FICHE-048). Les octets peuvent porter un mot de passe :
+    /// effacés à la libération.
+    pub file: Option<zeroize::Zeroizing<Vec<u8>>>,
     pub effect: Effect,
     /// Identifiants dont la valeur voulue a changé, et ceux dont on a repris la valeur du fichier.
     pub changed: Vec<String>,
@@ -144,6 +145,12 @@ pub fn plan_save(
         }
         match choices.get(&found.id) {
             Some(DriftChoice::KeepFile) => {
+                // Reprendre la valeur du fichier, c'est la garder comme valeur voulue : elle doit être une valeur
+                // que ce réglage accepte (sinon un enregistrement ou une recréation la refuserait ensuite). Une
+                // valeur invalide ne se reprend pas : « Remettre la mienne » ou un autre choix.
+                if let (Some(setting), Some(value)) = (fiche.setting(&found.id), &found.file) {
+                    validate_text(fiche, setting, value).map_err(SaveFailure::Refused)?;
+                }
                 working = working_with(&working, &found.id, found.file.clone());
                 adopted.push(found.id.clone());
             }
@@ -204,7 +211,7 @@ pub fn plan_save(
     let bytes = if all.is_empty() {
         None
     } else {
-        Some(apply_edits(format, file, &all)?)
+        Some(zeroize::Zeroizing::new(apply_edits(format, file, &all)?))
     };
     Ok(SavePlan {
         state: next,
@@ -225,7 +232,7 @@ impl std::fmt::Debug for SavePlan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SavePlan")
             .field("state", &self.state)
-            .field("file_bytes", &self.file.as_ref().map(Vec::len))
+            .field("file_bytes", &self.file.as_ref().map(|bytes| bytes.len()))
             .field("effect", &self.effect)
             .field("changed", &self.changed)
             .field("adopted", &self.adopted)

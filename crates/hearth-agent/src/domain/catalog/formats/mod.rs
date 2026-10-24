@@ -156,10 +156,24 @@ impl Piece {
     }
 }
 
-/// Un fichier découpé en morceaux. La concaténation des morceaux est le fichier.
+/// Un fichier découpé en morceaux. La concaténation des morceaux est le fichier. Le fichier d'un jeu peut porter un
+/// mot de passe : les octets et les valeurs lues sont effacés de la mémoire à la libération.
 #[derive(Debug, Clone)]
 pub struct Doc {
     pub(crate) pieces: Vec<Piece>,
+}
+
+impl Drop for Doc {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        for piece in &mut self.pieces {
+            piece.bytes.zeroize();
+            if let Some(entry) = &mut piece.entry {
+                entry.key.zeroize();
+                entry.value.zeroize();
+            }
+        }
+    }
 }
 
 impl Doc {

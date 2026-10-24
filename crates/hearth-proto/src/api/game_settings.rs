@@ -103,7 +103,9 @@ pub struct SettingValue {
     /// Imposé par la fiche : affiché, jamais modifiable.
     #[serde(default)]
     pub imposed: bool,
-    /// N'existe plus dans la version du jeu : gardé et grisé, jamais supprimé (BR-FICHE-049).
+    /// N'existe plus dans la version du jeu : gardé et grisé, jamais supprimé (BR-FICHE-049). **Toujours faux tant que
+    /// la version du jeu n'est pas lue** : la lecture de la version installée (repères de journal de la fiche) est
+    /// livrée avec la fiche de 7 Days to Die (HRT-115). Le client ne s'appuie pas sur ce champ avant.
     #[serde(default)]
     pub gone: bool,
     /// Ce qui se passe si on le change.
@@ -133,6 +135,14 @@ pub struct DriftItem {
     /// La valeur lue dans le fichier ; absente : la ligne n'y est pas.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    /// La valeur du fichier est une valeur que le réglage accepte. Faux : « Garder la valeur du fichier » est refusé
+    /// (`SETTING_REFUSED`), seul « Remettre la mienne » ou un autre changement tranche.
+    #[serde(default = "yes")]
+    pub file_valid: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// Un réglage que la fiche ne connaît pas (section « Autres réglages », BR-FICHE-047).
@@ -320,9 +330,9 @@ pub struct DriftChoice {
 pub struct SaveSettingsRequest {
     /// La révision lue avec la vue.
     pub base_rev: u32,
-    /// L'empreinte du fichier lue avec la vue : si le fichier a changé depuis, `SETTINGS_FILE_CHANGED`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub file_stamp: Option<String>,
+    /// L'empreinte du fichier lue avec la vue (`SettingsView::file_stamp`) : OBLIGATOIRE. Si le fichier a changé depuis,
+    /// `SETTINGS_FILE_CHANGED` ; un corps qui ne l'envoie pas est refusé (`422 VALIDATION_ERROR`).
+    pub file_stamp: String,
     pub origin: SaveOrigin,
     /// Ce que le compte s'attend à devoir faire ensuite (signé) ; l'agent le recalcule et refuse s'il diffère.
     pub effect: SettingEffect,
@@ -375,7 +385,7 @@ mod tests {
     fn a_request_never_shows_a_value_in_its_debug_text() {
         let request = SaveSettingsRequest {
             base_rev: 3,
-            file_stamp: None,
+            file_stamp: "ab".into(),
             origin: SaveOrigin::Form,
             effect: SettingEffect::Restart,
             changes: vec![SettingChange {

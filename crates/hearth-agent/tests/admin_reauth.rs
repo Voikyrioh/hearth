@@ -579,10 +579,18 @@ impl Bench {
             ActKind::GameSettingsSave => {
                 self.env.grant_services("marie").await;
                 let key = self.game_service().await;
+                let stamp = self
+                    .state
+                    .game_settings
+                    .view(&hearth_agent::domain::services::ServiceKey::parse(&key).unwrap())
+                    .await
+                    .unwrap()
+                    .file_stamp
+                    .unwrap();
                 Spec::Settings {
                     key,
                     body: json!({
-                        "base_rev": 0, "origin": "form", "effect": "restart",
+                        "base_rev": 0, "file_stamp": stamp, "origin": "form", "effect": "restart",
                         "changes": [{ "id": "motd", "action": "set", "value": "Bonjour" }]
                     }),
                 }

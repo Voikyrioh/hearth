@@ -113,7 +113,7 @@ fn file_of(fiche: &Fiche, state: &SettingsState, overrides: &[(&str, &str)]) -> 
 }
 
 fn text(plan: &SavePlan) -> String {
-    String::from_utf8(plan.file.clone().expect("fichier à écrire")).expect("utf8")
+    String::from_utf8(plan.file.as_ref().expect("fichier à écrire").to_vec()).expect("utf8")
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn an_invented_setting_and_a_comment_survive_every_gesture_of_br_fiche_047() {
         let plan = save(&fiche, &current, Some(&file), &gesture, &[]).expect("enregistré");
         current = plan.state;
         if let Some(bytes) = plan.file {
-            file = bytes;
+            file = bytes.to_vec();
         }
     }
     let out = String::from_utf8(file).expect("utf8");
@@ -357,4 +357,50 @@ fn analysing_pasted_text_judges_each_setting_without_writing_and_counts_the_unkn
         )
         .is_err()
     );
+}
+
+#[test]
+fn a_file_value_the_setting_does_not_accept_is_never_adopted_as_the_wanted_value() {
+    let fiche = terraria();
+    let current = state(&fiche, &[("world_name", "Monde")]);
+    let file = file_of(&fiche, &current, &[("maxplayers", "9999")]);
+    // « Garder la valeur du fichier » : refusé, c'est une valeur que le réglage n'accepte pas.
+    let kept = save(
+        &fiche,
+        &current,
+        Some(&file),
+        &[],
+        &[("max_players", DriftChoice::KeepFile)],
+    );
+    assert!(matches!(
+        kept,
+        Err(SaveFailure::Refused(ref r)) if r.id == "max_players" && r.reason == Reason::Bounds
+    ));
+    // « Remettre la mienne » reste possible : la valeur voulue réécrit la ligne.
+    let mine = save(
+        &fiche,
+        &current,
+        Some(&file),
+        &[],
+        &[("max_players", DriftChoice::KeepMine)],
+    )
+    .expect("choix fait");
+    assert!(text(&mine).contains("maxplayers=8"));
+}
+
+#[test]
+fn a_name_that_looks_like_a_secret_is_recognised_whatever_the_case() {
+    use super::settings_state::looks_secret;
+    for name in [
+        "password",
+        "ADMIN_PASS",
+        "api_token",
+        "Secret_x",
+        "steam_key",
+    ] {
+        assert!(looks_secret(name), "{name}");
+    }
+    for name in ["motd", "maxplayers", "banlist", "worldname"] {
+        assert!(!looks_secret(name), "{name}");
+    }
 }

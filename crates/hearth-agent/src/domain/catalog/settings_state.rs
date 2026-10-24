@@ -622,6 +622,15 @@ pub fn drift(
     (drifts, extras)
 }
 
+/// Le nom d'un réglage que la fiche ne connaît pas ressemble-t-il à un secret ? Sa valeur n'est alors jamais montrée
+/// (BR-FICHE-047) : le nom contient PASS (donc PASSWORD), SECRET, TOKEN ou KEY, sans tenir compte de la casse.
+pub fn looks_secret(key: &str) -> bool {
+    let upper = key.to_ascii_uppercase();
+    ["PASS", "SECRET", "TOKEN", "KEY"]
+        .iter()
+        .any(|word| upper.contains(word))
+}
+
 /// Réglages imposés que le fichier a défaits (aucune écriture : le repère `imposed_broken` du service).
 pub fn imposed_broken(
     fiche: &Fiche,

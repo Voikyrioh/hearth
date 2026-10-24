@@ -20,8 +20,8 @@
 //! nom ressemble à un secret ne sont jamais rendues. Le journal nomme les réglages changés qui ne sont pas des
 //! secrets, jamais une valeur (BR-FICHE-053).
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Arc, Mutex as StdMutex, PoisonError};
 
 use hearth_proto::api::game_settings::{
     AnalyzeRequest, ChangeAction, DriftItem, DriftResolution, FicheRef, FileState, ImportLine,
@@ -33,6 +33,7 @@ use ring::digest;
 use thiserror::Error;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
+use zeroize::Zeroizing;
 
 use super::catalog::CatalogService;
 use super::fiche_install::reason_code;
@@ -53,13 +54,16 @@ use crate::domain::catalog::settings_io::{
 };
 use crate::domain::catalog::settings_state::{
     Change, Context, Effect, InstallContext, Phase, Reason, Refusal, ResolvedValue, SettingsState,
-    Slot, VersionStatus, drift, effect_of, imposed_broken, resolve_install, version_status,
+    Slot, VersionStatus, drift, effect_of, imposed_broken, looks_secret, resolve_install,
+    validate_text, version_status,
 };
 use crate::domain::files::RelPath;
 use crate::domain::sealed::{AnswerId, SealContext, SecretField};
 use crate::domain::secret::Secret;
 use crate::domain::services::deploy::{flatten_target, normalize_target};
-use crate::domain::services::from_fiche::produced_file_perms;
+use crate::domain::services::from_fiche::{
+    generated_secret_id, produced_file_perms, state_of_answers,
+};
 use crate::domain::services::key::ServiceKey;
 use crate::domain::services::spec::{SecretsAccess, SpecBody};
 
@@ -173,7 +177,8 @@ struct FileChannel<'a> {
 
 /// Ce que dit la lecture d'un fichier.
 enum FileRead {
-    Bytes(Vec<u8>),
+    /// Les octets d'un fichier de réglages peuvent porter un mot de passe : effacés à la libération.
+    Bytes(Zeroizing<Vec<u8>>),
     Missing,
     /// Le fichier existe mais ne se lit pas ici (lien, trop gros, fichier spécial...).
     Unsafe,
@@ -191,6 +196,8 @@ struct Loaded<'a> {
     state: SettingsState,
     fingerprint: Option<String>,
     stored: Option<crate::application::ports::StoredSettings>,
+    /// Les secrets de la description, descellés UNE fois par chargement.
+    access: SecretsAccess,
 }
 
 /// Le fichier d'un canal tel qu'il est lu.
@@ -208,20 +215,14 @@ pub struct GameSettings {
     vault: Arc<SecretVault>,
     sink: Arc<dyn super::ports::AuditSink>,
     clock: Arc<dyn Clock>,
-    /// Deux enregistrements ne s'écrasent pas : ils passent l'un après l'autre.
-    saving: Mutex<()>,
+    /// Un verrou d'exclusion PAR SERVICE : le verrou d'écriture de fichier de l'agent est partagé (il laisse passer
+    /// plusieurs écritures de fichiers à la fois), il ne suffit donc pas à garder deux enregistrements de réglages
+    /// l'un derrière l'autre.
+    saving: StdMutex<HashMap<String, Arc<Mutex<()>>>>,
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
     hex(digest::digest(&digest::SHA256, bytes).as_ref())
-}
-
-/// Un nom de réglage inconnu qui ressemble à un secret n'est jamais montré avec sa valeur (BR-FICHE-047).
-fn looks_secret(key: &str) -> bool {
-    let upper = key.to_ascii_uppercase();
-    ["PASSWORD", "PASS", "SECRET", "TOKEN", "KEY"]
-        .iter()
-        .any(|word| upper.contains(word))
 }
 
 fn effect_wire(effect: Effect) -> SettingEffect {
@@ -299,20 +300,13 @@ fn complete(fiche: &Fiche, mut state: SettingsState) -> SettingsState {
     state
 }
 
-/// L'état de l'installation, relu de la description durable.
+/// L'état de l'installation, relu de la description durable (le domaine remplit et relit les réponses au même endroit).
 fn state_from_answers(fiche: &Fiche, body: &SpecBody) -> SettingsState {
-    let mut slots = BTreeMap::new();
-    if let Some(spec) = &body.fiche {
-        for answer in &spec.answers {
-            let slot = match (answer.secret, &answer.value) {
-                (true, _) => Slot::Secret,
-                (false, Some(value)) => Slot::Value(value.clone()),
-                (false, None) => Slot::Unwritten,
-            };
-            slots.insert(answer.id.clone(), slot);
-        }
-    }
-    complete(fiche, SettingsState::from_slots(slots))
+    let answers = body
+        .fiche
+        .as_ref()
+        .map_or(&[][..], |f| f.answers.as_slice());
+    complete(fiche, state_of_answers(fiche, answers))
 }
 
 /// Les ports du serveur de ce service, par identifiant de port de la fiche.
@@ -397,8 +391,14 @@ impl GameSettings {
             vault,
             sink,
             clock,
-            saving: Mutex::new(()),
+            saving: StdMutex::new(HashMap::new()),
         })
+    }
+
+    /// Le verrou d'exclusion de ce service.
+    fn serial(&self, key: &ServiceKey) -> Arc<Mutex<()>> {
+        let mut map = self.saving.lock().unwrap_or_else(PoisonError::into_inner);
+        Arc::clone(map.entry(key.as_str().to_owned()).or_default())
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -406,7 +406,7 @@ impl GameSettings {
     // -------------------------------------------------------------------------------------------------
 
     async fn load(&self, key: &ServiceKey) -> Result<Loaded<'_>, SettingsError> {
-        let Some((revision, _access)) = self.specs.read(key, None).await? else {
+        let Some((revision, access)) = self.specs.read(key, None).await? else {
             return Err(SettingsError::NotFound);
         };
         let body = revision.body;
@@ -437,6 +437,7 @@ impl GameSettings {
             state,
             fingerprint,
             stored,
+            access,
         })
     }
 
@@ -451,7 +452,7 @@ impl GameSettings {
         .await
         .map_err(|error| SettingsError::Storage(error.to_string()))?;
         Ok(match result {
-            Ok(bytes) => FileRead::Bytes(bytes),
+            Ok(bytes) => FileRead::Bytes(Zeroizing::new(bytes)),
             Err(FsError::NotFound) => FileRead::Missing,
             Err(_) => FileRead::Unsafe,
         })
@@ -461,13 +462,13 @@ impl GameSettings {
         &self,
         key: &ServiceKey,
         rel: &RelPath,
-        bytes: Vec<u8>,
+        bytes: &[u8],
         perms: Perms,
     ) -> Result<(), SettingsError> {
         let fs = Arc::clone(&self.fs);
         let key = key.clone();
         let rel = rel.clone();
-        let bytes = zeroize::Zeroizing::new(bytes);
+        let bytes = Zeroizing::new(bytes.to_vec());
         tokio::task::spawn_blocking(move || {
             let root = fs.open_service_root(&key)?;
             root.write_atomic(&rel, &bytes, perms)
@@ -493,25 +494,32 @@ impl GameSettings {
     }
 
     /// L'empreinte de l'ensemble des fichiers de réglages : un fichier absent et un fichier vide diffèrent.
-    fn fingerprint(files: &[ChannelFile]) -> String {
+    fn fingerprint<'f>(
+        files: impl IntoIterator<Item = (&'f str, Option<&'f FileRead>, Option<&'f [u8]>)>,
+    ) -> String {
         let mut all = Vec::new();
-        for file in files {
-            all.extend_from_slice(
-                &u16::try_from(file.id.len())
-                    .unwrap_or(u16::MAX)
-                    .to_be_bytes(),
-            );
-            all.extend_from_slice(file.id.as_bytes());
-            match &file.read {
-                FileRead::Bytes(bytes) => {
+        for (id, read, replaced) in files {
+            all.extend_from_slice(&u16::try_from(id.len()).unwrap_or(u16::MAX).to_be_bytes());
+            all.extend_from_slice(id.as_bytes());
+            match (replaced, read) {
+                (Some(bytes), _) => {
                     all.push(b'f');
                     all.extend_from_slice(sha256_hex(bytes).as_bytes());
                 }
-                FileRead::Missing => all.push(b'm'),
-                FileRead::Unsafe => all.push(b'u'),
+                (None, Some(FileRead::Bytes(bytes))) => {
+                    all.push(b'f');
+                    all.extend_from_slice(sha256_hex(bytes).as_bytes());
+                }
+                (None, Some(FileRead::Missing) | None) => all.push(b'm'),
+                (None, Some(FileRead::Unsafe)) => all.push(b'u'),
             }
         }
         sha256_hex(&all)
+    }
+
+    /// L'empreinte des fichiers tels qu'ils ont été lus.
+    fn stamp_of(files: &[ChannelFile]) -> String {
+        Self::fingerprint(files.iter().map(|f| (f.id.as_str(), Some(&f.read), None)))
     }
 
     /// Les réglages d'un serveur de jeu : valeurs voulues, état du fichier, écarts, réglages inconnus (BR-FICHE-047,
@@ -549,6 +557,12 @@ impl GameSettings {
                     .into_iter()
                     .filter(|d| Self::is_decidable(fiche, d))
                     .map(|d| DriftItem {
+                        file_valid: match (&d.file, fiche.setting(&d.id)) {
+                            (Some(value), Some(setting)) => {
+                                validate_text(fiche, setting, value).is_ok()
+                            }
+                            _ => true,
+                        },
                         id: d.id,
                         hearth: d.hearth,
                         file: d.file,
@@ -576,7 +590,7 @@ impl GameSettings {
             loaded.variant.as_deref(),
         );
         let broken = imposed_broken(fiche, &resolved, &entries_by_channel);
-        let stamp = Self::fingerprint(&files);
+        let stamp = Self::stamp_of(&files);
         let file_changed = loaded
             .fingerprint
             .as_ref()
@@ -596,7 +610,8 @@ impl GameSettings {
             file_state,
             file_stamp: Some(stamp),
             file_changed,
-            raw_edit: channels.iter().all(|c| c.channel.raw_edit.unwrap_or(false)),
+            raw_edit: !channels.is_empty()
+                && channels.iter().all(|c| c.channel.raw_edit.unwrap_or(false)),
             settings,
             drifts,
             others,
@@ -621,6 +636,8 @@ impl GameSettings {
             value,
             frozen: setting.change == ChangeWhen::WorldCreation,
             imposed: setting.imposed.is_some(),
+            // La version du jeu n'est pas lue (HRT-115) : `version_status` ne dit « disparu » que pour une version connue,
+            // donc ce champ vaut faux tant que la lecture de la version n'est pas branchée.
             gone: version_status(setting, None) == VersionStatus::Gone,
             effect: effect_wire(effect_of(fiche, setting)),
         }
@@ -725,7 +742,8 @@ impl GameSettings {
         {
             return Err(SettingsError::Invalid("size"));
         }
-        let _serial = self.saving.lock().await;
+        let serial = self.serial(key);
+        let _serial = serial.lock().await;
         let _lock = SettingsLock::take(&self.locks, key).map_err(|()| SettingsError::Busy)?;
         let loaded = self.load(key).await?;
         let fiche = loaded.fiche;
@@ -737,7 +755,7 @@ impl GameSettings {
         }
         let channels = file_channels(fiche);
         let files = self.read_files(key, &channels).await?;
-        let stamp = Self::fingerprint(&files);
+        let stamp = Self::stamp_of(&files);
 
         // Les changements : chacun vers son canal. Un réglage reçu par variable ou argument se recrée.
         let mut per_channel: BTreeMap<String, Vec<(String, Change)>> = BTreeMap::new();
@@ -839,10 +857,7 @@ impl GameSettings {
         let ctx = Self::context(&loaded);
 
         // Le fichier a changé depuis la lecture du client : rien n'est écrit, il relit et tranche.
-        let stamp_moved = request
-            .file_stamp
-            .as_ref()
-            .is_some_and(|expected| *expected != stamp);
+        let stamp_moved = request.file_stamp != stamp;
 
         // Un plan par canal fichier, l'état passant de l'un à l'autre. Rien n'est écrit avant que tous soient bons.
         let mut state = loaded.state.clone();
@@ -937,41 +952,44 @@ impl GameSettings {
             }
         }
 
-        // Les fichiers : écrits l'un après l'autre, repris en arrière si l'un échoue.
-        let mut after: Vec<ChannelFile> = files
-            .iter()
-            .map(|f| ChannelFile {
-                id: f.id.clone(),
-                read: match &f.read {
-                    FileRead::Bytes(b) => FileRead::Bytes(b.clone()),
-                    FileRead::Missing => FileRead::Missing,
-                    FileRead::Unsafe => FileRead::Unsafe,
-                },
-            })
-            .collect();
+        // Le fichier a-t-il bougé depuis le plan ? Il est relu JUSTE avant l'écriture et comparé à l'empreinte du plan :
+        // un fichier réécrit entre-temps ne se recouvre pas (ADR-0051 point 5). Rien n'est alors écrit.
+        if any_file {
+            let again = self.read_files(key, &channels).await?;
+            if Self::stamp_of(&again) != stamp {
+                return Err(SettingsError::FileChanged { ids: Vec::new() });
+            }
+        }
+        // Les fichiers : écrits l'un après l'autre. Si l'un échoue, les précédents ne sont remis que s'ils portent
+        // encore exactement ce que cet enregistrement y a écrit : jamais par-dessus le travail d'un autre.
         let mut written: Vec<usize> = Vec::new();
         for (index, plan) in &plans {
             let Some(bytes) = &plan.file else { continue };
             let channel = &channels[*index];
             if let Err(error) = self
-                .write_file(key, &channel.rel, bytes.clone(), channel.perms)
+                .write_file(key, &channel.rel, bytes, channel.perms)
                 .await
             {
-                for done in written {
-                    let before = &files[done];
-                    if let FileRead::Bytes(old) = &before.read {
-                        let target = &channels[done];
-                        let _ = self
-                            .write_file(key, &target.rel, old.clone(), target.perms)
-                            .await;
-                    }
+                for done in &written {
+                    self.restore_if_ours(key, &channels[*done], &files[*done].read, &plans, *done)
+                        .await;
                 }
                 return Err(error);
             }
             written.push(*index);
-            after[*index].read = FileRead::Bytes(bytes.clone());
         }
-        let new_stamp = Self::fingerprint(&after);
+        let replaced = |index: usize| {
+            plans
+                .iter()
+                .find(|(i, _)| *i == index)
+                .and_then(|(_, plan)| plan.file.as_ref().map(|b| b.as_slice()))
+        };
+        let new_stamp = Self::fingerprint(
+            files
+                .iter()
+                .enumerate()
+                .map(|(i, f)| (f.id.as_str(), Some(&f.read), replaced(i))),
+        );
 
         let rev = match self
             .repo
@@ -987,18 +1005,10 @@ impl GameSettings {
             .await
         {
             Ok(rev) => rev,
-            Err(SettingsStoreError::Conflict { by, at, .. }) => {
-                // Le fichier est déjà écrit : une autre écriture a gagné la course malgré le verrou (un autre
-                // agent sur la même base). L'ancien contenu est remis.
-                for done in written {
-                    if let FileRead::Bytes(old) = &files[done].read {
-                        let target = &channels[done];
-                        let _ = self
-                            .write_file(key, &target.rel, old.clone(), target.perms)
-                            .await;
-                    }
-                }
-                return Err(SettingsError::Conflict { by, at });
+            // Une autre écriture a gagné la course : son fichier est déjà là et rien n'est remis par-dessus. Le
+            // client relit, voit l'écart éventuel et tranche.
+            Err(SettingsStoreError::Conflict { .. }) => {
+                return Err(SettingsError::FileChanged { ids: Vec::new() });
             }
             Err(SettingsStoreError::Store(error)) => return Err(error.into()),
         };
@@ -1011,6 +1021,31 @@ impl GameSettings {
             changed: u32::try_from(changed.len() + request.others.len()).unwrap_or(u32::MAX),
             adopted,
         })
+    }
+
+    /// Remet l'ancien contenu d'un canal, mais seulement si le fichier porte encore ce que cet enregistrement y a écrit.
+    async fn restore_if_ours(
+        &self,
+        key: &ServiceKey,
+        channel: &FileChannel<'_>,
+        before: &FileRead,
+        plans: &[(usize, SavePlan)],
+        index: usize,
+    ) {
+        let (FileRead::Bytes(old), Some(ours)) = (
+            before,
+            plans
+                .iter()
+                .find(|(i, _)| *i == index)
+                .and_then(|(_, plan)| plan.file.as_ref()),
+        ) else {
+            return;
+        };
+        if let Ok(FileRead::Bytes(now)) = self.read_file(key, &channel.rel).await
+            && now.as_slice() == ours.as_slice()
+        {
+            let _ = self.write_file(key, &channel.rel, old, channel.perms).await;
+        }
     }
 
     fn account_of(actor: &Actor) -> String {
@@ -1030,7 +1065,11 @@ impl GameSettings {
         secrets: &[(String, Secret)],
         others: &[hearth_proto::api::game_settings::OtherChange],
     ) {
-        let Some(service) = ClientName::parse(&loaded.name) else {
+        // Un enregistrement va TOUJOURS au journal (BR-FICHE-053) : si le nom du service ne se nettoie pas en un nom
+        // affichable, la clé du service (`h_...`, toujours affichable) le remplace.
+        let Some(service) =
+            ClientName::parse(&loaded.name).or_else(|| ClientName::parse(loaded.key.as_str()))
+        else {
             return;
         };
         let names: Vec<ClientName> = changed
@@ -1073,7 +1112,8 @@ impl GameSettings {
         key: &ServiceKey,
         actor: &Actor,
     ) -> Result<Vec<String>, SettingsError> {
-        let _serial = self.saving.lock().await;
+        let serial = self.serial(key);
+        let _serial = serial.lock().await;
         let _lock = SettingsLock::take(&self.locks, key).map_err(|()| SettingsError::Busy)?;
         let loaded = self.load(key).await?;
         let fiche = loaded.fiche;
@@ -1088,7 +1128,7 @@ impl GameSettings {
         if missing.is_empty() {
             return Ok(Vec::new());
         }
-        let secrets = self.secret_values(&loaded).await?;
+        let (secrets, generated) = self.spec_secrets(&loaded).await?;
         let mut answers: BTreeMap<String, String> = BTreeMap::new();
         for (id, slot) in loaded.state.iter() {
             match slot {
@@ -1106,7 +1146,6 @@ impl GameSettings {
         // Un réglage imposé se recalcule ; il n'est jamais une réponse.
         answers.retain(|id, _| fiche.setting(id).is_some_and(|s| s.imposed.is_none()));
         let ports = host_ports(fiche, &loaded.body);
-        let generated = self.generated_secrets(&loaded).await?;
         let resolved = resolve_install(
             fiche,
             &InstallContext {
@@ -1150,12 +1189,13 @@ impl GameSettings {
                 .format
                 .create(&pairs)
                 .map_err(|_| SettingsError::Invalid("value"))?;
-            self.write_file(key, &channel.rel, bytes.clone(), channel.perms)
+            let bytes = Zeroizing::new(bytes);
+            self.write_file(key, &channel.rel, &bytes, channel.perms)
                 .await?;
             after[index].read = FileRead::Bytes(bytes);
             recreated.push(channel.channel.id.clone());
         }
-        let stamp = Self::fingerprint(&after);
+        let stamp = Self::stamp_of(&after);
         let sealed = loaded
             .stored
             .as_ref()
@@ -1179,21 +1219,32 @@ impl GameSettings {
         Ok(recreated)
     }
 
-    /// Les valeurs des secrets de réglage : celles changées depuis l'installation (scellées dans `game_setting_secrets`),
-    /// sinon les réponses secrètes de l'installation (scellées dans la description).
-    async fn secret_values(
+    /// Les secrets de la description et ceux changés depuis, descellés : les valeurs des réglages secrets (celles
+    /// changées depuis l'installation priment sur les réponses de l'installation) et les secrets tirés par l'agent à
+    /// l'installation (`gen-<id>`, pour les réglages imposés qui en dérivent). La description n'est descellée qu'UNE
+    /// fois, au chargement (`Loaded::access`).
+    async fn spec_secrets(
         &self,
         loaded: &Loaded<'_>,
-    ) -> Result<BTreeMap<String, Secret>, SettingsError> {
-        let mut found: BTreeMap<String, Secret> = BTreeMap::new();
-        if let Some((_, SecretsAccess::Opened(secrets))) =
-            self.specs.read(&loaded.key, None).await?
-        {
-            for entry in secrets.answers {
-                found.insert(
-                    entry.id.as_str().to_owned(),
-                    Secret::new(entry.value.expose().to_owned()),
-                );
+    ) -> Result<(BTreeMap<String, Secret>, BTreeMap<String, Secret>), SettingsError> {
+        let mut settings: BTreeMap<String, Secret> = BTreeMap::new();
+        let mut generated: BTreeMap<String, Secret> = BTreeMap::new();
+        match &loaded.access {
+            SecretsAccess::Opened(secrets) => {
+                for entry in &secrets.answers {
+                    let value = Secret::new(entry.value.expose().to_owned());
+                    match generated_secret_id(entry.id.as_str()) {
+                        Some(id) => {
+                            generated.insert(id.to_owned(), value);
+                        }
+                        None => {
+                            settings.insert(entry.id.as_str().to_owned(), value);
+                        }
+                    }
+                }
+            }
+            SecretsAccess::Unreadable(_) | SecretsAccess::Tampered => {
+                return Err(SettingsError::SecretsUnreadable);
             }
         }
         if let Some(stored) = &loaded.stored
@@ -1215,31 +1266,9 @@ impl GameSettings {
                     .map_err(|_| SettingsError::SecretsUnreadable)?;
                 let text = String::from_utf8(plain.expose().to_vec())
                     .map_err(|_| SettingsError::SecretsUnreadable)?;
-                found.insert(id.clone(), Secret::new(text));
+                settings.insert(id.clone(), Secret::new(text));
             }
         }
-        Ok(found)
-    }
-
-    /// Les secrets tirés par l'agent à l'installation (`gen-<id>`), pour les réglages imposés qui en dérivent.
-    async fn generated_secrets(
-        &self,
-        loaded: &Loaded<'_>,
-    ) -> Result<BTreeMap<String, Secret>, SettingsError> {
-        let mut found = BTreeMap::new();
-        if let Some((_, SecretsAccess::Opened(secrets))) =
-            self.specs.read(&loaded.key, None).await?
-        {
-            for entry in secrets.answers {
-                if let Some(id) = entry
-                    .id
-                    .as_str()
-                    .strip_prefix(crate::domain::services::from_fiche::GENERATED_PREFIX)
-                {
-                    found.insert(id.to_owned(), Secret::new(entry.value.expose().to_owned()));
-                }
-            }
-        }
-        Ok(found)
+        Ok((settings, generated))
     }
 }

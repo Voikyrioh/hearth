@@ -1107,7 +1107,7 @@ mod tests {
         };
         let request = |changes: Vec<SettingChange>, value: &str| SaveSettingsRequest {
             base_rev: 4,
-            file_stamp: None,
+            file_stamp: "ab".into(),
             origin: SaveOrigin::Form,
             effect: SettingEffect::Restart,
             changes,

@@ -1425,6 +1425,13 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     .await;
     // Un serveur de jeu installé depuis la fiche de Terraria, dont on enregistre les réglages (HRT-108).
     let game_key = support::game::terraria_service(&env, &deploy_rig.safe_fs, 1).await;
+    let game_stamp = state
+        .game_settings
+        .view(&game_key)
+        .await
+        .unwrap()
+        .file_stamp
+        .unwrap();
     // Deux opérations de service dans le journal (HRT-144) : une qu'on annulera, une qui attend une décision.
     let (cancel_op, decide_op) = {
         use hearth_agent::application::service_ops::AcceptRequest;
@@ -1714,7 +1721,7 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                     Method::PUT,
                     &format!("/services/{}/settings", game_key.as_str()),
                     json!({
-                        "base_rev": 0, "origin": "form", "effect": "restart",
+                        "base_rev": 0, "file_stamp": game_stamp, "origin": "form", "effect": "restart",
                         "changes": [{ "id": "motd", "action": "set", "value": "Bonjour" }]
                     }),
                 )
