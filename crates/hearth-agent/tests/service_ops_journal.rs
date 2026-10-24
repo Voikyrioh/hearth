@@ -12,13 +12,17 @@ mod audit;
 #[path = "support/tmp.rs"]
 mod tmp;
 
+#[path = "support/fake_engine.rs"]
+mod fake_engine;
+
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use hearth_agent::application::ports::{
-    Clock, CreatedObjects, IdGen, JournalError, OpJournal, OpRecord, Progress, ServiceObserver,
+    Clock, CreatedObjects, DecisionOffer, IdGen, JournalError, NewOp, OpJournal, OpRecord,
+    Progress, ServiceObserver, StepGuard, Store, StoreError, UnitOfWork,
 };
 use hearth_agent::application::service_ops::{
     AcceptRequest, CancelOutcome, OpError, OpLocks, ServiceOps,
@@ -379,6 +383,485 @@ async fn the_unique_index_is_the_belt_when_the_memory_lock_has_a_defect() {
         .locks()
         .with(|table| assert_eq!(table.held_services(), 0));
     assert_eq!(status(&env, &first).await.status, OpStatus::Accepted);
+}
+
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+// La fenêtre entre le commit d'une clôture et la fin de sa publication, tenue ouverte à volonté : la clôture
+// s'arrête APRÈS son commit (verrou et projection encore « occupés »), prévient le test (`committed`) et
+// attend sa reprise (`resume`). Aucun sommeil.
+struct Window {
+    armed: std::sync::atomic::AtomicBool,
+    committed: tokio::sync::Notify,
+    resume: tokio::sync::Notify,
+}
+
+impl Window {
+    async fn park_if_armed(&self) {
+        if self.armed.swap(false, Ordering::SeqCst) {
+            self.committed.notify_one();
+            self.resume.notified().await;
+        }
+    }
+}
+
+/// Le journal : une transition terminale qui s'arrête dans la fenêtre (le chemin de `move_to`).
+struct SlowJournal {
+    inner: Arc<SqliteOpJournal>,
+    window: Arc<Window>,
+}
+
+#[async_trait]
+impl OpJournal for SlowJournal {
+    async fn insert(&self, op: &NewOp) -> Result<(), JournalError> {
+        self.inner.insert(op).await
+    }
+    async fn get(&self, id: &str) -> Result<Option<OpRecord>, StoreError> {
+        self.inner.get(id).await
+    }
+    async fn unfinished(&self) -> Result<Vec<OpRecord>, StoreError> {
+        self.inner.unfinished().await
+    }
+    async fn steps(&self, id: &str) -> Result<Vec<StepRecord>, StoreError> {
+        self.inner.steps(id).await
+    }
+    async fn append_step(
+        &self,
+        id: &str,
+        step: &StepName,
+        state: StepState,
+        undo: &UndoInfo,
+        at: OffsetDateTime,
+        durable: bool,
+        guard: StepGuard,
+    ) -> Result<u32, JournalError> {
+        self.inner
+            .append_step(id, step, state, undo, at, durable, guard)
+            .await
+    }
+    async fn transition(
+        &self,
+        id: &str,
+        from: OpStatus,
+        to: OpStatus,
+        cause: Option<Cause>,
+        decision: Option<&DecisionOffer>,
+        at: OffsetDateTime,
+    ) -> Result<(), JournalError> {
+        self.inner
+            .transition(id, from, to, cause, decision, at)
+            .await?;
+        if to.is_terminal() {
+            self.window.park_if_armed().await;
+        }
+        Ok(())
+    }
+    async fn set_progress(
+        &self,
+        id: &str,
+        progress: &Progress,
+        at: OffsetDateTime,
+    ) -> Result<(), JournalError> {
+        self.inner.set_progress(id, progress, at).await
+    }
+    async fn mark_forced(&self, id: &str, at: OffsetDateTime) -> Result<(), JournalError> {
+        self.inner.mark_forced(id, at).await
+    }
+    async fn annotate_cause(
+        &self,
+        id: &str,
+        cause: Cause,
+        at: OffsetDateTime,
+    ) -> Result<bool, JournalError> {
+        self.inner.annotate_cause(id, cause, at).await
+    }
+    async fn expired_decisions(
+        &self,
+        older_than: OffsetDateTime,
+    ) -> Result<Vec<OpRecord>, StoreError> {
+        self.inner.expired_decisions(older_than).await
+    }
+    async fn purge_finished(&self, before: OffsetDateTime) -> Result<u64, StoreError> {
+        self.inner.purge_finished(before).await
+    }
+    async fn prune_finished_beyond(&self, keep: u32) -> Result<u64, StoreError> {
+        self.inner.prune_finished_beyond(keep).await
+    }
+    async fn recent_finished(&self, limit: u32) -> Result<Vec<OpRecord>, StoreError> {
+        self.inner.recent_finished(limit).await
+    }
+}
+
+/// Le magasin : un commit qui s'arrête dans la fenêtre (le chemin de `close` / `finish_with`, celui du bug).
+struct SlowStore {
+    inner: Arc<dyn Store>,
+    window: Arc<Window>,
+}
+
+#[async_trait]
+impl Store for SlowStore {
+    async fn begin(&self) -> Result<Box<dyn UnitOfWork>, StoreError> {
+        Ok(Box::new(SlowTx {
+            inner: self.inner.begin().await?,
+            window: self.window.clone(),
+        }))
+    }
+}
+
+struct SlowTx {
+    inner: Box<dyn UnitOfWork>,
+    window: Arc<Window>,
+}
+
+#[async_trait]
+impl UnitOfWork for SlowTx {
+    fn accounts(&mut self) -> &mut dyn hearth_agent::application::ports::AccountTx {
+        self.inner.accounts()
+    }
+    fn services_right(&mut self) -> &mut dyn hearth_agent::application::ports::ServicesRightTx {
+        self.inner.services_right()
+    }
+    fn adoptions(&mut self) -> &mut dyn hearth_agent::application::ports::AdoptionTx {
+        self.inner.adoptions()
+    }
+    fn service_ops(&mut self) -> &mut dyn hearth_agent::application::ports::ServiceOpTx {
+        self.inner.service_ops()
+    }
+    fn sessions(&mut self) -> &mut dyn hearth_agent::application::ports::SessionTx {
+        self.inner.sessions()
+    }
+    fn login_attempts(&mut self) -> &mut dyn hearth_agent::application::ports::LoginAttemptTx {
+        self.inner.login_attempts()
+    }
+    fn known_addresses(&mut self) -> &mut dyn hearth_agent::application::ports::KnownAddressTx {
+        self.inner.known_addresses()
+    }
+    fn devices(&mut self) -> &mut dyn hearth_agent::application::ports::DeviceTx {
+        self.inner.devices()
+    }
+    fn attack_mode(&mut self) -> &mut dyn hearth_agent::application::ports::AttackModeTx {
+        self.inner.attack_mode()
+    }
+    fn operations(&mut self) -> &mut dyn hearth_agent::application::ports::OperationTx {
+        self.inner.operations()
+    }
+    fn audit(&mut self) -> &mut dyn hearth_agent::application::ports::AuditTx {
+        self.inner.audit()
+    }
+    async fn commit(self: Box<Self>) -> Result<(), StoreError> {
+        let this = *self;
+        this.inner.commit().await?;
+        this.window.park_if_armed().await;
+        Ok(())
+    }
+}
+
+/// Un registre de services sans service : `ServiceOpAccess` n'en a besoin que pour juger la visibilité.
+fn empty_registry(
+    clock: Arc<dyn Clock>,
+) -> Arc<hearth_agent::application::services::ServicesRegistry> {
+    use hearth_agent::application::ports::{HostDescription, HostEnvironment, MonotonicClock};
+    struct Host;
+    impl HostEnvironment for Host {
+        fn describe(&self) -> HostDescription {
+            HostDescription {
+                os_id: "debian".into(),
+                os_like: vec![],
+                systemd: true,
+                declarative: false,
+                agent_account: "root".into(),
+                agent_is_admin: true,
+            }
+        }
+    }
+    struct Mono;
+    impl MonotonicClock for Mono {
+        fn elapsed(&self) -> Duration {
+            Duration::ZERO
+        }
+    }
+    hearth_agent::application::services::ServicesRegistry::new(
+        Arc::new(fake_engine::FakeEngine::new()),
+        &Host,
+        clock,
+        Arc::new(Mono),
+        true,
+        hearth_agent::application::services::EngineTimings::production(),
+    )
+}
+
+enum Via {
+    /// `finish` : la transaction du journal des opérations et de l'activité (`close`).
+    Close,
+    /// `cancel` d'une opération acceptée : `move_to`.
+    Move,
+    /// Le balayage : une décision restée sans réponse expire.
+    Expire,
+    /// `DELETE` d'une opération acceptée, par `ServiceOpAccess` (transaction + entrée du journal d'activité).
+    AccessCancel,
+    /// « Annuler » répondu à une décision en attente, par `ServiceOpAccess`.
+    AccessDecide,
+}
+
+struct Parked {
+    ops: Arc<ServiceOps>,
+    window: Arc<Window>,
+    /// L'opération en cours de clôture, sur le service 1.
+    id: String,
+    closer: tokio::task::JoinHandle<()>,
+    env: Env,
+}
+
+/// Une opération sur le service 1 dont la clôture est arrêtée après son commit : le journal dit « terminé »,
+/// le verrou et la projection disent encore « occupé ».
+async fn parked_closing(via: Via) -> Parked {
+    parked_closing_with(via, None).await
+}
+
+/// Comme [`parked_closing`], avec une échéance de porte choisie (l'échéance ne coûte pas l'horloge réelle).
+async fn parked_closing_with(via: Via, wait: Option<std::time::Duration>) -> Parked {
+    let env = Env::new().await;
+    let window = Arc::new(Window {
+        armed: std::sync::atomic::AtomicBool::new(false),
+        committed: tokio::sync::Notify::new(),
+        resume: tokio::sync::Notify::new(),
+    });
+    let journal = Arc::new(SlowJournal {
+        inner: env.journal.clone(),
+        window: window.clone(),
+    });
+    let (store, trail) = audit::audit_parts(&env.db, env.clock.clone());
+    let store: Arc<dyn Store> = Arc::new(SlowStore {
+        inner: store,
+        window: window.clone(),
+    });
+    let objects = Arc::new(FsCreatedObjects::new([
+        (ObjectRoot::Backups, env.dir.path().join("backups")),
+        (ObjectRoot::Staging, env.dir.path().join("staging")),
+    ]));
+    let mut built = ServiceOps::new(
+        journal as Arc<dyn OpJournal>,
+        Arc::new(OpLocks::new()),
+        env.clock.clone(),
+        env.ids.clone(),
+        objects,
+        store.clone(),
+        trail.clone(),
+    );
+    if let Some(wait) = wait {
+        built = built.with_closing_wait(wait);
+    }
+    let ops = Arc::new(built);
+    let access = hearth_agent::application::service_op_access::ServiceOpAccess::new(
+        ops.clone(),
+        empty_registry(env.clock.clone()),
+        store,
+        env.clock.clone(),
+        trail,
+    );
+    let id = ops
+        .accept(request(service(1), OpKind::Update))
+        .await
+        .unwrap();
+    if matches!(via, Via::Close | Via::Expire | Via::AccessDecide) {
+        ops.start(&id).await.unwrap();
+    }
+    if matches!(via, Via::Expire | Via::AccessDecide) {
+        ops.ask_decision(&id, &[Choice::Continue, Choice::Cancel])
+            .await
+            .unwrap();
+    }
+    if matches!(via, Via::Expire) {
+        env.clock.advance(Duration::minutes(16));
+    }
+    window.armed.store(true, Ordering::SeqCst);
+    let closer = {
+        let (ops, id) = (ops.clone(), id.clone());
+        tokio::spawn(async move {
+            let actor = hearth_agent::domain::audit::Actor::system();
+            let viewer = hearth_agent::application::service_op_access::Viewer {
+                may_manage_services: true,
+            };
+            match via {
+                Via::Close => ops.finish(&id, OpStatus::Succeeded, None).await.unwrap(),
+                Via::Move => {
+                    ops.cancel(&id).await.unwrap();
+                }
+                Via::Expire => {
+                    assert_eq!(ops.sweep().await.unwrap().expired, 1);
+                }
+                Via::AccessCancel => {
+                    assert!(access.cancel(&id, &actor, viewer).await.is_ok());
+                }
+                Via::AccessDecide => {
+                    assert!(
+                        access
+                            .decide(&id, Choice::Cancel, &actor, viewer)
+                            .await
+                            .is_ok()
+                    );
+                }
+            }
+        })
+    };
+    window.committed.notified().await;
+    assert!(status(&env, &id).await.status.is_terminal());
+    Parked {
+        ops,
+        window,
+        id,
+        closer,
+        env,
+    }
+}
+
+/// Laisse les autres tâches avancer tant qu'elles le peuvent : une tâche qui attend la porte ne finit pas.
+async fn let_others_run() {
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+}
+
+impl Parked {
+    async fn release(self) -> Env {
+        self.window.resume.notify_one();
+        self.closer.await.unwrap();
+        self.env
+    }
+}
+
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+#[tokio::test]
+async fn a_request_waits_for_the_closing_then_sees_the_service_free_through_close() {
+    let p = parked_closing(Via::Close).await;
+    let key = service(1);
+    let judged = {
+        let ops = p.ops.clone();
+        tokio::spawn(async move {
+            // Le chemin `ServiceLifecycle::request` : attendre la porte, puis juger « occupé ».
+            ops.wait_closed(&key).await;
+            ops.busy(&key)
+        })
+    };
+    let accepted = {
+        let ops = p.ops.clone();
+        tokio::spawn(async move { ops.accept(request(service(1), OpKind::Stop)).await })
+    };
+    let_others_run().await;
+    assert!(!judged.is_finished() && !accepted.is_finished());
+    let ops = p.ops.clone();
+    let _env = p.release().await;
+    assert_eq!(judged.await.unwrap(), None);
+    accepted.await.unwrap().unwrap();
+    assert_eq!(ops.open_gates(), 0);
+}
+
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+#[tokio::test]
+async fn accept_waits_for_the_closing_then_succeeds_through_move_to() {
+    let p = parked_closing(Via::Move).await;
+    let accepted = {
+        let ops = p.ops.clone();
+        tokio::spawn(async move { ops.accept(request(service(1), OpKind::Stop)).await })
+    };
+    let_others_run().await;
+    assert!(!accepted.is_finished());
+    let _env = p.release().await;
+    accepted.await.unwrap().unwrap();
+}
+
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+#[tokio::test]
+async fn a_concurrent_accept_never_makes_a_subscriber_receive_the_outcome_twice() {
+    let p = parked_closing(Via::Close).await;
+    let mut feed = p.ops.subscribe();
+    let accepted = {
+        let ops = p.ops.clone();
+        tokio::spawn(async move { ops.accept(request(service(1), OpKind::Stop)).await })
+    };
+    let_others_run().await;
+    let id = p.id.clone();
+    let _env = p.release().await;
+    accepted.await.unwrap().unwrap();
+    let mut terminal = 0;
+    while let Ok(snapshot) = feed.try_recv() {
+        if snapshot.record.id == id && snapshot.record.status.is_terminal() {
+            terminal += 1;
+        }
+    }
+    assert_eq!(terminal, 1);
+}
+
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+#[tokio::test]
+async fn a_slow_closing_on_one_service_never_makes_another_service_wait() {
+    let p = parked_closing(Via::Close).await;
+    let other = service(2);
+    let started = std::time::Instant::now();
+    p.ops.wait_closed(&other).await;
+    assert_eq!(p.ops.busy(&other), None);
+    let next = p.ops.accept(request(other, OpKind::Stop)).await.unwrap();
+    assert!(!next.is_empty());
+    assert!(started.elapsed() < std::time::Duration::from_millis(500));
+    let _env = p.release().await;
+}
+
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+#[tokio::test]
+async fn a_closing_stuck_past_the_deadline_does_not_freeze_the_service_and_a_running_operation_is_still_refused()
+ {
+    // Échéance injectée : le test ne paie pas l'échéance de production.
+    let p = parked_closing_with(Via::Close, Some(std::time::Duration::from_millis(200))).await;
+    let started = std::time::Instant::now();
+    let refused = p
+        .ops
+        .accept(request(service(1), OpKind::Stop))
+        .await
+        .unwrap_err();
+    assert!(matches!(refused, OpError::Locked(_)), "{refused:?}");
+    assert!(started.elapsed() >= std::time::Duration::from_millis(150));
+    let _env = p.release().await;
+    let env = Env::new().await;
+    let _id = running(&env, 1, OpKind::Update).await;
+    env.ops.wait_closed(&service(1)).await;
+    assert!(env.ops.busy(&service(1)).is_some());
+    let refused = env
+        .ops
+        .accept(request(service(1), OpKind::Stop))
+        .await
+        .unwrap_err();
+    assert!(matches!(refused, OpError::Locked(_)), "{refused:?}");
+}
+
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+// Chaque clôture, par chacune de ses voies, tient la porte jusqu'à la fin de sa publication : la demande
+// suivante attend, puis réussit.
+async fn the_next_accept_waits_then_succeeds(via: Via) {
+    let p = parked_closing(via).await;
+    let accepted = {
+        let ops = p.ops.clone();
+        tokio::spawn(async move { ops.accept(request(service(1), OpKind::Stop)).await })
+    };
+    let_others_run().await;
+    assert!(!accepted.is_finished());
+    let ops = p.ops.clone();
+    let _env = p.release().await;
+    accepted.await.unwrap().unwrap();
+    assert_eq!(ops.open_gates(), 0);
+}
+
+#[tokio::test]
+async fn the_expiry_of_a_decision_holds_the_gate_until_it_is_published() {
+    the_next_accept_waits_then_succeeds(Via::Expire).await;
+}
+
+#[tokio::test]
+async fn the_cancellation_of_the_access_holds_the_gate_until_it_is_published() {
+    the_next_accept_waits_then_succeeds(Via::AccessCancel).await;
+}
+
+#[tokio::test]
+async fn the_decision_of_the_access_holds_the_gate_until_it_is_published() {
+    the_next_accept_waits_then_succeeds(Via::AccessDecide).await;
 }
 
 #[tokio::test]
@@ -1420,7 +1903,7 @@ async fn concurrent_publications_never_send_an_older_state_after_the_final_one()
         let (ops, id) = (ops.clone(), id.clone());
         settlers.push(tokio::spawn(async move {
             for _ in 0..8 {
-                ops.settle(&id).await;
+                ops.settle(&id, None).await;
                 tokio::task::yield_now().await;
             }
         }));

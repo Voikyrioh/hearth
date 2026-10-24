@@ -18,6 +18,8 @@ use time::OffsetDateTime;
 use tokio::sync::{Mutex as AsyncMutex, broadcast};
 
 use super::audit::{AuditTrail, Pending};
+use super::closing_gates::ClosingGates;
+pub use super::closing_gates::ClosingGuard;
 use super::ports::{
     Clock, CreatedObjects, DecisionOffer, IdGen, JournalError, NewOp, OpJournal, OpRecord,
     Progress, RemoveOutcome, ServiceObserver, StepGuard, Store, StoreError,
@@ -213,6 +215,8 @@ pub struct ServiceOps {
     /// s'envoyer dans l'ordre inverse de leur lecture : un abonné ne reçoit jamais un état plus ancien
     /// APRÈS un plus récent (revue de la PR 94).
     publishing: AsyncMutex<()>,
+    /// Les portes de clôture, une par service (voir [`ClosingGates`]).
+    gates: Arc<ClosingGates>,
     /// Le magasin et la diffusion du journal d'activité : une clôture ou un constat écrit son entrée dans la
     /// transaction de l'opération (jamais regroupée : ce n'est pas un refus répété, BR-AUDIT-007).
     store: Arc<dyn Store>,
@@ -261,6 +265,7 @@ impl ServiceOps {
             index: Mutex::new(OpsIndex::new()),
             progress_gate: Mutex::new(HashMap::new()),
             publishing: AsyncMutex::new(()),
+            gates: Arc::new(ClosingGates::default()),
             store,
             trail,
         }
@@ -333,7 +338,16 @@ impl ServiceOps {
     /// À appeler après un changement d'opération fait HORS de ce service (l'annulation et la décision écrivent
     /// leur statut dans la transaction de leur entrée du journal d'activité, `ServiceOpAccess`) : rend le
     /// verrou d'une opération devenue terminale, met la projection à jour et prévient les abonnés.
-    pub async fn settle(&self, id: &str) {
+    pub async fn settle(&self, id: &str, held: Option<ClosingGuard>) {
+        // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC : la porte du service, prise avant le commit par l'appelant (`held`) ;
+        // sinon prise ici (la libération et l'annonce sont alors seules couvertes).
+        let _closing = match held {
+            Some(guard) => Some(guard),
+            None => match self.journal.get(id).await {
+                Ok(Some(record)) => Some(self.gates.close(&record.service).await),
+                _ => None,
+            },
+        };
         if let Ok(Some(record)) = self.journal.get(id).await
             && record.status.is_terminal()
         {
@@ -405,9 +419,65 @@ impl ServiceOps {
         true
     }
 
+    /// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+    /// La porte de clôture d'un service : à tenir AVANT toute transition vers un statut terminal et jusqu'à
+    /// la fin de [`Self::publish`] (verrous rendus, projection, annonce). Un client qui a lu l'issue (le
+    /// `GET` lit le journal) puis demande l'action suivante n'est ainsi jamais refusé par un état en retard.
+    /// Les transitions non terminales de ce service ne la prennent pas (l'accès, lui, la prend toujours). Ne
+    /// jamais attendre une autre porte en la tenant.
+    pub async fn closing(&self, service: &ServiceKey) -> ClosingGuard {
+        self.gates.close(service).await
+    }
+
+    /// Une échéance de porte autre que celle de production (tests de l'échéance).
+    #[must_use]
+    pub fn with_closing_wait(mut self, wait: std::time::Duration) -> Self {
+        self.gates = Arc::new(ClosingGates::with_wait(wait));
+        self
+    }
+
+    /// Attend, une fois et au plus [`CLOSING_GATE_WAIT`](super::closing_gates::CLOSING_GATE_WAIT), que les clôtures en cours de CE service se
+    /// terminent. À l'échéance on juge quand même (une clôture bloquée ne gèle pas le service) et on le
+    /// trace, sans valeur.
+    pub async fn wait_closed(&self, service: &ServiceKey) {
+        if self.gates.wait(service).await {
+            tracing::warn!(
+                wait_ms = u64::try_from(self.gates.deadline().as_millis()).unwrap_or(u64::MAX),
+                "porte de clôture : échéance atteinte, la demande est jugée sur l'état courant"
+            );
+        }
+    }
+
+    /// Qui tient le service d'après la projection : le compte et le genre de l'opération non terminée.
+    /// C'est ici, et non chez l'appelant, que se juge « occupé ». Sans attente : l'appelant qui juge une
+    /// demande appelle d'abord [`Self::wait_closed`] (une seule fois, partagée avec
+    /// [`Self::accept_after_wait`]) ; la liste des services lit sans attendre (une clôture en cours peut
+    /// la montrer « occupée » un instant, la publication qui suit la rafraîchit).
+    pub fn busy(&self, key: &ServiceKey) -> Option<(String, OpKind)> {
+        self.with_index(|index| {
+            index
+                .busy(key)
+                .map(|open| (open.account.clone(), open.kind))
+        })
+    }
+
+    /// Le nombre de portes de clôture vivantes (tests : la table se vide).
+    pub fn open_gates(&self) -> usize {
+        self.gates.open()
+    }
+
     /// Accepte une opération : prend les verrous (service exclusif, nom, place lourde), écrit la ligne
     /// `accepted`. Si l'écriture échoue, les verrous sont rendus. Rend l'identifiant.
     pub async fn accept(&self, request: AcceptRequest) -> Result<String, OpError> {
+        // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+        // Une clôture en cours (commit, verrous, index, annonce) se termine avant que l'on juge « occupé ».
+        self.wait_closed(&request.service).await;
+        self.accept_after_wait(request).await
+    }
+
+    /// [`Self::accept`] sans l'attente de la porte : pour l'appelant qui a déjà attendu (une attente par
+    /// demande, pas deux).
+    pub async fn accept_after_wait(&self, request: AcceptRequest) -> Result<String, OpError> {
         let id = self.ids.new_id();
         let service = request.service.as_str();
         self.locks
@@ -653,6 +723,14 @@ impl ServiceOps {
         cause: Option<Cause>,
         draft: Option<&AuditDraft>,
     ) -> Result<(), OpError> {
+        // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC : la porte du service, tenue jusqu'à la fin de la publication.
+        let service = self
+            .journal
+            .get(id)
+            .await?
+            .ok_or(OpError::NoSuchOperation)?
+            .service;
+        let _closing = self.closing(&service).await;
         let now = self.clock.now();
         let mut tx = self.store.begin().await?;
         let op = tx
@@ -784,6 +862,18 @@ impl ServiceOps {
         if !from.can_become(to) {
             return Err(OpError::IllegalTransition);
         }
+        // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC : seule une transition terminale prend la porte du service.
+        let _closing = if to.is_terminal() {
+            let service = self
+                .journal
+                .get(id)
+                .await?
+                .ok_or(OpError::NoSuchOperation)?
+                .service;
+            Some(self.closing(&service).await)
+        } else {
+            None
+        };
         self.journal
             .transition(id, from, to, cause, None, self.clock.now())
             .await?;
@@ -940,6 +1030,10 @@ impl ServiceOps {
             if !decision_expired(offer.since, now) {
                 continue;
             }
+            // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC : la clôture par expiration prend la porte du service comme les
+            // autres, du commit à la fin de la publication ; le nettoyage disque vient APRÈS, hors porte
+            // (comme pour une annulation).
+            let closing = self.closing(&op.service).await;
             match self
                 .journal
                 .transition(
@@ -955,6 +1049,8 @@ impl ServiceOps {
                 Ok(()) => {
                     self.locks.with(|table| table.release_all_of(&op.id));
                     summary.expired += 1;
+                    self.publish(&op.id).await;
+                    drop(closing);
                     // Ce que l'opération avait créé pour elle-même part avec elle (ADR-0045 : la décision
                     // expirée ne laisse plus d'orphelins), après le changement de statut.
                     if let Ok(steps) = self.journal.steps(&op.id).await {
@@ -964,7 +1060,6 @@ impl ServiceOps {
                         })
                         .await;
                     }
-                    self.publish(&op.id).await;
                 }
                 // Décidée entre-temps : rien à faire.
                 Err(JournalError::Stale) => {}

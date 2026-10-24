@@ -383,8 +383,11 @@ impl ServiceLifecycle {
             .registry
             .lifecycle_target(key)
             .ok_or(LifecycleError::NotFound)?;
-        if let Some(busy) = self.busy_of(key) {
-            return Err(busy);
+        // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC : `ServiceOps` juge « occupé », après les clôtures en cours.
+        // Une seule attente par demande : `accept_after_wait` ne la refait pas.
+        self.ops.wait_closed(key).await;
+        if let Some((by, kind)) = self.ops.busy(key) {
+            return Err(LifecycleError::Busy { by, kind });
         }
         check_state(gesture, target.state).map_err(|refusal| match refusal {
             StateRefusal::AlreadyInState(state) => LifecycleError::AlreadyInState(state),
@@ -403,7 +406,7 @@ impl ServiceLifecycle {
             .unwrap_or_default();
         let id = self
             .ops
-            .accept(AcceptRequest {
+            .accept_after_wait(AcceptRequest {
                 op_key: op_key.to_owned(),
                 service: key.clone(),
                 service_name: target.name.clone(),
@@ -457,16 +460,6 @@ impl ServiceLifecycle {
         let this = Arc::clone(self);
         tokio::spawn(async move { this.execute(job).await });
         Ok(accepted)
-    }
-
-    /// L'action qui tient ce service, d'après l'index du journal (visible de tous).
-    fn busy_of(&self, key: &ServiceKey) -> Option<LifecycleError> {
-        self.ops.with_index(|index| {
-            index.busy(key).map(|open| LifecycleError::Busy {
-                by: open.account.clone(),
-                kind: open.kind,
-            })
-        })
     }
 
     fn holder_account(&self, key: &ServiceKey) -> String {

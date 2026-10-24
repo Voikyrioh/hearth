@@ -49,6 +49,10 @@ pub use store::SqliteStore;
 
 pub const DATABASE_FILE: &str = "hearth.db";
 
+/// Combien de temps une écriture attend la base avant d'échouer. La porte de clôture
+/// (`application::closing_gates::CLOSING_GATE_WAIT`) est au moins aussi longue.
+pub const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[derive(Debug, Error)]
 pub enum DatabaseError {
     #[error("dossier de données {path} inaccessible : {source}")]
@@ -149,7 +153,7 @@ impl Database {
             // Une ligne supprimée ou vidée est réécrite avec des zéros dans la page (HRT-32) : une copie
             // de la base ne garde pas le contenu d'une ligne effacée (pages libres comprises).
             .pragma("secure_delete", "ON")
-            .busy_timeout(Duration::from_secs(5));
+            .busy_timeout(BUSY_TIMEOUT);
         let pool = SqlitePoolOptions::new()
             .max_connections(4)
             .connect_with(options)
@@ -270,7 +274,7 @@ pub async fn count_admins_read_only(data_dir: &Path) -> Result<u64, DatabaseErro
         .filename(&path)
         .read_only(true)
         .create_if_missing(false)
-        .busy_timeout(Duration::from_secs(5));
+        .busy_timeout(BUSY_TIMEOUT);
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect_with(options)
@@ -305,6 +309,11 @@ fn is_missing_table(error: &sqlx::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_closing_gate_waits_at_least_as_long_as_the_database() {
+        assert!(crate::application::closing_gates::CLOSING_GATE_WAIT >= BUSY_TIMEOUT);
+    }
 
     #[test]
     fn the_database_name_is_the_one_the_purge_knows() {
