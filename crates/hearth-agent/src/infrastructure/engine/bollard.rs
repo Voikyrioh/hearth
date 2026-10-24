@@ -559,24 +559,6 @@ impl ContainerEngine for BollardEngine {
 
     async fn send_stdin_line(&self, id: &str, line: &FicheLiteral) -> Result<(), EngineError> {
         let docker = self.inner.docker().await?;
-        // Le démon accepte l'attache d'un conteneur dont l'entrée n'est pas ouverte (il met l'entrée à nil et répond
-        // « ok ») : l'ordre partirait dans le vide. On regarde donc avant : arrêté ou entrée fermée, c'est un refus.
-        let inspected = docker
-            .inspect_container(
-                id,
-                None::<bollard::query_parameters::InspectContainerOptions>,
-            )
-            .await
-            .map_err(|error| translate(&error))?;
-        let running = inspected.state.as_ref().and_then(|state| state.running) == Some(true);
-        let open = inspected
-            .config
-            .as_ref()
-            .and_then(|config| config.open_stdin)
-            == Some(true);
-        if !running || !open {
-            return Err(EngineError::Refused);
-        }
         // Entrée seule : ni sortie ni journal ne sont demandés, rien n'est lu en retour.
         let options = AttachContainerOptionsBuilder::default()
             .stdin(true)
@@ -586,6 +568,24 @@ impl ContainerEngine for BollardEngine {
             .logs(false)
             .build();
         let work = async {
+            // Le démon accepte l'attache d'un conteneur dont l'entrée n'est pas ouverte (il met l'entrée à nil et répond
+            // « ok ») : l'ordre partirait dans le vide. On regarde donc avant : arrêté ou entrée fermée, c'est un refus.
+            let inspected = docker
+                .inspect_container(
+                    id,
+                    None::<bollard::query_parameters::InspectContainerOptions>,
+                )
+                .await
+                .map_err(|error| translate(&error))?;
+            let running = inspected.state.as_ref().and_then(|state| state.running) == Some(true);
+            let open = inspected
+                .config
+                .as_ref()
+                .and_then(|config| config.open_stdin)
+                == Some(true);
+            if !running || !open {
+                return Err(EngineError::Refused);
+            }
             let mut attached = docker
                 .attach_container(id, Some(options))
                 .await

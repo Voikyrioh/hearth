@@ -10,9 +10,10 @@
 
 use super::loading::model::Fiche;
 use super::loading::schema::fiche::{Proof, Step, StepKind, StopSignal, WorldSaved};
+use super::loading::value::order_refusal;
 
 /// Un ordre écrit sur l'entrée standard d'un service : un littéral de la fiche (1 à 64 caractères ASCII imprimables,
-/// jamais une fin de ligne ni un caractère de commande). **Il ne se construit que dans `domain/catalog`**, depuis une
+/// ni espace en bord, jamais une fin de ligne ni un caractère de commande : `order_refusal`). **Il ne se construit que dans `domain/catalog`**, depuis une
 /// fiche que le chargeur a acceptée : le port du moteur ne prend que ce type, donc aucun texte du client, d'une route ou
 /// d'un autre cas d'usage ne peut atteindre l'entrée d'un jeu (ADR-0052 point 4, BR-JEU-016).
 #[derive(Clone, PartialEq, Eq)]
@@ -21,10 +22,8 @@ pub struct FicheLiteral(String);
 impl FicheLiteral {
     /// `None` si le texte n'est pas un littéral de fiche. Visible dans `domain/catalog` seulement.
     pub(super) fn parse(text: &str) -> Option<Self> {
-        let valid = !text.is_empty()
-            && text.len() <= 64
-            && text.bytes().all(|byte| (0x20..=0x7e).contains(&byte));
-        valid.then(|| Self(text.to_owned()))
+        // La définition d'un ordre est celle du chargeur, une seule : ce que la fiche a fait accepter est ce qui passe.
+        order_refusal(text).is_none().then(|| Self(text.to_owned()))
     }
 
     pub fn as_str(&self) -> &str {

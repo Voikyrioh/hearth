@@ -595,7 +595,6 @@ impl ServiceLifecycle {
         let moments = Moments {
             lifecycle: self,
             job,
-            refused: std::sync::Mutex::new(None),
         };
         match game.run(&request, &moments).await {
             GameStopEnd::Stopped {
@@ -629,11 +628,12 @@ impl ServiceLifecycle {
                 self.refresh(job).await;
                 Finish::failed(Cause::StepFailed)
             }
-            end @ (GameStopEnd::Failed(_) | GameStopEnd::StopRefused) => {
+            end @ (GameStopEnd::Failed(_) | GameStopEnd::StopRefused(_)) => {
                 journal(self.ops.failed(&job.id, game_step::STOP).await, "failed");
                 let failure = match end {
                     GameStopEnd::Failed(error) => OrderFailure::from_engine(error),
-                    _ => moments.refusal().unwrap_or(OrderFailure::Refused),
+                    GameStopEnd::StopRefused(failure) => failure,
+                    _ => OrderFailure::Refused,
                 };
                 let finish = failure.finish();
                 // L'ordre n'a pas eu lieu (refusé, service disparu) : rien n'a été arrêté. Un résultat inconnu
@@ -1117,21 +1117,12 @@ impl Job {
 struct Moments<'a> {
     lifecycle: &'a ServiceLifecycle,
     job: &'a Job,
-    /// Pourquoi l'ordre d'arrêt a été refusé (gardé pour l'issue de l'opération).
-    refused: std::sync::Mutex<Option<OrderFailure>>,
-}
-
-impl Moments<'_> {
-    fn refusal(&self) -> Option<OrderFailure> {
-        *self
-            .refused
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
 }
 
 #[async_trait]
 impl StopMoments for Moments<'_> {
+    type Refusal = OrderFailure;
+
     async fn stop_wanted(&self) -> bool {
         let shown = if self.job.gesture == Gesture::Restart {
             TransitionKind::Restarting
@@ -1141,17 +1132,8 @@ impl StopMoments for Moments<'_> {
         self.lifecycle.want_stop(self.job, shown).await
     }
 
-    async fn order_stop(&self) -> bool {
-        match self.lifecycle.order(self.job, Gesture::Stop).await {
-            Ok(()) => true,
-            Err(failure) => {
-                *self
-                    .refused
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(failure);
-                false
-            }
-        }
+    async fn order_stop(&self) -> Result<(), OrderFailure> {
+        self.lifecycle.order(self.job, Gesture::Stop).await
     }
 
     async fn stop_dropped(&self) {

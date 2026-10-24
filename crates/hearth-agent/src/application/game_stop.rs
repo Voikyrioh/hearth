@@ -76,6 +76,9 @@ pub enum GameLookup {
 /// lieu.
 #[async_trait]
 pub trait StopMoments: Send + Sync {
+    /// Pourquoi l'ordre d'arrêt a été refusé, tel que l'appelant le type.
+    type Refusal: Send;
+
     /// Juste avant l'ordre de sortie, ou l'arrêt du moteur : l'arrêt voulu est écrit AVANT l'ordre (BR-LIFE-010) et
     /// l'étape « Arrêt » est annoncée. `false` : impossible à écrire, aucun ordre n'est donné.
     async fn stop_wanted(&self) -> bool;
@@ -85,8 +88,8 @@ pub trait StopMoments: Send + Sync {
     async fn stop_dropped(&self);
 
     /// L'arrêt demandé au pilote du service, par le SEUL chemin d'ordre du cas d'usage de pilotage (délai du service,
-    /// attente bornée, issue typée). `false` : refusé ou sans réponse ; l'issue est gardée par l'appelant.
-    async fn order_stop(&self) -> bool;
+    /// attente bornée, issue typée). `Err` : refusé ou sans réponse, avec l'issue que l'appelant juge.
+    async fn order_stop(&self) -> Result<(), Self::Refusal>;
 }
 
 /// Ce qu'il faut pour arrêter UN service de jeu.
@@ -99,21 +102,22 @@ pub struct StopRequest<'a> {
 
 /// Comment l'arrêt s'est terminé.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GameStopEnd {
+pub enum GameStopEnd<R> {
     /// Le moteur a arrêté le conteneur.
     Stopped {
         mention: SaveMention,
-        /// L'heure de l'ordre de sortie ou de l'arrêt, pour juger si l'arrêt a été forcé.
+        /// L'heure de l'arrêt demandé au moteur, juste après l'ordre de sortie et APRÈS toute décision attendue : de
+        /// là se juge si l'arrêt a été forcé.
         ordered_at: OffsetDateTime,
-        /// De l'ordre de sortie ou de l'arrêt à la fin de l'arrêt du moteur.
+        /// De cet instant à la fin de l'arrêt du moteur (une décision attendue avant n'y compte pas).
         took: Duration,
     },
     /// L'opération est déjà close (« Annuler », expiration, annulation du compte) : rien n'a été arrêté.
     Closed,
     /// Le journal des opérations ou l'arrêt voulu n'a pas pu être écrit : aucun ordre n'a été donné.
     NotWritten,
-    /// L'ordre d'arrêt a été refusé ou sans réponse ([`StopMoments::order_stop`] a rendu `false`).
-    StopRefused,
+    /// L'ordre d'arrêt a été refusé ou est resté sans réponse ([`StopMoments::order_stop`] a rendu `Err`).
+    StopRefused(R),
     /// Un ordre écrit sur l'entrée du service a échoué sans appel (le conteneur n'existe plus).
     Failed(EngineError),
 }
@@ -212,7 +216,11 @@ impl GameStop {
 
     /// Déroule l'arrêt : les étapes d'avant l'ordre de sortie, la décision s'il manque une confirmation, l'ordre de
     /// sortie puis AUSSITÔT l'arrêt demandé au moteur.
-    pub async fn run(&self, request: &StopRequest<'_>, moments: &dyn StopMoments) -> GameStopEnd {
+    pub async fn run<M: StopMoments>(
+        &self,
+        request: &StopRequest<'_>,
+        moments: &M,
+    ) -> GameStopEnd<M::Refusal> {
         let (before, quit) = match request.plan {
             StopPlan::Sequence { steps, .. } => (
                 before_quit(steps).cloned().collect::<Vec<_>>(),
@@ -276,14 +284,13 @@ impl GameStop {
         // Les durées se mesurent d'ici : une décision attendue avant ne compte pas dans « l'arrêt a-t-il été forcé ».
         let started = Instant::now();
         let ordered_at = self.clock.now();
-        if moments.order_stop().await {
-            GameStopEnd::Stopped {
+        match moments.order_stop().await {
+            Ok(()) => GameStopEnd::Stopped {
                 mention,
                 ordered_at,
                 took: started.elapsed(),
-            }
-        } else {
-            GameStopEnd::StopRefused
+            },
+            Err(refusal) => GameStopEnd::StopRefused(refusal),
         }
     }
 

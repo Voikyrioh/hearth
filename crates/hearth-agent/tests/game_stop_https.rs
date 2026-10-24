@@ -853,12 +853,12 @@ async fn a_server_installed_with_a_closed_input_gets_a_decision_never_an_order_s
 
 #[tokio::test]
 async fn cancelling_while_the_sign_is_awaited_closes_the_operation_at_once() {
-    // Un signe obligatoire attendu 300 « secondes de fiche » de 10 ms (3 s) : l'annulation ne l'attend pas.
+    // Un signe obligatoire attendu 300 « secondes de fiche » de 20 ms (6 s) : l'annulation ne l'attend pas.
     let b = bench_timed(
         terraria("tested", |t| {
             waits_for_sign(t).replacen("timeout_s = 30", "timeout_s = 300", 1)
         }),
-        10,
+        20,
     )
     .await;
     let server = b.install().await;
@@ -889,7 +889,7 @@ async fn cancelling_while_the_sign_is_awaited_closes_the_operation_at_once() {
         OperationStatus::Cancelled,
         "{operation:?}"
     );
-    assert!(started.elapsed() < Duration::from_millis(2500));
+    assert!(started.elapsed() < Duration::from_millis(4500));
     assert_eq!(b.calls(&server), vec![stdin(&server, "save")]);
 }
 
@@ -899,8 +899,8 @@ async fn a_cut_between_the_exit_order_and_the_engine_stop_leaves_the_wanted_stop
     // BR-JEU-011 : l'agent s'arrête après l'ordre de sortie, l'arrêt voulu et l'étape `stop` sont déjà écrits.
     let b = bench().await;
     let server = b.install().await;
-    b.plays_like_terraria(&server, false);
     // Le moteur ne répond jamais à l'arrêt : l'opération reste entre l'ordre et l'arrêt.
+    // Le jeu reçoit « exit » mais ne sort pas : l'arrêt voulu reste en base le temps de la coupure.
     b.engine.make_hang_on_stop(&server.id);
     let id = b.gesture("stop", &server).await;
     b.until(&id, |_| b.calls(&server).contains(&stop(&server, 10)))
@@ -911,7 +911,6 @@ async fn a_cut_between_the_exit_order_and_the_engine_stop_leaves_the_wanted_stop
         .unwrap();
     assert_eq!(intents.len(), 1, "l'arrêt voulu est en base avant l'ordre");
     let calls = b.calls(&server);
-    // Le redémarrage de l'agent.
     let ops = b.agent.ops();
     let observer = hearth_agent::infrastructure::ops_observer::UnobservedState;
     ops.recover_at_startup(&observer).await.unwrap();
@@ -922,6 +921,26 @@ async fn a_cut_between_the_exit_order_and_the_engine_stop_leaves_the_wanted_stop
     assert_eq!(operation.cause, Some(OperationCause::Interrupted));
     tokio::time::sleep(Duration::from_millis(150)).await;
     assert_eq!(b.calls(&server), calls, "rien n'est rejoué ni renvoyé");
+    // Après la coupure, le registre a consommé ou gardé l'arrêt voulu selon ce qu'il voit du jeu, et le service n'est
+    // jamais « En erreur » pour avoir quitté sur l'ordre de Hearth ; l'agent ne renvoie rien.
+    let state = b
+        .agent
+        .services()
+        .snapshot()
+        .services
+        .iter()
+        .find(|view| view.key == server.key)
+        .map(|view| view.derived.state)
+        .expect("service publié");
+    assert!(
+        matches!(
+            state,
+            hearth_agent::domain::services::ServiceStateKind::Running
+                | hearth_agent::domain::services::ServiceStateKind::Stopping
+                | hearth_agent::domain::services::ServiceStateKind::Stopped
+        ),
+        "{state:?}"
+    );
     let steps: Vec<_> = operation.steps.iter().map(|s| s.step.as_str()).collect();
     assert!(steps.contains(&"stop"), "{steps:?}");
 }
