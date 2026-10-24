@@ -65,6 +65,8 @@ pub enum AdminActKindDto {
     ServiceDeploy,
     /// Annuler l'opération d'un service (HRT-69) : couvert par l'élévation de cinq minutes.
     OperationCancel,
+    /// Enregistrer les réglages d'un serveur de jeu (HRT-109) : couvert par l'élévation de cinq minutes.
+    GameSettingsSave,
 }
 
 /// L'état de confiance du compte que l'agent annonce (HRT-194, BR-TRUST-052) : de lui dépend si piloter un
