@@ -19,7 +19,7 @@ import { progressOf, stepName } from "@/serviceOps/messages";
 // indéterminée) et deux gestes :
 //
 // - « Annuler le déploiement » n'existe QUE pendant la récupération ; dès que la création a commencé il reste visible,
-//   inactif, avec « Trop tard pour annuler » écrit dessous (l'agent le refuserait de toute façon) ;
+//   inactif, avec « Il est trop tard pour annuler » écrit dessous (l'agent le refuserait de toute façon) ;
 // - « Continuer en arrière-plan » ferme la fenêtre : le déploiement continue, sa progression reste dans la liste.
 //
 // Les issues se disent ICI, avec leur cause (jamais un texte de l'agent, seulement ses CODES) : un échec où rien n'a

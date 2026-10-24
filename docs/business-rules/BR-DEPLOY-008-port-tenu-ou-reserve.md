@@ -11,7 +11,7 @@ maj: 2026-10-24
 # BR-DEPLOY-008 — Un port tenu par un conteneur en marche ou un programme du serveur bloque le lancement ; un port réservé par un service arrêté avertit et se coche ; un conteneur hors Hearth n'est jamais nommé
 
 ## Règle
-Le formulaire vérifie le port à la saisie (`POST /deployments/check`) et l'agent le revérifie au lancement (`409 PORT_IN_USE`, `details.port`, `details.status`, `details.holder`, `details.suggested`). Un conteneur non adopté répond « Port tenu par un conteneur créé hors de Hearth. » sans son nom (BR-ADOPT-022). Un programme du serveur est nommé quand l'agent le voit (`/proc/net`, nom cherché pour le seul port en conflit) ; un écouteur `docker-proxy` appartient à son conteneur.
+Le formulaire vérifie le port à la saisie (`POST /deployments/check`) et l'agent le revérifie au lancement (`409 PORT_IN_USE`, `details.port`, `details.status`, `details.holder`, `details.suggested`). Un conteneur non adopté répond « Ce port est tenu par un conteneur créé hors de Hearth. » sans son nom (BR-ADOPT-022). Un programme du serveur est nommé quand l'agent le voit (`/proc/net`, nom cherché pour le seul port en conflit) ; un écouteur `docker-proxy` appartient à son conteneur.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/ports.rs::verdict`

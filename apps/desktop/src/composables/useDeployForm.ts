@@ -48,7 +48,6 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
   const check = ref<DeployCheck | null>(null);
   const checkSent = ref<string | null>(null);
   const checking = ref(false);
-  const checkFailed = ref(false);
   let ticket = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -74,12 +73,10 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
       if (mine !== ticket) return null;
       check.value = answer;
       checkSent.value = key;
-      checkFailed.value = false;
       return answer;
     } catch (error) {
       if (mine !== ticket) return null;
       // Une consultation qui échoue n'interdit rien : le serveur dira non au lancement s'il le faut.
-      checkFailed.value = true;
       check.value = null;
       checkSent.value = null;
       logUiError(error, "deploy:check");
@@ -247,7 +244,6 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
     resetTouched,
     check: checkCurrent,
     checking,
-    checkFailed,
     refreshCheck,
     portVerdicts,
     portsWaiting,

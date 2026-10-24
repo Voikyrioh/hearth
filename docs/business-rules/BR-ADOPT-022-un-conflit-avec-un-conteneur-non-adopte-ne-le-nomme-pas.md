@@ -11,7 +11,7 @@ maj: 2026-10-13
 # BR-ADOPT-022 — Un port ou un nom tenu par un conteneur non adopté est dit sans nommer le conteneur ni son image
 
 ## Règle
-Un port du serveur ou un nom de service tenu par un conteneur non adopté est dit « Ce port est tenu par un conteneur créé hors de Hearth. » (pour un nom : « Ce nom est déjà pris »), sans le nommer et sans son image (message du formulaire : « Port tenu par un conteneur créé hors de Hearth » ; nom : « Ce nom est déjà pris »). Le registre répond à « qui tient ce port » et « qui porte ce nom » par `Holder` : `Service(nom)` pour un service publié (déjà dans la liste), `Unmanaged` sans aucune charge utile pour un conteneur non adopté. Un conteneur arrêté tient encore son port et son nom.
+Un port du serveur ou un nom de service tenu par un conteneur non adopté est dit « Ce port est tenu par un conteneur créé hors de Hearth. » (pour un nom : « Ce nom est déjà pris »), sans le nommer et sans son image. Le registre répond à « qui tient ce port » et « qui porte ce nom » par `Holder` : `Service(nom)` pour un service publié (déjà dans la liste), `Unmanaged` sans aucune charge utile pour un conteneur non adopté. Un conteneur arrêté tient encore son port et son nom.
 
 Ce ticket pose la réponse du registre ; les messages du formulaire de déploiement et d'un démarrage refusé arrivent avec ces actes et ne peuvent dire que ce que `Holder` porte.
 

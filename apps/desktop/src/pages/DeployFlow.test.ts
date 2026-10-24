@@ -330,7 +330,7 @@ describe("le lancement et la progression (BR-DEPLOY-016)", () => {
     wrapper.unmount();
   });
 
-  it("annuler après la création est refusé : « Trop tard pour annuler », la progression continue", async () => {
+  it("annuler après la création est refusé : « Il est trop tard pour annuler », la progression continue", async () => {
     const { wrapper, bridge } = await boot();
     await fillMinimum(wrapper);
     await launch(wrapper);

@@ -360,7 +360,7 @@ describe("le formulaire (BR-DEPLOY-002 à 007, 014)", () => {
     wrapper.unmount();
   });
 
-  it("limite à 100 variables et à 50 ports : le bouton d'ajout reste visible, inactif, « Limite atteinte »", async () => {
+  it("limite à 100 variables et à 50 ports : le bouton d'ajout reste visible, inactif, « La limite est atteinte. »", async () => {
     const { wrapper } = await boot();
     const store = useDeployFormStore();
     const draft = store.of("forge");
