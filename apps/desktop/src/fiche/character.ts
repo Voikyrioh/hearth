@@ -1,4 +1,5 @@
 import { type MessageKey, t } from "@/i18n";
+import type { fr } from "@/i18n/fr";
 
 /**
  * Dire un caractère refusé en mots, et proposer le texte corrigé (revue UX 2026-10-24, constat 5). Une espace ne se
@@ -7,7 +8,7 @@ import { type MessageKey, t } from "@/i18n";
  */
 
 /** Caractère visible ou espace courante → clé de `fiche.character.names` (les textes sont dans `fr.ts`). */
-const KEYS: Record<string, string> = {
+const KEYS: Record<string, keyof typeof fr.fiche.character.names> = {
   " ": "space",
   "\t": "tab",
   "\u00A0": "nbsp",

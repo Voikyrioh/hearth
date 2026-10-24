@@ -59,8 +59,8 @@ describe("characterName", () => {
     expect(characterName("é")).toBe("la lettre accentuée « é »");
     expect(characterName("€")).toBe("le caractère « € »");
     // Un caractère invisible se nomme par son code, jamais par des guillemets vides.
-    expect(characterName("​")).toBe("le caractère invisible U+200B");
-    expect(characterName(" ")).toBe("le caractère invisible U+2028");
+    expect(characterName("\u200B")).toBe("le caractère invisible U+200B");
+    expect(characterName("\u2028")).toBe("le caractère invisible U+2028");
   });
 });
 

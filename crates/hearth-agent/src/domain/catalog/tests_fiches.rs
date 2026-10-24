@@ -1554,7 +1554,7 @@ fn the_terraria_catalog_speaks_to_the_user_in_vous_and_every_text_stays_within_i
     );
     assert_eq!(
         terraria.file.version, 3,
-        "le contenu a changé depuis la version 2 (aide sans les bornes que le client dit déjà)"
+        "version 3 : l'aide ne redit plus les bornes ni le jeu de caractères (ADR-0050)"
     );
     // Un entier dit ses bornes quand l'inventaire les donne ; un réglage à valeurs fermées dit chacune.
     let max_players = terraria.setting("max_players").expect("max_players");

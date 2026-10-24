@@ -109,7 +109,7 @@ describe("la page (BR-FICHE-014, 015)", () => {
     // Le jeu de caractères et les bornes sont dits UNE fois : par le client, d'après la donnée ; la fiche ne les redit
     // pas dans son aide (revue UX, constat 18).
     const worldHelp = wrapper.get('[data-question="world_name"]').text();
-    expect(worldHelp.match(/ettres, chiffres/gi)).toHaveLength(1);
+    expect(worldHelp.match(/lettres, chiffres/gi)).toHaveLength(1);
     expect(worldHelp).toContain("Lettres, chiffres, tirets et soulignés seulement.");
     const playersHelp = wrapper.get('[data-question="max_players"]').text();
     expect(playersHelp).toContain("Le nombre est compris entre 1 et 255.");

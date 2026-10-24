@@ -14,7 +14,7 @@ Nom de monde « Mon monde » dans l'installation d'un jeu : « Ce texte contient
 Le message citait le caractère tel quel (`{character}`). Un caractère qu'on ne voit pas ne dit rien. Rien dans le message ne disait quoi corriger.
 
 ## Reproduction
-Installer Terraria depuis le Catalogue, écrire « Mon monde » dans « Nom du monde », quitter le champ : le message s'arrête sur « : ». Test : `apps/desktop/e2e/ux-2026-10-24.spec.ts` (constats 16, 5, 17, 15, 13) et `src/fiche/characters.test.ts`.
+Installer Terraria depuis le Catalogue, écrire « Mon monde » dans « Nom du monde », quitter le champ : le message s'arrête sur « : ». Tests : le scénario « curseur dans le nom, caractère refusé en mots… » de `apps/desktop/e2e/ux-2026-10-24.spec.ts` et `apps/desktop/src/fiche/characters.test.ts`.
 
 ## Impacté
 `fiche/messages.ts::charsetText`, `fiche/character.ts`, `fiche/answers.ts`, `settings/messages.ts` (refus d'un réglage).
