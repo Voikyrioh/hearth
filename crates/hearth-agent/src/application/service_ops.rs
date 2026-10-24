@@ -235,7 +235,7 @@ impl AuditDraft {
             self.actor.clone(),
             self.action,
             self.target.clone(),
-            self.outcome.clone(),
+            self.outcome,
         )
     }
 }
