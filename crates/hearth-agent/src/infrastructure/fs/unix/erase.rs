@@ -20,7 +20,9 @@ use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::os::fd::OwnedFd;
 
-use rustix::fs::{AtFlags, Dir, FileType, Mode, fstat, openat, statat, unlinkat};
+use rustix::fs::{
+    AtFlags, Dir, FileType, Mode, StatxFlags, fstat, openat, statat, statx, unlinkat,
+};
 use rustix::io::Errno;
 
 use super::{OPEN_DIR, dev_of, file_type, fs_error};
@@ -48,14 +50,28 @@ enum Fate {
 /// L'effaceur : le périphérique de la racine, le décompte, le suivi.
 pub(super) struct Eraser<'p> {
     dev: u128,
+    /// L'identifiant de montage de la racine (`STATX_MNT_ID`, Linux 5.8) quand le noyau le donne : un
+    /// `mount --bind` du même système de fichiers a le même périphérique, pas le même montage.
+    mnt: Option<u64>,
     tally: Erased,
-    progress: &'p mut dyn FnMut(u64),
+    progress: &'p mut dyn FnMut(u64) -> bool,
+}
+
+/// L'identifiant de montage d'un dossier ouvert, ou `None` (noyau avant 5.8, ou refus).
+pub(crate) fn mnt_id_of(fd: &OwnedFd) -> Option<u64> {
+    let stat = statx(fd, "", AtFlags::EMPTY_PATH, StatxFlags::MNT_ID).ok()?;
+    (stat.stx_mask & StatxFlags::MNT_ID.bits() != 0).then_some(stat.stx_mnt_id)
 }
 
 impl<'p> Eraser<'p> {
-    pub(super) fn new(dev: u128, progress: &'p mut dyn FnMut(u64)) -> Self {
+    pub(super) fn new(
+        dev: u128,
+        mnt: Option<u64>,
+        progress: &'p mut dyn FnMut(u64) -> bool,
+    ) -> Self {
         Self {
             dev,
+            mnt,
             tally: Erased::default(),
             progress,
         }
@@ -63,7 +79,9 @@ impl<'p> Eraser<'p> {
 
     /// Le décompte final, après un dernier signe de vie du suivi.
     pub(super) fn finish(self) -> Erased {
-        (self.progress)(self.tally.removed);
+        if !self.tally.stopped {
+            let _ = (self.progress)(self.tally.removed);
+        }
         self.tally
     }
 
@@ -84,6 +102,9 @@ impl<'p> Eraser<'p> {
     }
 
     fn entry(&mut self, dir: &OwnedFd, name: &CStr, depth: usize) -> Fate {
+        if self.tally.stopped {
+            return Fate::StuckDir;
+        }
         let stat = match statat(dir, name, AtFlags::SYMLINK_NOFOLLOW) {
             Ok(stat) => stat,
             Err(Errno::NOENT) => return Fate::Gone,
@@ -107,6 +128,12 @@ impl<'p> Eraser<'p> {
             // Un point de montage : jamais descendu, il reste.
             Ok(_) => return self.stuck(FsError::CrossesDevice),
             Err(errno) => return self.stuck(fs_error(errno)),
+        }
+        // Un montage « bind » du même système de fichiers garde le périphérique : l'identifiant de montage le voit.
+        if let (Some(root), Some(child_mnt)) = (self.mnt, mnt_id_of(&child))
+            && root != child_mnt
+        {
+            return self.stuck(FsError::CrossesDevice);
         }
         let left_before = self.tally.left;
         self.contents(&child, depth + 1);
@@ -144,6 +171,9 @@ impl<'p> Eraser<'p> {
     pub(super) fn contents(&mut self, dir: &OwnedFd, depth: usize) {
         let mut stuck: HashSet<CString> = HashSet::new();
         for _ in 0..MAX_BATCHES {
+            if self.tally.stopped {
+                return;
+            }
             let names = match next_batch(dir, &stuck) {
                 Ok(names) => names,
                 Err(error) => {
@@ -167,8 +197,23 @@ impl<'p> Eraser<'p> {
                         stuck.insert(name);
                     }
                 }
+                // La mémoire est bornée aussi pour ce qui refuse de partir : au-delà d'un lot de noms coincés,
+                // on s'arrête et le reste est compté (au moins un), jamais un million de noms gardés.
+                if stuck.len() >= BATCH {
+                    self.note(FsError::Refused);
+                    self.tally.left += 1;
+                    return;
+                }
+                if self.tally.stopped {
+                    return;
+                }
             }
-            (self.progress)(self.tally.removed);
+            if !(self.progress)(self.tally.removed) {
+                // L'arrêt de l'agent : ce qui n'a pas été visité reste, on le compte (au moins un).
+                self.tally.stopped = true;
+                self.tally.left += 1;
+                return;
+            }
         }
         // Le service crée des entrées aussi vite qu'on les retire : on s'arrête, ce qui reste est dit.
         self.note(FsError::Refused);

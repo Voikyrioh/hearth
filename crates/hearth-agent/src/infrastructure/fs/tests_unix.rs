@@ -572,7 +572,14 @@ fn erase_tree_counts_what_it_removes_and_reports_progress() {
     let mut seen = Vec::new();
     let erased = f
         .root
-        .erase(&rel("data"), &mut |removed| seen.push(removed), true)
+        .erase(
+            &rel("data"),
+            &mut |removed| {
+                seen.push(removed);
+                true
+            },
+            true,
+        )
         .unwrap();
     assert_eq!(
         (erased.removed, erased.left, erased.first_error),
@@ -582,11 +589,11 @@ fn erase_tree_counts_what_it_removes_and_reports_progress() {
     assert!(!f.root_path.join("data").exists());
     assert!(f.root_path.is_dir(), "la racine reste");
     assert_eq!(
-        f.root.erase(&rel("data"), &mut |_| {}, true),
+        f.root.erase(&rel("data"), &mut |_| true, true),
         Err(FsError::NotFound)
     );
     assert_eq!(
-        f.root.erase(&RelPath::root(), &mut |_| {}, true),
+        f.root.erase(&RelPath::root(), &mut |_| true, true),
         Err(FsError::Refused)
     );
 }
@@ -598,13 +605,13 @@ fn erase_tree_unlinks_links_as_links_and_never_touches_the_outside() {
     symlink(&f.outside, f.root_path.join("t/to-dir")).unwrap();
     symlink(&f.outside, f.root_path.join("t/sub/to-dir-deep")).unwrap();
     symlink(f.outside.join("precious"), f.root_path.join("t/to-file")).unwrap();
-    let erased = f.root.erase(&rel("t"), &mut |_| {}, true).unwrap();
+    let erased = f.root.erase(&rel("t"), &mut |_| true, true).unwrap();
     assert_eq!((erased.removed, erased.left), (5, 0));
     assert!(!f.root_path.join("t").exists());
     assert_outside_intact(&f.outside);
     // Un lien visé directement : seul le lien part.
     symlink(&f.outside, f.root_path.join("out")).unwrap();
-    f.root.erase(&rel("out"), &mut |_| {}, true).unwrap();
+    f.root.erase(&rel("out"), &mut |_| true, true).unwrap();
     assert!(std::fs::symlink_metadata(f.root_path.join("out")).is_err());
     assert_outside_intact(&f.outside);
 }
@@ -623,7 +630,14 @@ fn a_huge_directory_is_erased_batch_by_batch() {
     let mut calls = 0u64;
     let erased = f
         .root
-        .erase(&rel("big"), &mut |_| calls += 1, true)
+        .erase(
+            &rel("big"),
+            &mut |_| {
+                calls += 1;
+                true
+            },
+            true,
+        )
         .unwrap();
     assert_eq!((erased.removed, erased.left), (count + 1, 0));
     assert!(
@@ -646,7 +660,10 @@ fn erasing_runs_on_a_low_priority_thread_and_leaves_the_caller_alone() {
     f.root
         .erase(
             &rel("data"),
-            &mut |_| during.push(nice_of_this_thread()),
+            &mut |_| {
+                during.push(nice_of_this_thread());
+                true
+            },
             true,
         )
         .unwrap();
@@ -671,7 +688,7 @@ fn what_refuses_to_go_is_counted_and_the_rest_is_erased() {
         .unwrap();
     let locked = f.root_path.join("data/locked");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o500)).unwrap();
-    let erased = f.root.erase(&rel("data"), &mut |_| {}, true).unwrap();
+    let erased = f.root.erase(&rel("data"), &mut |_| true, true).unwrap();
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(erased.left, 1, "{erased:?}");
     assert!(erased.first_error.is_some());
@@ -688,7 +705,7 @@ fn a_mount_point_is_left_in_place_and_counted_by_the_erasure() {
         .unwrap();
     let wrong = open_service_root(&f.data, &f.key, false).unwrap();
     let wrong = wrong.with_dev(f.root.dev() + 1);
-    let erased = wrong.erase(&rel("m"), &mut |_| {}, true).unwrap();
+    let erased = wrong.erase(&rel("m"), &mut |_| true, true).unwrap();
     assert_eq!((erased.removed, erased.left), (0, 1));
     assert_eq!(erased.first_error, Some(FsError::CrossesDevice));
     assert!(f.root_path.join("m/inner/f").exists());
@@ -724,9 +741,72 @@ fn a_directory_swapped_for_a_link_during_erasure_never_deletes_outside() {
             }
         });
         for _ in 0..1500u32 {
-            let _ = f.root.erase(&rel("victim"), &mut |_| {}, true);
+            let _ = f.root.erase(&rel("victim"), &mut |_| true, true);
         }
         stop.store(true, Ordering::Relaxed);
     });
     assert_outside_intact(&f.outside);
+}
+
+/// Revue de la PR 125 : ce qui refuse de partir ne se garde pas sans borne (un disque en lecture seule ne fait pas
+/// monter la mémoire) : au-delà d'un lot de noms coincés, on s'arrête et le reste est compté.
+#[test]
+fn names_that_refuse_to_go_are_kept_up_to_one_batch_then_the_rest_is_counted() {
+    if rustix::process::geteuid().is_root() {
+        return;
+    }
+    let f = fixture();
+    f.root.make_dirs(&rel("ro"), perms(0o750)).unwrap();
+    let ro = f.root_path.join("ro");
+    let count = super::unix::erase::BATCH + 76;
+    for index in 0..count {
+        std::fs::write(ro.join(format!("f{index}")), b"").unwrap();
+    }
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let erased = f.root.erase(&rel("ro"), &mut |_| true, true).unwrap();
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(erased.removed, 0);
+    assert!(
+        erased.left > 0 && erased.left <= count as u64 + 1,
+        "{erased:?}"
+    );
+    assert!(erased.first_error.is_some());
+}
+
+/// Revue de la PR 125 : le suivi demande l'arrêt (arrêt de l'agent) : le geste s'arrête au lot suivant et le dit.
+#[test]
+fn the_progress_can_stop_an_erasure_between_two_batches() {
+    let f = fixture();
+    f.root.make_dirs(&rel("big"), perms(0o750)).unwrap();
+    let big = f.root_path.join("big");
+    let count = super::unix::erase::BATCH * 3;
+    for index in 0..count {
+        std::fs::write(big.join(format!("f{index}")), b"").unwrap();
+    }
+    let mut batches = 0;
+    let erased = f
+        .root
+        .erase(
+            &rel("big"),
+            &mut |_| {
+                batches += 1;
+                false
+            },
+            true,
+        )
+        .unwrap();
+    assert!(erased.stopped, "{erased:?}");
+    assert!(erased.left >= 1);
+    assert_eq!(batches, 1, "arrêté après le premier lot");
+    let left_on_disk = std::fs::read_dir(&big).unwrap().count();
+    assert!(left_on_disk > 0 && left_on_disk < count, "{left_on_disk}");
+}
+
+/// Revue de la PR 125 : l'identifiant de montage est lisible (noyau 5.8 ou plus) sur un dossier ordinaire.
+#[test]
+fn the_mount_id_of_an_ordinary_directory_is_readable() {
+    let f = fixture();
+    let dir = std::fs::File::open(&f.root_path).unwrap();
+    let fd = std::os::fd::OwnedFd::from(dir);
+    assert!(super::unix::erase::mnt_id_of(&fd).is_some());
 }

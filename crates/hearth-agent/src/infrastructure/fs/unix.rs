@@ -160,8 +160,8 @@ pub(super) fn remove_service_root(data_dir: &Path, key: &ServiceKey) -> Result<(
     let (services, dev) = open_services_dir(data_dir, false)?;
     let root = open_dir_on(&services, name, dev)?;
     check_trusted(&root)?;
-    let mut quiet = |_: u64| {};
-    let mut eraser = Eraser::new(dev, &mut quiet);
+    let mut quiet = |_: u64| true;
+    let mut eraser = Eraser::new(dev, erase::mnt_id_of(&root), &mut quiet);
     eraser.contents(&root, 0);
     let report = eraser.finish();
     if report.left > 0 || report.first_error.is_some() {
@@ -315,7 +315,7 @@ impl UnixRoot {
     }
 
     pub(super) fn remove(&self, rel: &RelPath) -> Result<(), FsError> {
-        let mut quiet = |_: u64| {};
+        let mut quiet = |_: u64| true;
         let report = self.erase(rel, &mut quiet, false)?;
         if report.left > 0 || report.first_error.is_some() {
             return Err(report.first_error.unwrap_or(FsError::Refused));
@@ -328,15 +328,18 @@ impl UnixRoot {
     pub(super) fn erase(
         &self,
         rel: &RelPath,
-        progress: &mut (dyn FnMut(u64) + Send),
+        progress: &mut (dyn FnMut(u64) -> bool + Send),
         low_priority: bool,
     ) -> Result<Erased, FsError> {
         let (parent, leaf) = self.parent_of(rel)?;
         let name = CString::new(leaf).map_err(|_| FsError::Refused)?;
         statat(&parent, name.as_c_str(), AtFlags::SYMLINK_NOFOLLOW).map_err(fs_error)?;
         let (dev, depth) = (self.dev, rel.depth());
-        let work = move |parent: OwnedFd, name: CString, progress: &mut (dyn FnMut(u64) + Send)| {
-            let mut eraser = Eraser::new(dev, progress);
+        let mnt = erase::mnt_id_of(&self.fd);
+        let work = move |parent: OwnedFd,
+                         name: CString,
+                         progress: &mut (dyn FnMut(u64) -> bool + Send)| {
+            let mut eraser = Eraser::new(dev, mnt, progress);
             eraser.erase_entry(&parent, &name, depth);
             let report = eraser.finish();
             // Le retrait du nom doit survivre à une coupure : `fsync` du dossier parent.

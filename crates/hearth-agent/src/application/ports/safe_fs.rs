@@ -108,6 +108,8 @@ pub struct Erased {
     pub left: u64,
     /// La première erreur rencontrée, pour la trace seulement : jamais un chemin.
     pub first_error: Option<FsError>,
+    /// Le suivi a demandé l'arrêt (arrêt de l'agent) : le reste n'a pas été visité, `left` en compte au moins un.
+    pub stopped: bool,
 }
 
 /// Accès aux racines de service.
@@ -154,15 +156,17 @@ pub trait ServiceRoot: Send + Sync {
     /// `BR-DEL-030`) : mêmes garanties que [`Self::remove_tree`] (un lien est retiré comme lien, aucun montage
     /// franchi, 64 niveaux, jamais la racine), et en plus :
     /// - **mémoire bornée** quel que soit le nombre d'entrées d'un dossier (les noms se lisent par lots, HRT-179) ;
-    /// - **faible priorité** : le geste tourne sur un fil à part dont la priorité est abaissée, sans gêner les
-    ///   autres services ;
-    /// - **suivi** : `progress` reçoit le nombre d'éléments retirés jusqu'ici, après chaque lot ;
+    /// - **priorité processeur basse** : le geste tourne sur un fil créé pour lui (l'appelant garde un fil de
+    ///   tâche bloquante, qui l'attend) dont le « nice » est abaissé. Ce n'est PAS une priorité d'entrée-sortie
+    ///   (`ioprio_set` exige `libc` et `unsafe`) : sous `mq-deadline` ou `none` elle ne change rien aux disques ;
+    /// - **suivi et arrêt** : `progress` reçoit le nombre d'éléments retirés jusqu'ici, après chaque lot, et rend
+    ///   `false` pour demander l'arrêt (l'agent s'arrête) : le geste s'arrête au lot suivant, `Erased::stopped` ;
     /// - **jamais d'arrêt à la première erreur** : ce qui part part, ce qui reste est compté (`Erased::left`).
     ///
     /// `NotFound` si le dossier visé n'existe pas (rien à effacer).
     fn erase_tree(
         &self,
         rel: &RelPath,
-        progress: &mut (dyn FnMut(u64) + Send),
+        progress: &mut (dyn FnMut(u64) -> bool + Send),
     ) -> Result<Erased, FsError>;
 }

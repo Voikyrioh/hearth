@@ -927,6 +927,22 @@ pub async fn start_engined(
         .join(SERVICES_DIR)
         .to_string_lossy()
         .into_owned();
+    // La racine des dossiers gérés telle que la suppression la compare aux montages des autres conteneurs : le dossier
+    // de données canonique (liens, `//` et `..` résolus), lu une fois au démarrage (BR-DEL-008). Sans forme
+    // canonique, la forme de la configuration ; la suppression compare de toute façon les deux et l'identité.
+    let host_paths: Arc<dyn crate::application::ports::HostPaths> =
+        Arc::new(crate::infrastructure::host::paths::SystemHostPaths);
+    let deletion_root = host_paths
+        .canonical(&config.data_dir.to_string_lossy())
+        .map_or_else(
+            || services_root.clone(),
+            |canonical| {
+                std::path::Path::new(&canonical)
+                    .join(SERVICES_DIR)
+                    .to_string_lossy()
+                    .into_owned()
+            },
+        );
     // Ce que l'agent sait de lui-même, pour juger un dossier du serveur (BR-DEPLOY-012) : sans l'un de ces faits,
     // aucun dossier du serveur n'est jugé (et tous restent refusés).
     let folders = FolderFacts::new(
@@ -988,10 +1004,11 @@ pub async fn start_engined(
         service_repo.clone(),
         service_repo.clone(),
         safe_fs.clone(),
+        host_paths,
         phases.clone(),
         adapters.clock.clone(),
         DeleteContext {
-            services_root: services_root.clone(),
+            services_root: deletion_root,
             timings: engine.delete,
         },
     );
@@ -1040,6 +1057,7 @@ pub async fn start_engined(
         adapters.clock.clone(),
         services.trail.clone(),
     ));
+    let deletion_for_shutdown = service_deletion.clone();
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
@@ -1063,7 +1081,11 @@ pub async fn start_engined(
         erasure_pending: database.erasure_pending(),
     });
     // À l'arrêt, les flux ouverts se ferment d'eux-mêmes avant que le serveur n'attende les connexions.
-    let server = http::spawn(listener, tls, router)?.on_shutdown(move || closing.begin_shutdown());
+    // L'arrêt de l'agent arrête aussi un effacement en cours, qui reste « à vérifier » (BR-DEL-025).
+    let server = http::spawn(listener, tls, router)?.on_shutdown(move || {
+        closing.begin_shutdown();
+        deletion_for_shutdown.begin_shutdown();
+    });
     // Le résultat d'une mise à jour que personne n'a encore annoncé (le nouvel agent après un
     // échange, l'ancien après un retour en arrière) part au journal et au flux.
     tokio::spawn({

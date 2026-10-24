@@ -18,6 +18,7 @@ mod game_settings_repo;
 mod gpu_probe;
 mod host_environment;
 mod host_folders;
+mod host_paths;
 mod host_ports;
 mod id_gen;
 mod identity_store;
@@ -67,6 +68,7 @@ pub use game_settings_repo::{GameSettingsRepo, NewSettings, SettingsStoreError, 
 pub use gpu_probe::GpuProbe;
 pub use host_environment::{HostDescription, HostEnvironment};
 pub use host_folders::HostFolders;
+pub use host_paths::HostPaths;
 pub use host_ports::HostPorts;
 pub use id_gen::IdGen;
 pub use identity_store::{IdentityError, IdentityStore, PublicIdentity};

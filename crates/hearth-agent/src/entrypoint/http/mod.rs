@@ -404,7 +404,7 @@ pub static ENDPOINTS: &[Endpoint] = &[
         route: || post(deployments::create),
     },
     // Supprimer un service (HRT-85, ADR-0045, BR-DEL-*) : la fenêtre « Supprimer {nom} ? » se bâtit sur une
-    // consultation du droit « gérer les services » (dossiers, tailles, sort de chacun ; seul un refus est consigné) ;
+    // consultation du droit « gérer les services » (dossiers, tailles, sort de chacun ; aucun journal) ;
     // supprimer est un acte d'administration confirmé (`ServiceDelete` `0x14`, jamais couvert par l'élévation).
     Endpoint {
         method: Method::GET,
@@ -412,7 +412,9 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Services,
         version_checked: true,
         tracked: false,
-        audit: Some(AuditAction::ServiceDelete),
+        // Une consultation sans action de journal propre : aucun refus n'est écrit sous `service.delete` (celui d'un
+        // service adopté appartient à l'acte, pas à la fenêtre qu'on ouvre).
+        audit: None,
         route: || get(service_delete::preview),
     },
     Endpoint {

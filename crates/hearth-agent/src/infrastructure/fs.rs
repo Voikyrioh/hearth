@@ -121,7 +121,7 @@ impl ServiceRoot for unix::UnixRoot {
     fn erase_tree(
         &self,
         rel: &RelPath,
-        progress: &mut (dyn FnMut(u64) + Send),
+        progress: &mut (dyn FnMut(u64) -> bool + Send),
     ) -> Result<Erased, FsError> {
         self.erase(rel, progress, true)
     }

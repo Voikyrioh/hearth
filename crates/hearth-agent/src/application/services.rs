@@ -1887,25 +1887,34 @@ impl ServicesRegistry {
     /// adoptés ou non ; seuls ceux du service `own` sont exclus. Un conteneur créé hors de Hearth et non adopté
     /// n'a pas de nom ici (`Holder::Unmanaged`, BR-ADOPT-002). **Lecture réservée à la suppression** : jamais
     /// diffusée, jamais gardée.
-    pub fn folder_users(&self, own: &ServiceKey) -> Vec<FolderUse> {
+    ///
+    /// `None` : la liste des conteneurs n'est pas connue (moteur pas « Prêt » : le registre vide sa liste quand il
+    /// ne la tient plus). Une liste qu'on n'a pas est un doute, jamais « personne ne l'utilise ».
+    pub fn folder_users(&self, own: &ServiceKey) -> Option<Vec<FolderUse>> {
+        if self.engine_state() != EngineState::Ready {
+            return None;
+        }
         let inner = self.lock();
-        inner
-            .containers
-            .values()
-            .filter(|observation| {
-                key_of(&inner.owners, &inner.hearth_ids, observation).as_ref() != Some(own)
-            })
-            .map(|observation| FolderUse {
-                holder: Self::holder_of(&inner, observation),
-                sources: observation
-                    .mounts
-                    .iter()
-                    .filter(|mount| mount.kind == MountType::Folder)
-                    .map(|mount| mount.source.clone())
-                    .collect(),
-                complete: observation.mounts_omitted == 0,
-            })
-            .collect()
+        Some(
+            inner
+                .containers
+                .values()
+                .filter(|observation| {
+                    key_of(&inner.owners, &inner.hearth_ids, observation).as_ref() != Some(own)
+                })
+                .map(|observation| FolderUse {
+                    holder: Self::holder_of(&inner, observation),
+                    sources: observation
+                        .mounts
+                        .iter()
+                        .filter(|mount| mount.kind == MountType::Folder)
+                        .map(|mount| mount.source.clone())
+                        .collect(),
+                    identities: Vec::new(),
+                    complete: observation.mounts_omitted == 0,
+                })
+                .collect(),
+        )
     }
 
     /// Combien de volumes du moteur (pas des dossiers) les conteneurs de ce service montent : la suppression

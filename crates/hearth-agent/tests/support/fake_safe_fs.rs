@@ -309,7 +309,7 @@ impl ServiceRoot for FakeRoot {
     fn erase_tree(
         &self,
         rel: &RelPath,
-        progress: &mut (dyn FnMut(u64) + Send),
+        progress: &mut (dyn FnMut(u64) -> bool + Send),
     ) -> Result<Erased, FsError> {
         if rel.is_root() {
             return Err(FsError::Refused);
@@ -367,9 +367,14 @@ impl ServiceRoot for FakeRoot {
                 left,
                 first_error: (left > 0)
                     .then_some(FsError::Io(std::io::ErrorKind::PermissionDenied)),
+                stopped: false,
             })
         })?;
-        progress(report.removed);
-        Ok(report)
+        // Le suivi peut demander l'arrêt : le faux a tout retiré d'un coup, il le dit seulement.
+        let go_on = progress(report.removed);
+        Ok(Erased {
+            stopped: !go_on,
+            ..report
+        })
     }
 }

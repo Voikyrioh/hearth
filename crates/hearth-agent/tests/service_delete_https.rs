@@ -686,6 +686,7 @@ async fn an_adopted_service_is_never_deleted_and_the_refusal_is_journaled() {
     }
     let preview = b.preview(&key).await;
     assert_eq!(code(&preview), "SERVICE_ADOPTED");
+    // Ouvrir la fenêtre n'écrit aucun refus `service.delete` : seul l'acte le fait.
     // Rien n'est touché, et le refus est au journal avec sa cause (BR-DEL-002).
     assert!(b.engine.container_ids().contains(&adopted.id));
     assert!(b.engine.removed_keeping_volumes().is_empty());
@@ -696,10 +697,9 @@ async fn an_adopted_service_is_never_deleted_and_the_refusal_is_journaled() {
     for entry in &journal {
         assert_eq!(entry.0, "failed");
         assert!(
-            entry
-                .2
-                .as_deref()
-                .is_some_and(|reason| reason.starts_with("service adopté")),
+            entry.2.as_deref().is_some_and(
+                |reason| reason.starts_with("service adopté") && !reason.contains("(2 autres")
+            ),
             "{entry:?}"
         );
         assert_eq!(entry.1.as_deref(), Some("service 7dtd"));
@@ -1302,4 +1302,51 @@ async fn an_agent_restarting_in_the_middle_of_an_erasure_never_resumes_it_and_as
     b.safe_fs.release_erasure();
     second.shutdown().await;
     b.agent.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// L'arrêt de l'agent pendant un effacement (revue de la PR 125)
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn stopping_the_agent_stops_the_erasure_and_leaves_the_operation_to_check() {
+    let b = bench().await;
+    let service = b.deploy("web").await;
+    let hold = b.safe_fs.hold_erasure();
+    let accepted = b
+        .accepted(
+            service.key.as_str(),
+            json!({ "erase_data": true, "confirm_name": "web" }),
+        )
+        .await;
+    b.until(&accepted.operation_id, |op| {
+        op.step.as_deref() == Some("erase")
+    })
+    .await;
+    let started = Instant::now();
+    while b.safe_fs.erase_calls().is_empty() {
+        assert!(started.elapsed() < Duration::from_secs(15));
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // L'agent s'arrête pendant l'effacement : le suivi demande l'arrêt, l'opération n'est PAS close.
+    b.agent.shutdown().await;
+    drop(hold);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let status: String = sqlx::query_scalar("SELECT status FROM service_ops WHERE id = ?")
+        .bind(&accepted.operation_id)
+        .fetch_one(b.env.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        status, "running",
+        "ni réussie ni échouée : à vérifier au prochain démarrage"
+    );
+    let done: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM service_op_steps WHERE op_id = ? AND step = 'erase' AND state = 'done'",
+    )
+    .bind(&accepted.operation_id)
+    .fetch_one(b.env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(done, 0, "l'étape d'effacement n'est pas dite finie");
 }

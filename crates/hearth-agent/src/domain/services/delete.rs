@@ -78,8 +78,13 @@ fn single_component(source: &str) -> Option<RelPath> {
     (rel.components().count() == 1).then_some(rel)
 }
 
-/// Ce qu'un AUTRE conteneur monte : ses dossiers du serveur, et si la liste est complète (l'agent n'en lit
-/// qu'un nombre borné par conteneur).
+/// L'identité d'un dossier sur le serveur : (périphérique, inode). Deux chemins qui désignent le même dossier
+/// (lien, montage « bind », `//`) ont la même identité.
+pub type FileId = (u64, u64);
+
+/// Ce qu'un AUTRE conteneur monte : ses dossiers du serveur (le chemin que le moteur donne, et sa forme
+/// canonique quand l'appelant a pu la lire), leur identité, et si la liste est complète (l'agent n'en lit qu'un
+/// nombre borné par conteneur).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FolderUse {
     /// Qui c'est, tel que la fenêtre peut le dire : un service publié par son nom, un conteneur créé hors de
@@ -87,8 +92,18 @@ pub struct FolderUse {
     pub holder: Holder,
     /// Les chemins du serveur que ce conteneur monte.
     pub sources: Vec<String>,
+    /// Les identités de ceux qui existent.
+    pub identities: Vec<FileId>,
     /// La liste est entière. `false` : des montages ne sont pas lus, on ne sait pas.
     pub complete: bool,
+}
+
+/// Le dossier géré dont on juge le sort : ses chemins (celui de la description et sa forme canonique) et son
+/// identité quand il existe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnFolder {
+    pub paths: Vec<String>,
+    pub identity: Option<FileId>,
 }
 
 /// Ce qu'il advient d'un dossier géré.
@@ -102,34 +117,58 @@ pub enum Fate {
         services: Vec<String>,
         unmanaged: bool,
     },
-    /// Conservé : un autre conteneur a des montages que l'agent ne lit pas, donc l'agent ne peut pas prouver
-    /// qu'il n'utilise pas ce dossier.
+    /// Conservé : on ne peut pas prouver qu'aucun autre conteneur ne l'utilise (liste des conteneurs absente ou
+    /// pas prête, montages non lus).
     Unverifiable,
+}
+
+/// Un chemin ramené à sa forme lexicale : `//`, `/./` et `/..` résolus, sans `/` final. Ne lit pas le disque.
+pub fn normalize(path: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for part in path.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            other => parts.push(other),
+        }
+    }
+    format!("/{}", parts.join("/"))
 }
 
 /// Deux chemins du serveur se recouvrent-ils (le même, l'un dans l'autre) ?
 fn overlaps(a: &str, b: &str) -> bool {
-    let (a, b) = (a.trim_end_matches('/'), b.trim_end_matches('/'));
+    let (a, b) = (normalize(a), normalize(b));
     let inside = |inner: &str, outer: &str| {
-        inner == outer
+        outer == "/"
+            || inner == outer
             || inner
                 .strip_prefix(outer)
                 .is_some_and(|rest| rest.starts_with('/'))
     };
-    inside(a, b) || inside(b, a)
+    inside(&a, &b) || inside(&b, &a)
 }
 
-/// Le sort du dossier géré `host_path` d'après ce que les autres conteneurs montent (BR-DEL-008).
-pub fn fate_of(host_path: &str, others: &[FolderUse]) -> Fate {
+/// Le sort du dossier géré `own` d'après ce que les autres conteneurs montent (BR-DEL-008). `others` à `None` :
+/// la liste des conteneurs n'est pas connue (moteur pas prêt) : une liste qu'on n'a pas est un doute, jamais un
+/// feu vert.
+pub fn fate_of(own: &OwnFolder, others: Option<&[FolderUse]>) -> Fate {
+    let Some(others) = others else {
+        return Fate::Unverifiable;
+    };
     let mut services: Vec<String> = Vec::new();
     let mut unmanaged = false;
     let mut unverifiable = false;
     for other in others {
-        if other
+        let same_place = other
             .sources
             .iter()
-            .any(|source| overlaps(host_path, source))
-        {
+            .any(|source| own.paths.iter().any(|path| overlaps(path, source)))
+            || own
+                .identity
+                .is_some_and(|identity| other.identities.contains(&identity));
+        if same_place {
             match &other.holder {
                 Holder::Service(name) => {
                     if !services.contains(name) {
@@ -195,8 +234,20 @@ mod tests {
         FolderUse {
             holder: Holder::Service(name.into()),
             sources: sources.iter().map(|s| (*s).into()).collect(),
+            identities: Vec::new(),
             complete,
         }
+    }
+
+    fn own(path: &str) -> OwnFolder {
+        OwnFolder {
+            paths: vec![path.to_owned()],
+            identity: None,
+        }
+    }
+
+    fn fate(path: &str, others: &[FolderUse]) -> Fate {
+        fate_of(&own(path), Some(others))
     }
 
     #[test]
@@ -249,9 +300,9 @@ mod tests {
     #[test]
     fn a_folder_nobody_else_uses_is_erased() {
         let path = format!("{ROOT}/{KEY}/data");
-        assert_eq!(fate_of(&path, &[]), Fate::Erase);
+        assert_eq!(fate(&path, &[]), Fate::Erase);
         assert_eq!(
-            fate_of(&path, &[used_by("autre", &["/srv/elsewhere"], true)]),
+            fate(&path, &[used_by("autre", &["/srv/elsewhere"], true)]),
             Fate::Erase
         );
     }
@@ -268,7 +319,7 @@ mod tests {
             "/var/lib".to_owned(),
         ] {
             assert_eq!(
-                fate_of(&path, &[used_by("sauvegarde", &[source.as_str()], true)]),
+                fate(&path, &[used_by("sauvegarde", &[source.as_str()], true)]),
                 Fate::Shared {
                     services: vec!["sauvegarde".into()],
                     unmanaged: false
@@ -282,7 +333,7 @@ mod tests {
     fn a_sibling_whose_name_merely_starts_the_same_is_not_a_parent() {
         let path = format!("{ROOT}/{KEY}/data");
         assert_eq!(
-            fate_of(&path, &[used_by("x", &[&format!("{path}-old")], true)]),
+            fate(&path, &[used_by("x", &[&format!("{path}-old")], true)]),
             Fate::Erase
         );
     }
@@ -293,10 +344,11 @@ mod tests {
         let other = FolderUse {
             holder: Holder::Unmanaged,
             sources: vec![path.clone()],
+            identities: Vec::new(),
             complete: true,
         };
         assert_eq!(
-            fate_of(&path, &[other]),
+            fate(&path, &[other]),
             Fate::Shared {
                 services: Vec::new(),
                 unmanaged: true
@@ -307,7 +359,7 @@ mod tests {
     #[test]
     fn services_sharing_the_folder_are_listed_once_in_name_order() {
         let path = format!("{ROOT}/{KEY}/data");
-        let fate = fate_of(
+        let fate = fate(
             &path,
             &[
                 used_by("zeta", &[&path], true),
@@ -329,18 +381,74 @@ mod tests {
      {
         let path = format!("{ROOT}/{KEY}/data");
         assert_eq!(
-            fate_of(&path, &[used_by("gros", &["/srv/x"], false)]),
+            fate(&path, &[used_by("gros", &["/srv/x"], false)]),
             Fate::Unverifiable
         );
         // Une utilisation prouvée l'emporte sur le doute.
         assert!(matches!(
-            fate_of(
+            fate(
                 &path,
                 &[
                     used_by("gros", &["/srv/x"], false),
                     used_by("vu", &[&path], true)
                 ]
             ),
+            Fate::Shared { .. }
+        ));
+    }
+
+    #[test]
+    fn a_list_of_containers_we_do_not_have_is_a_doubt_never_a_green_light() {
+        let path = format!("{ROOT}/{KEY}/data");
+        assert_eq!(fate_of(&own(&path), None), Fate::Unverifiable);
+    }
+
+    #[test]
+    fn paths_are_compared_in_their_lexical_form() {
+        let path = format!("{ROOT}/{KEY}/data");
+        for source in [
+            format!("/var//lib/hearth/./services/{KEY}/data"),
+            format!("/var/lib/hearth/services/x/../{KEY}/data/"),
+            format!("/var/lib/hearth/services/{KEY}//data/saves"),
+        ] {
+            assert!(
+                matches!(
+                    fate(&path, &[used_by("a", &[source.as_str()], true)]),
+                    Fate::Shared { .. }
+                ),
+                "{source}"
+            );
+        }
+        assert_eq!(normalize("/a/../../b//c/."), "/b/c");
+    }
+
+    #[test]
+    fn the_same_directory_under_another_name_is_found_by_its_identity() {
+        // Un lien ou un montage « bind » : le chemin ne dit rien, le périphérique et l'inode oui.
+        let mut folder = own("/var/lib/hearth/services/h_x/data");
+        folder.identity = Some((7, 42));
+        let mut other = used_by("alias", &["/mnt/elsewhere/looks-unrelated"], true);
+        other.identities = vec![(7, 42)];
+        assert!(matches!(
+            fate_of(&folder, Some(&[other.clone()])),
+            Fate::Shared { .. }
+        ));
+        other.identities = vec![(7, 43)];
+        assert_eq!(fate_of(&folder, Some(&[other])), Fate::Erase);
+    }
+
+    #[test]
+    fn the_canonical_form_of_our_folder_is_compared_too() {
+        let folder = OwnFolder {
+            paths: vec![
+                "/srv/link/services/h_x/data".into(),
+                "/real/hearth/services/h_x/data".into(),
+            ],
+            identity: None,
+        };
+        let other = used_by("b", &["/real/hearth/services/h_x"], true);
+        assert!(matches!(
+            fate_of(&folder, Some(&[other])),
             Fate::Shared { .. }
         ));
     }

@@ -203,6 +203,7 @@ fn state_over_rig(
             hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(env.db.pool().clone()),
         ),
         rig.safe_fs.clone(),
+        Arc::new(hearth_agent::infrastructure::host::paths::SystemHostPaths),
         phases.clone(),
         env.clock.clone(),
         hearth_agent::application::delete::DeleteContext {

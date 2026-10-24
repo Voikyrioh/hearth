@@ -29,7 +29,7 @@
 //! journal d'activité (`BR-DEL-029`) ; un volume supprimé ; un conteneur coupé de force sans l'avoir dit.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use hearth_proto::api::service_delete::{
@@ -41,8 +41,8 @@ use tokio::time::Instant;
 
 use super::game_phase::GamePhases;
 use super::ports::{
-    Clock, ContainerEngine, EngineError, Erased, FsError, Measure, SafeFs, ServiceContainers,
-    ServiceIntents, StopIntent,
+    Clock, ContainerEngine, EngineError, Erased, FsError, HostPaths, Measure, SafeFs,
+    ServiceContainers, ServiceIntents, StopIntent,
 };
 use super::service_lifecycle::reason_of;
 use super::service_ops::{AcceptRequest, AuditDraft, OpError, ServiceOps};
@@ -56,7 +56,9 @@ use crate::domain::ops::{
     Cause, Holder, OpKind, OpStatus, Refusal, StopEvidence, UndoInfo, WAIT_FLOOR, WAIT_MARGIN,
     stop_was_forced, wait_budget_with,
 };
-use crate::domain::services::delete::{Fate, ManagedFolder, MountSplit, fate_of, split_mounts};
+use crate::domain::services::delete::{
+    Fate, FolderUse, ManagedFolder, MountSplit, OwnFolder, fate_of, split_mounts,
+};
 use crate::domain::services::plan::image_reference;
 use crate::domain::services::spec::{SpecBody, fold_name};
 use crate::domain::services::{
@@ -155,14 +157,26 @@ struct Finish {
     status: OpStatus,
     cause: Option<Cause>,
     note: DeleteNote,
+    /// L'effacement s'est arrêté avec l'agent : rien n'est clos.
+    halted: bool,
 }
 
 impl Finish {
+    fn halted(note: DeleteNote) -> Self {
+        Self {
+            status: OpStatus::Failed,
+            cause: None,
+            note,
+            halted: true,
+        }
+    }
+
     fn failed(cause: Cause, note: DeleteNote) -> Self {
         Self {
             status: OpStatus::Failed,
             cause: Some(cause),
             note,
+            halted: false,
         }
     }
 
@@ -172,6 +186,7 @@ impl Finish {
             status: OpStatus::Interrupted,
             cause: Some(cause),
             note,
+            halted: false,
         }
     }
 
@@ -180,6 +195,7 @@ impl Finish {
             status: OpStatus::Cancelled,
             cause: Some(Cause::CancelledByAccount),
             note,
+            halted: false,
         }
     }
 
@@ -188,6 +204,7 @@ impl Finish {
             status: OpStatus::Succeeded,
             cause: (left > 0).then_some(Cause::DataNotErased),
             note,
+            halted: false,
         }
     }
 }
@@ -217,9 +234,13 @@ pub struct ServiceDeletion {
     containers: Arc<dyn ServiceContainers>,
     intents: Arc<dyn ServiceIntents>,
     safe_fs: Arc<dyn SafeFs>,
+    host_paths: Arc<dyn HostPaths>,
     phases: Arc<GamePhases>,
     clock: Arc<dyn Clock>,
     context: DeleteContext,
+    /// L'agent s'arrête : un effacement en cours s'arrête au lot suivant et reste « à vérifier » (comme après un
+    /// redémarrage), au lieu de faire attendre l'arrêt jusqu'à la fin ou au `SIGKILL`.
+    stopping: Arc<AtomicBool>,
     /// Une mesure à la fois pour tout l'agent (conception technique 9.3).
     measure_gate: AsyncMutex<()>,
 }
@@ -242,6 +263,7 @@ impl ServiceDeletion {
         containers: Arc<dyn ServiceContainers>,
         intents: Arc<dyn ServiceIntents>,
         safe_fs: Arc<dyn SafeFs>,
+        host_paths: Arc<dyn HostPaths>,
         phases: Arc<GamePhases>,
         clock: Arc<dyn Clock>,
         context: DeleteContext,
@@ -254,11 +276,19 @@ impl ServiceDeletion {
             containers,
             intents,
             safe_fs,
+            host_paths,
             phases,
             clock,
             context,
+            stopping: Arc::new(AtomicBool::new(false)),
             measure_gate: AsyncMutex::new(()),
         })
+    }
+
+    /// L'agent s'arrête (appelé à l'arrêt du serveur) : les effacements en cours s'arrêtent au lot suivant, leur
+    /// opération reste en cours dans le journal et sera « à vérifier » au prochain démarrage, jamais reprise.
+    pub fn begin_shutdown(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
     }
 
     // -----------------------------------------------------------------------------------------
@@ -313,27 +343,53 @@ impl ServiceDeletion {
     }
 
     fn busy_of(&self, key: &ServiceKey) -> Option<DeleteError> {
-        self.ops.with_index(|index| {
-            index.busy(key).map(|open| DeleteError::Busy {
-                by: open.account.clone(),
-                kind: open.kind,
-            })
-        })
+        self.ops
+            .busy(key)
+            .map(|(by, kind)| DeleteError::Busy { by, kind })
     }
 
     /// Les dossiers du service rangés, et le sort de chacun d'après ce que les autres conteneurs montent.
-    fn judge_folders(&self, key: &ServiceKey, body: Option<&SpecBody>) -> Judged {
+    async fn judge_folders(&self, key: &ServiceKey, body: Option<&SpecBody>) -> Judged {
         let Some(body) = body else {
             return Judged::default();
         };
         let split = split_mounts(body, &self.context.services_root, key.as_str());
-        let users = self.registry.folder_users(key);
-        let fates = split
-            .managed
-            .iter()
-            .map(|folder| fate_of(&folder.host_path, &users))
-            .collect();
+        let mut fates = Vec::with_capacity(split.managed.len());
+        for folder in &split.managed {
+            fates.push(self.fate_now(key, &folder.host_path).await);
+        }
         Judged { split, fates }
+    }
+
+    /// Le sort d'un dossier géré MAINTENANT : la liste des autres conteneurs est lue à cet instant ; chemins
+    /// canoniques et identité (périphérique, inode) des deux côtés ; au moindre doute (liste absente, chemin
+    /// illisible d'un côté seulement), le dossier est conservé (BR-DEL-008).
+    async fn fate_now(&self, key: &ServiceKey, host_path: &str) -> Fate {
+        let users = self.registry.folder_users(key);
+        let paths = Arc::clone(&self.host_paths);
+        let host_path = host_path.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let own = OwnFolder {
+                paths: variants(paths.as_ref(), &host_path),
+                identity: paths.identity(&host_path),
+            };
+            let resolved: Option<Vec<FolderUse>> = users.map(|list| {
+                list.into_iter()
+                    .map(|mut other| {
+                        let mut sources = Vec::new();
+                        for source in &other.sources {
+                            sources.extend(variants(paths.as_ref(), source));
+                            other.identities.extend(paths.identity(source));
+                        }
+                        other.sources = sources;
+                        other
+                    })
+                    .collect()
+            });
+            fate_of(&own, resolved.as_deref())
+        })
+        .await
+        .unwrap_or(Fate::Unverifiable)
     }
 
     // -----------------------------------------------------------------------------------------
@@ -344,8 +400,7 @@ impl ServiceDeletion {
     /// rien n'est écrit.
     pub async fn preview(&self, key: &ServiceKey) -> Result<DeletePreview, DeleteFailed> {
         let subject = self.subject(key).await?;
-        let judged = self.judge_folders(key, subject.body.as_ref());
-        let _one_measure_at_a_time = self.measure_gate.lock().await;
+        let judged = self.judge_folders(key, subject.body.as_ref()).await;
         let deadline = Instant::now() + self.context.timings.measure_budget;
         let mut in_time = true;
         let mut folders =
@@ -430,6 +485,8 @@ impl ServiceDeletion {
     /// Mesure un dossier géré dans le temps qui reste. `None` : le dossier ou la racine n'existe plus, ou ne se
     /// lit pas.
     async fn measure(&self, key: &ServiceKey, rel: &RelPath, budget: Duration) -> Option<Measure> {
+        // Une mesure à la fois pour tout l'agent, aussi bien pour la fenêtre que pour la taille journalisée.
+        let _one_measure_at_a_time = self.measure_gate.lock().await;
         let fs = Arc::clone(&self.safe_fs);
         let (key, rel) = (key.clone(), rel.clone());
         let result =
@@ -454,6 +511,9 @@ impl ServiceDeletion {
         actor: Actor,
         op_key: &str,
     ) -> Result<DeleteAccepted, DeleteFailed> {
+        // Une clôture en cours sur ce service (commit, verrous, projection, annonce) se termine avant que l'on juge
+        // « occupé » : une seule attente par demande, partagée avec `accept_after_wait`.
+        self.ops.wait_closed(key).await;
         let subject = match self.subject(key).await {
             Ok(subject) => subject,
             // Une suppression en cours a déjà oublié le service (description et conteneur) mais tient encore son
@@ -486,7 +546,7 @@ impl ServiceDeletion {
             return Err(named(DeleteError::NameMismatch));
         }
 
-        let judged = self.judge_folders(key, subject.body.as_ref());
+        let judged = self.judge_folders(key, subject.body.as_ref()).await;
         let erase: Vec<EraseTarget> = if request.erase_data {
             judged
                 .split
@@ -506,7 +566,7 @@ impl ServiceDeletion {
         let account = account_of(&actor);
         let id = self
             .ops
-            .accept(AcceptRequest {
+            .accept_after_wait(AcceptRequest {
                 op_key: op_key.to_owned(),
                 service: key.clone(),
                 service_name: subject.name.clone(),
@@ -542,6 +602,7 @@ impl ServiceDeletion {
             );
             return Err(named(DeleteError::Internal(error.to_string())));
         }
+        let job_actor = actor.clone();
         let job = Job {
             id: id.clone(),
             key: key.clone(),
@@ -555,29 +616,20 @@ impl ServiceDeletion {
         let work = tokio::spawn(async move { this.execute(job).await });
         // Une panique de l'exécution ne laisse jamais une opération « en cours » : elle est close, le verrou rendu.
         let watcher = Arc::clone(self);
-        let watched = id.clone();
+        let (watched, name, actor_of_job) = (id.clone(), subject.name.clone(), job_actor);
         tokio::spawn(async move {
             if work.await.is_err() {
                 tracing::error!(operation = %watched, "exécution d'une suppression interrompue par une panique");
-                journal(
-                    watcher
-                        .ops
-                        .finish(&watched, OpStatus::Failed, Some(Cause::StepFailed))
-                        .await,
-                    "finish",
-                );
+                watcher
+                    .close_after_panic(&watched, &name, actor_of_job)
+                    .await;
             }
         });
         Ok(DeleteAccepted { operation_id: id })
     }
 
     fn holder_account(&self, key: &ServiceKey) -> String {
-        self.ops.with_index(|index| {
-            index
-                .busy(key)
-                .map(|open| open.account.clone())
-                .unwrap_or_default()
-        })
+        self.ops.busy(key).map(|(by, _)| by).unwrap_or_default()
     }
 
     // -----------------------------------------------------------------------------------------
@@ -588,6 +640,12 @@ impl ServiceDeletion {
         let started = Instant::now();
         let mut note = DeleteNote::default();
         let finish = self.run(&job, &mut note).await;
+        if finish.halted {
+            // L'agent s'arrête au milieu de l'effacement : l'opération n'est pas close, son `intent` sans `done`
+            // en fait une opération « à vérifier » au prochain démarrage (BR-DEL-025), jamais reprise.
+            tracing::info!(operation = %job.id, "effacement arrêté par l'arrêt de l'agent : à vérifier au prochain démarrage");
+            return;
+        }
         self.settle(&job, finish, started.elapsed()).await;
     }
 
@@ -665,7 +723,11 @@ impl ServiceDeletion {
             if let Err(finish) = self.begin(job, step::ERASE, *note).await {
                 return finish;
             }
-            left = self.erase(job, note).await;
+            let (remaining, halted) = self.erase(job, note).await;
+            if halted {
+                return Finish::halted(*note);
+            }
+            left = remaining;
             journal(
                 self.ops
                     .done(&job.id, step::ERASE, &UndoInfo::default())
@@ -825,7 +887,7 @@ impl ServiceDeletion {
     /// Efface les dossiers gérés un par un (`BR-DEL-006` à `BR-DEL-008`). Rend le nombre d'éléments qui n'ont pas
     /// pu être effacés. Le sort de chaque dossier est rejugé juste avant : un conteneur créé entre-temps qui le
     /// monte le fait conserver.
-    async fn erase(&self, job: &Job, note: &mut DeleteNote) -> u64 {
+    async fn erase(&self, job: &Job, note: &mut DeleteNote) -> (u64, bool) {
         let timings = self.context.timings;
         let deadline = Instant::now() + timings.measure_budget;
         let mut left = 0_u64;
@@ -834,9 +896,19 @@ impl ServiceDeletion {
         let mut bytes = 0_u64;
         let mut partial = false;
         let total = u64::try_from(job.erase.len()).unwrap_or(u64::MAX);
+        let mut halted = false;
         for (index, target) in job.erase.iter().enumerate() {
-            let users = self.registry.folder_users(&job.key);
-            if fate_of(&target.folder.host_path, &users) != Fate::Erase {
+            if self.stopping.load(Ordering::SeqCst) {
+                halted = true;
+                break;
+            }
+            if self.fate_now(&job.key, &target.folder.host_path).await != Fate::Erase {
+                // Devenu partagé (ou impossible à vérifier) depuis la fenêtre : conservé, et dit comme ce qui
+                // reste (`data_not_erased`), jamais passé sous silence.
+                tracing::warn!(
+                    "dossier d'un service supprimé conservé : devenu partagé ou non vérifiable"
+                );
+                left = left.saturating_add(1);
                 continue;
             }
             // La taille d'avant l'effacement, pour le journal (`BR-DEL-029`), dans le budget qui reste.
@@ -861,6 +933,10 @@ impl ServiceDeletion {
                     base = base.saturating_add(erased.removed);
                     left = left.saturating_add(erased.left);
                     folders += 1;
+                    if erased.stopped {
+                        halted = true;
+                        break;
+                    }
                     if let Some(error) = erased.first_error {
                         tracing::warn!(
                             ?error,
@@ -882,6 +958,9 @@ impl ServiceDeletion {
             bytes,
             partial,
         });
+        if halted {
+            return (left, true);
+        }
         // La racine du service ne part que si plus rien n'y est : un dossier conservé la garde (`BR-DEL-008`).
         if left == 0 {
             let fs = Arc::clone(&self.safe_fs);
@@ -892,7 +971,7 @@ impl ServiceDeletion {
                 Err(error) => tracing::warn!(%error, "retrait de la racine interrompu"),
             }
         }
-        left
+        (left, false)
     }
 
     /// Efface un dossier sur un fil à part, avec un signe de vie régulier dans l'opération (`BR-DEL-030`).
@@ -905,16 +984,20 @@ impl ServiceDeletion {
         base: u64,
     ) -> Result<Erased, FsError> {
         let seen = Arc::new(AtomicU64::new(0));
-        let (fs, key, rel, counter) = (
+        let (fs, key, rel, counter, stopping) = (
             Arc::clone(&self.safe_fs),
             job.key.clone(),
             rel.clone(),
             Arc::clone(&seen),
+            Arc::clone(&self.stopping),
         );
+        // Le geste tourne sur un fil créé pour lui (`erase_tree`) ; ce fil de tâche bloquante l'attend. Le suivi
+        // rend `false` quand l'agent s'arrête : l'effacement s'arrête au lot suivant.
         let mut work = tokio::task::spawn_blocking(move || {
             let root = fs.open_service_root(&key)?;
             root.erase_tree(&rel, &mut |removed| {
-                counter.store(removed, Ordering::Relaxed)
+                counter.store(removed, Ordering::Relaxed);
+                !stopping.load(Ordering::SeqCst)
             })
         });
         loop {
@@ -971,11 +1054,18 @@ impl ServiceDeletion {
             .await
         {
             Ok(()) => {}
-            Err(OpError::IllegalTransition | OpError::Stale) => tracing::info!(
-                operation = %job.id,
-                "suppression non close : l'opération a changé de statut entre-temps"
-            ),
-            Err(error) => tracing::error!(%error, "suppression non close dans le journal"),
+            Err(OpError::IllegalTransition | OpError::Stale) => {
+                tracing::info!(
+                    operation = %job.id,
+                    "suppression non close : l'opération a changé de statut entre-temps"
+                );
+                // Si l'autre changement l'a rendue terminale sans rendre ses verrous, ils sont rendus ici.
+                self.ops.settle(&job.id, None).await;
+            }
+            Err(error) => {
+                tracing::error!(%error, "suppression non close dans le journal");
+                self.ops.settle(&job.id, None).await;
+            }
         }
         // La trace dit l'opération, jamais le service ni un chemin.
         tracing::info!(
@@ -986,6 +1076,35 @@ impl ServiceDeletion {
             duration_ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
             "suppression terminée"
         );
+    }
+
+    /// Une panique de l'exécution : l'opération est close par le MÊME chemin que toute clôture (`finish_with` :
+    /// transaction, entrée au journal d'activité, verrous rendus, annonce). Pendant `Cancelling`, la seule issue
+    /// permise est « annulé » (un `failed` serait refusé et laisserait le verrou).
+    async fn close_after_panic(&self, id: &str, name: &str, actor: Actor) {
+        let cancelling = self.is_cancelling(id).await;
+        let (status, cause) = if cancelling {
+            (OpStatus::Cancelled, Cause::CancelledByAccount)
+        } else {
+            (OpStatus::Failed, Cause::StepFailed)
+        };
+        let draft = ClientName::parse(name).map(|service| AuditDraft {
+            actor,
+            action: OpKind::Delete.audit_action(),
+            target: Target::ServiceDelete {
+                service,
+                note: DeleteNote::default(),
+            },
+            outcome: if cancelling {
+                Outcome::Failed(reason_of(cause))
+            } else {
+                Outcome::Failed(Reason::Internal)
+            },
+        });
+        if let Err(error) = self.ops.finish_with(id, status, Some(cause), draft).await {
+            tracing::error!(%error, "suppression interrompue non close dans le journal");
+        }
+        self.ops.settle(id, None).await;
     }
 
     /// Une entrée au journal d'activité (`BR-DEL-029`) : le compte, le service, ce qui a été effacé (des nombres),
@@ -1063,4 +1182,24 @@ fn journal<T>(result: Result<T, OpError>, what: &'static str) {
     if let Err(error) = result {
         tracing::warn!(%error, write = what, "journal de la suppression non écrit");
     }
+}
+
+/// Les formes d'un chemin du serveur à comparer : celle qu'on donne, sa forme canonique, et la forme canonique de
+/// son dossier parent suivie de son dernier nom (le dossier lui-même peut ne pas exister).
+fn variants(paths: &dyn HostPaths, path: &str) -> Vec<String> {
+    let mut out = vec![path.to_owned()];
+    let mut add = |candidate: String| {
+        if !out.contains(&candidate) {
+            out.push(candidate);
+        }
+    };
+    if let Some(canonical) = paths.canonical(path) {
+        add(canonical);
+    }
+    if let Some((parent, leaf)) = path.trim_end_matches('/').rsplit_once('/')
+        && let Some(canonical) = paths.canonical(parent)
+    {
+        add(format!("{}/{leaf}", canonical.trim_end_matches('/')));
+    }
+    out
 }

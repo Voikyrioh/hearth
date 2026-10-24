@@ -79,17 +79,21 @@ pub fn run(fs: &dyn SafeFs, uid: u32, gid: u32) {
     root.write_atomic(&rel("data/deep/b"), b"b", file).unwrap();
     let mut seen = Vec::new();
     let erased = root
-        .erase_tree(&rel("data"), &mut |removed| seen.push(removed))
+        .erase_tree(&rel("data"), &mut |removed| {
+            seen.push(removed);
+            true
+        })
         .unwrap();
     assert_eq!((erased.removed, erased.left), (4, 0), "{erased:?}");
     assert_eq!(erased.first_error, None);
     assert_eq!(seen.last().copied(), Some(4), "le suivi dit le total");
     assert_eq!(
-        root.erase_tree(&rel("data"), &mut |_| {}).unwrap_err(),
+        root.erase_tree(&rel("data"), &mut |_| true).unwrap_err(),
         FsError::NotFound
     );
     assert_eq!(
-        root.erase_tree(&RelPath::root(), &mut |_| {}).unwrap_err(),
+        root.erase_tree(&RelPath::root(), &mut |_| true)
+            .unwrap_err(),
         FsError::Refused
     );
     // Une racine vide se retire sans rien toucher ; pleine, elle reste.
