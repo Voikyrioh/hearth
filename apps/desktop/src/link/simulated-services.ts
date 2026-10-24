@@ -208,6 +208,12 @@ export class SimulatedServices {
       : undefined;
   }
 
+  /** Les services de la liste d'un serveur (de quoi vérifier), vide si la liste n'est pas connue. */
+  list(serverId: string): ServiceDto[] {
+    const book = this.books.get(serverId);
+    return book?.view.kind === "supported" ? [...book.view.services] : [];
+  }
+
   /** L'état du moteur d'un serveur, `null` tant qu'il n'est pas connu. */
   engineState(serverId: string): EngineDto["state"] | null {
     const book = this.books.get(serverId);

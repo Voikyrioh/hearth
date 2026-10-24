@@ -61,6 +61,10 @@ pub enum AdminActKindDto {
     ServiceStart,
     ServiceStop,
     ServiceRestart,
+    /// Déployer une image (HRT-69) : le mot de passe à chaque fois, jamais couvert par l'élévation.
+    ServiceDeploy,
+    /// Annuler l'opération d'un service (HRT-69) : couvert par l'élévation de cinq minutes.
+    OperationCancel,
 }
 
 /// L'état de confiance du compte que l'agent annonce (HRT-194, BR-TRUST-052) : de lui dépend si piloter un

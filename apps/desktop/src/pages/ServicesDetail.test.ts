@@ -665,11 +665,12 @@ describe("la liste (HRT-137)", () => {
     wrapper.unmount();
   });
 
-  it("l'état vide dit ce que la liste montre et que l'installation arrive", async () => {
+  it("l'état vide dit ce que la liste montre et propose de déployer", async () => {
     const { wrapper } = await open((bridge) => bridge.services.seed("forge", []));
     const empty = wrapper.get("[data-services-empty]").text();
     expect(empty).toContain("Aucun service pour l'instant");
-    expect(empty).toContain("Installer un service depuis Hearth arrive bientôt.");
+    expect(empty).toContain("Hearth affiche ici les services qu'il a créés");
+    expect(empty).toContain("Déployer un service");
     wrapper.unmount();
   });
 

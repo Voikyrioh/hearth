@@ -20,6 +20,7 @@ import {
   type ServiceLogEvent,
   type SnapshotEvent,
 } from "@/bindings";
+import type { EngineCapacity } from "@/resources";
 import {
   type AgentUpdateEvent,
   type AgentUpdateOutcome,
@@ -29,6 +30,19 @@ import {
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import { toAuditFilterDto, toAuditLive, toAuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
+import {
+  type CancelOutcome,
+  type DeployCheck,
+  type DeployCheckInput,
+  type DeployOutcome,
+  type DeployRequest,
+  toCancelOutcome,
+  toDeployCheck,
+  toDeployCheckInputDto,
+  toDeployOutcome,
+  toDeployRequestDto,
+  toEngineCapacity,
+} from "./deploy";
 import {
   type DeviceRemovalOutcome,
   type TrustedDevices,
@@ -593,6 +607,38 @@ export class TauriLinkBridge implements LinkBridge {
       restart: commands.serviceRestart,
     }[gesture];
     return toLifecycleOutcome(unwrap(await run(serverId, key, adminPassword)));
+  }
+
+  // Déployer une image (HRT-69) : UNE commande typée par geste. L'agent juge tout ; la coquille ne fait que
+  // construire la requête, l'envoyer et lire la réponse par son code.
+  async checkDeployment(serverId: string, input: DeployCheckInput): Promise<DeployCheck> {
+    return toDeployCheck(
+      unwrap(await commands.deployCheck(serverId, toDeployCheckInputDto(input))),
+    );
+  }
+
+  async deployService(
+    serverId: string,
+    request: DeployRequest,
+    adminPassword: string | null,
+  ): Promise<DeployOutcome> {
+    return toDeployOutcome(
+      unwrap(await commands.deployService(serverId, toDeployRequestDto(request), adminPassword)),
+    );
+  }
+
+  async cancelServiceOperation(
+    serverId: string,
+    opId: string,
+    adminPassword: string | null,
+  ): Promise<CancelOutcome> {
+    return toCancelOutcome(
+      unwrap(await commands.cancelServiceOperation(serverId, opId, adminPassword)),
+    );
+  }
+
+  async readEngineCapacity(serverId: string): Promise<EngineCapacity | null> {
+    return toEngineCapacity(unwrap(await commands.readEngineCapacity(serverId)));
   }
 
   async recheckEngine(serverId: string): Promise<EngineInfo> {

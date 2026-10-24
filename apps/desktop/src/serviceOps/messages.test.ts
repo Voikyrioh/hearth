@@ -70,7 +70,7 @@ describe("les textes d'une opération", () => {
 
   it("l'issue se dit par le statut, en phrase complète", () => {
     expect(outcomeText(op({ status: "succeeded" }), "terraria")).toBe(
-      "Le déploiement de terraria a réussi.",
+      "Le service terraria est en marche.",
     );
     expect(outcomeText(op({ status: "failed", kind: "update" }), "terraria")).toBe(
       "La modification de terraria a échoué.",

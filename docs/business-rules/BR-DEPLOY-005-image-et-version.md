@@ -5,7 +5,7 @@ titre: L'image se donne sous la forme `registre/organisation/nom`, la version da
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-deployer-image.md (BR-DEPLOY-005), HRT-68
-maj: 2026-10-17
+maj: 2026-10-24
 ---
 
 # BR-DEPLOY-005 — L'image se donne sous la forme `registre/organisation/nom`, la version dans un champ séparé ; une version écrite dans le champ de l'image passe dans le champ Version, une version vide vaut `latest`
@@ -16,10 +16,12 @@ Les empreintes (`@sha256:…`) ne sont pas prises en charge. Une version écrite
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/deploy.rs::ImageRef::parse`
 - `crates/hearth-proto/src/api/service_spec.rs::split_image`
+- `apps/desktop/src/deploy/rules.ts::{splitImage, imageIssue, tagIssue, effectiveTag}` et `deploy/draft.ts::movedVersion` (client : la version écrite dans l'image passe dans le champ Version)
 
 ## Vérification
 - `crates/hearth-agent/src/domain/services/deploy.rs::tests::the_version_in_the_image_field_moves_and_empty_means_latest`
 - `crates/hearth-agent/src/domain/services/deploy.rs::tests::a_bad_image_is_refused_on_the_right_field`
+- `apps/desktop/src/deploy/deploy.test.ts (l'image et la version)`
 
 ## Cas limites
 - Le port d'un registre (`registry:5000/app`) n'est pas une version.
@@ -29,3 +31,4 @@ BR-DEPLOY-002
 
 ## Historique
 - 2026-10-17 — création (HRT-68, déployer une image, côté agent).
+- 2026-10-24 — côté client (HRT-69, déployer une image).

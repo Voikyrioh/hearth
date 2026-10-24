@@ -6,6 +6,7 @@ import { TauriLinkBridge } from "./tauri";
 export * from "./agent-update";
 export * from "./audit";
 export type { LinkBridge } from "./bridge";
+export * from "./deploy";
 export * from "./devices";
 export * from "./logs";
 export * from "./machine";
@@ -28,6 +29,7 @@ export {
 export { SimulatedAccounts, simulatedCheckInput } from "./simulated-accounts";
 export { SimulatedAgentUpdates } from "./simulated-agent-update";
 export { SimulatedAudit } from "./simulated-audit";
+export { SimulatedDeploys } from "./simulated-deploy";
 export { SimulatedDevices } from "./simulated-devices";
 export { HOSTILE_LINES, SimulatedLogs } from "./simulated-logs";
 export { bareMachine, type Pinnable, SimulatedMachine, sampleMachine } from "./simulated-machine";

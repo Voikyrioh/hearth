@@ -1,7 +1,8 @@
 //! Commandes du suivi des opérations de service exposées à l'interface (liste blanche : `build.rs` et
 //! `capabilities/default.json`). UNE commande par geste (ADR-0016), aucun paramètre libre : ni route, ni
-//! méthode. Aucune commande n'annule ni ne crée une opération (HRT-84) ; celles qui agissent sont la décision
-//! et les trois gestes de pilotage (HRT-65), des actes d'administration confirmés.
+//! méthode. Celles qui agissent sont la décision, les trois gestes de pilotage (HRT-65), le déploiement d'une image et
+//! l'annulation de son opération (HRT-69), des actes d'administration confirmés ; les deux autres (consultation du
+//! formulaire, bornes de la machine) sont des lectures.
 
 use std::sync::Arc;
 
@@ -9,6 +10,11 @@ use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use tauri::State;
 
+use super::deploy;
+use super::deploy_dto::{
+    CancelOutcome, DeployCheckDto, DeployCheckInputDto, DeployOutcome, DeployRequestDto,
+    EngineCapacityDto,
+};
 use super::dto::{DecisionOutcome, OperationChoiceDto, ServiceOperationEvent};
 use super::lifecycle::{self, GestureDto, LifecycleOutcome};
 use super::service;
@@ -107,4 +113,62 @@ pub async fn service_restart(
     admin_password: Option<String>,
 ) -> Result<LifecycleOutcome, LinkFailure> {
     gesture(link, server_id, key, GestureDto::Restart, admin_password).await
+}
+
+/// Les constats du formulaire de déploiement sur le nom, les ports et l'image (`POST /deployments/check`) : une
+/// CONSULTATION, ni suivi ni journal (BR-DEPLOY-033), jamais un secret. Hors « Connecté » : `NotConnected`.
+#[tauri::command]
+#[specta::specta]
+pub async fn deploy_check(
+    link: Runtime_<'_>,
+    server_id: String,
+    input: DeployCheckInputDto,
+) -> Result<DeployCheckDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    deploy::check(link.manager(), &id, input).await
+}
+
+/// Déploie une image (`POST /deployments`) : un acte d'administration confirmé, JAMAIS couvert par l'élévation
+/// (le mot de passe à chaque fois). L'agent répond `202` : l'issue ne se lit jamais ici, elle arrive par le suivi
+/// des opérations. Jamais rejoué : un résultat inconnu se lit sur le flux (BR-DEPLOY-028). La valeur d'une variable,
+/// son nom et la commande ne sont ni tracés ni gardés. Sans le droit « gérer les services » :
+/// `MissingServicesRight`.
+#[tauri::command]
+#[specta::specta]
+pub async fn deploy_service(
+    link: Runtime_<'_>,
+    server_id: String,
+    deployment: DeployRequestDto,
+    admin_password: Option<String>,
+) -> Result<DeployOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let admin_password = admin_password.map(Secret::new);
+    deploy::deploy(link.manager(), &id, deployment, admin_password.as_ref()).await
+}
+
+/// Annule une opération de service avant son point de non-retour (`DELETE /operations/services/{id}`) : un acte
+/// d'administration confirmé, couvert par l'élévation. Jamais rejoué.
+#[tauri::command]
+#[specta::specta]
+pub async fn cancel_service_operation(
+    link: Runtime_<'_>,
+    server_id: String,
+    op_id: String,
+    admin_password: Option<String>,
+) -> Result<CancelOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let admin_password = admin_password.map(Secret::new);
+    deploy::cancel(link.manager(), &id, &op_id, admin_password.as_ref()).await
+}
+
+/// Les bornes des curseurs de ressources et la part de la machine déjà engagée (`GET /engine/capacity`,
+/// BR-DEPLOY-038) : une lecture.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_engine_capacity(
+    link: Runtime_<'_>,
+    server_id: String,
+) -> Result<EngineCapacityDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    deploy::capacity(link.manager(), &id).await
 }

@@ -3,6 +3,7 @@ import { roleLabel } from "@/accounts/messages";
 import { knownStep, REASONS, resultMessage } from "@/agentUpdate/messages";
 import { OUTCOME_KEYS, originOf } from "@/audit/format";
 import bindings from "@/bindings.ts?raw";
+import { portVerdict } from "@/deploy/messages";
 import { type MessageKey, t } from "@/i18n";
 import type { AuditEntry } from "@/link";
 import { type OperationChoice, type OperationKind, toOperation } from "@/link/serviceOps";
@@ -223,6 +224,20 @@ const SAYS: Record<string, (value: string) => void> = {
   ServiceStateDto: (value) => {
     text(STATE_KEYS[value as keyof typeof STATE_KEYS]);
   },
+  // HRT-69 : un constat de port inconnu ne dit rien (ni erreur, ni avertissement) : le serveur tranche au lancement.
+  PortStatusDto: (value) => {
+    const verdict = portVerdict({
+      hostPort: 8080,
+      protocol: "tcp",
+      status: value as "free",
+      holder: null,
+      suggested: null,
+      privileged: false,
+    });
+    if (value === "unknown") {
+      expect(verdict).toEqual({ error: null, warning: null, reserved: false, suggested: null });
+    }
+  },
 };
 
 /** Les unions qui ne s'affichent nulle part comme un libellé : la raison, par écrit. Une union absente des deux listes échoue. */
@@ -242,6 +257,8 @@ const NOT_SHOWN: Record<string, string> = {
     "ne s'affiche pas : sert à la règle du mot de passe (inconnu = le plus strict), testé dans simulated-reauth.test.ts et password_need",
   ProtocolDto: "dit par portLabel (testé dans services.test.ts)",
   ScopeDto: "dit par portLabel (testé dans services.test.ts)",
+  NameStatusDto:
+    "indicatif : seuls « taken » et « being_deleted » font un texte (DeployForm) ; tout autre constat, inconnu compris, ne dit rien et le serveur tranche au lancement (BR-DEPLOY-032)",
 };
 
 describe("toute union générée qui contient « unknown » a une table de libellés exhaustive", () => {
