@@ -135,6 +135,33 @@ fn i4_the_engine_port_has_no_function_that_runs_a_command_in_a_container() {
 }
 
 #[test]
+fn no_route_carries_the_order_written_to_a_games_input() {
+    // HRT-103, BR-JEU-002 : `send_stdin_line` n'est appelée que par la suite d'arrêt d'un service de fiche, avec un
+    // texte de la fiche. Ni l'entrée HTTP, ni le flux, ni un autre cas d'usage ne la connaissent.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    sources(&root, &mut files);
+    let allowed = [
+        "application/ports/container_engine.rs",
+        "application/game_stop.rs",
+        "infrastructure/engine/bollard.rs",
+        "domain/catalog/architecture_guard.rs",
+    ];
+    let mut offences = Vec::new();
+    for path in &files {
+        let normalized = path.to_string_lossy().replace('\\', "/");
+        if allowed.iter().any(|ok| normalized.ends_with(ok)) {
+            continue;
+        }
+        let text = std::fs::read_to_string(path).expect("lisible");
+        if production_part(&text).contains("send_stdin_line") {
+            offences.push(normalized);
+        }
+    }
+    assert!(offences.is_empty(), "{offences:#?}");
+}
+
+#[test]
 fn no_regular_expression_or_template_library_is_in_the_agent_dependencies() {
     let manifest =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
