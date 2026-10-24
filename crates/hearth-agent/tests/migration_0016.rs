@@ -241,3 +241,59 @@ async fn the_repository_writes_numbered_revisions_keeps_the_seals_and_refuses_a_
         .unwrap();
     assert_eq!(left, 0);
 }
+
+#[tokio::test]
+async fn the_settings_of_a_service_leave_with_its_description() {
+    let dir = tmp::tempdir().unwrap();
+    let pool = open(&dir.path().join("hearth.db")).await;
+    migrator_up_to(16).run(&pool).await.unwrap();
+    for rev in [1, 2] {
+        sqlx::query(
+            "INSERT INTO service_specs (service_key, rev, name, name_folded, spec_json, updated_by, created_at, current)
+             VALUES (?, ?, 'n', 'n', '{}', 'ada', '2026-10-13T10:00:00.000Z', ?)",
+        )
+        .bind(KEY)
+        .bind(rev)
+        .bind(i64::from(rev == 2))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let repo = SqliteGameSettingsRepo::new(pool.clone());
+    repo.save(new(
+        None,
+        state(&[("password", Slot::Secret)]),
+        vec![("password".into(), blob(1))],
+    ))
+    .await
+    .unwrap();
+    // Effacer une ancienne révision (le conteneur précédent est supprimé) ne touche pas aux réglages.
+    sqlx::query("DELETE FROM service_specs WHERE service_key = ? AND rev = 1")
+        .bind(KEY)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        repo.load(&ServiceKey::parse(KEY).unwrap())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    // Effacer la dernière révision (suppression du service) emporte la ligne et ses scellés.
+    sqlx::query("DELETE FROM service_specs WHERE service_key = ?")
+        .bind(KEY)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        repo.load(&ServiceKey::parse(KEY).unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM game_setting_secrets")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
+}

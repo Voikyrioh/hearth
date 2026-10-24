@@ -34,3 +34,12 @@ CREATE TABLE game_setting_secrets (
 
 -- Ceinture du « nonce jamais réutilisé ».
 CREATE UNIQUE INDEX game_setting_secrets_nonce ON game_setting_secrets (nonce);
+
+-- Les réglages d'un service partent avec sa description : quand la dernière révision de `service_specs` d'une clé est
+-- effacée (suppression du service), la ligne `game_settings` et, par la clé étrangère, ses scellés partent aussi.
+-- Une clé étrangère directe est impossible : la clé primaire de `service_specs` est (service_key, rev).
+CREATE TRIGGER game_settings_forget_with_specs AFTER DELETE ON service_specs
+WHEN NOT EXISTS (SELECT 1 FROM service_specs WHERE service_key = OLD.service_key)
+BEGIN
+    DELETE FROM game_settings WHERE service_key = OLD.service_key;
+END;
