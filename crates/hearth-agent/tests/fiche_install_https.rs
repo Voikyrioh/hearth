@@ -288,7 +288,7 @@ async fn a_fiche_install_creates_a_service_with_the_fiche_digest_the_pinned_imag
     .unwrap();
     assert_eq!(
         row,
-        ("terraria".to_owned(), 2, b.fiche.digest_hex()),
+        ("terraria".to_owned(), 3, b.fiche.digest_hex()),
         "la description du service"
     );
     // Le journal : une installation depuis une fiche, avec la fiche, et aucune valeur (BR-FICHE-032).

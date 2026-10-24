@@ -1553,8 +1553,8 @@ fn the_terraria_catalog_speaks_to_the_user_in_vous_and_every_text_stays_within_i
             .all(|n| n.channel == "args" || n.key == "banlist")
     );
     assert_eq!(
-        terraria.file.version, 2,
-        "le contenu a changé depuis la version 1"
+        terraria.file.version, 3,
+        "le contenu a changé depuis la version 2 (aide sans les bornes que le client dit déjà)"
     );
     // Un entier dit ses bornes quand l'inventaire les donne ; un réglage à valeurs fermées dit chacune.
     let max_players = terraria.setting("max_players").expect("max_players");
