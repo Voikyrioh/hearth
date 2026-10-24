@@ -118,8 +118,12 @@ fn terraria_with_the_proposed_values_writes_only_what_is_known_and_sends_no_orde
         "ni password, ni motd, ni language, ni les permissions du mode Voyage : rien d'inventé"
     );
     assert!(
-        !draft.stdin_open,
-        "une séquence non essayée n'ouvre pas l'entrée standard"
+        draft.stdin_open,
+        "la fiche déclare des ordres : l'entrée est ouverte même si la suite n'est pas essayée (rien n'est envoyé)"
+    );
+    assert!(
+        !draft.stop.sends_orders(),
+        "une suite non essayée n'envoie rien"
     );
     assert!(draft.sealed.is_empty());
 }
@@ -628,10 +632,10 @@ fn assert_closed(
         }
         assert_eq!(doc.duplicate_keys(), 0, "{label}");
     }
-    // L'entrée standard n'est ouverte que pour envoyer un ordre.
+    // L'entrée standard n'est ouverte que si la fiche déclare un ordre à y écrire.
     assert_eq!(
         draft.stdin_open,
-        draft.stop.sends_orders() || super::stop_plan::save_plan(fiche).is_some(),
+        super::stop_plan::declares_orders(fiche),
         "{label}"
     );
     // Les valeurs en clair ne contiennent jamais un secret saisi.

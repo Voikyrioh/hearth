@@ -10,7 +10,8 @@
 //! - **Les journaux** (HRT-66) passent par `logs.rs`, écrit à la main sur le même socket : le décodeur de
 //!   `bollard::Docker::logs` accumule sans borne une ligne de terminal sans fin de ligne et écrit les octets
 //!   restants dans une trace `debug` (voir l'en-tête de `logs.rs`).
-//! - **Écrire** (HRT-64) : `start`, `stop` et `restart` seulement. Un ordre d'arrêt dure jusqu'au délai de
+//! - **Écrire** (HRT-64) : `start`, `stop` et `restart` ; HRT-103 y ajoute UNE ligne littérale de fiche sur l'entrée
+//!   du conteneur (`send_stdin_line`, attache en entrée seule), jamais une commande exécutée dedans. Un ordre d'arrêt dure jusqu'au délai de
 //!   grâce du conteneur (120 s pour un serveur de jeu qui sauvegarde) : ces appels ont un délai de requête
 //!   propre, celui de l'attente de l'action (`wait_budget`), pas les 10 s des lectures. Un conteneur déjà
 //!   dans l'état visé (le moteur répond « non modifié », 304) n'est pas une erreur.
@@ -26,9 +27,9 @@ use bollard::models::{
     MountType, PortBinding, PortMap, RestartPolicy, RestartPolicyNameEnum, SystemVersion,
 };
 use bollard::query_parameters::{
-    CreateContainerOptionsBuilder, CreateImageOptionsBuilder, EventsOptionsBuilder,
-    InspectContainerOptionsBuilder, ListContainersOptionsBuilder, RemoveContainerOptionsBuilder,
-    RestartContainerOptionsBuilder, StopContainerOptionsBuilder,
+    AttachContainerOptionsBuilder, CreateContainerOptionsBuilder, CreateImageOptionsBuilder,
+    EventsOptionsBuilder, InspectContainerOptionsBuilder, ListContainersOptionsBuilder,
+    RemoveContainerOptionsBuilder, RestartContainerOptionsBuilder, StopContainerOptionsBuilder,
 };
 use bollard::{API_DEFAULT_VERSION, ClientVersion, Docker};
 use futures_util::{StreamExt, stream};
@@ -43,6 +44,7 @@ use crate::application::ports::{
     ContainerEngine, EngineError, EngineEvent, EngineEvents, EngineInfo, EnvEntry, Listing,
     LogQuery, LogStream, PullStream, Unreadable,
 };
+use crate::domain::catalog::stop_plan::FicheLiteral;
 use crate::domain::ops::wait_budget;
 use crate::domain::services::plan::{ContainerPlan, hardening};
 use crate::domain::services::pull::{LayerEvent, PullTracker};
@@ -64,6 +66,8 @@ const REQUEST_TIMEOUT_S: u64 = 10;
 const INSPECT_CONCURRENCY: usize = 8;
 /// Taille maximale de la réponse de `/_ping` lue (en-têtes et corps).
 const MAX_PING_BYTES: usize = 16 * 1024;
+/// Délai d'une ligne écrite sur l'entrée d'un conteneur (attache, écriture, détache), HRT-103.
+const STDIN_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Les événements qui changent ce que la liste montre. Les autres (`exec_*`, `health_status`,
 /// `attach`, `top`, `resize`…) sont du bruit pour une liste de services.
@@ -551,6 +555,62 @@ impl ContainerEngine for BollardEngine {
             .restart_container(id, Some(options))
             .await
             .map_err(|error| translate(&error))
+    }
+
+    async fn send_stdin_line(&self, id: &str, line: &FicheLiteral) -> Result<(), EngineError> {
+        let docker = self.inner.docker().await?;
+        // Entrée seule : ni sortie ni journal ne sont demandés, rien n'est lu en retour.
+        let options = AttachContainerOptionsBuilder::default()
+            .stdin(true)
+            .stdout(false)
+            .stderr(false)
+            .stream(true)
+            .logs(false)
+            .build();
+        let work = async {
+            // Le démon accepte l'attache d'un conteneur dont l'entrée n'est pas ouverte (il met l'entrée à nil et répond
+            // « ok ») : l'ordre partirait dans le vide. On regarde donc avant : arrêté ou entrée fermée, c'est un refus.
+            let inspected = docker
+                .inspect_container(
+                    id,
+                    None::<bollard::query_parameters::InspectContainerOptions>,
+                )
+                .await
+                .map_err(|error| translate(&error))?;
+            let running = inspected.state.as_ref().and_then(|state| state.running) == Some(true);
+            let open = inspected
+                .config
+                .as_ref()
+                .and_then(|config| config.open_stdin)
+                == Some(true);
+            if !running || !open {
+                return Err(EngineError::Refused);
+            }
+            let mut attached = docker
+                .attach_container(id, Some(options))
+                .await
+                .map_err(|error| translate(&error))?;
+            let mut bytes = Vec::with_capacity(line.as_str().len() + 1);
+            bytes.extend_from_slice(line.as_str().as_bytes());
+            bytes.push(b'\n');
+            attached
+                .input
+                .write_all(&bytes)
+                .await
+                .map_err(|_| EngineError::Unreachable)?;
+            attached
+                .input
+                .flush()
+                .await
+                .map_err(|_| EngineError::Unreachable)?;
+            // Se détacher : la connexion est fermée à la chute de `attached`. L'entrée du conteneur, elle, reste
+            // ouverte (le conteneur n'est pas créé avec `StdinOnce`).
+            let _ = attached.input.shutdown().await;
+            Ok(())
+        };
+        tokio::time::timeout(STDIN_TIMEOUT, work)
+            .await
+            .unwrap_or(Err(EngineError::Timeout))
     }
 
     async fn image_present(&self, image: &str) -> Result<bool, EngineError> {

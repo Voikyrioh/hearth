@@ -11,6 +11,7 @@ pub mod fiche_install;
 pub mod folders;
 pub mod game_phase;
 pub mod game_settings;
+pub mod game_stop;
 pub mod hello;
 pub mod install;
 pub mod maintenance;

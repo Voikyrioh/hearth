@@ -20,6 +20,7 @@ use hearth_agent::application::ports::{
     ContainerEngine, EngineError, EngineEvent, EngineEvents, EngineInfo, EnvEntry, Listing,
     LogQuery, LogStream, PullStream, Unreadable,
 };
+use hearth_agent::domain::catalog::stop_plan::FicheLiteral;
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::domain::services::image::image_name;
 use hearth_agent::domain::services::logs::{LineAssembler, LogLine, LogSource};
@@ -119,6 +120,8 @@ pub struct CreatedPlan {
     pub binds: Vec<(String, String, bool)>,
     pub cpu_millis: u32,
     pub memory_bytes: u64,
+    /// L'entrée standard du conteneur est ouverte (HRT-103).
+    pub stdin_open: bool,
 }
 
 #[derive(Default)]
@@ -148,6 +151,8 @@ pub enum Call {
     Start(String),
     Stop(String, Duration),
     Restart(String, Duration),
+    /// Une ligne écrite sur l'entrée du conteneur (HRT-103).
+    Stdin(String, String),
 }
 
 /// Ce que le faux fait des ordres `start`, `stop` et `restart` (HRT-64) : par défaut, tout réussit aussitôt.
@@ -168,6 +173,29 @@ struct WriteScript {
     relaunch: BTreeMap<String, Duration>,
     /// Les dates écrites par le faux (`None` : l'heure réelle).
     now: Option<time::OffsetDateTime>,
+    /// `send_stdin_line` échoue avec cette erreur (HRT-103).
+    stdin_errors: BTreeMap<String, EngineError>,
+    /// L'entrée de ce conteneur n'a pas été ouverte à sa création : le moteur refuse l'attache.
+    stdin_closed: BTreeSet<String>,
+    /// Ce que le jeu fait d'une ligne reçue, par conteneur.
+    on_stdin: BTreeMap<String, Vec<StdinReaction>>,
+    /// Un ordre de sortie a été reçu et le programme est en train de sortir : l'arrêt demandé au moteur attend sa
+    /// fin au lieu d'ajouter son propre délai.
+    exiting: BTreeSet<String>,
+    /// L'arrêt de ce conteneur a été demandé au moteur : sa règle de redémarrage ne le relance pas (« arrêté sur
+    /// demande »), comme Docker.
+    stop_requested: BTreeSet<String>,
+}
+
+/// Ce que le jeu fait quand il lit une ligne sur son entrée (HRT-103).
+#[derive(Debug, Clone)]
+pub struct StdinReaction {
+    /// La ligne qui déclenche la réaction.
+    pub line: String,
+    /// Le jeu écrit cette ligne dans ses journaux (à l'heure `at_ms`).
+    pub log: Option<(i64, String)>,
+    /// Le programme sort ce temps après la ligne, avec ce code (virtuel sous `tokio::time::pause`).
+    pub exit_after: Option<(Duration, i64)>,
 }
 
 /// Un morceau d'octets écrit par un conteneur sur l'une de ses sorties, à l'heure du moteur.
@@ -444,6 +472,47 @@ impl FakeEngine {
     }
 
     // -----------------------------------------------------------------------------------------
+    // L'entrée standard des conteneurs (HRT-103)
+    // -----------------------------------------------------------------------------------------
+
+    /// Les lignes écrites sur l'entrée de ce conteneur, dans l'ordre.
+    pub fn stdin_lines(&self, id: &str) -> Vec<String> {
+        self.lock()
+            .script
+            .calls
+            .iter()
+            .filter_map(|call| match call {
+                Call::Stdin(target, line) if target == id => Some(line.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// `send_stdin_line` de ce conteneur échoue (None : rétablit).
+    pub fn fail_stdin(&self, id: &str, error: Option<EngineError>) {
+        let mut state = self.lock();
+        match error {
+            Some(error) => state.script.stdin_errors.insert(id.to_owned(), error),
+            None => state.script.stdin_errors.remove(id),
+        };
+    }
+
+    /// L'entrée de ce conteneur n'est pas ouverte (créé sans `stdin_open`) : le moteur refuse l'attache.
+    pub fn close_stdin(&self, id: &str) {
+        self.lock().script.stdin_closed.insert(id.to_owned());
+    }
+
+    /// Ce que le jeu de ce conteneur fait d'une ligne reçue.
+    pub fn on_stdin(&self, id: &str, reaction: StdinReaction) {
+        self.lock()
+            .script
+            .on_stdin
+            .entry(id.to_owned())
+            .or_default()
+            .push(reaction);
+    }
+
+    // -----------------------------------------------------------------------------------------
     // Mise en scène de la récupération, de la création et de la suppression (HRT-68)
     // -----------------------------------------------------------------------------------------
 
@@ -580,6 +649,32 @@ impl FakeEngine {
         if hang {
             std::future::pending::<()>().await;
         }
+        // Le programme sort déjà de lui-même (ordre de sortie reçu) : l'arrêt demandé attend cette fin, au plus le
+        // délai de grâce, puis tue. La règle de redémarrage ne relance pas un conteneur dont l'arrêt est demandé.
+        let exiting = {
+            let mut state = self.lock();
+            state.script.stop_requested.insert(id.to_owned());
+            state.script.exiting.contains(id)
+        };
+        if exiting {
+            let finished = tokio::time::timeout(grace, self.wait_not_running(id))
+                .await
+                .is_ok();
+            if !finished {
+                let removed = {
+                    let mut state = self.lock();
+                    Self::mark_exited(&mut state, id, 137)
+                };
+                self.wake_logs();
+                self.emit(id, "die");
+                self.emit(id, "stop");
+                if removed {
+                    self.emit(id, "destroy");
+                }
+            }
+            self.lock().script.exiting.remove(id);
+            return Ok(());
+        }
         if !wait.is_zero() {
             tokio::time::sleep(wait).await;
         }
@@ -613,9 +708,26 @@ impl FakeEngine {
         Ok(())
     }
 
+    /// Attend que le conteneur ne tourne plus (ou n'existe plus).
+    async fn wait_not_running(&self, id: &str) {
+        loop {
+            let running = self.lock().containers.get(id).is_some_and(|container| {
+                matches!(
+                    container.run_state,
+                    RunState::Running | RunState::Restarting | RunState::Paused
+                )
+            });
+            if !running {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
     fn do_start(&self, id: &str) -> Result<(), EngineError> {
         {
             let mut state = self.lock();
+            state.script.stop_requested.remove(id);
             if let Some(error) = state
                 .list_error
                 .or_else(|| state.script.start_errors.get(id).copied())
@@ -877,6 +989,87 @@ impl ContainerEngine for FakeEngine {
         Ok(())
     }
 
+    async fn send_stdin_line(&self, id: &str, line: &FicheLiteral) -> Result<(), EngineError> {
+        let reaction = {
+            let mut state = self.lock();
+            if let Some(error) = state
+                .list_error
+                .or_else(|| state.script.stdin_errors.get(id).copied())
+            {
+                return Err(error);
+            }
+            let Some(container) = state.containers.get(id) else {
+                return Err(EngineError::NotFound);
+            };
+            if container.run_state != RunState::Running || state.script.stdin_closed.contains(id) {
+                return Err(EngineError::Refused);
+            }
+            state
+                .script
+                .calls
+                .push(Call::Stdin(id.to_owned(), line.as_str().to_owned()));
+            let reaction = state
+                .script
+                .on_stdin
+                .get(id)
+                .and_then(|all| all.iter().find(|r| r.line == line.as_str()))
+                .cloned();
+            if reaction
+                .as_ref()
+                .is_some_and(|reaction| reaction.exit_after.is_some())
+            {
+                state.script.exiting.insert(id.to_owned());
+            }
+            reaction
+        };
+        if let Some(reaction) = reaction {
+            if let Some((at_ms, text)) = reaction.log {
+                self.push_log(id, LogSource::Out, at_ms, &text);
+            }
+            if let Some((after, code)) = reaction.exit_after {
+                let state = self.state.clone();
+                let feed = self.feed.clone();
+                let tick = self.log_tick.clone();
+                let id = id.to_owned();
+                tokio::spawn(async move {
+                    tokio::time::sleep(after).await;
+                    let (removed, relaunch, requested) = {
+                        let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+                        let removed = FakeEngine::mark_exited(&mut state, &id, code);
+                        (
+                            removed,
+                            state.script.relaunch.get(&id).copied(),
+                            state.script.stop_requested.contains(&id),
+                        )
+                    };
+                    tick.send_modify(|tick| *tick += 1);
+                    let event = |action: &str| {
+                        let _ = feed.send(Feed::Event(EngineEvent {
+                            container_id: id.clone(),
+                            action: action.to_owned(),
+                        }));
+                    };
+                    event("die");
+                    if removed {
+                        event("destroy");
+                    }
+                    // Comme Docker : la règle de redémarrage relance un programme qui sort de lui-même, sauf si
+                    // l'arrêt a été demandé au moteur.
+                    if let Some(again) = relaunch.filter(|_| !removed && !requested) {
+                        tokio::time::sleep(again).await;
+                        {
+                            let mut state = state.lock().unwrap_or_else(PoisonError::into_inner);
+                            FakeEngine::mark_running(&mut state, &id);
+                            state.script.exiting.remove(&id);
+                        }
+                        event("start");
+                    }
+                });
+            }
+        }
+        Ok(())
+    }
+
     async fn image_present(&self, image: &str) -> Result<bool, EngineError> {
         let state = self.lock();
         if let Some(error) = state.list_error {
@@ -1031,7 +1224,11 @@ impl ContainerEngine for FakeEngine {
                 .map(|(name, value)| (name.expose().to_owned(), value.expose().to_owned()))
                 .collect();
             state.envs.insert(id.clone(), pairs.clone());
+            if !plan.stdin_open {
+                state.script.stdin_closed.insert(id.clone());
+            }
             state.deploy.created.push(CreatedPlan {
+                stdin_open: plan.stdin_open,
                 name: plan.name.clone(),
                 image: plan.image.clone(),
                 labels: plan.labels.clone(),

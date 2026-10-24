@@ -74,7 +74,7 @@ const ACCOUNT_CODES: [&str; 18] = [
 
 /// Gestion des services : valeurs révélées, services adoptés ou rendus, refus de lire les conteneurs
 /// existants ou les journaux d'un service adopté (HRT-80).
-const SERVICES_CODES: [&str; 23] = [
+const SERVICES_CODES: [&str; 24] = [
     action::SERVICE_ENV_REVEAL,
     action::SERVICE_ADOPT,
     action::SERVICE_RELEASE,
@@ -94,6 +94,7 @@ const SERVICES_CODES: [&str; 23] = [
     action::SERVICE_BACKUP_DELETE,
     action::SERVICE_WORLD_IMPORT,
     action::SERVICE_GAME_SETTINGS,
+    action::SERVICE_GAME_PASSWORD_REVEAL,
     action::OPERATION_CANCEL,
     action::OPERATION_DECIDE,
     action::SERVICE_ADOPTION_TO_CONFIRM,

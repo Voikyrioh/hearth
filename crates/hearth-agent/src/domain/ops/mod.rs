@@ -10,6 +10,8 @@
 //! - [`index`] : `busy` et `last_action` du fil, projections du journal.
 //! - [`lifecycle`] : démarrer, arrêter, redémarrer (HRT-64) : l'état permet-il le geste, combien attendre, l'arrêt
 //!   a-t-il été forcé.
+//! - [`game_stop`] : arrêter un serveur de jeu en enregistrant son monde (HRT-103) : le plan de l'opération, le signe
+//!   cherché dans les journaux du jeu, ce qui oblige à demander une décision.
 //! - [`flush`] : la cadence des messages `operation` d'un abonné (500 ms par opération).
 //! - [`observe`] : le décompte des conteneurs du moteur devient l'état que `recover` classe.
 //! - [`locks`] : le verrou par service (exclusif, partagé en écriture de fichiers, aucun) et les deux
@@ -18,6 +20,7 @@
 pub mod access;
 pub mod decision;
 pub mod flush;
+pub mod game_stop;
 pub mod index;
 pub mod kind;
 pub mod lifecycle;
@@ -31,6 +34,7 @@ pub use decision::{
     CancelVerdict, ChoiceRefused, apply_choice, cancel_verdict, decision_expired, decision_expiry,
 };
 pub use flush::{MAX_TRACKED_OPS, OpFlush};
+pub use game_stop::{AskReason, GameStopKind, confirms, op_plan};
 pub use index::{MAX_INDEXED_SERVICES, OpSummary, OpsIndex, ServiceOpsEntry};
 pub use kind::{Cause, Choice, OpKind, OpStatus};
 pub use lifecycle::{
