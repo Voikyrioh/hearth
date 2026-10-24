@@ -1408,8 +1408,8 @@ export const fr = {
     cpu: "Processeur",
     memorySlider: "Mémoire, curseur",
     cpuSlider: "Processeur, curseur",
-    memoryField: "Mémoire, valeur exacte",
-    cpuField: "Processeur, valeur exacte",
+    memoryField: "Valeur exacte",
+    cpuField: "Valeur exacte",
     memoryUnit: "Unité de la mémoire",
     unitMoOption: "Mo",
     unitGoOption: "Go",
@@ -1422,9 +1422,8 @@ export const fr = {
     proofMeasured: "mesuré",
     proofPublisher: "chiffre de l'éditeur",
     proofMeasuredIdle: "mesuré au repos",
-    noFigure: "Hearth n'a pas de chiffre pour ce programme.",
     proposed:
-      "Hearth propose {value} parce qu'il ne connaît pas cette application. Montez ce chiffre si elle en demande plus.",
+      "Hearth ne connaît pas cette application et propose {value}. Montez ce chiffre si elle en demande plus.",
     belowRecommended: "Sous la mémoire recommandée : le serveur peut ralentir ou s'arrêter.",
     noCapacity:
       "Hearth n'a pas pu lire les limites de ce serveur. Le service ne peut pas être envoyé sans elles.",
@@ -2060,7 +2059,9 @@ export const fr = {
     nameBeingDeleted:
       "Ce service est en cours de suppression. Attendez la fin de l'effacement de ses données.",
     imageLabel: "Image",
-    imagePlaceholder: "registre/organisation/nom (le registre et l'organisation sont facultatifs)",
+    imagePlaceholder: "nginx",
+    imageHelp:
+      "Le nom complet s'écrit registre/organisation/nom ; le registre et l'organisation sont facultatifs.",
     imageRequired: "L'image est requise",
     imageFormat: "Le nom de l'image n'est pas valide",
     imageTooLong: "Le nom de l'image ne peut pas dépasser 255 caractères",

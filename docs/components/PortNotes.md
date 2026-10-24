@@ -7,3 +7,4 @@ Les notes sous un port du serveur (HRT-69, HRT-102, BR-DEPLOY-007 à 009) : l'av
 - Props : `verdict` (`PortVerdict`), `privileged`, `clean` (aucune erreur sous le champ)
 - Événements et slots : `suggest` (le port proposé)
 - Notes : partagé par `PortMappingRow` (déploiement d'une image) et `FichePortField` (installation d'une fiche) ; les textes sont les clés `deploy.*`. Tests : `pages/DeployService.test.ts`, `pages/InstallFromFiche.test.ts`.
+- Revue UX du 2026-10-24 (constat 12) : « Utiliser le port … » est un bouton secondaire posé sous l'encart (et non dans l'encart teinté, où son bord disparaissait), comme « Ajouter un port ».

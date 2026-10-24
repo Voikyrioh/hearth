@@ -25,7 +25,7 @@ const props = withDefaults(
     /** La mémoire recommandée d'une fiche et sa preuve ; `null` pour une application sans fiche. */
     recommended?: { bytes: number; proof: "measured" | "measured_idle" | "publisher" } | null;
     /**
-     * Un texte à la place de « Hearth n'a pas de chiffre pour ce programme » quand `recommended` est `null` : une fiche
+     * Un texte à la place de « Hearth ne connaît pas cette application et propose… » quand `recommended` est `null` : une fiche
      * dont la mémoire n'est pas prouvée le dit avec ses mots (HRT-102). Sans lui, la proposition de BR-RES-039.
      */
     memoryNote?: string | null;
@@ -92,10 +92,7 @@ const proposedText = computed(() =>
         <template #hint>
           <p v-if="recommended" class="sliders__hint">{{ recommendedText }}</p>
           <p v-else-if="memoryNote" class="sliders__hint" data-memory-note>{{ memoryNote }}</p>
-          <template v-else>
-            <p class="sliders__hint">{{ t("resources.noFigure") }}</p>
-            <p class="sliders__hint">{{ proposedText }}</p>
-          </template>
+          <p v-else class="sliders__hint">{{ proposedText }}</p>
           <Callout v-if="below" tone="warn" inline>{{ t("resources.belowRecommended") }}</Callout>
         </template>
       </ResourceSlider>

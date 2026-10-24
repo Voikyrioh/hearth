@@ -838,7 +838,9 @@ describe("les ressources (BR-DEPLOY-038, BR-RES-037)", () => {
     const { wrapper } = await boot();
     expect(wrapper.get("[data-resources]").text()).toContain("Mémoire");
     expect(wrapper.get("[data-resources]").text()).toContain("Processeur");
-    expect(wrapper.get("[data-resources]").text()).toContain("Hearth propose 2 Go");
+    expect(wrapper.get("[data-resources]").text()).toContain(
+      "Hearth ne connaît pas cette application et propose 2 Go",
+    );
     expect(wrapper.get("[data-resources]").text()).not.toMatch(/sans limite/i);
     wrapper.unmount();
   });

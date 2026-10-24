@@ -12,3 +12,4 @@ Le fil reste en octets (`memoryBytes`) et en millicœurs (`cpuMillis`) ; une val
 - Événements et slots : `update:modelValue` (`Resources`)
 - Envoi : le composant ne le juge pas. L'appelant, qui a `capacity` et la valeur, garde son bouton d'envoi inactif tant que `resources/ready.ts::resourcesIssue(capacity, valeur)` n'est pas `null` (la raison, `capacity`, `memory` ou `cpu`, lui dit quoi afficher).
 - Notes : Tests : `components/organisms/resourceSliders.test.ts`. Règles pures : `src/resources/`.
+- Revue UX du 2026-10-24 (constat 18) : une application inconnue dit une seule phrase sous le curseur de mémoire, « Hearth ne connaît pas cette application et propose {x}. Montez ce chiffre si elle en demande plus. » (plus de « Hearth n'a pas de chiffre pour ce programme. » avant).
