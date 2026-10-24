@@ -143,10 +143,89 @@ pub struct DeployAccept {
     pub low_disk: bool,
 }
 
+/// Longueur maximale de l'identifiant d'une fiche, d'une variante, d'une réponse, d'un port ou d'un contrat.
+pub const MAX_FICHE_TOKEN_CHARS: usize = 64;
+/// Réponses d'une fiche, au plus (comme `MAX_ANSWERS` de l'agent).
+pub const MAX_FICHE_ANSWERS: usize = 64;
+/// Contrats d'une fiche, au plus.
+pub const MAX_FICHE_AGREEMENTS: usize = 4;
+
+/// La réponse à une question de la fiche. La valeur peut être un secret : elle n'est ni signée, ni journalisée,
+/// ni tracée, et `Debug` ne la montre pas.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FicheAnswer {
+    /// Identifiant du réglage de la fiche.
+    pub id: String,
+    pub value: String,
+}
+
+impl fmt::Debug for FicheAnswer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "FicheAnswer({}, ***)", self.id)
+    }
+}
+
+/// Un port de la fiche et le port du serveur choisi.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct FichePort {
+    pub id: String,
+    pub host_port: u16,
+}
+
+/// D'où vient le service : une fiche du catalogue de l'agent (HRT-101, BR-FICHE-013). Le corps ne dit JAMAIS
+/// l'image, les variables, les dossiers ni la commande : la fiche les décide, l'agent les traduit et les juge
+/// comme un déploiement ordinaire.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DeploySource {
+    Fiche {
+        id: String,
+        /// La version de la fiche que l'utilisateur a vue.
+        version: u32,
+        /// Son empreinte (hexadécimale) : si la fiche de l'agent a changé depuis, `FICHE_CHANGED`.
+        digest: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        variant: Option<String>,
+        #[serde(default)]
+        answers: Vec<FicheAnswer>,
+        /// Les contrats que l'utilisateur a acceptés par un geste (identifiants).
+        #[serde(default)]
+        agreements: Vec<String>,
+        #[serde(default)]
+        ports: Vec<FichePort>,
+        /// Les ports facultatifs que l'utilisateur publie aussi (identifiants).
+        #[serde(default)]
+        optional_ports: Vec<String>,
+        /// Reprise d'un monde existant : refusée par cette version (seul `false` est accepté).
+        #[serde(default)]
+        world_imported: bool,
+    },
+}
+
+impl fmt::Debug for DeploySource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Fiche {
+                id,
+                version,
+                answers,
+                ..
+            } => f
+                .debug_struct("DeploySource::Fiche")
+                .field("id", id)
+                .field("version", version)
+                .field("answers", &answers.len())
+                .finish_non_exhaustive(),
+        }
+    }
+}
+
 /// Corps de `POST /deployments`. Le membre `reauth` de la confirmation voyage à côté (voir `api::reauth`).
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DeploySpec {
     pub name: String,
+    /// Absente quand le service vient d'une fiche (`source`).
+    #[serde(default)]
     pub image: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
@@ -163,6 +242,10 @@ pub struct DeploySpec {
     pub resources: DeployResources,
     #[serde(default)]
     pub accept: DeployAccept,
+    /// Le service vient d'une fiche du catalogue (HRT-101) : `image`, `env`, `ports`, `mounts` et `command`
+    /// doivent alors être vides (`PLAN_SETTING_REFUSED`), seule la fiche les décide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<DeploySource>,
     /// Tout membre que ce type ne connaît pas (hors `reauth`) : l'agent refuse le déploiement, il n'ignore
     /// jamais un réglage qu'il ne comprend pas (BR-DEPLOY-035).
     #[serde(flatten, default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -181,6 +264,7 @@ impl fmt::Debug for DeploySpec {
             .field("mounts", &self.mounts.len())
             .field("command", &self.command.is_some())
             .field("resources", &self.resources)
+            .field("source", &self.source)
             .finish_non_exhaustive()
     }
 }
@@ -360,6 +444,20 @@ mod tests {
             command: Some("run --token SENTINEL-CMD".into()),
             resources: DeployResources::default(),
             accept: DeployAccept::default(),
+            source: Some(DeploySource::Fiche {
+                id: "terraria".into(),
+                version: 1,
+                digest: "ab".into(),
+                variant: None,
+                answers: vec![FicheAnswer {
+                    id: "password".into(),
+                    value: "SENTINEL-ANSWER".into(),
+                }],
+                agreements: vec![],
+                ports: vec![],
+                optional_ports: vec![],
+                world_imported: false,
+            }),
             extra: BTreeMap::new(),
         };
         let shown = format!("{spec:?} {:?}", spec.env[0]);
@@ -367,6 +465,40 @@ mod tests {
             !shown.contains("SENTINEL") && !shown.contains("DB_PASSWORD"),
             "{shown}"
         );
+    }
+
+    #[test]
+    fn a_fiche_body_needs_no_image_and_round_trips() {
+        let body = serde_json::json!({
+            "name": "mon-terraria",
+            "resources": {"cpu_millis": 1000, "memory_bytes": 2147483648u64},
+            "source": {"type": "fiche", "id": "terraria", "version": 1, "digest": "ab",
+                "answers": [{"id": "password", "value": "x"}], "agreements": ["eula"],
+                "ports": [{"id": "game", "host_port": 7778}]}
+        });
+        let spec: DeploySpec = serde_json::from_value(body.clone()).expect("lu");
+        assert!(spec.image.is_empty() && spec.extra.is_empty());
+        let Some(DeploySource::Fiche {
+            ports,
+            world_imported,
+            ..
+        }) = &spec.source
+        else {
+            panic!("source");
+        };
+        assert_eq!(ports[0].host_port, 7778);
+        assert!(!world_imported);
+        let back = serde_json::to_value(&spec).expect("json");
+        assert_eq!(back["source"]["type"], "fiche");
+        // Un déploiement ordinaire ne porte pas de membre `source`.
+        let plain = serde_json::to_value(
+            serde_json::from_value::<DeploySpec>(
+                serde_json::json!({"name": "web", "image": "nginx"}),
+            )
+            .expect("lu"),
+        )
+        .expect("json");
+        assert!(plain.get("source").is_none());
     }
 
     #[test]

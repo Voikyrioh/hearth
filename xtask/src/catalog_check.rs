@@ -6,8 +6,8 @@
 //! - `ids.lock` : un identifiant de réglage publié ne disparaît pas par oubli (il passe en `[[retired]]`), ne
 //!   change pas de clé sans `rename` d'un `[[migration]]`, n'est pas réutilisé après son retrait ;
 //! - `--release` (option, branchée sur aucune publication : la CI lance `catalog-check` sans elle) : refuse toute
-//!   fiche `preview`. Toute fiche est embarquée, `preview` comprise ; une fiche `preview` n'est jamais PROPOSÉE
-//!   (`domain::catalog::embedded::offered()`). Il refuse aussi toute fiche dont la mémoire recommandée manque ou
+//!   fiche `preview`. Toute fiche est embarquée, `preview` comprise ; une fiche `preview` n'est PROPOSÉE que par une
+//!   construction d'essai (`domain::catalog::embedded::keep_offered`, HRT-101). Il refuse aussi toute fiche dont la mémoire recommandée manque ou
 //!   n'a qu'une mesure au repos (HRT-122, BR-RES-038).
 //!
 //! Hors périmètre de ce ticket (HRT-114) : `golden.toml`, `probe.toml`, `evidence.toml`, le relevé sur l'image

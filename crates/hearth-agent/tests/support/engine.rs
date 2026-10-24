@@ -65,6 +65,11 @@ pub fn parts_supervised(
         free_space: Arc::new(super::fake_host::FakeFreeSpace::new()),
         deploy: fast_deploy(),
         safe_fs: Some(Arc::new(super::fake_safe_fs::FakeSafeFs::new())),
+        catalog: hearth_agent::app::CatalogParts {
+            include_preview: false,
+            random: Arc::new(super::fake_random::FakeRandom::counting_from(0)),
+            service: None,
+        },
     }
 }
 

@@ -3,9 +3,12 @@
 pub mod accounts;
 pub mod attack_mode;
 pub mod audit;
+pub mod catalog;
 pub mod deployments;
 pub mod elevation;
+pub mod fiche_install;
 pub mod folders;
+pub mod game_phase;
 pub mod hello;
 pub mod install;
 pub mod maintenance;

@@ -110,11 +110,13 @@ pub enum AuditAction {
     /// Une adoption tombe sans qu'aucun compte agisse : délai de confirmation écoulé, unité ou conteneur
     /// disparu (HRT-80, BR-ADOPT-017, BR-ADOPT-027). Auteur : le système ; cible : le service par sa clé.
     ServiceAdoptionLapsed,
+    /// Une fiche du catalogue est écartée au chargement (HRT-101, BR-FICHE-007). Auteur : le système.
+    CatalogFicheRefused,
 }
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 48] = [
+    pub const ALL: [AuditAction; 49] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -163,6 +165,7 @@ impl AuditAction {
         Self::OperationDecide,
         Self::ServiceAdoptionToConfirm,
         Self::ServiceAdoptionLapsed,
+        Self::CatalogFicheRefused,
     ];
 
     /// Code stable : celui du stockage et du filtre `action=` (catalogue de `hearth-proto`).
@@ -216,6 +219,7 @@ impl AuditAction {
             Self::OperationDecide => action::OPERATION_DECIDE,
             Self::ServiceAdoptionToConfirm => action::SERVICE_ADOPTION_TO_CONFIRM,
             Self::ServiceAdoptionLapsed => action::SERVICE_ADOPTION_LAPSED,
+            Self::CatalogFicheRefused => action::CATALOG_FICHE_REFUSED,
         }
     }
 
@@ -270,6 +274,7 @@ impl AuditAction {
             Self::OperationDecide => "Décision sur une opération",
             Self::ServiceAdoptionToConfirm => "Adoption à confirmer",
             Self::ServiceAdoptionLapsed => "Adoption tombée",
+            Self::CatalogFicheRefused => "Fiche écartée",
         }
     }
 

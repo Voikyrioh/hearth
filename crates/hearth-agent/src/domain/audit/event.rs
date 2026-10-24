@@ -233,6 +233,29 @@ pub enum Target {
         /// conservé (BR-DEPLOY-020).
         stopped_right_after_start: bool,
     },
+    /// Un serveur de jeu installé depuis une fiche, réussi ou non (HRT-101, BR-FICHE-032) : la fiche et sa
+    /// version, l'image (et son empreinte), les ports du SERVEUR, le NOMBRE de réponses, les ressources choisies
+    /// et le titre des contrats acceptés. **Aucune valeur de réponse, aucun nom de variable, aucun secret
+    /// tiré, aucun chemin** : le type n'a pas de champ pour eux.
+    GameInstall {
+        service: ClientName,
+        fiche: ClientName,
+        version: u32,
+        image: ClientName,
+        host_ports: Vec<u16>,
+        answers: u32,
+        cpu_millis: u32,
+        memory_bytes: u64,
+        agreements: Vec<ClientName>,
+    },
+    /// Une fiche visée par une demande refusée avant de connaître le service (fiche inconnue, empreinte
+    /// changée, contrat non accepté...) : son identifiant, nettoyé et borné.
+    Fiche(ClientName),
+    /// Une fiche écartée au chargement de l'agent : son dossier et l'invariant violé (jamais un contenu).
+    FicheRefused {
+        dir: ClientName,
+        invariant: ClientName,
+    },
 }
 
 /// Ce qu'une issue de démarrage, d'arrêt ou de redémarrage a de particulier (texte fixe).
@@ -348,6 +371,46 @@ impl Target {
                     text.push_str(", arrêté juste après le démarrage");
                 }
                 Some(text)
+            }
+            Self::GameInstall {
+                service,
+                fiche,
+                version,
+                image,
+                host_ports,
+                answers,
+                cpu_millis,
+                memory_bytes,
+                agreements,
+            } => {
+                let mut text = format!(
+                    "service {} : fiche {} (version {version}), image {}",
+                    service.as_str(),
+                    fiche.as_str(),
+                    image.as_str()
+                );
+                if !host_ports.is_empty() {
+                    let ports: Vec<String> = host_ports.iter().map(u16::to_string).collect();
+                    text.push_str(&format!(", ports {}", ports.join(", ")));
+                }
+                match answers {
+                    0 => {}
+                    1 => text.push_str(", 1 réponse"),
+                    n => text.push_str(&format!(", {n} réponses")),
+                }
+                text.push_str(&format!(
+                    ", {cpu_millis} millicœurs, {} Mio de mémoire",
+                    memory_bytes / (1024 * 1024)
+                ));
+                if !agreements.is_empty() {
+                    let titles: Vec<&str> = agreements.iter().map(ClientName::as_str).collect();
+                    text.push_str(&format!(", contrats acceptés : {}", titles.join(", ")));
+                }
+                Some(text)
+            }
+            Self::Fiche(fiche) => Some(format!("fiche {}", fiche.as_str())),
+            Self::FicheRefused { dir, invariant } => {
+                Some(format!("fiche {} ({})", dir.as_str(), invariant.as_str()))
             }
             Self::ServiceAdoption(key, cause) => {
                 Some(format!("service {} ({})", key.as_str(), cause.text()))
@@ -503,6 +566,18 @@ pub enum Reason {
     DeployLimit,
     /// Annulé par l'utilisateur (BR-DEPLOY-025).
     CancelledByAccount,
+    /// Installer depuis une fiche (HRT-101, BR-FICHE-021) : la machine est plus petite que le minimum mesuré.
+    HostTooSmall,
+    /// Installer depuis une fiche (BR-FICHE-023) : l'espace libre est sous le besoin mesuré de l'installation.
+    NotEnoughSpace,
+    /// Installer depuis une fiche : la fiche n'est pas proposée par cet agent (inconnue, ou d'essai).
+    FicheUnknown,
+    /// Installer depuis une fiche : la fiche de l'agent n'est plus celle que le client a vue.
+    FicheChanged,
+    /// Installer depuis une fiche : un contrat n'est pas accepté (BR-FICHE-058).
+    AgreementRequired,
+    /// Installer depuis une fiche : la fiche ne se traduit pas en description valable (fiche refusée).
+    FicheRefused,
 }
 
 impl Reason {
@@ -580,6 +655,12 @@ impl Reason {
             Self::LimitsRequired => "limites de ressources requises".to_owned(),
             Self::DeployLimit => "deux déploiements déjà en cours".to_owned(),
             Self::CancelledByAccount => "annulé par l'utilisateur".to_owned(),
+            Self::HostTooSmall => "machine trop petite".to_owned(),
+            Self::NotEnoughSpace => "espace insuffisant pour l'installation".to_owned(),
+            Self::FicheUnknown => "fiche inconnue".to_owned(),
+            Self::FicheChanged => "fiche changée depuis l'affichage".to_owned(),
+            Self::AgreementRequired => "contrat non accepté".to_owned(),
+            Self::FicheRefused => "fiche refusée".to_owned(),
         }
     }
 }
@@ -979,6 +1060,70 @@ mod tests {
             Reason::TooManyAttempts { retry_after_s: 60 }.text(),
             "trop de tentatives, attente de 60 s"
         );
+    }
+
+    #[test]
+    fn a_game_install_entry_carries_no_answer_value() {
+        let name = |text: &str| ClientName::parse(text).unwrap();
+        let entry = Target::GameInstall {
+            service: name("mon-terraria"),
+            fiche: name("terraria"),
+            version: 1,
+            image: name("ryshe/terraria:vanilla-1.4.5.8"),
+            host_ports: vec![7777],
+            answers: 3,
+            cpu_millis: 1000,
+            memory_bytes: 2 << 30,
+            agreements: vec![name("Contrat de licence")],
+        };
+        let text = entry.text().unwrap();
+        assert_eq!(
+            text,
+            "service mon-terraria : fiche terraria (version 1), image ryshe/terraria:vanilla-1.4.5.8, ports 7777, 3 réponses, 1000 millicœurs, 2048 Mio de mémoire, contrats acceptés : Contrat de licence"
+        );
+        // Le type n'a pas de champ pour une valeur : seul le NOMBRE de réponses y entre.
+        assert!(!text.contains("SENTINEL"));
+        assert_eq!(
+            Target::FicheRefused {
+                dir: name("bad"),
+                invariant: name("I2")
+            }
+            .text()
+            .unwrap(),
+            "fiche bad (I2)"
+        );
+        assert_eq!(
+            Target::Fiche(name("terraria")).text().unwrap(),
+            "fiche terraria"
+        );
+        for reason in [
+            Reason::HostTooSmall,
+            Reason::NotEnoughSpace,
+            Reason::FicheUnknown,
+            Reason::FicheChanged,
+            Reason::AgreementRequired,
+            Reason::FicheRefused,
+        ] {
+            let text = reason.text();
+            assert!(!text.contains('\u{2014}') && !text.contains('{'), "{text}");
+        }
+        assert_eq!(
+            Reason::NotEnoughSpace.text(),
+            "espace insuffisant pour l'installation"
+        );
+        let record = AuditEvent::new(
+            at(),
+            Actor::system(),
+            AuditAction::CatalogFicheRefused,
+            Target::FicheRefused {
+                dir: name("bad"),
+                invariant: name("I2"),
+            },
+            Outcome::Failed(Reason::FicheRefused),
+        )
+        .into_record(1);
+        assert_eq!(record.action, "catalog.fiche.refused");
+        assert_eq!(record.action_label, "Fiche écartée");
     }
 
     #[test]

@@ -35,7 +35,7 @@ Le format est FERMÉ : tout champ inconnu, à n'importe quel niveau, est refusé
 
 ## Cas limites
 - Le format borne ce que Hearth DEMANDE au moteur, pas ce que l'image fait une fois lancée ni ce qu'elle télécharge (BR-FICHE-036).
-- Le test « la description est acceptée par le validateur du déploiement ordinaire » est écrit mais IGNORÉ : ce validateur n'existe pas encore (HRT-68, HRT-101). L'interface attendue est `translate::DeploymentValidator`.
+- Le validateur du déploiement ordinaire est branché (HRT-101) : toute traduction est acceptée par `OrdinaryDeployment` (`tests_translate.rs::property_every_accepted_fiche_and_valid_answers_give_a_closed_description`, 700 cas par fiche, graine fixe) ; ses refus gardent le même code que le formulaire (`the_ordinary_deployment_validator_refuses_what_a_hand_made_deployment_refuses`).
 
 ## Règles liées
 - BR-FICHE-005, BR-FICHE-011, BR-JEU-040

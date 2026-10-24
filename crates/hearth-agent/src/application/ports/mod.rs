@@ -30,6 +30,7 @@ mod operation_repo;
 mod password_hasher;
 mod proof;
 mod safe_fs;
+mod secret_random;
 mod secret_sealer;
 mod security_feed;
 mod service_containers;
@@ -83,6 +84,7 @@ pub use operation_repo::{OperationRepo, OperationTx};
 pub use password_hasher::{HashError, PasswordHasher};
 pub use proof::{ChallengeCrypto, CryptoError, ProofVerifier};
 pub use safe_fs::{FsError, Measure, Ownership, Perms, SafeFs, ServiceRoot};
+pub use secret_random::{RandomError, SecretRandom};
 pub use secret_sealer::{
     KeyCheckRepo, KeyRead, KeyStoreError, SealError, SealerFactory, SecretSealer, ServicesKeyStore,
 };

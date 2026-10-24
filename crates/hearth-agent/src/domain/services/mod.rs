@@ -12,6 +12,7 @@ pub mod deploy;
 pub mod drift;
 pub mod engine;
 pub mod folders;
+pub mod from_fiche;
 pub mod hidden;
 pub mod image;
 pub mod key;

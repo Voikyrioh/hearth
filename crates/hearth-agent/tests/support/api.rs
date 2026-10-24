@@ -190,6 +190,9 @@ fn state_over_rig(
             folders: None,
             timings: rig.timings,
         },
+        Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
+        Arc::new(super::fake_random::FakeRandom::counting_from(0)),
+        hearth_agent::application::game_phase::GamePhases::new(engine.clone(), env.clock.clone()),
     );
     let service_lifecycle = hearth_agent::application::service_lifecycle::ServiceLifecycle::new(
         services.clone(),
@@ -218,6 +221,7 @@ fn state_over_rig(
         service_ops,
         service_lifecycle,
         deployments,
+        catalog: Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         hello: Arc::new(HelloService::new(
             InstallId::from_bytes([3; 16]),
             false,

@@ -1431,9 +1431,9 @@ fn the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_d
         "l'empreinte de l'image n'est pas vérifiée : aucune n'est inventée"
     );
     assert_eq!(EMBEDDED.len(), fiches.len());
-    // Embarquée, mais jamais proposée : `offered()` ne rend que les fiches `published`.
+    // Embarquée, mais jamais proposée : `offered_with(false)` ne rend que les fiches `published`.
     assert!(
-        super::embedded::offered()
+        super::embedded::offered_with(false)
             .iter()
             .all(|f| f.id() != "terraria"),
         "une fiche preview n'est pas proposée"

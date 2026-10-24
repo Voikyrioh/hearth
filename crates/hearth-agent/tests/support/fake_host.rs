@@ -68,6 +68,8 @@ impl HostPorts for FakeHostPorts {
 pub struct FakeFreeSpace {
     bytes: AtomicU64,
     failing: AtomicBool,
+    /// Un autre disque sous ce préfixe de chemin (la racine de données, par exemple).
+    under: Mutex<Vec<(String, u64)>>,
 }
 
 impl FakeFreeSpace {
@@ -75,7 +77,16 @@ impl FakeFreeSpace {
         Self {
             bytes: AtomicU64::new(500 * 1024 * 1024 * 1024),
             failing: AtomicBool::new(false),
+            under: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Les chemins sous `prefix` ont `bytes` octets libres (un autre disque que celui des images).
+    pub fn set_under(&self, prefix: &str, bytes: u64) {
+        self.under
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((prefix.to_owned(), bytes));
     }
 
     pub fn set(&self, bytes: u64) {
@@ -94,9 +105,19 @@ impl Default for FakeFreeSpace {
 }
 
 impl FreeSpace for FakeFreeSpace {
-    fn free_bytes(&self, _path: &Path) -> Result<u64, UpdateHostError> {
+    fn free_bytes(&self, path: &Path) -> Result<u64, UpdateHostError> {
         if self.failing.load(Ordering::SeqCst) {
             return Err(UpdateHostError::Other("illisible".into()));
+        }
+        let wanted = path.to_string_lossy();
+        if let Some((_, bytes)) = self
+            .under
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .find(|(prefix, _)| wanted.starts_with(prefix.as_str()))
+        {
+            return Ok(*bytes);
         }
         Ok(self.bytes.load(Ordering::SeqCst))
     }

@@ -15,6 +15,7 @@ pub mod engine_contract;
 pub mod fake_daemon;
 pub mod fake_engine;
 pub mod fake_host;
+pub mod fake_random;
 pub mod fake_safe_fs;
 pub mod fake_supervisor;
 pub mod https;

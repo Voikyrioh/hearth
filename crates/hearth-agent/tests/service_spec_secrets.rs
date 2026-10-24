@@ -22,8 +22,9 @@ use hearth_agent::domain::sealed::{AnswerId, KEY_LEN, KeyProblem};
 use hearth_agent::domain::secret::Secret;
 use hearth_agent::domain::services::key::ServiceKey;
 use hearth_agent::domain::services::spec::{
-    AnswerEntry, EnvEntry, SecretsAccess, SpecBody, SpecFiche, SpecImage, SpecMount, SpecMountKind,
-    SpecPort, SpecProtocol, SpecRestart, SpecSecrets, SpecSettings,
+    AnswerEntry, EnvEntry, SecretsAccess, SpecAgreement, SpecAnswer, SpecBody, SpecFiche,
+    SpecImage, SpecMount, SpecMountKind, SpecPort, SpecProtocol, SpecRestart, SpecSecrets,
+    SpecSettings,
 };
 use hearth_agent::infrastructure::logging::{self, LogFormat};
 use hearth_agent::infrastructure::sealer::RingSealerFactory;
@@ -131,11 +132,7 @@ fn body(name: &str) -> SpecBody {
             public_address: Some("jeu.example.org".into()),
             backup_ignored: Vec::new(),
         },
-        fiche: Some(SpecFiche {
-            id: "terraria".into(),
-            version: 2,
-            digest: "sha256:abc".into(),
-        }),
+        fiche: Some(SpecFiche::new("terraria", 2, "sha256:abc")),
     }
 }
 
@@ -443,6 +440,43 @@ async fn a_description_is_numbered_and_the_previous_revision_stays_readable() {
     // Jamais la courante, même demandée.
     assert_eq!(env.specs.discard_before(&service, 99).await.unwrap(), 0);
     assert!(env.specs.read(&service, None).await.unwrap().is_some());
+}
+
+/// HRT-101 : variante, réponses (la secrète sans valeur en clair) et contrats survivent à la base, dans
+/// `spec_json`, sans migration.
+#[tokio::test]
+async fn a_fiche_description_survives_the_database_with_its_answers_and_agreements() {
+    let env = Env::new().await;
+    let service = key(9);
+    let mut described = body("Terraria");
+    let mut fiche = SpecFiche::new("terraria", 3, "sha256:abc");
+    fiche.variant = Some("vanilla".into());
+    fiche.answers = vec![
+        SpecAnswer {
+            id: "max_players".into(),
+            value: Some("8".into()),
+            secret: false,
+            frozen: true,
+        },
+        SpecAnswer {
+            id: "password".into(),
+            value: None,
+            secret: true,
+            frozen: false,
+        },
+    ];
+    fiche.agreements = vec![SpecAgreement {
+        id: "eula".into(),
+        accepted_by: "acct1".into(),
+        accepted_at: 1_790_000_000,
+    }];
+    described.fiche = Some(fiche);
+    env.specs
+        .save(&service, None, described.clone(), &secrets("pw"), "acct1")
+        .await
+        .unwrap();
+    let (read, _) = env.specs.read(&service, None).await.unwrap().unwrap();
+    assert_eq!(read.body, described);
 }
 
 #[tokio::test]
