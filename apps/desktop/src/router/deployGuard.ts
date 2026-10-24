@@ -21,7 +21,26 @@ export async function deployRouteGuard(
   to: RouteLocationNormalized,
 ): Promise<true | RouteLocationRaw> {
   const id = typeof to.params.id === "string" ? to.params.id : "";
-  const list: RouteLocationRaw = { name: "services", params: { id } };
+  return gatedRoute(to, { name: "services", params: { id } });
+}
+
+/**
+ * La même garde pour l'installation d'un serveur de jeu depuis une fiche (HRT-102, BR-FICHE-033) : un compte sans le
+ * droit, un agent qui ne gère pas les services et un moteur inutilisable sont renvoyés vers la fiche, qui explique.
+ */
+export async function ficheInstallGuard(
+  to: RouteLocationNormalized,
+): Promise<true | RouteLocationRaw> {
+  const id = typeof to.params.id === "string" ? to.params.id : "";
+  const fiche = typeof to.params.fiche === "string" ? to.params.fiche : "";
+  return gatedRoute(to, { name: "fiche", params: { id, fiche } });
+}
+
+async function gatedRoute(
+  to: RouteLocationNormalized,
+  list: RouteLocationRaw,
+): Promise<true | RouteLocationRaw> {
+  const id = typeof to.params.id === "string" ? to.params.id : "";
   const server = useServersStore().byId(id);
   if (!server) return list;
   const services = useServicesStore();

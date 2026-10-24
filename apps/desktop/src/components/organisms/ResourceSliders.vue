@@ -23,13 +23,26 @@ const props = withDefaults(
     capacity: EngineCapacity | null;
     modelValue: Resources;
     /** La mémoire recommandée d'une fiche et sa preuve ; `null` pour une application sans fiche. */
-    recommended?: { bytes: number; proof: "measured" | "publisher" } | null;
+    recommended?: { bytes: number; proof: "measured" | "measured_idle" | "publisher" } | null;
+    /**
+     * Un texte à la place de « Hearth n'a pas de chiffre pour ce programme » quand `recommended` est `null` : une fiche
+     * dont la mémoire n'est pas prouvée le dit avec ses mots (HRT-102). Sans lui, la proposition de BR-RES-039.
+     */
+    memoryNote?: string | null;
+    /** Une ligne sous le curseur de processeur (la valeur recommandée de la fiche, ou « Hearth ne sait pas… »). */
+    cpuNote?: string | null;
     disabled?: boolean;
   }>(),
-  { recommended: null, disabled: false },
+  { recommended: null, memoryNote: null, cpuNote: null, disabled: false },
 );
 
 const emit = defineEmits<{ "update:modelValue": [value: Resources] }>();
+
+const PROOF_KEYS = {
+  measured: "resources.proofMeasured",
+  measured_idle: "resources.proofMeasuredIdle",
+  publisher: "resources.proofPublisher",
+} as const;
 
 const memoryList = computed(() => (props.capacity ? memoryStops(props.capacity.memoryBytes) : []));
 const cpuList = computed(() => (props.capacity ? cpuStops(props.capacity.cpus) : []));
@@ -53,11 +66,7 @@ const recommendedText = computed(() =>
     ? ""
     : t("resources.recommended", {
         value: formatMemory(props.recommended.bytes),
-        proof: t(
-          props.recommended.proof === "measured"
-            ? "resources.proofMeasured"
-            : "resources.proofPublisher",
-        ),
+        proof: t(PROOF_KEYS[props.recommended.proof]),
       }),
 );
 const proposedText = computed(() =>
@@ -82,6 +91,7 @@ const proposedText = computed(() =>
       >
         <template #hint>
           <p v-if="recommended" class="sliders__hint">{{ recommendedText }}</p>
+          <p v-else-if="memoryNote" class="sliders__hint" data-memory-note>{{ memoryNote }}</p>
           <template v-else>
             <p class="sliders__hint">{{ t("resources.noFigure") }}</p>
             <p class="sliders__hint">{{ proposedText }}</p>
@@ -95,7 +105,11 @@ const proposedText = computed(() =>
         :model-value="modelValue.cpuMillis"
         :disabled="disabled"
         @update:model-value="setCpu"
-      />
+      >
+        <template v-if="cpuNote" #hint>
+          <p class="sliders__hint" data-cpu-note>{{ cpuNote }}</p>
+        </template>
+      </ResourceSlider>
     </template>
   </section>
 </template>

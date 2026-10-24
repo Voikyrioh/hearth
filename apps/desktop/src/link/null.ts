@@ -160,6 +160,18 @@ export class NullLinkBridge implements LinkBridge {
   async readEngineCapacity(): Promise<never> {
     return this.unavailable();
   }
+  async readCatalog(): Promise<never> {
+    return this.unavailable();
+  }
+  async readFiche(): Promise<never> {
+    return this.unavailable();
+  }
+  async installFiche(): Promise<never> {
+    return this.unavailable();
+  }
+  async openFicheLink(): Promise<never> {
+    return this.unavailable();
+  }
   async recheckEngine(): Promise<never> {
     return this.unavailable();
   }

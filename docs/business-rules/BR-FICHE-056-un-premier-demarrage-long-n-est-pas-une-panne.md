@@ -15,15 +15,20 @@ Une fiche dont le premier démarrage est long (téléchargements déclarés, gé
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/catalog/readiness.rs::{ReadyRule::of, phase_of}`
+- `apps/desktop/src/fiche/firstStart.ts`
+- `apps/desktop/src/components/organisms/FirstStartPanel.vue`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/readiness.rs::the_phases_follow_the_first_start_the_sign_and_the_delay_of_the_fiche`
+- `apps/desktop/src/fiche/fiche.test.ts::le premier démarrage (BR-FICHE-056)`
 
 ## Cas limites
 - Les octets écrits relevés toutes les 30 secondes et l'étape en cours (repères de journal) ne sont pas dans cette version.
+- Le panneau n'est pas encore posé dans le détail d'un service : l'agent ne projette pas la phase (suivi HRT-197).
 
 ## Règles liées
 - BR-FICHE-028, BR-FICHE-010
 
 ## Historique
 - 2026-10-24 — création (HRT-101).
+- 2026-10-24 — côté client (HRT-102).

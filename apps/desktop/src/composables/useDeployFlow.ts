@@ -17,6 +17,7 @@ import { t } from "@/i18n";
 import {
   type DeployCheck,
   type DeployField,
+  type DeployOutcome,
   type DeployRefusal,
   getLinkBridge,
   type ServiceInfo,
@@ -36,10 +37,58 @@ const OPTIONS = {
   passwordMissingIsRefusal: true,
 } as const;
 
-/** Le refus du serveur montré en tête du formulaire, et le champ qu'il désigne (BR-DEPLOY-032). */
+/**
+ * Le refus du serveur montré en tête du formulaire, et le champ qu'il désigne (BR-DEPLOY-032). `question` : la
+ * question d'une fiche qu'il désigne (installation depuis une fiche, HRT-102).
+ */
 export interface FormRefusal {
   text: string;
   field: DeployField | null;
+  question?: string | null;
+}
+
+/**
+ * Ce que le parcours demande à ce qu'il déploie (HRT-102) : une image saisie à la main (`DeployService`) ou une fiche
+ * du Catalogue (`InstallFromFiche`) suivent le MÊME parcours (récapitulatif, mot de passe à chaque fois, progression,
+ * issue, effacement de la saisie) : seul ce qui est propre à la source change.
+ */
+export interface DeployFlowSource {
+  /** Montre tous les défauts de forme ; `true` s'il en reste (le récapitulatif ne s'ouvre pas). */
+  validate(): boolean;
+  /** Refait la consultation du serveur (nom, ports, place) : les constats sont indicatifs. */
+  refreshCheck(): Promise<DeployCheck | null>;
+  /**
+   * L'envoi de la demande, ou `null` si elle n'est pas valable. `run` est l'appel du pont : la saisie (secrets
+   * compris) ne traverse que lui.
+   */
+  prepare(accept: { reservedPorts: boolean; lowDisk: boolean }): {
+    name: string;
+    run: (serverId: string, adminPassword: string | null) => Promise<DeployOutcome>;
+  } | null;
+  /** Efface la saisie de la mémoire. */
+  wipe(): void;
+  /** Un refus propre à cette source qui ramène à la page (`null` : le parcours ordinaire le juge). */
+  refusal?(refused: DeployRefusal): FormRefusal | null;
+}
+
+/** Le formulaire « Déployer un service » vu comme source du parcours. */
+function sourceOfForm(form: DeployFormState): DeployFlowSource {
+  return {
+    validate() {
+      form.touchAll();
+      return form.issues.value.any;
+    },
+    refreshCheck: () => form.refreshCheck(),
+    prepare(accept) {
+      const request = toRequest(form.draft.value, accept);
+      if (!request) return null;
+      return {
+        name: request.name,
+        run: (id, adminPassword) => getLinkBridge().deployService(id, request, adminPassword),
+      };
+    },
+    wipe: () => form.wipe(),
+  };
 }
 
 /** Un déploiement lancé depuis cette page : l'opération que l'agent suit, ou « résultat inconnu » (lien coupé). */
@@ -65,14 +114,21 @@ export interface Launch {
  * La saisie (valeurs de variables, commande) est effacée de la mémoire dès que l'issue est connue et que le formulaire
  * n'a plus à rouvrir, ou aussitôt à l'abandon (BR-DEPLOY-029). Aucun mot de passe n'est gardé : il traverse l'appel.
  */
-export function useDeployFlow(options: {
-  serverId: () => string;
-  form: DeployFormState;
-  navigate: (to: RouteLocationRaw) => void;
-  /** Met le curseur sur ce champ du formulaire. */
-  focusField: (field: DeployField) => void;
-}) {
-  const { serverId, form } = options;
+export function useDeployFlow(
+  options: {
+    serverId: () => string;
+    navigate: (to: RouteLocationRaw) => void;
+    /** Met le curseur sur ce champ du formulaire. */
+    focusField: (field: DeployField) => void;
+    /** Met le curseur sur cette question d'une fiche. */
+    focusQuestion?: (id: string) => void;
+  } & (
+    | /** Le formulaire d'une image (`DeployService`). */ { form: DeployFormState }
+    | /** Une autre origine (une fiche du Catalogue). */ { source: DeployFlowSource }
+  ),
+) {
+  const { serverId } = options;
+  const form: DeployFlowSource = "source" in options ? options.source : sourceOfForm(options.form);
   const operations = useServiceOpsStore();
   const services = useServicesStore();
   const toasts = useToastsStore();
@@ -102,8 +158,7 @@ export function useDeployFlow(options: {
 
   async function openSummary(): Promise<void> {
     if (opening.value || summaryOpen.value) return;
-    form.touchAll();
-    if (form.issues.value.any) return;
+    if (form.validate()) return;
     opening.value = true;
     refusal.value = null;
     forceLowDisk.value = null;
@@ -132,17 +187,14 @@ export function useDeployFlow(options: {
     adminPassword: string | null,
     accept: { reservedPorts: boolean; lowDisk: boolean },
   ): Promise<ActReport> {
-    const request = toRequest(form.draft.value, accept);
+    const request = form.prepare(accept);
     if (!request) {
       // Le formulaire ne devrait pas pouvoir arriver ici (le bouton est inactif) : on le dit au journal, pas en silence.
       logUiError(new Error("déploiement sans demande valable"), "deploy:request");
       return { kind: "failed" };
     }
     const id = serverId();
-    const result = await action.run(
-      () => getLinkBridge().deployService(id, request, adminPassword),
-      OPTIONS,
-    );
+    const result = await action.run(() => request.run(id, adminPassword), OPTIONS);
     if (!result) {
       if (action.passwordMissing.value) {
         return { kind: "refused", refusal: { kind: "password_required" } };
@@ -172,6 +224,20 @@ export function useDeployFlow(options: {
   /** Un refus de l'agent : celui qui vise un champ ferme la fenêtre et y ramène ; les autres se disent dans la fenêtre. */
   function settleRefusal(refused: DeployRefusal): ActReport {
     if (refused.kind === "no_space") forceLowDisk.value = { freeBytes: refused.freeBytes };
+    const own = form.refusal?.(refused) ?? null;
+    if (own) {
+      // Un refus propre à la source (une réponse refusée, une machine trop petite) : la page le dit, la saisie reste.
+      refusal.value = own;
+      void form.refreshCheck();
+      summaryOpen.value = false;
+      if (own.question && options.focusQuestion) {
+        const question = own.question;
+        void nextTick()
+          .then(() => nextTick())
+          .then(() => options.focusQuestion?.(question));
+      } else if (own.field) focusLater(own.field);
+      return { kind: "done" };
+    }
     if (!isFieldRefusal(refused)) return { kind: "refused", refusal: refused };
     const field = refusalField(refused);
     refusal.value = { text: refusalText(refused), field };

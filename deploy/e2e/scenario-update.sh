@@ -28,8 +28,14 @@ die() {
     printf 'ECHEC - %s\n' "$*" >&2
     [ -f "$OUT" ] && { echo '--- dernière sortie' >&2; cat "$OUT" >&2; }
     journalctl -u hearth-agent -u hearth-agent-update --no-pager 2>/dev/null | tail -n 40 >&2 || true
+    DIED=1
     exit 1
 }
+
+DIED=0
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+trap 'report_exit $?' EXIT
 
 run() {
     status=0
@@ -349,7 +355,8 @@ ok "mise à jour orpheline : conclue au démarrage (réussite), sauvegarde retir
 code=$(api POST /agent/update "$ADMIN" -d "$(confirmed "$SLOW_BODY")")
 [ "$code" = 202 ] || die "la mise à jour lente devrait être acceptée (reçu $code : $(cat "$OUT.body"))"
 sleep 2
-systemctl kill --signal=SIGKILL hearth-agent
+# FIX:01M5P0Q7C3N8T5W2R9XK4D6HJE : kill_main au lieu de `systemctl kill`, dont l'erreur sur le cgroup arrêtait le scénario.
+kill_main hearth-agent || die "l'agent n'a pas de processus principal à tuer"
 waited=0
 until [ "$(hello_version 2>/dev/null)" = "0.2.1" ]; do
     [ "$waited" -lt 90 ] || die "l'agent ne revient pas après avoir été tué"
@@ -376,7 +383,8 @@ until [ "$(sha_of "$INSTALLED")" = "$(sha_of /dist/mute)" ]; do
     sleep 0.1
     waited=$((waited + 1))
 done
-systemctl kill --signal=SIGKILL hearth-agent-update 2>/dev/null || die "le superviseur n'existe plus : il a déjà conclu"
+# FIX:01M5P0Q7C3N8T5W2R9XK4D6HJE
+kill_main hearth-agent-update || die "le superviseur n'existe plus : il a déjà conclu"
 ok "superviseur tué (SIGKILL) après l'échange : le nouvel agent ne répond pas, personne ne conclut... sauf systemd"
 # Aucun geste manuel à partir d'ici : on ne touche ni au service ni aux fichiers.
 waited=0

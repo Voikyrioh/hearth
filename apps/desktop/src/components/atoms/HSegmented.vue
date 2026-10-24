@@ -3,11 +3,15 @@ import { ref } from "vue";
 
 // Choix exclusif entre quelques options : groupe `radiogroup`, flèches pour passer
 // d'une option à l'autre, un seul arrêt de tabulation (l'option cochée).
-const props = defineProps<{
-  modelValue: T;
-  options: readonly { value: T; label: string }[];
-  label: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    modelValue: T;
+    options: readonly { value: T; label: string }[];
+    label: string;
+    disabled?: boolean;
+  }>(),
+  { disabled: false },
+);
 
 const emit = defineEmits<{ "update:modelValue": [value: T] }>();
 
@@ -41,6 +45,7 @@ function move(delta: number) {
       role="radio"
       :class="['seg__item', { 'seg__item--on': option.value === modelValue }]"
       :aria-checked="option.value === modelValue"
+      :disabled="disabled"
       :tabindex="option.value === modelValue ? 0 : -1"
       @click="emit('update:modelValue', option.value)"
     >

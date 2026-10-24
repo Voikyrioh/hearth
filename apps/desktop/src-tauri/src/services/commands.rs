@@ -3,7 +3,6 @@
 //! ni méthode, ni adresse. Lecture seule : « Vérifier à nouveau » relance la détection du moteur,
 //! `POST /engine/recheck` ne modifie rien.
 
-use std::process::Command;
 use std::sync::Arc;
 
 use hearth_link::domain::server::ServerId;
@@ -140,9 +139,9 @@ pub fn keep_service_logs(
 #[tauri::command]
 #[specta::specta]
 pub fn open_engine_docs() -> Result<(), LinkFailure> {
-    Command::new("explorer")
-        .arg(ENGINE_DOCS_URL)
-        .spawn()
-        .map(drop)
-        .map_err(|_| LinkFailure::Internal)
+    if crate::browser::open_in_browser(ENGINE_DOCS_URL) {
+        Ok(())
+    } else {
+        Err(LinkFailure::Internal)
+    }
 }

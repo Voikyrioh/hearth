@@ -28,15 +28,22 @@ WORK=$(mktemp -d)
 # Le journal de systemd garde les passages précédents : on ne compte que ce que CE passage a écrit.
 START=$(date '+%Y-%m-%d %H:%M:%S')
 
+DIED=0
+LIB_UNITS="hearth-agent $UNIT_SUP"
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$(dirname "$0")/lib.sh"
+
 ok() { printf 'ok - %s\n' "$*"; }
 die() {
     printf 'ECHEC - %s\n' "$*" >&2
     journalctl -u hearth-agent -u "$UNIT_SUP" --no-pager 2>/dev/null | tail -n 40 >&2 || true
+    DIED=1
     exit 1
 }
 
 cleanup() {
     status=$?
+    report_exit "$status"
     systemctl stop "$UNIT_SUP" >/dev/null 2>&1 || true
     systemctl reset-failed "$UNIT_SUP" >/dev/null 2>&1 || true
     if [ -x "$INSTALLED" ]; then
@@ -144,9 +151,9 @@ ok "unité transitoire acceptée par systemd : $(systemctl show "$UNIT_SUP" -p R
 wait_for "le binaire déposé est installé et le contrôle commence" 30 phase_is checking
 [ "$(sha_of "$INSTALLED")" = "$(sha_of "$WORK/crash")" ] || die "l'échange n'a pas eu lieu"
 hello_version >/dev/null 2>&1 && die "le binaire qui plante ne devrait pas répondre"
-SUP_PID=$(systemctl show "$UNIT_SUP" -p MainPID --value)
-systemctl kill --signal=SIGKILL "$UNIT_SUP"
-ok "superviseur tué (SIGKILL, pid $SUP_PID) après l'échange, pendant le contrôle : le nouveau binaire ne démarre pas"
+# FIX:01M5P0Q7C3N8T5W2R9XK4D6HJE : par le pid (jamais 0), `systemctl kill` sortant en erreur sur le cgroup (EIO) au hasard.
+kill_main "$UNIT_SUP" || die "le superviseur n'a pas de processus principal à tuer"
+ok "superviseur tué (SIGKILL) après l'échange, pendant le contrôle : le nouveau binaire ne démarre pas"
 wait_for "systemd relance le superviseur (reprise)" 20 sh -c "[ \"\$(journalctl -u $UNIT_SUP --since \"$START\" --no-pager | grep -c 'reprise du superviseur')\" -ge 1 ]"
 ok "systemd a relancé le superviseur, qui a repris son marqueur"
 # La fenêtre de contrôle (12 s) repart, le retour arrière suit : sans aucun geste manuel.
@@ -199,6 +206,8 @@ wait_for "le contrôle commence" 30 phase_is checking
 kills=0
 while [ "$kills" -lt 12 ]; do
     if systemctl is-active --quiet "$UNIT_SUP"; then
+        # Voulu : `systemctl kill` toléré ici (|| true). La boucle tue l'unité entre deux relances,
+        # où `kill_main` attendrait 2 s un pid qui n'existe pas encore ; le EIO ne casse rien.
         systemctl kill --signal=SIGKILL "$UNIT_SUP" >/dev/null 2>&1 || true
         kills=$((kills + 1))
         sleep 3
@@ -237,7 +246,8 @@ wait_for "le contrôle commence" 30 phase_is checking
 n=0
 while [ "$n" -lt 2 ]; do
     n=$((n + 1))
-    systemctl kill --signal=SIGKILL "$UNIT_SUP"
+    # FIX:01M5P0Q7C3N8T5W2R9XK4D6HJE
+    kill_main "$UNIT_SUP" || die "mort $n : le superviseur n'a pas de processus principal à tuer"
     systemctl restart hearth-agent
     wait_for "reprise $n par systemd" 30 sh -c "[ \"\$(journalctl -u $UNIT_SUP --since \"$START\" --no-pager | grep -c 'reprise du superviseur')\" -ge $n ]"
     ok "mort $n du superviseur, agent redémarré dans la fenêtre de relance, reprise $n par systemd"

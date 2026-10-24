@@ -16,15 +16,21 @@ Règle de présentation, portée par le client (HRT-102) : la phrase « Il reste
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/from_fiche.rs::fit_warnings`
 - `crates/hearth-agent/src/application/catalog.rs::CatalogService::detail`
+- `apps/desktop/src/fiche/fit.ts::memoryNotices`
+- `apps/desktop/src/components/organisms/InstallResources.vue`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/services/from_fiche.rs::an_unmeasured_minimum_never_blocks`
+- `apps/desktop/src/fiche/fiche.test.ts::dit en chiffres ce qu'il reste de mémoire et ce qui dépasse`
+- `apps/desktop/src/pages/InstallFromFiche.test.ts`
 
 ## Cas limites
 - Le texte et la jauge sont au client (HRT-102).
+- Les cases « Je comprends » (limite sous le minimum, mémoire qui dépasse) sont dans la fenêtre « Vérifiez avant de lancer » (`fiche/attention.ts`), pas dans l'étape.
 
 ## Règles liées
 - BR-FICHE-021, BR-RES-007
 
 ## Historique
 - 2026-10-24 — création (HRT-101).
+- 2026-10-24 — côté client (HRT-102).
