@@ -76,12 +76,26 @@ pub trait Harness: Send + Sync {
     fn image(&self) -> String;
     /// Retire l'image du serveur pour forcer une récupération (sans effet si elle n'y est pas).
     async fn forget_image(&self, image: &str);
+    /// Les couches (empreintes `diff_id`, `RootFS.Layers`) de l'image dans le serveur, `None` si le décor ne sait
+    /// pas les lire ou si l'image n'y est pas. Sert à prouver un vrai téléchargement sans dépendre du rapport de
+    /// progression du moteur.
+    async fn image_layers(&self, _image: &str) -> Option<Vec<String>> {
+        None
+    }
     /// Une image que le registre ne connaît pas.
     fn missing_image(&self) -> String;
     /// Une version qui n'existe pas dans le dépôt de `image()`.
     fn missing_tag(&self) -> String;
     /// Un dossier du serveur qui existe, à monter dans un conteneur.
     fn scratch_dir(&self) -> String;
+}
+
+/// Une variable d'environnement du décor : lue, rognée, `None` si absente ou vide.
+pub fn env_value(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 /// La variable sentinelle : ni son nom ni sa valeur ne doivent ressortir d'un `Debug`. Le nom est lu
@@ -765,11 +779,42 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
     assert!(!engine.image_present(&image).await.expect("présence"));
     let mut pull = engine.pull(&image);
     let mut percents = Vec::new();
+    let mut events = 0_usize;
+    let mut bytes_done = 0_u64;
     while let Some(item) = pull.next().await {
         let progress = item.expect("récupération");
+        events += 1;
+        bytes_done = bytes_done.max(progress.bytes_done);
         if let Some(percent) = progress.percent {
             percents.push(percent);
         }
+    }
+    // Preuve d'un vrai téléchargement (HRT-168). L'image était ABSENTE du moteur (vérifié plus haut) et l'une de
+    // ses couches n'existe que dans le registre : la CI la pose dans le registre local sans que le démon la voie
+    // jamais et donne son `diff_id` dans `HEARTH_TEST_PULL_LAYER`. Après la récupération, les couches de l'image
+    // doivent la contenir. On ne s'appuie PAS sur les octets ni les pourcentages : un moteur dont le magasin
+    // d'images est containerd (Docker 29, runners GitHub) ne rapporte pas `progressDetail`, donc 0 octet et
+    // aucun pourcentage pour un vrai téléchargement. Ces statistiques sont consignées, jamais exigées.
+    eprintln!("récupération : {events} évènements, {bytes_done} octets, progression {percents:?}");
+    assert!(events > 0, "le flux de récupération n'a rien rapporté");
+    // Dépôt autre que celui par défaut (la CI pose `HEARTH_TEST_PULL_REPO`) : la couche attendue est OBLIGATOIRE,
+    // sans quoi le test repasserait au vert sans rien prouver.
+    let expected_layer = env_value("HEARTH_TEST_PULL_LAYER");
+    if env_value("HEARTH_TEST_PULL_REPO").is_some() {
+        assert!(
+            expected_layer.is_some(),
+            "HEARTH_TEST_PULL_REPO est posé : HEARTH_TEST_PULL_LAYER (diff_id de la couche propre) est obligatoire"
+        );
+    }
+    if let Some(layer) = &expected_layer {
+        let layers = harness
+            .image_layers(&image)
+            .await
+            .expect("les couches de l'image récupérée");
+        assert!(
+            layers.contains(layer),
+            "la couche propre du registre {layer} doit être dans l'image récupérée : {layers:?}"
+        );
     }
     assert!(
         percents.windows(2).all(|pair| pair[0] <= pair[1]),
@@ -899,7 +944,7 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
     );
     no_image.image = format!(
         "{}-never-pulled:1",
-        harness.missing_image().split(':').next().unwrap()
+        harness.missing_image().rsplit_once(':').unwrap().0
     );
     assert_eq!(engine.create(&no_image).await, Err(EngineError::NotFound));
 
