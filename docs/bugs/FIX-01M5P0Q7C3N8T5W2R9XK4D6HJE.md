@@ -27,4 +27,4 @@ Relancer le job.
 
 ## Références
 - Ticket : HRT-206
-- Code : `deploy/e2e/scenario-update.sh`, `deploy/e2e/double-failure-systemd.sh` `deploy/e2e/lib.sh` (marqueur `FIX:01M5P0Q7C3N8T5W2R9XK4D6HJE`)
+- Code : `deploy/e2e/scenario-update.sh`, `deploy/e2e/double-failure-systemd.sh`, `deploy/e2e/lib.sh` (marqueur `FIX:01M5P0Q7C3N8T5W2R9XK4D6HJE`)
