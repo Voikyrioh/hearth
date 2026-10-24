@@ -106,13 +106,14 @@ describe("la page (BR-FICHE-014, 015)", () => {
     expect(frozen[0]).toContain(
       "Ce réglage ne pourra plus être changé après la création du monde.",
     );
-    // La fiche dit déjà le jeu de caractères et les bornes : le client ne les redit pas (revue UX, constat 18).
+    // Le jeu de caractères et les bornes sont dits UNE fois : par le client, d'après la donnée ; la fiche ne les redit
+    // pas dans son aide (revue UX, constat 18).
     const worldHelp = wrapper.get('[data-question="world_name"]').text();
-    expect(worldHelp).toContain("lettres, chiffres, tiret et souligné seulement");
-    expect(worldHelp).not.toContain("Lettres, chiffres, tirets et soulignés seulement.");
+    expect(worldHelp.match(/ettres, chiffres/gi)).toHaveLength(1);
+    expect(worldHelp).toContain("Lettres, chiffres, tirets et soulignés seulement.");
     const playersHelp = wrapper.get('[data-question="max_players"]').text();
-    expect(playersHelp).toContain("de 1 à 255");
-    expect(playersHelp).not.toContain("Le nombre est compris entre 1 et 255.");
+    expect(playersHelp).toContain("Le nombre est compris entre 1 et 255.");
+    expect(playersHelp).not.toContain("de 1 à 255");
     wrapper.unmount();
   });
 
@@ -426,7 +427,7 @@ describe("lancer, suivre, terminer (BR-FICHE-013, 027, 034)", () => {
     expect(received).toMatchObject({
       name: "mon-terraria",
       fiche: "terraria",
-      version: 2,
+      version: 3,
       variant: null,
       agreements: [],
       ports: [{ id: "game", hostPort: 7777 }],

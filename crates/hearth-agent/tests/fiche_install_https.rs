@@ -298,7 +298,7 @@ async fn a_fiche_install_creates_a_service_with_the_fiche_digest_the_pinned_imag
     assert_eq!(journal[0].3.as_deref(), Some("ada"));
     let target = journal[0].1.clone().unwrap();
     assert!(
-        target.contains("fiche terraria (version 2)") && target.contains("mon-terraria"),
+        target.contains("fiche terraria (version 3)") && target.contains("mon-terraria"),
         "{target}"
     );
     b.agent.shutdown().await;

@@ -65,7 +65,7 @@ describe("lire le catalogue", () => {
     const detail = await detailOf(sim, "terraria");
     expect(detail.card).toMatchObject({
       name: "Terraria",
-      version: 2,
+      version: 3,
       status: "preview",
       installable: true,
     });

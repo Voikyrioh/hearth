@@ -129,22 +129,6 @@ function charsetText(character: string | null, suggestion: string | null): strin
     : `${head} ${t("fiche.answerIssue.charsetSuggest", { suggestion: safeText(suggestion) })}`;
 }
 
-/**
- * L'aide que le client ajoute sous le champ d'une question : le jeu de caractères ou les bornes, SEULEMENT si l'aide de
- * la fiche ne les dit pas déjà (revue UX 2026-10-24, constat 18 : « de 1 à 255 » puis « Le nombre est compris entre 1 et
- * 255 »). Une aide qui cite les deux bornes, ou qui parle de lettres et de chiffres, suffit.
- */
-export function extraHint(question: FicheQuestion, ficheHelp: string): string | null {
-  const charset = charsetHint(question);
-  if (charset !== null) return /lettres|chiffres/i.test(ficheHelp) ? null : charset;
-  const bounds = boundsText(question);
-  if (bounds === null) return null;
-  const quoted = [question.min, question.max]
-    .filter((value): value is number => value !== null)
-    .map((value) => new RegExp(`(?<!\\d)${value}(?!\\d)`));
-  return quoted.length > 0 && quoted.every((pattern) => pattern.test(ficheHelp)) ? null : bounds;
-}
-
 /** La phrase d'un défaut de réponse. Le caractère refusé est cité, jamais la valeur. */
 export function answerIssueText(issue: AnswerIssue): string {
   switch (issue.code) {

@@ -1,8 +1,8 @@
 {
   "fiche": {
-    "digest": "1b1e88e4ce58a8176e0903d28eb5d8ec886c3c078148a24a627605375d187f02",
+    "digest": "15cae650aa3b49c2deccffa3a1f1b5be26543051a372cb613479599b14302f2b",
     "id": "terraria",
-    "version": 2
+    "version": 3
   },
   "settings": [
     {
@@ -13,7 +13,7 @@
         "charset": "file_stem",
         "choices": [],
         "frozen_after_creation": true,
-        "help": "Le nom du monde que le jeu crée au premier lancement. Il nomme aussi le fichier du monde : lettres, chiffres, tiret et souligné seulement. Il ne peut plus changer une fois le monde créé.",
+        "help": "Le nom du monde que le jeu crée au premier lancement. Il nomme aussi le fichier du monde. Il ne peut plus changer une fois le monde créé.",
         "id": "world_name",
         "kind": "text",
         "label": "Nom du monde",
@@ -125,7 +125,7 @@
       "question": {
         "choices": [],
         "frozen_after_creation": false,
-        "help": "Combien de joueurs peuvent être connectés en même temps, de 1 à 255. Plus il y en a, plus le serveur travaille : surveillez la mémoire et le processeur du service.",
+        "help": "Combien de joueurs peuvent être connectés en même temps. Plus il y en a, plus le serveur travaille : surveillez la mémoire et le processeur du service.",
         "id": "max_players",
         "kind": "int",
         "label": "Nombre de joueurs",
