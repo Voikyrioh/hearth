@@ -498,10 +498,13 @@ export class SimulatedGameSettings {
       }
     }
 
-    // Une clé que la fiche connaît ne se règle pas comme « autre réglage » : refusé dans `plan_save`, donc avant l'empreinte.
-    const knownKeys = this.knownKeys(detail);
-    for (const other of request.others) {
-      if (knownKeys.has(other.key)) return refused({ kind: "invalid" });
+    // Un écart non tranché passe avant (FILE_CHANGED). Ensuite : une clé que la fiche connaît ne se règle pas comme
+    // « autre réglage » (refusé dans `plan_save`, donc avant l'empreinte).
+    if (unresolved.length === 0) {
+      const knownKeys = this.knownKeys(detail);
+      for (const other of request.others) {
+        if (knownKeys.has(other.key)) return refused({ kind: "invalid" });
+      }
     }
 
     // 4. Le fichier a bougé ou un écart attend un choix : rien n'est écrit.

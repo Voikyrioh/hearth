@@ -11,7 +11,7 @@ import wire from "./fixtures/terraria-settings.json";
  * `import.meta.env.DEV`).
  */
 
-interface WireQuestion {
+export interface WireQuestion {
   id: string;
   label: string;
   help: string;
@@ -30,7 +30,7 @@ interface WireQuestion {
   obtain_url?: string;
 }
 
-interface WireSetting {
+export interface WireSetting {
   question: WireQuestion;
   key: string;
   theme: string;
@@ -50,38 +50,41 @@ const fixture = wire as unknown as {
   settings: WireSetting[];
 };
 
-/** Les clés du fil que `toSetting` lit : le test de la fixture échoue si le JSON en porte une de plus (ou en perd une). */
-export const WIRE_SETTING_KEYS = [
-  "question",
-  "key",
-  "theme",
-  "level",
-  "channel",
-  "game_default",
-  "imposed_why",
-  "since",
-  "until",
-  "replaced_by",
-  "list",
-] as const;
-export const WIRE_QUESTION_KEYS = [
-  "id",
-  "label",
-  "help",
-  "secret",
-  "proposed",
-  "kind",
-  "choices",
-  "min",
-  "max",
-  "min_len",
-  "max_len",
-  "charset",
-  "frozen_after_creation",
-  "variants",
-  "secret_kind",
-  "obtain_url",
-] as const;
+/**
+ * Les champs du fil que `toSetting` lit, un `Record` lié au type : un champ ajouté au type sans être listé ici ne compile
+ * pas, et le test de la fixture échoue si le JSON en porte un qui n'est pas là.
+ */
+export const WIRE_SETTING_KEYS: Record<keyof WireSetting, true> = {
+  question: true,
+  key: true,
+  theme: true,
+  level: true,
+  channel: true,
+  game_default: true,
+  imposed_why: true,
+  since: true,
+  until: true,
+  replaced_by: true,
+  list: true,
+};
+export const WIRE_QUESTION_KEYS: Record<keyof WireQuestion, true> = {
+  id: true,
+  label: true,
+  help: true,
+  secret: true,
+  proposed: true,
+  kind: true,
+  choices: true,
+  min: true,
+  max: true,
+  min_len: true,
+  max_len: true,
+  charset: true,
+  frozen_after_creation: true,
+  variants: true,
+  secret_kind: true,
+  obtain_url: true,
+};
 
 export function toSetting(item: WireSetting): FicheSetting {
   const q = item.question;

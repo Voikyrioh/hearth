@@ -203,11 +203,7 @@ function openToken(id: string) {
         @choose="state.chooseDrift"
       />
       <Callout v-else-if="state.banner.value === 'pending'" tone="info" data-settings-pending>
-        {{
-          state.pendingApply.value?.effect === "recreate"
-            ? t("gameSettings.pendingRecreate")
-            : t("gameSettings.pendingRestart")
-        }}
+        {{ t("gameSettings.pendingRestart") }}
         <template v-if="canRestart" #actions>
           <HButton
             variant="secondary"

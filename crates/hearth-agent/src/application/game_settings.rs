@@ -945,7 +945,6 @@ impl GameSettings {
                 Err(SaveFailure::Unreadable(failure)) => return Err(unreadable(&failure)),
                 Err(SaveFailure::Write(_)) => return Err(SettingsError::Invalid("value")),
                 Err(SaveFailure::KnownKeyAsOther) => return Err(SettingsError::Invalid("others")),
-                Err(SaveFailure::NoFileFormat) => return Err(SettingsError::Invalid("channel")),
             }
         }
         if !per_channel.is_empty() {

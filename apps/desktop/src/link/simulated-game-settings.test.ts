@@ -258,6 +258,11 @@ describe("l'écart quand le jeu a réécrit son fichier (BR-FICHE-048)", () => {
     expect(bridge.gameSettings.fileText(SERVER, KEY)).toContain("maxplayers=20");
   });
 
+  it("juge l'écart non tranché avant une clé connue donnée comme autre réglage", () => {
+    const outcome = save({ others: [{ key: "motd", value: "x", remove: false }] });
+    expect(refusal(outcome)).toMatchObject({ kind: "file_changed" });
+  });
+
   it("garde la valeur du fichier, ou remet celle de Hearth, réglage par réglage", () => {
     const current = view();
     const ids = current.drifts.map((drift) => drift.id);

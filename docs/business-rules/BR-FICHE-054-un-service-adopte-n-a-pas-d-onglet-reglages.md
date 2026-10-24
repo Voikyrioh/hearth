@@ -26,7 +26,6 @@ L'onglet « Réglages » n'existe que pour un service créé par Hearth depuis u
 
 ## Cas limites
 - Un agent plus ancien (sans la capacité `game-settings`) : l'onglet n'apparaît pas, la vue n'est jamais demandée.
-- Un serveur de jeu dont la fiche n'a aucun fichier de réglages lisible a une vue vide ; analyser ou enregistrer répond `422 VALIDATION_ERROR` (`details.field = "channel"`), pas « pas un serveur de jeu ».
 - Une clé mal formée (`SERVICE_NOT_FOUND`) est une erreur, jamais « pas de réglages ».
 
 ## Règles liées

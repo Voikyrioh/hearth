@@ -59,6 +59,6 @@ Corps (`SaveSettingsRequest`) :
 | `422 SETTING_REFUSED` | un changement est refusé (`details.id` seulement si c'est un réglage de la fiche, `details.reason` : `bounds`, `choice`, `charset`, `length`, `frozen`, `imposed`, `retired`, `unknown_id`, `variant`, `version`, `check`, `secret`, `carried_by_world`, `details.char` au plus un caractère) ; jamais la valeur |
 | `409 RECREATE_NOT_AVAILABLE` | un réglage reçu par variable ou argument demande de recréer le service (`details.ids`) ; rien n'est écrit |
 | `409 OPERATION_IN_PROGRESS` | une opération exclusive tient le service |
-| `422 VALIDATION_ERROR` | corps incohérent (`details.field`) ; `details.field = "channel"` : la fiche de ce serveur n'a aucun fichier de réglages que Hearth sache lire (analyser ou enregistrer est impossible ; la vue, elle, est vide) |
+| `422 VALIDATION_ERROR` | corps incohérent (`details.field`) |
 
 Journal : `service.game.settings`, le NOMBRE de réglages changés, les noms de ceux qui ne sont pas des secrets, « mot de passe modifié » ; jamais une valeur (BR-FICHE-053).

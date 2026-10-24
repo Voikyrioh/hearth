@@ -1845,7 +1845,6 @@ export const fr = {
     driftInvalid:
       "Le réglage n'accepte pas la valeur du fichier : seule « Remettre la mienne » est possible.",
     pendingRestart: "À appliquer au prochain démarrage",
-    pendingRecreate: "À appliquer quand Hearth recrée le service",
     pendingRestartNow: "Redémarrer maintenant",
     versionUnknown: "Hearth ne connaît pas la version installée du jeu.",
     fileUnreadable:
