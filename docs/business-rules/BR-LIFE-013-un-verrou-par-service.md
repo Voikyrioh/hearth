@@ -17,7 +17,9 @@ Toute opération (démarrer, arrêter, redémarrer, déployer, modifier, supprim
 - `crates/hearth-agent/src/domain/ops/locks.rs::LockTable`
 - `crates/hearth-agent/src/domain/ops/kind.rs::OpKind::lock_mode`
 - `crates/hearth-agent/src/application/service_ops.rs::ServiceOps::accept`
-- `crates/hearth-agent/src/application/service_ops.rs::ServiceOps::busy` et `wait_closed` (porte de clôture, HRT-101)
+- `crates/hearth-agent/src/application/closing_gates.rs::ClosingGates` (une porte de clôture par service, HRT-101)
+- `crates/hearth-agent/src/application/service_ops.rs::ServiceOps::closing`, `wait_closed`, `busy`, `accept_after_wait`, `settle`, `sweep`
+- `crates/hearth-agent/src/application/service_op_access.rs::ServiceOpAccess::cancel` et `decide` (porte prise avant le commit)
 - `crates/hearth-agent/migrations/0012_service_specs_and_ops.sql (index service_ops_open)`
 - `crates/hearth-agent/src/application/service_lifecycle.rs::ServiceLifecycle::request` (HRT-64)
 - `apps/desktop/src/services/lifecycle.ts::controlsOf` et `services/pilot.ts::pilotLock` (client, HRT-65 : boutons désactivés avec la raison et « Lancée par {compte} »)
@@ -28,14 +30,14 @@ Toute opération (démarrer, arrêter, redémarrer, déployer, modifier, supprim
 - `crates/hearth-agent/tests/service_ops_journal.rs::an_accepted_operation_takes_the_service_and_gives_it_back_when_it_ends`
 - `crates/hearth-agent/tests/service_ops_journal.rs::the_unique_index_is_the_belt_when_the_memory_lock_has_a_defect`
 - `crates/hearth-agent/tests/service_ops_journal.rs::heavy_io_has_one_seat_for_the_whole_server`
-- `crates/hearth-agent/tests/service_ops_journal.rs::the_service_is_never_seen_busy_once_the_outcome_is_committed_projection_path`, `accept_waits_for_the_closing_operation_instead_of_being_refused`, `a_subscriber_receives_the_terminal_outcome_exactly_once`, `an_operation_really_running_is_still_refused_and_a_stuck_closing_does_not_freeze_the_service`
+- `crates/hearth-agent/tests/service_ops_journal.rs::a_request_waits_for_the_closing_then_sees_the_service_free_through_close`, `accept_waits_for_the_closing_then_succeeds_through_move_to`, `a_concurrent_accept_never_makes_a_subscriber_receive_the_outcome_twice`, `a_slow_closing_on_one_service_never_makes_another_service_wait`, `a_closing_stuck_past_the_deadline_does_not_freeze_the_service_and_a_running_operation_is_still_refused`
 - `crates/hearth-agent/tests/service_lifecycle_https.rs::the_next_action_is_never_refused_once_the_previous_outcome_can_be_read`
 - `crates/hearth-agent/tests/service_lifecycle_https.rs::a_second_request_on_a_busy_service_is_refused_with_who_holds_it_and_other_services_are_free`
 
 ## Cas limites
 - Le refus est typé (`409 SERVICE_BUSY`, `details.by` le compte, `details.kind` le genre) : « Une action est déjà en cours sur ce service. » (HRT-64, `ServiceLifecycle::request` lit l'index du journal avant l'état du service ; deux demandes simultanées sont départagées par le verrou en mémoire puis la base).
 - Le verrou est VISIBLE de tous : `ServiceItem.busy` (type, compte, depuis quand) est la projection de l'opération non terminée du service (BR-OPS-005, HRT-144).
-- Une issue terminale lisible (le `GET` lit le journal) ne laisse jamais le service « occupé » : `close`, `move_to` et `settle` tiennent la porte de clôture du commit (pour `settle`, de la libération) jusqu'à la fin de `publish` (verrous, projection, annonce) ; `accept` et `ServiceOps::busy` l'attendent une fois, au plus 1 s (`CLOSING_GATE_WAIT`), avant de juger. Une opération réellement en cours donne toujours 409 ; une clôture bloquée au-delà de 1 s ne gèle pas le service. La porte n'est jamais tenue pendant l'attente d'une autre porte (pas d'interblocage).
+- Une issue terminale lisible (le `GET` lit le journal) ne laisse jamais le service « occupé » (HRT-101). Il y a UNE porte de clôture PAR SERVICE (`ClosingGates`, table clé vers `RwLock`, entrée retirée quand plus personne ne la tient ni ne l'attend). Toute clôture (statut terminal) la prend en lecture AVANT son commit et la tient jusqu'à la fin de `publish` (verrous rendus, projection, annonce) : `close`/`finish_with`, `move_to` terminal, l'expiration par `sweep` (le nettoyage disque vient après, hors porte), l'annulation et la décision de `ServiceOpAccess` (porte avant le `begin`, passée à `settle`). Les transitions non terminales (`running` vers `cancelling`, « continuer », « revenir ») ne la prennent pas. `ServiceLifecycle::request` attend la porte du service UNE fois (`wait_closed`, au plus 1 s), juge `busy`, puis `accept_after_wait` ; `accept` seul attend aussi une fois. À l'échéance on juge quand même et un `warn!` sans valeur est tracé : une opération réellement en cours donne toujours 409, une clôture bloquée ne gèle pas le service. Coût : un verrou court sur la table et une allocation par clôture ; une clôture lente sur A ne fait jamais attendre B. Pas d'interblocage : l'ordre est toujours porte puis transaction, une clôture n'attend jamais une autre porte. Limite : `settle` appelé sans garde (aucun appelant aujourd'hui hors accès) ne couvre que libération et annonce. La liste des services (`ServiceItem.busy`) lit la projection SANS attendre : pendant une clôture elle peut dire « occupé » un instant, la publication qui suit la rafraîchit.
 
 ## Règles liées
 - BR-FILES-024, BR-DEL-019, BR-EDIT-031

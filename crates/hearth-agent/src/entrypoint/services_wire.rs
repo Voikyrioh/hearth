@@ -240,6 +240,8 @@ fn with_operations(
     if !may_see(origin, reader.may_manage_services) {
         return item;
     }
+    // La liste lit la projection SANS attendre la porte de clôture (FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC) : une
+    // clôture en cours peut la montrer « occupée » un instant ; la publication qui suit la rafraîchit.
     item.busy = ops.busy(&view.key).map(service_ops_wire::busy);
     item.last_action = ops
         .last_action(&view.key)

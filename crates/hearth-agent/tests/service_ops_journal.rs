@@ -18,7 +18,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use hearth_agent::application::ports::{
-    Clock, CreatedObjects, IdGen, JournalError, OpJournal, OpRecord, Progress, ServiceObserver,
+    Clock, CreatedObjects, DecisionOffer, IdGen, JournalError, NewOp, OpJournal, OpRecord,
+    Progress, ServiceObserver, StepGuard, Store, StoreError, UnitOfWork,
 };
 use hearth_agent::application::service_ops::{
     AcceptRequest, CancelOutcome, OpError, OpLocks, ServiceOps,
@@ -381,36 +382,43 @@ async fn the_unique_index_is_the_belt_when_the_memory_lock_has_a_defect() {
     assert_eq!(status(&env, &first).await.status, OpStatus::Accepted);
 }
 
-/// Un journal dont le commit d'un statut terminal est suivi d'une pause : la fenêtre entre le commit et la
-/// fin de la clôture (verrous, projection, annonce), tenue ouverte à volonté.
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+// La fenêtre entre le commit d'une clôture et la fin de sa publication, tenue ouverte à volonté : la clôture
+// s'arrête APRÈS son commit (verrou et projection encore « occupés »), prévient le test (`committed`) et
+// attend sa reprise (`resume`). Aucun sommeil.
+struct Window {
+    armed: std::sync::atomic::AtomicBool,
+    committed: tokio::sync::Notify,
+    resume: tokio::sync::Notify,
+}
+
+impl Window {
+    async fn park_if_armed(&self) {
+        if self.armed.swap(false, Ordering::SeqCst) {
+            self.committed.notify_one();
+            self.resume.notified().await;
+        }
+    }
+}
+
+/// Le journal : une transition terminale qui s'arrête dans la fenêtre (le chemin de `move_to`).
 struct SlowJournal {
     inner: Arc<SqliteOpJournal>,
-    pause: std::time::Duration,
+    window: Arc<Window>,
 }
 
 #[async_trait]
 impl OpJournal for SlowJournal {
-    async fn insert(
-        &self,
-        op: &hearth_agent::application::ports::NewOp,
-    ) -> Result<(), JournalError> {
+    async fn insert(&self, op: &NewOp) -> Result<(), JournalError> {
         self.inner.insert(op).await
     }
-    async fn get(
-        &self,
-        id: &str,
-    ) -> Result<Option<OpRecord>, hearth_agent::application::ports::StoreError> {
+    async fn get(&self, id: &str) -> Result<Option<OpRecord>, StoreError> {
         self.inner.get(id).await
     }
-    async fn unfinished(
-        &self,
-    ) -> Result<Vec<OpRecord>, hearth_agent::application::ports::StoreError> {
+    async fn unfinished(&self) -> Result<Vec<OpRecord>, StoreError> {
         self.inner.unfinished().await
     }
-    async fn steps(
-        &self,
-        id: &str,
-    ) -> Result<Vec<StepRecord>, hearth_agent::application::ports::StoreError> {
+    async fn steps(&self, id: &str) -> Result<Vec<StepRecord>, StoreError> {
         self.inner.steps(id).await
     }
     async fn append_step(
@@ -421,7 +429,7 @@ impl OpJournal for SlowJournal {
         undo: &UndoInfo,
         at: OffsetDateTime,
         durable: bool,
-        guard: hearth_agent::application::ports::StepGuard,
+        guard: StepGuard,
     ) -> Result<u32, JournalError> {
         self.inner
             .append_step(id, step, state, undo, at, durable, guard)
@@ -433,14 +441,14 @@ impl OpJournal for SlowJournal {
         from: OpStatus,
         to: OpStatus,
         cause: Option<Cause>,
-        decision: Option<&hearth_agent::application::ports::DecisionOffer>,
+        decision: Option<&DecisionOffer>,
         at: OffsetDateTime,
     ) -> Result<(), JournalError> {
         self.inner
             .transition(id, from, to, cause, decision, at)
             .await?;
         if to.is_terminal() {
-            tokio::time::sleep(self.pause).await;
+            self.window.park_if_armed().await;
         }
         Ok(())
     }
@@ -466,40 +474,118 @@ impl OpJournal for SlowJournal {
     async fn expired_decisions(
         &self,
         older_than: OffsetDateTime,
-    ) -> Result<Vec<OpRecord>, hearth_agent::application::ports::StoreError> {
+    ) -> Result<Vec<OpRecord>, StoreError> {
         self.inner.expired_decisions(older_than).await
     }
-    async fn purge_finished(
-        &self,
-        before: OffsetDateTime,
-    ) -> Result<u64, hearth_agent::application::ports::StoreError> {
+    async fn purge_finished(&self, before: OffsetDateTime) -> Result<u64, StoreError> {
         self.inner.purge_finished(before).await
     }
-    async fn prune_finished_beyond(
-        &self,
-        keep: u32,
-    ) -> Result<u64, hearth_agent::application::ports::StoreError> {
+    async fn prune_finished_beyond(&self, keep: u32) -> Result<u64, StoreError> {
         self.inner.prune_finished_beyond(keep).await
     }
-    async fn recent_finished(
-        &self,
-        limit: u32,
-    ) -> Result<Vec<OpRecord>, hearth_agent::application::ports::StoreError> {
+    async fn recent_finished(&self, limit: u32) -> Result<Vec<OpRecord>, StoreError> {
         self.inner.recent_finished(limit).await
     }
 }
 
-/// Une opération acceptée sur le service 1, puis annulée (`accepted` -> `cancelled`, par `move_to`) dans une
-/// tâche dont la clôture traîne `pause` après le commit. Rend l'opération, la tâche et l'environnement.
-async fn closing_slowly(
-    pause: std::time::Duration,
-) -> (Arc<ServiceOps>, String, tokio::task::JoinHandle<()>, Env) {
+/// Le magasin : un commit qui s'arrête dans la fenêtre (le chemin de `close` / `finish_with`, celui du bug).
+struct SlowStore {
+    inner: Arc<dyn Store>,
+    window: Arc<Window>,
+}
+
+#[async_trait]
+impl Store for SlowStore {
+    async fn begin(&self) -> Result<Box<dyn UnitOfWork>, StoreError> {
+        Ok(Box::new(SlowTx {
+            inner: self.inner.begin().await?,
+            window: self.window.clone(),
+        }))
+    }
+}
+
+struct SlowTx {
+    inner: Box<dyn UnitOfWork>,
+    window: Arc<Window>,
+}
+
+#[async_trait]
+impl UnitOfWork for SlowTx {
+    fn accounts(&mut self) -> &mut dyn hearth_agent::application::ports::AccountTx {
+        self.inner.accounts()
+    }
+    fn services_right(&mut self) -> &mut dyn hearth_agent::application::ports::ServicesRightTx {
+        self.inner.services_right()
+    }
+    fn adoptions(&mut self) -> &mut dyn hearth_agent::application::ports::AdoptionTx {
+        self.inner.adoptions()
+    }
+    fn service_ops(&mut self) -> &mut dyn hearth_agent::application::ports::ServiceOpTx {
+        self.inner.service_ops()
+    }
+    fn sessions(&mut self) -> &mut dyn hearth_agent::application::ports::SessionTx {
+        self.inner.sessions()
+    }
+    fn login_attempts(&mut self) -> &mut dyn hearth_agent::application::ports::LoginAttemptTx {
+        self.inner.login_attempts()
+    }
+    fn known_addresses(&mut self) -> &mut dyn hearth_agent::application::ports::KnownAddressTx {
+        self.inner.known_addresses()
+    }
+    fn devices(&mut self) -> &mut dyn hearth_agent::application::ports::DeviceTx {
+        self.inner.devices()
+    }
+    fn attack_mode(&mut self) -> &mut dyn hearth_agent::application::ports::AttackModeTx {
+        self.inner.attack_mode()
+    }
+    fn operations(&mut self) -> &mut dyn hearth_agent::application::ports::OperationTx {
+        self.inner.operations()
+    }
+    fn audit(&mut self) -> &mut dyn hearth_agent::application::ports::AuditTx {
+        self.inner.audit()
+    }
+    async fn commit(self: Box<Self>) -> Result<(), StoreError> {
+        let this = *self;
+        this.inner.commit().await?;
+        this.window.park_if_armed().await;
+        Ok(())
+    }
+}
+
+enum Via {
+    /// `finish` : la transaction du journal des opérations et de l'activité (`close`).
+    Close,
+    /// `cancel` d'une opération acceptée : `move_to`.
+    Move,
+}
+
+struct Parked {
+    ops: Arc<ServiceOps>,
+    window: Arc<Window>,
+    /// L'opération en cours de clôture, sur le service 1.
+    id: String,
+    closer: tokio::task::JoinHandle<()>,
+    env: Env,
+}
+
+/// Une opération sur le service 1 dont la clôture est arrêtée après son commit : le journal dit « terminé »,
+/// le verrou et la projection disent encore « occupé ».
+async fn parked_closing(via: Via) -> Parked {
     let env = Env::new().await;
+    let window = Arc::new(Window {
+        armed: std::sync::atomic::AtomicBool::new(false),
+        committed: tokio::sync::Notify::new(),
+        resume: tokio::sync::Notify::new(),
+    });
     let journal = Arc::new(SlowJournal {
         inner: env.journal.clone(),
-        pause,
+        window: window.clone(),
     });
     let (store, trail) = audit::audit_parts(&env.db, env.clock.clone());
+    let store: Arc<dyn Store> = Arc::new(SlowStore {
+        inner: store,
+        window: window.clone(),
+    });
     let objects = Arc::new(FsCreatedObjects::new([
         (ObjectRoot::Backups, env.dir.path().join("backups")),
         (ObjectRoot::Staging, env.dir.path().join("staging")),
@@ -517,50 +603,103 @@ async fn closing_slowly(
         .accept(request(service(1), OpKind::Update))
         .await
         .unwrap();
+    if matches!(via, Via::Close) {
+        ops.start(&id).await.unwrap();
+    }
+    window.armed.store(true, Ordering::SeqCst);
     let closer = {
         let (ops, id) = (ops.clone(), id.clone());
         tokio::spawn(async move {
-            ops.cancel(&id).await.unwrap();
+            match via {
+                Via::Close => ops.finish(&id, OpStatus::Succeeded, None).await.unwrap(),
+                Via::Move => {
+                    ops.cancel(&id).await.unwrap();
+                }
+            }
         })
     };
-    // Le temps que la clôture ait commité et se soit arrêtée dans sa pause.
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    (ops, id, closer, env)
-}
-
-// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
-#[tokio::test]
-async fn the_service_is_never_seen_busy_once_the_outcome_is_committed_projection_path() {
-    let (ops, id, closer, env) = closing_slowly(std::time::Duration::from_millis(300)).await;
+    window.committed.notified().await;
     assert!(status(&env, &id).await.status.is_terminal());
-    // Le chemin `request` : la projection `busy` est jugée par `ServiceOps`, après la clôture en cours.
-    assert_eq!(ops.busy(&service(1)).await, None);
-    closer.await.unwrap();
+    Parked {
+        ops,
+        window,
+        id,
+        closer,
+        env,
+    }
+}
+
+/// Laisse les autres tâches avancer tant qu'elles le peuvent : une tâche qui attend la porte ne finit pas.
+async fn let_others_run() {
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+}
+
+impl Parked {
+    async fn release(self) -> Env {
+        self.window.resume.notify_one();
+        self.closer.await.unwrap();
+        self.env
+    }
 }
 
 // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
 #[tokio::test]
-async fn accept_waits_for_the_closing_operation_instead_of_being_refused() {
-    let (ops, id, closer, _env) = closing_slowly(std::time::Duration::from_millis(300)).await;
-    let next = ops.accept(request(service(1), OpKind::Stop)).await.unwrap();
-    assert_ne!(next, id);
-    closer.await.unwrap();
+async fn a_request_waits_for_the_closing_then_sees_the_service_free_through_close() {
+    let p = parked_closing(Via::Close).await;
+    let key = service(1);
+    let judged = {
+        let ops = p.ops.clone();
+        tokio::spawn(async move {
+            // Le chemin `ServiceLifecycle::request` : attendre la porte, puis juger « occupé ».
+            ops.wait_closed(&key).await;
+            ops.busy(&key)
+        })
+    };
+    let accepted = {
+        let ops = p.ops.clone();
+        tokio::spawn(async move { ops.accept(request(service(1), OpKind::Stop)).await })
+    };
+    let_others_run().await;
+    assert!(!judged.is_finished() && !accepted.is_finished());
+    let ops = p.ops.clone();
+    let _env = p.release().await;
+    assert_eq!(judged.await.unwrap(), None);
+    accepted.await.unwrap().unwrap();
+    assert_eq!(ops.open_gates(), 0);
 }
 
 // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
 #[tokio::test]
-async fn a_subscriber_receives_the_terminal_outcome_exactly_once() {
-    let env = Env::new().await;
-    let id = env
-        .ops
-        .accept(request(service(1), OpKind::Update))
-        .await
-        .unwrap();
-    let mut feed = env.ops.subscribe();
-    env.ops.cancel(&id).await.unwrap();
+async fn accept_waits_for_the_closing_then_succeeds_through_move_to() {
+    let p = parked_closing(Via::Move).await;
+    let accepted = {
+        let ops = p.ops.clone();
+        tokio::spawn(async move { ops.accept(request(service(1), OpKind::Stop)).await })
+    };
+    let_others_run().await;
+    assert!(!accepted.is_finished());
+    let _env = p.release().await;
+    accepted.await.unwrap().unwrap();
+}
+
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+#[tokio::test]
+async fn a_concurrent_accept_never_makes_a_subscriber_receive_the_outcome_twice() {
+    let p = parked_closing(Via::Close).await;
+    let mut feed = p.ops.subscribe();
+    let accepted = {
+        let ops = p.ops.clone();
+        tokio::spawn(async move { ops.accept(request(service(1), OpKind::Stop)).await })
+    };
+    let_others_run().await;
+    let id = p.id.clone();
+    let _env = p.release().await;
+    accepted.await.unwrap().unwrap();
     let mut terminal = 0;
     while let Ok(snapshot) = feed.try_recv() {
-        if snapshot.record.status.is_terminal() {
+        if snapshot.record.id == id && snapshot.record.status.is_terminal() {
             terminal += 1;
         }
     }
@@ -569,27 +708,40 @@ async fn a_subscriber_receives_the_terminal_outcome_exactly_once() {
 
 // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
 #[tokio::test]
-async fn an_operation_really_running_is_still_refused_and_a_stuck_closing_does_not_freeze_the_service()
+async fn a_slow_closing_on_one_service_never_makes_another_service_wait() {
+    let p = parked_closing(Via::Close).await;
+    let other = service(2);
+    let started = std::time::Instant::now();
+    p.ops.wait_closed(&other).await;
+    assert_eq!(p.ops.busy(&other), None);
+    let next = p.ops.accept(request(other, OpKind::Stop)).await.unwrap();
+    assert!(!next.is_empty());
+    assert!(started.elapsed() < std::time::Duration::from_millis(500));
+    let _env = p.release().await;
+}
+
+// FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC
+#[tokio::test]
+async fn a_closing_stuck_past_the_deadline_does_not_freeze_the_service_and_a_running_operation_is_still_refused()
  {
+    let p = parked_closing(Via::Close).await;
+    let refused = p
+        .ops
+        .accept(request(service(1), OpKind::Stop))
+        .await
+        .unwrap_err();
+    assert!(matches!(refused, OpError::Locked(_)), "{refused:?}");
+    let _env = p.release().await;
     let env = Env::new().await;
     let _id = running(&env, 1, OpKind::Update).await;
-    assert!(env.ops.busy(&service(1)).await.is_some());
+    env.ops.wait_closed(&service(1)).await;
+    assert!(env.ops.busy(&service(1)).is_some());
     let refused = env
         .ops
         .accept(request(service(1), OpKind::Stop))
         .await
         .unwrap_err();
     assert!(matches!(refused, OpError::Locked(_)), "{refused:?}");
-    // Une clôture bloquée plus longtemps que la porte : on juge quand même (409), sans attendre sans fin.
-    let (ops, _id, closer, _env) = closing_slowly(std::time::Duration::from_millis(2_500)).await;
-    let started = std::time::Instant::now();
-    let refused = ops
-        .accept(request(service(1), OpKind::Stop))
-        .await
-        .unwrap_err();
-    assert!(matches!(refused, OpError::Locked(_)), "{refused:?}");
-    assert!(started.elapsed() < std::time::Duration::from_millis(2_000));
-    closer.await.unwrap();
 }
 
 #[tokio::test]
@@ -1631,7 +1783,7 @@ async fn concurrent_publications_never_send_an_older_state_after_the_final_one()
         let (ops, id) = (ops.clone(), id.clone());
         settlers.push(tokio::spawn(async move {
             for _ in 0..8 {
-                ops.settle(&id).await;
+                ops.settle(&id, None).await;
                 tokio::task::yield_now().await;
             }
         }));
