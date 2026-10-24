@@ -822,3 +822,16 @@ fn the_other_stop_kinds_and_every_untested_element_are_handled() {
     assert_eq!(ready_sign(&fiche), None);
     assert!(game_version_reader(&fiche).is_none());
 }
+
+#[test]
+fn an_order_is_a_printable_ascii_literal_of_a_fiche_and_nothing_else() {
+    use super::stop_plan::FicheLiteral;
+    // BR-JEU-016 : le port du moteur ne prend que ce type, construit ici seulement.
+    assert_eq!(FicheLiteral::parse("save").unwrap().as_str(), "save");
+    assert!(FicheLiteral::parse(&"a".repeat(64)).is_some());
+    for refused in ["", "save\n", "sa\tve", "sa\0ve", "sauvegardé", "\u{7f}"] {
+        assert!(FicheLiteral::parse(refused).is_none(), "{refused:?}");
+    }
+    assert!(FicheLiteral::parse(&"a".repeat(65)).is_none());
+    assert!(!format!("{:?}", FicheLiteral::parse("save").unwrap()).contains("save"));
+}

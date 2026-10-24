@@ -232,3 +232,97 @@ async fn a_second_agent_that_lost_the_race_refuses_and_never_restores_the_file_o
         "{wanted} {file}"
     );
 }
+
+/// Un journal d'activité qui n'écrit plus rien : la révélation ne doit alors rien rendre.
+struct BrokenJournal;
+
+#[async_trait::async_trait]
+impl hearth_agent::application::ports::AuditSink for BrokenJournal {
+    async fn record(
+        &self,
+        _actor: Actor,
+        _action: hearth_agent::domain::audit::AuditAction,
+        _target: hearth_agent::domain::audit::Target,
+        _outcome: hearth_agent::domain::audit::Outcome,
+    ) {
+    }
+
+    async fn record_required(
+        &self,
+        _actor: Actor,
+        _action: hearth_agent::domain::audit::AuditAction,
+        _target: hearth_agent::domain::audit::Target,
+        _outcome: hearth_agent::domain::audit::Outcome,
+    ) -> Result<(), hearth_agent::application::ports::AuditWriteError> {
+        Err(hearth_agent::application::ports::AuditWriteError)
+    }
+
+    async fn record_grouped_required(
+        &self,
+        _actor: Actor,
+        _action: hearth_agent::domain::audit::AuditAction,
+        _target: hearth_agent::domain::audit::Target,
+        _outcome: hearth_agent::domain::audit::Outcome,
+    ) -> Result<(), hearth_agent::application::ports::AuditWriteError> {
+        Err(hearth_agent::application::ports::AuditWriteError)
+    }
+}
+
+#[tokio::test]
+async fn the_revealed_password_follows_the_saved_one_and_a_journal_that_fails_rules_the_reveal_out()
+{
+    use hearth_agent::application::game_settings::GameSettings;
+    let env = env().await;
+    let (state, rig) = bench(&env).await;
+    let key = support::game::terraria_service(&env, &rig.safe_fs, 1).await;
+    let actor = Actor::command_line();
+    // Aucun mot de passe : toute personne qui joint le port entre (BR-JEU-027).
+    assert!(
+        state
+            .game_settings
+            .reveal_game_password(&key, actor.clone())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // Enregistré, il se relit ; changé, c'est le plus récent.
+    for (value, expected) in [
+        (Some(SENTINEL), Some(SENTINEL)),
+        (Some("Autre-mot-9"), Some("Autre-mot-9")),
+    ] {
+        let view = state.game_settings.view(&key).await.unwrap();
+        let rev = view.rev;
+        let stamp = view.file_stamp.unwrap();
+        state
+            .game_settings
+            .save(
+                &key,
+                &actor,
+                &request(rev, &stamp, vec![("password", value.unwrap())]),
+            )
+            .await
+            .expect("enregistré");
+        let revealed = state
+            .game_settings
+            .reveal_game_password(&key, actor.clone())
+            .await
+            .unwrap();
+        assert_eq!(revealed.as_ref().map(|s| s.expose()), expected);
+    }
+    // Un journal d'activité qui échoue : la valeur est jetée, rien n'est rendu.
+    let broken = GameSettings::new(
+        Arc::new(hearth_agent::application::catalog::CatalogService::embedded(true)),
+        support::game::specs_of(&env),
+        Arc::new(
+            hearth_agent::infrastructure::sqlite::SqliteGameSettingsRepo::new(
+                env.db.pool().clone(),
+            ),
+        ),
+        rig.safe_fs.clone(),
+        Arc::new(hearth_agent::application::service_ops::OpLocks::new()),
+        Arc::new(BrokenJournal),
+        env.clock.clone(),
+    );
+    let refused = broken.reveal_game_password(&key, actor).await;
+    assert!(matches!(refused, Err(SettingsError::JournalUnavailable)));
+}

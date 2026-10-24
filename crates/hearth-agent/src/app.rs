@@ -24,6 +24,7 @@ use crate::application::elevation::Elevations;
 use crate::application::folders::FolderFacts;
 use crate::application::game_phase::GamePhases;
 use crate::application::game_settings::GameSettings;
+use crate::application::game_stop::GameStop;
 use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
@@ -954,6 +955,15 @@ pub async fn start_engined(
         services.audit_sink.clone(),
         adapters.clock.clone(),
     );
+    // L'arrêt des serveurs de jeu (HRT-103) : la suite d'étapes de la fiche, déroulée par le cas d'usage de pilotage.
+    service_lifecycle.set_game_stop(GameStop::new(
+        foundations.specs.clone(),
+        catalog.clone(),
+        container_engine.clone(),
+        foundations.ops.clone(),
+        adapters.clock.clone(),
+        engine.lifecycle.game,
+    ));
     let deployments = Deployments::new(
         registry.clone(),
         foundations.ops.clone(),
