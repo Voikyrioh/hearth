@@ -6,13 +6,14 @@ import bindings from "@/bindings.ts?raw";
 import { portVerdict } from "@/deploy/messages";
 import { kindText, stopTexts } from "@/fiche/messages";
 import { type MessageKey, t } from "@/i18n";
-import type { AuditEntry, QuestionKind, WorldSaved } from "@/link";
+import type { AuditEntry, ImportState, QuestionKind, SettingEffect, WorldSaved } from "@/link";
 import { type OperationChoice, type OperationKind, toOperation } from "@/link/serviceOps";
 import { endNotice, gapKindOf, gapText, LOG_STATE_KEYS, sourceTag } from "@/logs/view";
 import { ATTACK_STATE_KEYS } from "@/security/messages";
 import { CHOICE_KEYS, LABEL_KEYS, outcomeText, statusText } from "@/serviceOps/messages";
 import { mountView, restartText } from "@/services/detail";
 import { STATE_KEYS } from "@/services/format";
+import { effectText, importStateText } from "@/settings/messages";
 import { OPERATION_TEXTS } from "@/stores/link";
 
 // BR-COMPAT-001 point 4 et 7 : toute union générée (`bindings.ts`) qui contient "unknown" (agent plus récent que ce
@@ -101,6 +102,20 @@ const SAYS: Record<string, (value: string) => void> = {
     // Le genre d'une question se dit par `kindText` ; un genre inconnu devient « Valeur » et un champ de texte (HRT-102).
     key(kindText(value as QuestionKind));
     expect(kindText(value as QuestionKind)).not.toMatch(/^fiche\./);
+  },
+  SettingEffectDto: (value) => {
+    // La mention d'effet d'un réglage (HRT-109, BR-FICHE-042) : un effet inconnu dit que Hearth ne sait pas ; « none » ne dit rien.
+    const said = effectText(value as SettingEffect, false);
+    if (value === "none") expect(said).toBeNull();
+    else {
+      key(said ?? undefined);
+      expect(said).not.toMatch(/^gameSettings\./);
+    }
+  },
+  ImportStateDto: (value) => {
+    // L'état d'une ligne du texte collé (HRT-109, BR-FICHE-052) : une valeur plus récente se lit « inconnue ».
+    key(importStateText(value as ImportState));
+    expect(importStateText(value as ImportState)).not.toMatch(/^gameSettings\./);
   },
   FicheWorldSavedDto: (value) => {
     // La façon d'enregistrer le monde à l'arrêt se dit par `stopTexts` ; une valeur inconnue le dit aussi (HRT-102).
@@ -281,6 +296,14 @@ const NOT_SHOWN: Record<string, string> = {
     "décide du port du service (`same_number` : le même nombre que le serveur) ; inconnu se lit comme un port fixe (HRT-102)",
   FicheStatusDto:
     "l'état d'une fiche (publiée ou d'essai) ne s'affiche pas : la liste dit seulement « Livrée avec Hearth » (BR-FICHE-003)",
+  FicheLevelDto:
+    "range un réglage en vue « Courants » ou « Tout afficher » ; un niveau inconnu est avancé, jamais affiché (HRT-109)",
+  FicheItemCharsetDto:
+    "choisit le contrôle d'une liste d'identifiants ; un jeu inconnu ne contrôle rien et l'agent juge (HRT-109)",
+  FileStateDto:
+    "choisit un bandeau (fichier illisible, fichier disparu) ; un état inconnu n'en montre aucun (HRT-109)",
+  ValueStateDto:
+    "un état inconnu se lit « non écrit » (le jeu prend son défaut) ; la valeur n'est jamais inventée (HRT-109)",
   NameStatusDto:
     "indicatif : seuls « taken » et « being_deleted » font un texte (DeployForm) ; tout autre constat, inconnu compris, ne dit rien et le serveur tranche au lancement (BR-DEPLOY-032)",
 };

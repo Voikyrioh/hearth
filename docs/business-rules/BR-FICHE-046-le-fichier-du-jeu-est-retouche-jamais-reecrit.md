@@ -5,7 +5,7 @@ titre: Le fichier du jeu est la vérité de ses octets : il est lu et retouché 
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-installer-serveur-de-jeu.md (BR-FICHE-046), contexts/hearth/conceptions/2026-10-13-technique-fiches-de-jeu.md, HRT-113
-maj: 2026-10-13
+maj: 2026-10-24
 ---
 
 # BR-FICHE-046 — Le fichier du jeu est la vérité de ses octets : il est lu et retouché sans perte, jamais rendu par-dessus
@@ -20,6 +20,7 @@ Deux formats écrits à la main, sans bibliothèque : `kv_lines` et `xml_propert
 
 - `crates/hearth-agent/src/domain/catalog/settings_io.rs::{apply_edits, plan_save}` (HRT-108 : le plan d'un enregistrement ne retouche que les valeurs demandées)
 - `crates/hearth-agent/src/application/game_settings.rs::GameSettings::save` (HRT-108 : lecture par `SafeFs`, 2 Mio au plus, un fichier illisible est refusé entier)
+- Client (HRT-109) : `apps/desktop/src/components/organisms/RawFileDialog.vue` (bandeau mot pour mot, case « Je comprends » à chaque ouverture), `apps/desktop/src/components/organisms/GameSettingsTab.vue` (bouton absent et phrase du pied quand `raw_edit` est faux)
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/formats/contract.rs::p1_identity_render_of_parse_gives_the_same_bytes (suite de contrat, les deux formats)`
@@ -32,12 +33,14 @@ Deux formats écrits à la main, sans bibliothèque : `kv_lines` et `xml_propert
 
 - `crates/hearth-agent/tests/game_settings_https.rs::an_unreadable_file_is_refused_whole_for_a_save_and_told_by_the_view`
 - `crates/hearth-agent/src/domain/catalog/tests_io.rs::an_unreadable_file_is_refused_whole_and_nothing_is_planned`
+- `apps/desktop/src/components/organisms/gameSettingsTab.test.ts::le fichier brut, la console et les autres réglages`
 
 ## Cas limites
 - Un doublon de clé : la DERNIÈRE entrée est lue et retouchée (hypothèse sur le jeu, non vérifiée) ; `duplicate_keys` le signale.
 - Aucun troisième format (`json`, `ini_sections`, `cfg_lines`) : ils viennent avec leur premier jeu.
 
 - Un fichier qui retire ou défait un réglage imposé avertit : l'analyse d'un texte collé dit `imposed_undone`, la vue dit `imposed_broken`, aucune écriture ne le corrige (BR-FICHE-048, BR-FICHE-052).
+- L'éditeur de fichiers de l'onglet « Fichiers » n'existe pas encore : « Ouvrir le fichier » est présent mais inactif, avec sa phrase (suivi : onglet Fichiers).
 
 ## Règles liées
 - BR-FICHE-047, BR-FICHE-048, BR-FICHE-052
@@ -45,3 +48,4 @@ Deux formats écrits à la main, sans bibliothèque : `kv_lines` et `xml_propert
 ## Historique
 - 2026-10-13 — création (HRT-113, format de fiche version 2, domaine pur).
 - 2026-10-24 — HRT-108 : l'agent lit le fichier du jeu et le retouche à l'enregistrement.
+- 2026-10-24 — pointeurs du client (HRT-109).

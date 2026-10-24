@@ -6,6 +6,7 @@ import DashCard from "@/components/molecules/DashCard.vue";
 import FichePortField from "@/components/molecules/FichePortField.vue";
 import QuestionField from "@/components/molecules/QuestionField.vue";
 import VariantChoice from "@/components/molecules/VariantChoice.vue";
+import InstallSettings from "@/components/organisms/InstallSettings.vue";
 import type { FicheInstallState } from "@/composables/useFicheInstall";
 import { nameText, portVerdict } from "@/deploy/messages";
 import { currentAnswer } from "@/fiche/answers";
@@ -112,6 +113,8 @@ defineExpose({
         @blur="install.touch(`q:${question.id}`)"
         @link="emit('link', 'token', question.id)"
       />
+      <!-- « Voir tous les réglages » (HRT-109, BR-FICHE-040) : les autres réglages du jeu, repliés par défaut -->
+      <InstallSettings :install="install" />
     </DashCard>
 
     <DashCard v-if="always.length > 0 || optional.length > 0" :title="always.length + optional.length > 1 ? t('fiche.cardPorts2') : t('fiche.cardPort')">

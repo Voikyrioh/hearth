@@ -1,5 +1,5 @@
 //! Les réglages d'un serveur de jeu : lire, analyser un texte collé, enregistrer (HRT-108, ADR-0051,
-//! BR-FICHE-037 à 053, BR-JEU-035 et BR-JEU-036).
+//! BR-FICHE-037, 042, 044, 046 à 049, 052, 053, BR-JEU-035 et BR-JEU-036).
 //!
 //! **Deux vérités, sans recouvrement.** Le fichier du jeu fait foi pour ses octets ; la table `game_settings` (ou, à
 //! défaut, les réponses de l'installation) pour les valeurs que le compte VEUT. Un écart est montré, jamais corrigé
@@ -74,9 +74,10 @@ const SEAL_REV: u32 = 0;
 
 #[derive(Debug, Error)]
 pub enum SettingsError {
-    /// Aucun serveur de jeu de cette clé (service inconnu, pas créé par Hearth, ou pas depuis une fiche proposée).
+    /// Aucun serveur de jeu de cette clé (service inconnu, pas créé par Hearth, ou pas depuis une fiche proposée) :
+    /// l'API répond `NOT_A_GAME_SERVICE`.
     #[error("aucun serveur de jeu de cette clé")]
-    NotFound,
+    NotAGameService,
     /// Les réglages ont changé depuis leur lecture.
     #[error("les réglages ont changé depuis leur lecture")]
     Conflict {
@@ -452,16 +453,16 @@ impl GameSettings {
 
     async fn load(&self, key: &ServiceKey) -> Result<Loaded<'_>, SettingsError> {
         let Some((revision, access)) = self.specs.read(key, None).await? else {
-            return Err(SettingsError::NotFound);
+            return Err(SettingsError::NotAGameService);
         };
         let body = revision.body;
         let Some(spec_fiche) = &body.fiche else {
-            return Err(SettingsError::NotFound);
+            return Err(SettingsError::NotAGameService);
         };
         let fiche = self
             .catalog
             .fiche(&spec_fiche.id)
-            .ok_or(SettingsError::NotFound)?;
+            .ok_or(SettingsError::NotAGameService)?;
         let variant = spec_fiche.variant.clone();
         let stored = self.repo.load(key).await?;
         let (rev, state, fingerprint) = match &stored {
@@ -699,7 +700,8 @@ impl GameSettings {
         let loaded = self.load(key).await?;
         let channels = file_channels(loaded.fiche);
         let Some(channel) = channels.first() else {
-            return Err(SettingsError::NotFound);
+            // Un serveur de jeu sans fichier de réglages que Hearth sache lire n'est pas « pas un serveur de jeu ».
+            return Err(SettingsError::Invalid("channel"));
         };
         let (_resolved, imposed) = imposed_values(
             loaded.fiche,
@@ -947,7 +949,6 @@ impl GameSettings {
                 Err(SaveFailure::Unreadable(failure)) => return Err(unreadable(&failure)),
                 Err(SaveFailure::Write(_)) => return Err(SettingsError::Invalid("value")),
                 Err(SaveFailure::KnownKeyAsOther) => return Err(SettingsError::Invalid("others")),
-                Err(SaveFailure::NoFileFormat) => return Err(SettingsError::NotFound),
             }
         }
         if !per_channel.is_empty() {

@@ -16,18 +16,23 @@ maj: 2026-10-24
 ## Application (code)
 - `crates/hearth-agent/src/domain/catalog/settings_io.rs::{analyze_import, imported_value}`
 - `crates/hearth-agent/src/application/game_settings.rs::GameSettings::{analyze, save}`
+- Client (HRT-109) : `apps/desktop/src/components/organisms/SettingsImportDialog.vue`, `apps/desktop/src/settings/importing.ts::{importRows, toImportRequest}` ; la commande `analyze_game_settings` de la coquille (`apps/desktop/src-tauri/src/service_ops/game_settings.rs`)
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_io.rs::analysing_pasted_text_judges_each_setting_without_writing_and_counts_the_unknown`
 - `crates/hearth-agent/tests/game_settings_https.rs::analysing_a_pasted_text_writes_nothing_and_judges_each_setting`
 - `crates/hearth-agent/tests/game_settings_https.rs::an_import_applies_the_chosen_lines_reads_the_secret_on_the_agent_and_keeps_the_unknown`
+- `apps/desktop/src/components/organisms/gameSettingsTab.test.ts::l'import d'un texte collé (BR-FICHE-052)`
+- `apps/desktop/src/settings/settings.test.ts::l'import d'un texte collé (BR-FICHE-052)`
 
 ## Cas limites
 - Une clé du texte inconnue de la fiche n'est pas ajoutée au fichier ; un réglage inconnu déjà dans le fichier y reste (BR-FICHE-047).
 - L'effacement du texte dans la mémoire du client est du client (HRT-109).
+- Dans l'installation, le bouton « Importer des réglages » est présent mais inactif : l'agent lit le texte avec le format du jeu, ce qui demande un service installé (`InstallSettings.vue`).
 
 ## Règles liées
 - BR-FICHE-046, BR-FICHE-047, BR-FICHE-053
 
 ## Historique
 - 2026-10-24 — création (HRT-108).
+- 2026-10-24 — pointeurs du client (HRT-109).

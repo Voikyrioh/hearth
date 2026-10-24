@@ -149,6 +149,7 @@ describe("états du droit", () => {
       vi.spyOn(bridge, "readServiceRights").mockResolvedValue({
         known: true,
         granted: false,
+        gameSettings: true,
         account: hostile,
       });
     }, "forge");

@@ -54,6 +54,8 @@ export function useServiceRights() {
     gate,
     canAct: computed(() => canAct(gate.value)),
     reasonId,
+    /** L'agent annonce les réglages de jeu (capacité `game-settings`) : l'onglet « Réglages » peut exister. */
+    gameSettings: computed(() => rights.value?.rights?.gameSettings ?? false),
     /** Le compte connecté, tel que l'agent le connaît (à valider avant tout affichage). */
     account: computed(() => rights.value?.rights?.account ?? ""),
     /** Relit le droit tout de suite (« Vérifier à nouveau » sous l'échec de lecture). */

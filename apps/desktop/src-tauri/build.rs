@@ -79,6 +79,9 @@ const COMMANDS: &[&str] = &[
     "read_fiche",
     "install_fiche",
     "open_fiche_link",
+    "read_game_settings",
+    "analyze_game_settings",
+    "save_game_settings",
 ];
 
 fn main() {

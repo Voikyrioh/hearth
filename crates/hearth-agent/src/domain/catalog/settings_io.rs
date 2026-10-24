@@ -36,8 +36,6 @@ pub enum SaveFailure {
     DriftUnresolved(Vec<String>),
     /// Une valeur ne s'écrit pas dans ce format, ou le fichier écrit ne serait plus relisible.
     Write(Refused),
-    /// Le canal n'est pas un fichier que Hearth sait retoucher.
-    NoFileFormat,
     /// Une clé que la fiche connaît est donnée comme « autre réglage » : elle passe par son réglage.
     KnownKeyAsOther,
 }

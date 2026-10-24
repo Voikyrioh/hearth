@@ -1,7 +1,7 @@
 import { nameIssue } from "@/deploy/rules";
 import type { FicheDetail, FicheInstallRequest, FichePort } from "@/link";
 import type { Resources } from "@/resources";
-import { answersToSend, visibleQuestions } from "./answers";
+import { answersToSend, extraAnswersToSend, extraSettings, visibleQuestions } from "./answers";
 import { publishedPorts, readableHostPorts, startingHostPort } from "./ports";
 
 /**
@@ -98,7 +98,10 @@ export function toInstallRequest(
     version: draft.version,
     digest: draft.digest,
     variant: draft.variant,
-    answers: answersToSend(visibleQuestions(detail, draft.variant), draft.answers),
+    answers: [
+      ...answersToSend(visibleQuestions(detail, draft.variant), draft.answers),
+      ...extraAnswersToSend(extraSettings(detail, draft.variant), draft.answers),
+    ],
     agreements: [...choices.agreements],
     ports: readable.map(({ port, deploy }) => ({ id: port.id, hostPort: deploy.hostPort })),
     optionalPorts: published.filter((port) => port.publish === "optional").map((port) => port.id),

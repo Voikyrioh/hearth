@@ -14,5 +14,7 @@ pub mod commands;
 pub mod deploy;
 pub mod deploy_dto;
 pub mod dto;
+pub mod game_settings;
+pub mod game_settings_dto;
 pub mod lifecycle;
 pub mod service;

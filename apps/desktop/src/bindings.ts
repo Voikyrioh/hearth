@@ -285,6 +285,22 @@ export const commands = {
 	 *  adresse lui-même.
 	 */
 	openFicheLink: (serverId: string, fiche: string, kind: FicheLinkKind, key: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("open_fiche_link", { serverId, fiche, kind, key })),
+	/**
+	 *  Les réglages voulus et l'état du fichier d'un service de jeu (`GET /services/{key}/settings`) : une lecture, qui
+	 *  exige le droit « gérer les services ». Un service sans réglages de jeu se lit `Absent`, jamais comme une panne.
+	 */
+	readGameSettings: (serverId: string, key: string) => typedError<SettingsReadDto, LinkFailure>(__TAURI_INVOKE("read_game_settings", { serverId, key })),
+	/**
+	 *  Lit un texte collé (`POST /services/{key}/settings/analyze`) : une consultation, rien n'est écrit. Le texte peut
+	 *  porter un mot de passe : il ne traverse que cet appel, n'est ni gardé ni tracé.
+	 */
+	analyzeGameSettings: (serverId: string, key: string, text: string) => typedError<AnalyzeOutcomeDto, LinkFailure>(__TAURI_INVOKE("analyze_game_settings", { serverId, key, text })),
+	/**
+	 *  Enregistre des réglages (`PUT /services/{key}/settings`) : un acte d'administration confirmé, couvert par
+	 *  l'élévation de cinq minutes. L'agent ne redémarre rien ; redémarrer est `service_restart`. Jamais rejoué : un résultat
+	 *  inconnu se relit sur le fichier. Une valeur peut être un mot de passe : elle ne traverse que cet appel.
+	 */
+	saveGameSettings: (serverId: string, key: string, settings: SaveSettingsRequestDto, adminPassword: string | null) => typedError<SaveOutcome, LinkFailure>(__TAURI_INVOKE("save_game_settings", { serverId, key, settings, adminPassword })),
 };
 
 /* Types */
@@ -407,7 +423,9 @@ export type AdminActKindDto = "account_create" | "account_role" | "account_passw
 /**  Déployer une image (HRT-69) : le mot de passe à chaque fois, jamais couvert par l'élévation. */
 "service_deploy" | 
 /**  Annuler l'opération d'un service (HRT-69) : couvert par l'élévation de cinq minutes. */
-"operation_cancel";
+"operation_cancel" | 
+/**  Enregistrer les réglages d'un serveur de jeu (HRT-109) : couvert par l'élévation de cinq minutes. */
+"game_settings_save";
 
 /**  Qui a adopté un service, et quand (HRT-79). */
 export type AdoptionDto = {
@@ -540,6 +558,9 @@ export type AlertDto = {
 	/**  Administrateur seulement : combien d'AUTRES comptes sont visés. */
 	others: number | null,
 };
+
+/**  La lecture d'un texte collé : lue, ou illisible par le format du jeu (rien n'est écrit dans les deux cas). */
+export type AnalyzeOutcomeDto = { kind: "read"; view: ImportViewDto } | { kind: "unreadable"; reason: string | null; line: number | null };
 
 /**
  *  Erreur d'une commande. Sérialisée `{ kind, message }` côté TypeScript ;
@@ -715,6 +736,8 @@ export type CatalogDto = {
 	/**  Les fiches d'une version plus récente que ce client, illisibles ici : comptées, jamais montrées. */
 	unreadable: number,
 };
+
+export type ChangeActionDto = "set" | "unset" | "reset" | "from_import";
 
 export type CpuInfoDto = {
 	model: string,
@@ -913,6 +936,21 @@ export type DiskSampleDto = {
 	totalBytes: number | null,
 };
 
+export type DriftChoiceDto = {
+	id: string,
+	choice: DriftResolutionDto,
+};
+
+/**  Un réglage dont le fichier ne dit plus ce que Hearth veut. */
+export type DriftDto = {
+	id: string,
+	hearth: string | null,
+	file: string | null,
+	fileValid: boolean,
+};
+
+export type DriftResolutionDto = "keep_file" | "keep_mine";
+
 export type DriverDto = "engine" | "supervisor" | "unknown";
 
 /**
@@ -1015,6 +1053,15 @@ export type FicheDetailDto = {
 	firstStart: FicheFirstStartDto | null,
 	stop: FicheStopDto | null,
 	imposed: FicheImposedDto[],
+	/**  Les thèmes en mots simples (HRT-109) ; vide d'un agent plus ancien. */
+	themes: FicheThemeDto[],
+	/**  Le catalogue complet de réglages (HRT-109) ; vide d'un agent plus ancien. */
+	settings: FicheSettingDto[],
+	/**
+	 *  Des réglages ou thèmes d'une version plus récente que ce client, illisibles ici : l'onglet le dit, mais la
+	 *  fiche reste installable (ils ne changent pas ce que l'installation écrit).
+	 */
+	settingsUnreadable: number,
 	/**
 	 *  Des éléments d'une version plus récente que ce client, illisibles ici : une fiche incomplète pour ce
 	 *  client ne s'installe pas.
@@ -1083,8 +1130,13 @@ export type FicheInstallRequestDto = {
 	accept: DeployAcceptDto,
 };
 
+export type FicheItemCharsetDto = "digits" | "slug" | "unknown";
+
 /**  Ce qui manque à la machine pour un minimum MESURÉ : le processeur (millicœurs) ou la mémoire (octets). */
 export type FicheLackDto = "cpu" | "memory";
+
+/**  Le niveau d'un réglage ; une valeur plus récente se lit `Unknown` (traitée comme avancée par l'interface). */
+export type FicheLevelDto = "essential" | "common" | "advanced" | "unknown";
 
 /**  Quelle adresse de la fiche s'ouvre (`open_fiche_link`) : jamais l'adresse elle-même. */
 export type FicheLinkKind = 
@@ -1094,6 +1146,13 @@ export type FicheLinkKind =
 "token" | 
 /**  La source d'un chiffre de l'éditeur : `cpu`, `memory` ou `disk`. */
 "evidence";
+
+/**  Ce que la fiche dit d'une liste d'identifiants. */
+export type FicheListDto = {
+	itemCharset: FicheItemCharsetDto,
+	separator: string,
+	maxItems: number,
+};
 
 export type FicheMemoryNeedDto = {
 	minBytes: number | null,
@@ -1153,6 +1212,12 @@ export type FicheQuestionKindDto = "text" | "secret" | "int" | "bool" | "choice"
  */
 export type FicheReadDto = { kind: "found"; fiche: FicheDetailDto } | { kind: "unknown" };
 
+export type FicheRefDto = {
+	id: string,
+	version: number,
+	digest: string,
+};
+
 export type FicheResourcesDto = {
 	cpu: FicheCpuNeedDto,
 	memory: FicheMemoryNeedDto,
@@ -1161,6 +1226,20 @@ export type FicheResourcesDto = {
 
 /**  Le genre d'un secret. */
 export type FicheSecretKindDto = "game_password" | "admin_password" | "server_token" | "unknown";
+
+/**  Un réglage du catalogue de la fiche (BR-FICHE-037) : son contrôle et tout ce qu'il faut pour le montrer. */
+export type FicheSettingDto = {
+	question: FicheQuestionDto,
+	key: string,
+	theme: string,
+	level: FicheLevelDto,
+	gameDefault: string | null,
+	imposedWhy: string | null,
+	since: string | null,
+	until: string | null,
+	replacedBy: string | null,
+	list: FicheListDto | null,
+};
 
 export type FicheStatusDto = "published" | "preview" | "unknown";
 
@@ -1171,6 +1250,13 @@ export type FicheStopDto = {
 	sequenceTested: boolean,
 };
 
+/**  Un thème en mots simples (BR-FICHE-041). */
+export type FicheThemeDto = {
+	id: string,
+	label: string,
+	order: number,
+};
+
 export type FicheVariantDto = {
 	id: string,
 	label: string,
@@ -1179,6 +1265,8 @@ export type FicheVariantDto = {
 };
 
 export type FicheWorldSavedDto = "by_image_on_signal" | "by_sequence" | "not_saved" | "unknown";
+
+export type FileStateDto = "ok" | "missing" | "unreadable" | "unknown";
 
 /**
  *  Le certificat présenté n'est plus celui qui a été confirmé (BR-CONN-003). Les empreintes sont
@@ -1241,6 +1329,24 @@ export type ImageDto = {
 	ref: string | null,
 	tag: string | null,
 	shortId: string,
+};
+
+/**  Une ligne du texte collé, lue par l'agent. La valeur d'un secret n'y figure pas. */
+export type ImportLineDto = {
+	id: string,
+	state: ImportStateDto,
+	reason: string | null,
+	pasted: string | null,
+	secret: boolean,
+};
+
+export type ImportStateDto = "take" | "same" | "rejected" | "imposed" | "frozen" | "unknown";
+
+export type ImportViewDto = {
+	lines: ImportLineDto[],
+	unknown: number,
+	duplicates: number,
+	imposedUndone: string[],
 };
 
 export type InitDto = "systemd" | "other";
@@ -1516,6 +1622,20 @@ export type OsDto = {
 	arch: string,
 };
 
+/**  Un réglage inconnu de la fiche : changer sa valeur, ou le retirer. */
+export type OtherChangeDto = {
+	key: string,
+	remove: boolean,
+	value: string | null,
+};
+
+/**  Un réglage que la fiche ne connaît pas. */
+export type OtherSettingDto = {
+	key: string,
+	value: string | null,
+	masked: boolean,
+};
+
 export type OutcomeDto = "done" | "not_executed" | "unknown";
 
 /**
@@ -1625,6 +1745,40 @@ export type SampleDto = {
 	net: NetDto | null,
 	gpus: GpuSampleDto[],
 	temps: TempDto[],
+};
+
+export type SaveOriginDto = "form" | "import" | "reset" | "drift";
+
+/**  L'issue d'un enregistrement. */
+export type SaveOutcome = { kind: "saved"; rev: number; effect: SettingEffectDto; fileWritten: boolean; changed: number; adopted: string[] } | { kind: "refused"; refusal: SaveRefusal } | 
+/**  Le lien est tombé avant la réponse : on ne sait pas. Jamais rejoué ; l'interface relit la vue. */
+{ kind: "unknown"; opId: string };
+
+/**  Pourquoi l'agent a refusé l'enregistrement. Sans texte : l'interface choisit le message d'après `kind`. */
+export type SaveRefusal = { kind: "wrong_password" } | 
+/**  L'élévation s'est fermée côté agent : la fenêtre redemande le mot de passe sans perdre la saisie. */
+{ kind: "password_required" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "busy" } | 
+/**  Les réglages ont changé depuis la lecture (autre révision), ou l'effet annoncé n'est pas celui des changements. */
+{ kind: "conflict"; by: string | null; effectMismatch: boolean } | 
+/**  Le fichier a bougé depuis la lecture, ou des réglages en écart attendent un choix. */
+{ kind: "file_changed"; ids: string[] } | { kind: "file_unreadable"; reason: string | null; line: number | null } | 
+/**  Un changement est refusé : le réglage (s'il est de la fiche), la raison, au plus UN caractère. Jamais la valeur. */
+{ kind: "setting_refused"; id: string | null; reason: string; character: string | null } | 
+/**  Un réglage reçu par variable ou argument demande de recréer le service (pas encore livré). */
+{ kind: "recreate_not_available"; ids: string[] } | 
+/**  Une action tient le service. */
+{ kind: "operation_in_progress" } | { kind: "service_not_found" } | { kind: "invalid" } | { kind: "other" };
+
+/**  La demande d'enregistrement. Le texte collé et les valeurs peuvent porter un mot de passe : jamais dans un `Debug`. */
+export type SaveSettingsRequestDto = {
+	baseRev: number,
+	fileStamp: string,
+	origin: SaveOriginDto,
+	effect: SettingEffectDto,
+	changes: SettingChangeDto[],
+	others: OtherChangeDto[],
+	driftChoices: DriftChoiceDto[],
+	importText: string | null,
 };
 
 export type ScopeDto = "all" | "local" | "unknown";
@@ -1744,6 +1898,8 @@ export type ServiceOperationEvent = {
 export type ServiceRightsDto = {
 	known: boolean,
 	granted: boolean,
+	/**  L'agent annonce `game-settings` (HRT-109) : seul cas où l'onglet « Réglages » peut exister. */
+	gameSettings: boolean,
 	account: string,
 };
 
@@ -1782,6 +1938,26 @@ unreadable: number } |
 /**  Pas de capacité `services` dans `/hello` : ni sujet ni route envoyés à cet agent. */
 { kind: "unsupported"; agentVersion: string };
 
+/**  Le geste sur un réglage. La valeur peut être un mot de passe : `Debug` n'en montre que la présence. */
+export type SettingChangeDto = {
+	id: string,
+	action: ChangeActionDto,
+	value: string | null,
+};
+
+export type SettingEffectDto = "none" | "restart" | "recreate" | "unknown";
+
+/**  La valeur voulue d'un réglage de la fiche. */
+export type SettingValueDto = {
+	id: string,
+	state: ValueStateDto,
+	value: string | null,
+	frozen: boolean,
+	imposed: boolean,
+	gone: boolean,
+	effect: SettingEffectDto,
+};
+
 /**
  *  Réglages locaux, tels que l'interface les voit. Le fait que l'explication de
  *  fermeture ait été montrée reste interne à la coquille.
@@ -1789,6 +1965,26 @@ unreadable: number } |
 export type Settings = {
 	/**  Lancer Hearth au démarrage de Windows (désactivé par défaut, BR-CLIENT-006). */
 	launchAtStartup: boolean,
+};
+
+/**
+ *  La lecture des réglages d'un service : trouvés, ou « ce service n'a pas de réglages de jeu » (un service qui n'est
+ *  pas né d'une fiche, ou un agent plus ancien : jamais une panne).
+ */
+export type SettingsReadDto = { kind: "found"; view: SettingsViewDto } | { kind: "absent" };
+
+/**  La vue des réglages d'un service (`GET /services/{key}/settings`). */
+export type SettingsViewDto = {
+	rev: number,
+	fiche: FicheRefDto,
+	fileState: FileStateDto,
+	fileStamp: string | null,
+	fileChanged: boolean,
+	rawEdit: boolean,
+	settings: SettingValueDto[],
+	drifts: DriftDto[],
+	others: OtherSettingDto[],
+	imposedBroken: string[],
 };
 
 /**
@@ -1882,6 +2078,8 @@ export type UpdateStateDto = {
 };
 
 export type UsernameProblemDto = "empty" | "too_short" | "too_long" | "invalid_chars";
+
+export type ValueStateDto = "written" | "unwritten" | "secret_set" | "unknown";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

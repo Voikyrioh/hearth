@@ -50,6 +50,10 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`EmptyState`](./EmptyState.md) — Placeholder de vue vide.
 - [`UnreadableNote`](./UnreadableNote.md) — Ligne « n éléments ne sont pas lisibles par cette version » sous une liste partielle.
 - [`SettingRow`](./SettingRow.md) — Ligne de réglage.
+- [`GameSettingRow`](./GameSettingRow.md) — Ligne d'un réglage de jeu (HRT-109).
+- [`IdListSetting`](./IdListSetting.md) — Liste d'identifiants (HRT-109).
+- [`ImposedBrokenBanner`](./ImposedBrokenBanner.md) — L'arrêt propre n'est plus garanti (HRT-109).
+- [`ConsoleWaitSection`](./ConsoleWaitSection.md) — Ce qui attend la console (HRT-109).
 - [`ComingSoonPanel`](./ComingSoonPanel.md) — Carte « Bientôt disponible ».
 - [`ColorSwatches`](./ColorSwatches.md) — Palette des 8 couleurs de serveur.
 - [`StepTrail`](./StepTrail.md) — Fil des étapes de l'assistant.
@@ -129,6 +133,15 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`AgreementDialog`](./AgreementDialog.md) — La fenêtre du contrat de licence, « Je refuse » et « J'accepte » (HRT-102).
 - [`FicheSummaryDialog`](./FicheSummaryDialog.md) — « Vérifiez avant de lancer » d'une installation depuis une fiche (HRT-102).
 - [`InstallAnswers`](./InstallAnswers.md) — Les « Réponses » de l'installation (HRT-102).
+- [`GameSettingsTab`](./GameSettingsTab.md) — L'onglet « Réglages » d'un service de jeu (HRT-109).
+- [`GameSettingsList`](./GameSettingsList.md) — La liste des réglages d'un jeu : recherche, filtres, thèmes (HRT-109).
+- [`SettingThemeCard`](./SettingThemeCard.md) — Carte de thème repliable (HRT-109).
+- [`FileChangedBanner`](./FileChangedBanner.md) — Le fichier a changé : un choix par réglage (HRT-109).
+- [`SettingsImportDialog`](./SettingsImportDialog.md) — Importer des réglages collés (HRT-109).
+- [`SettingsResetDialog`](./SettingsResetDialog.md) — Confirmer une remise en bloc (HRT-109).
+- [`RawFileDialog`](./RawFileDialog.md) — Modifier le fichier brut : avertissement et case (HRT-109).
+- [`OtherSettingsSection`](./OtherSettingsSection.md) — Autres réglages, jamais perdus (HRT-109).
+- [`InstallSettings`](./InstallSettings.md) — Voir tous les réglages dans l'installation (HRT-109).
 - [`InstallResources`](./InstallResources.md) — Les « Ressources » de l'installation (HRT-102).
 - [`FirstStartPanel`](./FirstStartPanel.md) — Le premier démarrage long : des faits, jamais un pourcentage (HRT-102).
 

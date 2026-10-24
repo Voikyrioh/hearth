@@ -5,7 +5,7 @@ titre: Le jeu ou une main peut réécrire le fichier : Hearth compare, ne corrig
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-installer-serveur-de-jeu.md (BR-FICHE-048), contexts/hearth/conceptions/2026-10-13-technique-fiches-de-jeu.md, HRT-113
-maj: 2026-10-13
+maj: 2026-10-24
 ---
 
 # BR-FICHE-048 — Le jeu ou une main peut réécrire le fichier : Hearth compare, ne corrige pas seul, et n'écrit que dans quatre cas
@@ -19,6 +19,7 @@ Quatre moments d'écriture, aucun autre : la création à l'installation (`Confi
 
 - `crates/hearth-agent/src/domain/catalog/settings_io.rs::{plan_save, DriftChoice}` (HRT-108 : un choix par réglage en écart, sinon rien n'est planifié)
 - `crates/hearth-agent/src/application/game_settings.rs::GameSettings::{view, save, recreate_missing_files}` (HRT-108 : empreinte du fichier lue à l'ouverture et revérifiée avant l'écriture, `game_settings.file_fingerprint`)
+- Client (HRT-109) : `apps/desktop/src/components/organisms/FileChangedBanner.vue`, `apps/desktop/src/settings/edits.ts::toSaveRequest` (un choix par réglage en écart, « Garder la valeur du fichier » par défaut), `apps/desktop/src/composables/useGameSettings.ts` (relit la vue après `SETTINGS_FILE_CHANGED`)
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_state.rs::drift_compares_the_state_to_the_file_and_lists_unknown_lines_without_touching_them`
@@ -28,6 +29,8 @@ Quatre moments d'écriture, aucun autre : la création à l'installation (`Confi
 - `crates/hearth-agent/tests/game_settings_https.rs::a_file_that_moved_since_it_was_read_is_refused_by_its_stamp`
 - `crates/hearth-agent/tests/game_settings_https.rs::an_imposed_setting_undone_by_hand_is_reported_and_never_rewritten`
 - `crates/hearth-agent/tests/game_settings_use_cases.rs::a_vanished_file_is_recreated_from_the_wanted_values_secret_included_and_a_present_one_is_never_touched`
+- `apps/desktop/src/components/organisms/gameSettingsTab.test.ts::le fichier a changé (BR-FICHE-048)`
+- `apps/desktop/src/link/simulated-game-settings.test.ts::l'écart quand le jeu a réécrit son fichier (BR-FICHE-048)`
 
 ## Cas limites
 - Écart : `GET /services/{key}/settings` rend `drifts` (réglage, valeur de Hearth, valeur du fichier ; jamais un secret) ; un enregistrement exige un choix (`keep_file`, `keep_mine`) par réglage en écart, sinon `409 SETTINGS_FILE_CHANGED` (`details.ids`) et rien n'est écrit ; changer soi-même le réglage en écart vaut choix. `file_stamp` (SHA-256 du fichier tel que lu) refuse un fichier qui a bougé entre la lecture et l'enregistrement. L'empreinte du fichier tel que Hearth l'a écrit en dernier est en base (`file_changed` dans la vue).
@@ -42,3 +45,4 @@ Quatre moments d'écriture, aucun autre : la création à l'installation (`Confi
 ## Historique
 - 2026-10-13 — création (HRT-113, format de fiche version 2, domaine pur).
 - 2026-10-24 — HRT-108 : lecture, écart, empreinte et enregistrement par l'agent.
+- 2026-10-24 — pointeurs du client (HRT-109).

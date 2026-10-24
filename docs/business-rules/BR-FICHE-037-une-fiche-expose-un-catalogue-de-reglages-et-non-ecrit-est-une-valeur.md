@@ -5,7 +5,7 @@ titre: Une fiche expose un catalogue de réglages ; un réglage a trois états :
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-installer-serveur-de-jeu.md (BR-FICHE-037), contexts/hearth/conceptions/2026-10-13-technique-fiches-de-jeu.md, HRT-113
-maj: 2026-10-13
+maj: 2026-10-24
 ---
 
 # BR-FICHE-037 — Une fiche expose un catalogue de réglages ; un réglage a trois états : une valeur, la valeur proposée, ou non écrit
@@ -20,6 +20,7 @@ Chaque réglage porte un identifiant Hearth stable, le nom du jeu, un canal (`en
 - `crates/hearth-agent/catalog/terraria/settings.toml`
 
 - `crates/hearth-agent/src/application/game_settings.rs::GameSettings::view` (HRT-108 : les trois états d'un réglage rendus au client, jamais la valeur d'un secret)
+- Client (HRT-109) : `apps/desktop/src/settings/model.ts::{modelsOf, installModelsOf, proposedOf, defaultUnverified}`, `apps/desktop/src/components/molecules/GameSettingRow.vue`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_state.rs::not_written_is_a_value_distinct_from_the_default_of_the_game`
@@ -29,6 +30,8 @@ Chaque réglage porte un identifiant Hearth stable, le nom du jeu, un canal (`en
 - `crates/hearth-agent/src/domain/catalog/tests_translate.rs::terraria_with_the_proposed_values_writes_only_what_is_known_and_sends_no_order`
 
 - `crates/hearth-agent/tests/game_settings_https.rs::reading_shows_the_installed_values_the_file_state_and_never_the_password`
+- `apps/desktop/src/settings/settings.test.ts::le catalogue de Terraria rendu lisible (objectif de Voiky)`
+- `apps/desktop/src/components/organisms/gameSettingsTab.test.ts::les thèmes en mots simples (BR-FICHE-041)`
 
 ## Cas limites
 - Les 15 permissions du mode Voyage de Terraria sont exposées sans défaut : l'inventaire n'en a lu aucun.
@@ -39,3 +42,4 @@ Chaque réglage porte un identifiant Hearth stable, le nom du jeu, un canal (`en
 
 ## Historique
 - 2026-10-13 — création (HRT-113, format de fiche version 2, domaine pur).
+- 2026-10-24 — pointeurs du client (HRT-109).

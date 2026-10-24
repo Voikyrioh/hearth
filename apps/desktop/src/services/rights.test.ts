@@ -4,7 +4,7 @@ import { canAct, grantCommand, type RightsState, rightsGate } from "./rights";
 // Le droit « gérer les services » (HRT-78) : ce que chaque profil voit et la commande à copier. Fonctions pures.
 const known = (granted: boolean, account = "marie", knownByAgent = true): RightsState => ({
   phase: "known",
-  rights: { known: knownByAgent, granted, account },
+  rights: { known: knownByAgent, granted, gameSettings: knownByAgent, account },
 });
 
 describe("grantCommand (BR-GRANT-013)", () => {

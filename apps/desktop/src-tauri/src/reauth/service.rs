@@ -81,6 +81,15 @@ fn act_of(kind: AdminActKindDto, role: Option<RoleDto>) -> AdminAct<'static> {
             command: false,
         },
         AdminActKindDto::OperationCancel => AdminAct::OperationCancel { target: "" },
+        // Enregistrer des réglages : le genre seul décide (la table de l'élévation), ni la cible ni le corps ne comptent.
+        AdminActKindDto::GameSettingsSave => AdminAct::GameSettingsSave {
+            target: "".into(),
+            base_rev: 0,
+            changes: 0,
+            ids_digest: [0; hearth_proto::admin_act::FINGERPRINT_LEN],
+            origin: "form",
+            effect: "restart",
+        },
         AdminActKindDto::ServiceStart => AdminAct::ServiceStart { target: "".into() },
         AdminActKindDto::ServiceStop => AdminAct::ServiceStop { target: "".into() },
         AdminActKindDto::ServiceRestart => AdminAct::ServiceRestart { target: "".into() },
@@ -180,6 +189,8 @@ mod tests {
                 // Déployer : jamais couvert par l'élévation (BR-DEPLOY-015). Annuler : la table de l'élévation.
                 (Kind::ServiceDeploy, None, Yes),
                 (Kind::OperationCancel, None, UnlessElevated),
+                // Enregistrer les réglages d'un jeu : la table de l'élévation (HRT-108, ADR-0051).
+                (Kind::GameSettingsSave, None, UnlessElevated),
             ] {
                 assert_eq!(
                     password_need_of(kind, role, trust),

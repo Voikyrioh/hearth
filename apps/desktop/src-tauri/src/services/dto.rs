@@ -27,6 +27,8 @@ use specta::Type;
 pub struct ServiceRightsDto {
     pub known: bool,
     pub granted: bool,
+    /// L'agent annonce `game-settings` (HRT-109) : seul cas où l'onglet « Réglages » peut exister.
+    pub game_settings: bool,
     pub account: String,
 }
 
@@ -35,6 +37,7 @@ impl From<hearth_link::ServiceRightsRead> for ServiceRightsDto {
         Self {
             known: read.agent_knows,
             granted: read.granted,
+            game_settings: read.game_settings,
             account: read.account,
         }
     }

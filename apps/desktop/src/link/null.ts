@@ -172,6 +172,15 @@ export class NullLinkBridge implements LinkBridge {
   async openFicheLink(): Promise<never> {
     return this.unavailable();
   }
+  async readGameSettings(): Promise<never> {
+    return this.unavailable();
+  }
+  async analyzeGameSettings(): Promise<never> {
+    return this.unavailable();
+  }
+  async saveGameSettings(): Promise<never> {
+    return this.unavailable();
+  }
   async recheckEngine(): Promise<never> {
     return this.unavailable();
   }

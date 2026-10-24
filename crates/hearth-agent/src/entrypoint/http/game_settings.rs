@@ -1,4 +1,4 @@
-//! Les réglages d'un serveur de jeu (HRT-108, ADR-0051, BR-FICHE-037 à 053) : `GET /services/{key}/settings`,
+//! Les réglages d'un serveur de jeu (HRT-108, ADR-0051, BR-FICHE-037, 042, 044, 046 à 049, 052, 053) : `GET /services/{key}/settings`,
 //! `POST /services/{key}/settings/analyze` et `PUT /services/{key}/settings`.
 //!
 //! Les trois exigent le droit « gérer les services » (niveau `Services`, jugé avant tout handler). Lire et analyser
@@ -29,21 +29,24 @@ use crate::application::game_settings::SettingsError;
 use crate::application::sessions::Reauthenticated;
 use crate::domain::services::ServiceKey;
 
-fn not_found() -> ApiError {
-    ApiError::new(
-        ErrorCode::ServiceNotFound,
-        "Ce service n'existe pas, ou n'a pas de réglages.",
-    )
-}
-
 /// Une clé mal formée est un service inconnu, comme pour toute route de service.
 fn key_of(raw: &str) -> Result<ServiceKey, ApiError> {
-    ServiceKey::parse(raw).ok_or_else(not_found)
+    ServiceKey::parse(raw)
+        .ok_or_else(|| ApiError::new(ErrorCode::ServiceNotFound, "Ce service n'existe pas."))
+}
+
+/// Une clé qui n'est pas celle d'un serveur de jeu créé depuis une fiche (inconnue, adoptée, déployée à la main, ou
+/// fiche que cet agent ne propose pas) : même réponse pour toutes, `NOT_A_GAME_SERVICE`.
+fn not_a_game_service() -> ApiError {
+    ApiError::new(
+        ErrorCode::NotAGameService,
+        "Ce service n'est pas un serveur de jeu créé depuis une fiche : il n'a pas de réglages.",
+    )
 }
 
 fn settings_error(error: SettingsError) -> ApiError {
     match error {
-        SettingsError::NotFound => not_found(),
+        SettingsError::NotAGameService => not_a_game_service(),
         SettingsError::Conflict { by, at } => ApiError(ErrorBody::with_details(
             ErrorCode::SettingsConflict,
             "Les réglages ont changé depuis que vous les avez lus. Relisez-les, puis recommencez.",

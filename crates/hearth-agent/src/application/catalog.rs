@@ -8,8 +8,9 @@
 use hearth_proto::api::catalog::{
     AgreementView, CatalogView, CharsetView, ChoiceView, CpuNeed, DiskNeed, DownloadView,
     EvidenceView, FicheCard, FicheDetail, FicheStatus, FirstStartView, FolderView, ImageView,
-    ImposedView, MemoryNeed, PortMappingView, PortView, QuestionKind, QuestionView, RefusedFiche,
-    ResourcesView, SecretKindView, StopView, VariantView, WorldSavedView,
+    ImposedView, ItemCharsetView, LevelView, ListView, MemoryNeed, PortMappingView, PortView,
+    QuestionKind, QuestionView, RefusedFiche, ResourcesView, SecretKindView, SettingView, StopView,
+    ThemeView, VariantView, WorldSavedView,
 };
 
 use crate::application::ports::AuditSink;
@@ -20,7 +21,7 @@ use crate::domain::catalog::loading::schema::fiche::{
     Evidence, FolderRole, PlainEvidence, Platform, PortMapping, PortRole, Proof, Protocol, Publish,
     Status, WorldSaved,
 };
-use crate::domain::catalog::loading::schema::settings::{Level, SecretKind};
+use crate::domain::catalog::loading::schema::settings::{ItemCharset, Level, SecretKind};
 
 /// Une fiche écartée au chargement : son dossier et l'invariant violé.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,6 +307,70 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
             })
             .collect::<Vec<_>>()
             .into(),
+        // Le catalogue de réglages (HRT-109, BR-FICHE-037, BR-FICHE-041) : les thèmes dans l'ordre de la fiche, puis
+        // chaque réglage avec son contrôle. Ni le client ni l'agent n'inventent un libellé, une borne ou un choix.
+        themes: {
+            let mut themes: Vec<_> = fiche.themes.iter().collect();
+            themes.sort_by_key(|theme| theme.order);
+            themes
+                .into_iter()
+                .map(|theme| ThemeView {
+                    id: theme.id.clone(),
+                    label: theme.label.clone(),
+                    order: theme.order,
+                })
+                .collect::<Vec<_>>()
+                .into()
+        },
+        settings: fiche
+            .settings
+            .iter()
+            .map(setting_view)
+            .collect::<Vec<_>>()
+            .into(),
+    }
+}
+
+/// Un réglage du catalogue : son contrôle (le même que celui d'une question), son nom technique, son thème, son
+/// niveau, son défaut et ses versions. Un secret ne porte jamais de valeur proposée ni de défaut.
+fn setting_view(setting: &crate::domain::catalog::loading::model::Setting) -> SettingView {
+    let mut question = question(setting);
+    if let ValueSpec::Opaque { max_len } = &setting.spec {
+        question.max_len = u32::try_from(*max_len).ok();
+    }
+    let secret = setting.is_secret();
+    SettingView {
+        question,
+        key: setting.key.clone(),
+        theme: setting.theme.clone(),
+        level: match setting.level {
+            Level::Essential => LevelView::Essential,
+            Level::Common => LevelView::Common,
+            Level::Advanced => LevelView::Advanced,
+        },
+        game_default: setting.game_default.clone().filter(|_| !secret),
+        imposed_why: setting.imposed.as_ref().map(|imposed| imposed.why.clone()),
+        since: setting.versions.as_ref().and_then(|v| v.since.clone()),
+        until: setting.versions.as_ref().and_then(|v| v.until.clone()),
+        replaced_by: setting
+            .versions
+            .as_ref()
+            .and_then(|v| v.replaced_by.clone()),
+        list: match &setting.spec {
+            ValueSpec::IdList {
+                item_charset,
+                separator,
+                max_items,
+            } => Some(ListView {
+                item_charset: match item_charset {
+                    ItemCharset::Digits => ItemCharsetView::Digits,
+                    ItemCharset::Slug => ItemCharsetView::Slug,
+                },
+                separator: separator.to_string(),
+                max_items: u32::try_from(*max_items).unwrap_or(u32::MAX),
+            }),
+            _ => None,
+        },
     }
 }
 
@@ -512,6 +577,125 @@ mod tests {
                 .iter()
                 .all(|setting| !setting.why.is_empty())
         );
+    }
+
+    #[test]
+    fn the_detail_serves_the_whole_settings_catalogue_with_its_themes_and_never_a_secret_default() {
+        let catalog = CatalogService::embedded(true);
+        let terraria = catalog.detail("terraria").unwrap();
+        // Les thèmes, dans l'ordre de la fiche ; chaque réglage en nomme un qui existe.
+        let orders: Vec<u32> = terraria.themes.iter().map(|theme| theme.order).collect();
+        assert!(
+            orders.windows(2).all(|pair| pair[0] <= pair[1]),
+            "{orders:?}"
+        );
+        assert!(terraria.themes.iter().any(|theme| theme.id == "game"));
+        assert!(
+            terraria.settings.iter().all(|setting| terraria
+                .themes
+                .iter()
+                .any(|theme| theme.id == setting.theme)),
+            "un réglage sans thème serait introuvable dans l'onglet"
+        );
+        // Tous les réglages y sont (les imposés aussi, avec leur raison) : bien plus que les questions.
+        assert!(terraria.settings.len() > terraria.questions.len());
+        assert!(
+            terraria
+                .settings
+                .iter()
+                .filter(|setting| setting.imposed_why.is_some())
+                .count()
+                >= 1
+        );
+        // Les questions de l'installation sont, mot pour mot, les contrôles des réglages essentiels non imposés.
+        for question in terraria.questions.iter() {
+            let setting = terraria
+                .settings
+                .iter()
+                .find(|setting| setting.question.id == question.id)
+                .expect("une question est un réglage");
+            assert_eq!(&setting.question, question);
+            assert_eq!(setting.level, LevelView::Essential);
+        }
+        // Un secret ne porte ni valeur proposée ni défaut.
+        let password = terraria
+            .settings
+            .iter()
+            .find(|setting| setting.question.id == "password")
+            .unwrap();
+        assert!(password.question.secret);
+        assert_eq!(
+            (&password.question.proposed, &password.game_default),
+            (&None, &None)
+        );
+        // Un défaut non vérifié reste absent : le client ne l'invente pas.
+        let name = terraria
+            .settings
+            .iter()
+            .find(|setting| setting.question.id == "world_name")
+            .unwrap();
+        assert_eq!(name.game_default, None);
+        assert_eq!(name.key, "worldname");
+    }
+
+    /// La fiche de Terraria telle que le client simulé la montre (`apps/desktop/src/link/fixtures/`) : générée d'ici, jamais
+    /// écrite à la main. Si la fiche bouge sans que la fixture suive, ce test échoue et dit comment la refaire :
+    /// `HEARTH_REGEN_FIXTURES=1 cargo test -p hearth-agent --lib terraria_fixture`.
+    #[test]
+    fn terraria_fixture_of_the_simulated_client_follows_the_embedded_fiche() {
+        let catalog = CatalogService::embedded(true);
+        let detail = catalog.detail("terraria").unwrap();
+        let fiche = catalog.fiche("terraria").unwrap();
+        let settings: Vec<serde_json::Value> = detail
+            .settings
+            .iter()
+            .zip(&fiche.settings)
+            .map(|(view, setting)| {
+                let mut wire = serde_json::to_value(view).unwrap();
+                // Le canal n'est pas sur le fil : le simulateur en déduit l'effet comme l'agent (fichier, redémarrage ;
+                // argument, recréation).
+                wire["channel"] = serde_json::Value::String(setting.channel.clone());
+                wire
+            })
+            .collect();
+        let generated = serde_json::json!({
+            "fiche": { "id": "terraria", "version": detail.card.version, "digest": detail.digest },
+            "themes": serde_json::to_value(&detail.themes).unwrap(),
+            "settings": settings,
+        });
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../apps/desktop/src/link/fixtures/terraria-settings.json"
+        );
+        if std::env::var_os("HEARTH_REGEN_FIXTURES").is_some() {
+            std::fs::create_dir_all(std::path::Path::new(path).parent().unwrap()).unwrap();
+            let mut text = serde_json::to_string_pretty(&generated).unwrap();
+            text.push(char::from(10));
+            std::fs::write(path, text).unwrap();
+        }
+        let on_disk: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(path).expect("fixture absente : HEARTH_REGEN_FIXTURES=1"),
+        )
+        .unwrap();
+        assert_eq!(
+            on_disk, generated,
+            "la fiche de Terraria a changé : refaire la fixture du client simulé avec `HEARTH_REGEN_FIXTURES=1 cargo test -p hearth-agent --lib terraria_fixture`"
+        );
+    }
+
+    #[test]
+    fn a_list_setting_says_its_separator_charset_and_maximum() {
+        let catalog = CatalogService::from_parts(vec![rich()], Vec::new(), true);
+        let id = catalog.fiches.first().unwrap().id().to_owned();
+        let detail = catalog.detail(&id).unwrap();
+        let list = detail
+            .settings
+            .iter()
+            .find(|setting| setting.question.kind == QuestionKind::IdList)
+            .expect("la fiche d'essai porte une liste d'identifiants");
+        let view = list.list.as_ref().unwrap();
+        assert!(view.max_items > 0 && !view.separator.is_empty());
+        assert_ne!(view.item_charset, ItemCharsetView::Unknown);
     }
 
     #[test]
