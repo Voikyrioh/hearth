@@ -22,6 +22,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`HBars`](./HBars.md) — Barres verticales (SVG), une par cœur.
 - [`HMeter`](./HMeter.md) — Jauge linéaire (SVG), occupation d'un disque.
 - [`HSelect`](./HSelect.md) — Liste déroulante native (libellé, masquable).
+- [`HTextarea`](./HTextarea.md) — Zone de texte qui grandit avec la saisie (HRT-69).
 
 ## Molécules
 
@@ -55,6 +56,10 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`DashCard`](./DashCard.md) — Carte du tableau de bord (titre de section, corps).
 - [`CoreBars`](./CoreBars.md) — Une barre par cœur du processeur.
 - [`ResourceSlider`](./ResourceSlider.md) — Un curseur discret de mémoire ou de processeur et sa saisie exacte (HRT-146).
+- [`DeployButton`](./DeployButton.md) — Le bouton « Déployer un service » : absent, désactivé et expliqué, ou actif (HRT-69).
+- [`EnvVarRow`](./EnvVarRow.md) — Une variable du formulaire de déploiement : valeur masquée d'office pour un secret (HRT-69).
+- [`PortMappingRow`](./PortMappingRow.md) — Une correspondance de ports : erreur, avertissement, port libre proposé par l'agent (HRT-69).
+- [`ProgressSteps`](./ProgressSteps.md) — Les étapes d'une opération avec la barre de celle qui progresse (HRT-69).
 
 ## Organismes
 
@@ -95,6 +100,11 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`OperationsStrip`](./OperationsStrip.md) — La bande « Opérations en cours » de la section Services.
 - [`LifecycleButtons`](./LifecycleButtons.md) — Démarrer, arrêter, redémarrer : les gestes de l'état, la raison écrite dessous.
 - [`ServiceLifecycleDialog`](./ServiceLifecycleDialog.md) — La fenêtre de confirmation (effet, avertissements, socle) des trois gestes.
+- [`DeployForm`](./DeployForm.md) — Le formulaire « Déployer un service » : Général, variables, ports, commande, ressources, pied (HRT-69).
+- [`EnvVarRows`](./EnvVarRows.md) — La section Variables d'environnement du formulaire de déploiement (HRT-69).
+- [`PortMappingRows`](./PortMappingRows.md) — La section Ports du formulaire de déploiement (HRT-69).
+- [`DeploySummaryDialog`](./DeploySummaryDialog.md) — Le récapitulatif « Vérifiez avant de lancer » et ses points d'attention (HRT-69).
+- [`DeployProgressDialog`](./DeployProgressDialog.md) — La progression d'un déploiement, l'annulation et les issues (HRT-69).
 - [`ServiceRowMenu`](./ServiceRowMenu.md) — Le menu d'actions d'une ligne de la liste des services.
 - [`OperationDecisionDialog`](./OperationDecisionDialog.md) — La fenêtre de décision d'une opération (acte confirmé, mot de passe à chaque réponse).
 - [`AgentUpdateSteps`](./AgentUpdateSteps.md) — Les étapes d'une mise à jour de l'agent (téléchargement, vérification, installation, redémarrage, contrôle).
@@ -121,6 +131,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`Accounts`](./Accounts.md) — Comptes (administrateurs) : liste, création, rôle, mots de passe, sessions, suppression.
 - [`Security`](./Security.md) — Sécurité : « Mode attaque » (carte) et tes postes de confiance (liste, retrait avec mot de passe).
 - [`Audit`](./Audit.md) — Journal d'activité (à venir).
+- [`DeployService`](./DeployService.md) — « Déployer un service » : formulaire en page, récapitulatif, progression, abandon (HRT-69).
 - [`Settings`](./Settings.md) — Réglages.
 
 ## Règle partagée

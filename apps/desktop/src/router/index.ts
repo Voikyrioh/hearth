@@ -14,12 +14,14 @@ import Accounts from "@/pages/Accounts.vue";
 import AddServer from "@/pages/AddServer.vue";
 import Audit from "@/pages/Audit.vue";
 import Dashboard from "@/pages/Dashboard.vue";
+import DeployService from "@/pages/DeployService.vue";
 import Security from "@/pages/Security.vue";
 import Servers from "@/pages/Servers.vue";
 import Services from "@/pages/Services.vue";
 import Settings from "@/pages/Settings.vue";
 import Welcome from "@/pages/Welcome.vue";
 import { useServersStore } from "@/stores/servers";
+import { deployRouteGuard } from "./deployGuard";
 
 declare module "vue-router" {
   interface RouteMeta {
@@ -34,7 +36,7 @@ declare module "vue-router" {
 
 /**
  * Routes : `/welcome` (aucun serveur), `/servers/new` (assistant d'ajout), `/servers` (carnet),
- * `/servers/:id/{dashboard,services,accounts,audit,security}` dans le gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
+ * `/servers/:id/{dashboard,services,services/deployer,accounts,audit,security}` dans le gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
  * serveur ou l'accueil. Historique par hachage (l'application est servie depuis des fichiers).
  */
 export function createAppRouter(history: RouterHistory = createWebHashHistory()): Router {
@@ -63,6 +65,14 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
             name: "services",
             component: Services,
             meta: { title: "pages.services" },
+          },
+          {
+            // Déployer une image (HRT-69) : la route est gardée (droit de gérer les services, moteur utilisable).
+            path: "services/deployer",
+            name: "services-deploy",
+            component: DeployService,
+            meta: { title: "pages.deployService" },
+            beforeEnter: deployRouteGuard,
           },
           {
             path: "accounts",

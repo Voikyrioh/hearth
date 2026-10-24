@@ -148,6 +148,18 @@ export class NullLinkBridge implements LinkBridge {
   async pilotService(): Promise<never> {
     return this.unavailable();
   }
+  async checkDeployment(): Promise<never> {
+    return this.unavailable();
+  }
+  async deployService(): Promise<never> {
+    return this.unavailable();
+  }
+  async cancelServiceOperation(): Promise<never> {
+    return this.unavailable();
+  }
+  async readEngineCapacity(): Promise<never> {
+    return this.unavailable();
+  }
   async recheckEngine(): Promise<never> {
     return this.unavailable();
   }

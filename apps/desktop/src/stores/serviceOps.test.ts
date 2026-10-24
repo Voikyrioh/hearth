@@ -92,7 +92,7 @@ describe("le magasin des opérations de service", () => {
     await flushPromises();
     expect(store.of("forge")).toEqual([]);
     expect(toasts.items.map((toast) => toast.message)).toEqual([
-      "Le déploiement de terraria a réussi.",
+      "Le service terraria est en marche.",
     ]);
     expect(toasts.items[0]?.kind).toBe("success");
     // Le rejeu d'une issue déjà dite (numéro plus grand : la coquille la rejoue faute d'acquittement) est réacquitté.
@@ -163,5 +163,63 @@ describe("le magasin des opérations de service", () => {
     await vi.advanceTimersByTimeAsync(SERVICE_OPS_RETRY_MS + 1);
     expect(store.failed).toBe(false);
     store.reset();
+  });
+});
+
+describe("une opération suivie par une fenêtre (HRT-69)", () => {
+  it("son issue n'est pas annoncée par une notification : la fenêtre la reçoit et la règle", async () => {
+    const { store, toasts, bridge } = await started();
+    store.watch("forge", "A");
+    store.apply(upsert(op({ step: "pull", percent: 20 }), 1));
+    expect(store.get("forge", "A")?.operation.percent).toBe(20);
+    store.apply(upsert(op({ status: "failed", cause: "tag_not_found" }), 2));
+    await flushPromises();
+    expect(toasts.items).toEqual([]);
+    expect(store.of("forge")).toEqual([]);
+    expect(store.finishedOf("forge", "A")?.operation).toMatchObject({
+      status: "failed",
+      cause: "tag_not_found",
+    });
+    // Rien n'est acquitté tant que la fenêtre n'a pas dit l'issue : la coquille la rejouerait au besoin.
+    expect(bridge.serviceOps.acknowledged).toEqual([]);
+    store.settle("forge", "A");
+    await flushPromises();
+    expect(store.finishedOf("forge", "A")).toBeUndefined();
+    expect(toasts.items).toEqual([]);
+    expect(bridge.serviceOps.acknowledged).toEqual([{ serverId: "forge", ids: ["A"] }]);
+  });
+
+  it("une fenêtre qui se ferme avant l'issue la laisse à la notification, dite une seule fois", async () => {
+    const { store, toasts } = await started();
+    store.watch("forge", "A");
+    store.apply(upsert(op(), 1));
+    store.release("forge", "A");
+    store.apply(upsert(op({ status: "succeeded" }), 2));
+    await flushPromises();
+    expect(toasts.items.map((toast) => toast.message)).toEqual([
+      "Le service ce service est en marche.",
+    ]);
+    store.apply(upsert(op({ status: "succeeded" }), 3));
+    expect(toasts.items).toHaveLength(1);
+  });
+
+  it("une fenêtre qui se ferme APRÈS l'issue la fait annoncer tout de suite", async () => {
+    const { store, toasts } = await started();
+    store.watch("forge", "A");
+    store.apply(upsert(op({ status: "failed", cause: "disk_full" }), 1));
+    expect(toasts.items).toEqual([]);
+    store.release("forge", "A");
+    await flushPromises();
+    expect(toasts.items.map((toast) => toast.message)).toEqual([
+      "Le déploiement de ce service a échoué : disque plein.",
+    ]);
+  });
+
+  it("une issue arrivée avant la réponse qui désigne l'opération est rendue à la fenêtre qui la suit ensuite", async () => {
+    const { store } = await started();
+    store.apply(upsert(op({ status: "succeeded" }), 1));
+    await flushPromises();
+    store.watch("forge", "A");
+    expect(store.finishedOf("forge", "A")?.operation.status).toBe("succeeded");
   });
 });

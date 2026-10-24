@@ -378,6 +378,19 @@ const EXPECTED: &[(&str, &str)] = &[
         "serviceRestart",
         "serverId: string, key: string, adminPassword: string | null",
     ),
+    (
+        "deployCheck",
+        "serverId: string, input: DeployCheckInputDto",
+    ),
+    (
+        "deployService",
+        "serverId: string, deployment: DeployRequestDto, adminPassword: string | null",
+    ),
+    (
+        "cancelServiceOperation",
+        "serverId: string, opId: string, adminPassword: string | null",
+    ),
+    ("readEngineCapacity", "serverId: string"),
 ];
 
 /// Les commandes qui portent UN ACTE D'ADMINISTRATION, avec le paramètre qui porte le mot de passe de
@@ -400,6 +413,8 @@ const ADMIN_COMMANDS: &[(&str, &str)] = &[
     ("serviceStart", "adminPassword"),
     ("serviceStop", "adminPassword"),
     ("serviceRestart", "adminPassword"),
+    ("deployService", "adminPassword"),
+    ("cancelServiceOperation", "adminPassword"),
 ];
 
 /// Les commandes qui ne modifient RIEN chez l'agent : lectures, réglages locaux, abonnements.
@@ -457,6 +472,8 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "openEngineDocs",
     "listServiceOperations",
     "ackServiceOperations",
+    "deployCheck",
+    "readEngineCapacity",
 ];
 
 /// Toute commande exposée est soit un acte d'administration de la liste fermée (avec son mot de passe de

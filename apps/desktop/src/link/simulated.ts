@@ -1,7 +1,15 @@
 import type { OperationDto } from "@/bindings";
+import type { EngineCapacity } from "@/resources";
 import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
+import type {
+  CancelOutcome,
+  DeployCheck,
+  DeployCheckInput,
+  DeployOutcome,
+  DeployRequest,
+} from "./deploy";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
@@ -33,6 +41,7 @@ import {
 } from "./simulated-accounts";
 import { SimulatedAgentUpdates } from "./simulated-agent-update";
 import { SimulatedAudit } from "./simulated-audit";
+import { SimulatedDeploys } from "./simulated-deploy";
 import { SimulatedDevices } from "./simulated-devices";
 import { SimulatedLogs } from "./simulated-logs";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
@@ -214,6 +223,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly serviceOps: SimulatedServiceOps;
   /** Les journaux des services simulés (HRT-67) : pilotables (`logs.seed`, `push`, `flood`, `interrupt`, `end`…). */
   readonly logs = new SimulatedLogs();
+  /** Déployer une image (HRT-69) : l'agent simulé juge comme le vrai ; la suite est pilotée (`deploys.progress`, `toStep`, `succeed`, `fail`). */
+  readonly deploys: SimulatedDeploys;
 
   constructor(options: SimulatedOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -246,6 +257,7 @@ export class SimulatedLinkBridge implements LinkBridge {
       (id, key, busy) => this.services.setBusy(id, key, busy),
       this.now,
     );
+    this.deploys = new SimulatedDeploys(this.services, this.serviceOps, this.now);
     this.agentUpdates = new SimulatedAgentUpdates({
       now: this.now,
       publishLink: (id, state) => this.publish(id, state),
@@ -481,6 +493,98 @@ export class SimulatedLinkBridge implements LinkBridge {
       update: "h_minecraft",
       wait: "h_robot",
     });
+  }
+
+  // --- Déployer une image (HRT-69) ---
+
+  async checkDeployment(serverId: string, input: DeployCheckInput): Promise<DeployCheck> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("deploy check");
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    // Le moteur doit répondre (503 `ENGINE_UNAVAILABLE`), et la consultation peut échouer pour un test.
+    if (this.services.engineState(serverId) !== "ready" || this.deploys.failCheck) {
+      throw this.fail({ kind: "unreachable" });
+    }
+    return this.deploys.check(serverId, input);
+  }
+
+  async deployService(
+    serverId: string,
+    request: DeployRequest,
+    adminPassword: string | null,
+  ): Promise<DeployOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("deploy");
+    // Les contrôles dans l'ordre de l'agent : droit, confirmation (jamais couverte par l'élévation), moteur, demande.
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    const confirmation = this.reauth.confirm(
+      serverId,
+      "service_deploy",
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    const engine = this.services.engineState(serverId);
+    if (engine !== "ready") {
+      return { kind: "refused", refusal: { kind: "engine_unavailable", engine } };
+    }
+    const by = server.username ?? "marie";
+    const accept = () => this.deploys.accept(serverId, request, by);
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) accept();
+      this.publish(serverId, "reconnecting");
+      const opId = "sim-op-" + this.nextOperation++;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return accept();
+  }
+
+  async cancelServiceOperation(
+    serverId: string,
+    opId: string,
+    adminPassword: string | null,
+  ): Promise<CancelOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("service operation cancel");
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    // Annuler est couvert par l'élévation de cinq minutes : sous le délai, aucun mot de passe.
+    const confirmation = this.reauth.confirm(
+      serverId,
+      "operation_cancel",
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    return this.deploys.cancel(serverId, opId);
+  }
+
+  async readEngineCapacity(serverId: string): Promise<EngineCapacity | null> {
+    this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("engine capacity");
+    return this.deploys.capacity(serverId);
   }
 
   async recheckEngine(serverId: string): Promise<EngineInfo> {

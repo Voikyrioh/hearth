@@ -99,6 +99,8 @@
   --soon-min-height: 320px;
   --dialog-width: 440px;
   --form-dialog-width: 480px;
+  /* Récapitulatif d'un déploiement (HRT-69) : une fenêtre large qui défile, titre et boutons collants. */
+  --wide-dialog-width: 640px;
   --notes-max-height: 320px;
   --toast-width: 340px;
   --tooltip-max: 260px;

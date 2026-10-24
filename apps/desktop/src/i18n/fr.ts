@@ -403,6 +403,7 @@ export const fr = {
   pages: {
     dashboard: "Tableau de bord",
     services: "Services",
+    deployService: "Déployer un service",
     accounts: "Comptes",
     audit: "Journal d'activité",
     security: "Sécurité",
@@ -976,8 +977,7 @@ export const fr = {
     adopted: "Adopté",
     externalHelp: "Lancé en dehors de Hearth. Hearth le suit mais ne l'a pas créé.",
     otherHelp: "Services en pause, ou dans un état que Hearth ne sait pas nommer.",
-    emptyText:
-      "Hearth affiche ici les services qu'il a créés ou que vous lui avez confiés. Installer un service depuis Hearth arrive bientôt.",
+    emptyText: "Hearth affiche ici les services qu'il a créés ou que vous lui avez confiés.",
     openRow: "Ouvrir le détail de {name}",
   },
   // Le détail d'un service (HRT-63, BR-SVC-007 à 009, 016, 023, 027, 028). Textes de la spec `voir-les-services` et du
@@ -1036,6 +1036,8 @@ export const fr = {
     steps: {
       check: "Vérification",
       pull: "Récupération de l'image",
+      create: "Création du service",
+      watch: "Vérification du démarrage",
       stop: "Arrêt du service",
       stopOld: "Arrêt de l'ancien service",
       recreate: "Recréation",
@@ -1419,6 +1421,252 @@ export const fr = {
     belowRecommended: "Sous la mémoire recommandée : le serveur peut ralentir ou s'arrêter.",
     noCapacity:
       "Hearth n'a pas pu lire les limites de ce serveur. Le service ne peut pas être envoyé sans elles.",
+  },
+  // Déployer une image (HRT-69, BR-DEPLOY-001 à 009, 014 à 016, 020, 027 à 031, 033). Textes de la spec
+  // `deployer-image` et du design du lot 1, mis au vouvoiement ; les autres sont marqués « hors spec ». Le moteur de
+  // conteneurs, l'image, le registre : aucun nom interne n'est dit.
+  deploy: {
+    open: "Déployer un service",
+    pageTitle: "Déployer un service",
+    close: "Fermer",
+    backToList: "Retour à la liste",
+    formLabel: "Formulaire de déploiement",
+    counter: "{n} sur {max}",
+    limitReached: "La limite est atteinte.",
+    // Pourquoi le bouton « Déployer un service » est inactif (BR-ENGINE-014, BR-GRANT-014).
+    engineStopped: "Le déploiement est indisponible : le moteur de conteneurs est arrêté.",
+    engineDenied:
+      "Le déploiement est indisponible : l'agent n'a pas le droit d'utiliser le moteur.",
+    engineUnresponsive: "Le déploiement est indisponible : le moteur de conteneurs ne répond pas.",
+    engineNotReady:
+      "Le déploiement est indisponible tant que le moteur de conteneurs n'est pas prêt.",
+    fixFields: "Corrigez les champs signalés pour continuer.",
+    // Hors spec : le formulaire est vide, aucun champ n'est encore signalé.
+    fillRequired: "Renseignez le nom et l'image pour continuer.",
+    goToField: "Aller au premier champ à corriger",
+    // Hors spec : les bornes de la machine ne sont pas encore lues.
+    capacityPending: "Les limites du serveur sont en cours de lecture.",
+    checking: "La vérification est en cours.",
+    indicative:
+      "Ces vérifications sont indicatives : le serveur les refait au lancement et a le dernier mot.",
+    // Section Général
+    general: "Général",
+    nameLabel: "Nom du service",
+    namePlaceholder: "mon-service",
+    nameHelp:
+      "Lettres, chiffres, tirets et points. Ce nom ne pourra pas être réutilisé par un autre service.",
+    nameRequired: "Le nom est requis",
+    nameTooShort: "Le nom doit faire au moins 2 caractères",
+    nameTooLong: "Le nom ne peut pas dépasser 63 caractères",
+    nameFirst: "Le nom doit commencer par une lettre ou un chiffre",
+    nameChars: "Le nom ne peut contenir que lettres, chiffres, tirets et points",
+    nameTaken: "Ce nom est déjà pris",
+    nameBeingDeleted:
+      "Ce service est en cours de suppression. Attendez la fin de l'effacement de ses données.",
+    imageLabel: "Image",
+    imagePlaceholder: "registre/organisation/nom (le registre et l'organisation sont facultatifs)",
+    imageRequired: "L'image est requise",
+    imageFormat: "Le nom de l'image n'est pas valide",
+    imageTooLong: "Le nom de l'image ne peut pas dépasser 255 caractères",
+    imageDigest: "Les identifiants d'empreinte (@sha256) ne sont pas pris en charge pour l'instant",
+    imageMoved: "La version a été déplacée dans le champ Version.",
+    tagLabel: "Version",
+    tagPlaceholder: "latest",
+    tagFormat:
+      "La version n'est pas valide (lettres, chiffres, points, tirets et soulignés, 128 caractères au plus)",
+    tagConflict:
+      "La version est écrite deux fois, avec deux valeurs différentes. Gardez-en une seule.",
+    tagLatest:
+      "« latest » peut changer d'un jour à l'autre. Choisissez une version précise pour un résultat stable.",
+    // Variables d'environnement
+    envTitle: "Variables d'environnement",
+    envVisible:
+      "Les valeurs sont visibles par les comptes qui peuvent gérer les services de ce serveur, et par toute personne qui a accès au moteur sur la machine.",
+    envNameLabel: "Nom de la variable",
+    envValueLabel: "Valeur",
+    envShow: "Afficher la valeur",
+    envHide: "Masquer la valeur",
+    envRemove: "Retirer la variable {n}",
+    envAdd: "Ajouter une variable",
+    envNameRequired: "Le nom de la variable est requis",
+    envNameFormat:
+      "Le nom de la variable ne peut contenir que lettres, chiffres et soulignés, et ne peut pas commencer par un chiffre",
+    envNameTooLong: "Le nom de la variable est trop long (255 caractères au plus)",
+    envNameDuplicate: "Cette variable est déjà définie",
+    envValueTooLong: "La valeur ne peut pas dépasser 8 192 caractères",
+    envValueMultiline: "La valeur doit tenir sur une seule ligne",
+    envTooMany: "Vous ne pouvez pas ajouter plus de 100 variables",
+    // Ports
+    portsTitle: "Ports",
+    hostPortLabel: "Port du serveur",
+    containerPortLabel: "Port du service",
+    protocolLabel: "Protocole",
+    portRemove: "Retirer la correspondance de ports {n}",
+    portAdd: "Ajouter un port",
+    portRequired: "Le port du serveur est requis",
+    portInteger: "Le port doit être un nombre entier",
+    portRange: "Le port doit être compris entre 1 et 65535",
+    containerPortRequired: "Le port du service est requis",
+    portDuplicate: "Ce port est déjà utilisé plus haut dans le formulaire",
+    portAgent: "Ce port est utilisé par Hearth lui-même.",
+    portService: "Ce port est pris par le service « {name} »",
+    portUnmanaged: "Ce port est tenu par un conteneur créé hors de Hearth.",
+    portProgram: "Ce port est occupé sur le serveur",
+    portProgramBy: "Ce port est occupé sur le serveur par « {program} »",
+    portReserved:
+      "Ce port est réservé par le service arrêté « {name} ». Vous pouvez continuer, mais ce service ne pourra pas démarrer tant que le vôtre tourne.",
+    portReservedAnon:
+      "Ce port est réservé par un service arrêté. Vous pouvez continuer, mais ce service ne pourra pas démarrer tant que le vôtre tourne.",
+    portPrivileged:
+      "Les ports sous 1024 sont réservés aux programmes du système : vérifiez que c'est voulu.",
+    portSuggested: "Le port libre le plus proche est le {port}.",
+    portUseSuggested: "Utiliser le port {port}",
+    portChecking: "Le port est en cours de vérification…",
+    portToConfirm: "Vous devrez le confirmer au lancement",
+    portExposed: "Ce port sera accessible à tout appareil qui peut joindre votre serveur.",
+    // Commande
+    commandTitle: "Commande",
+    commandLabel: "Commande de lancement",
+    commandPlaceholder: "Laissez vide pour utiliser la commande de l'image",
+    commandSecret:
+      "Ne mettez pas de secret dans la commande : elle est visible de tous les comptes. Utilisez les variables.",
+    commandTooLong: "La commande est trop longue (4 096 caractères au plus)",
+    commandQuote: "Les guillemets de la commande ne sont pas fermés",
+    // Hors spec : l'agent refuse un caractère de contrôle, trop d'arguments ou un argument trop long.
+    commandControl: "La commande contient un caractère que le serveur refuse",
+    commandArgs: "La commande a trop d'arguments, ou l'un d'eux est trop long",
+    // Ressources (BR-DEPLOY-038, BR-RES-037)
+    resourcesTitle: "Ressources",
+    // Pied du formulaire
+    submit: "Déployer",
+    // Revalidation au clic (BR-DEPLOY-032)
+    refusedPort: "Le port {port} vient d'être pris par {occupant}. Rien n'a été créé.",
+    occupantUnmanaged: "un conteneur créé hors de Hearth",
+    occupantProgram: "un programme du serveur",
+    occupantService: "le service « {name} »",
+    occupantUnknown: "un autre programme",
+    refusedField: "Le serveur a refusé {field}. Rien n'a été créé.",
+    refusedLimits: "Les limites de mémoire et de processeur sont obligatoires. Rien n'a été créé.",
+    refusedSetting: "Ce réglage n'est pas permis pour un service créé par Hearth.",
+    refusedLimit:
+      "Deux déploiements sont déjà en cours sur ce serveur. Attendez la fin de l'un d'eux.",
+    refusedEngine: "Le moteur de conteneurs n'est pas accessible ({state}). Rien n'a été créé.",
+    refusedEngineBare: "Le moteur de conteneurs n'est pas accessible. Rien n'a été créé.",
+    refusedOther: "Le serveur a refusé le déploiement. Rien n'a été créé.",
+    refusedBusy: "Une autre confirmation est en cours. Réessayez dans un instant.",
+    fieldName: "le nom",
+    fieldImage: "l'image",
+    fieldTag: "la version",
+    fieldEnv: "les variables",
+    fieldPorts: "les ports",
+    fieldMounts: "les dossiers",
+    fieldCommand: "la commande",
+    fieldResources: "les ressources",
+    // Abandon de saisie (BR-DEPLOY-029)
+    abandonTitle: "Abandonner votre saisie ?",
+    abandonText: "Ce que vous avez saisi sera effacé.",
+    abandon: "Abandonner",
+    keepTyping: "Continuer la saisie",
+    // Récapitulatif (BR-DEPLOY-015)
+    summaryTitle: "Vérifiez avant de lancer",
+    summaryName: "Nom",
+    summaryImage: "Image et version",
+    summaryDefault: "par défaut",
+    summaryPorts: "Ports",
+    summaryNoPorts: "Aucun port",
+    summaryPortRow: "{host} vers {container} ({protocol})",
+    summaryEnv: "Variables",
+    summaryEnvCount: "{n} variables",
+    summaryEnvCountOne: "1 variable",
+    summaryNoEnv: "Aucune variable",
+    summaryMask: "••••••••",
+    summaryCommand: "Commande",
+    summaryCommandCustom: "Commande personnalisée",
+    summaryCommandImage: "Commande de l'image",
+    summaryRestart: "Redémarrage",
+    restartText:
+      "Le service redémarre tout seul après un redémarrage du serveur, sauf si vous l'avez arrêté.",
+    summaryResources: "Ressources",
+    summaryResourcesText: "Le service reçoit {memory} de mémoire et {cpu} de processeur.",
+    attentionTitle: "Points d'attention",
+    attentionReserved: "Continuer malgré le port réservé",
+    attentionDisk: "Continuer malgré le manque de place",
+    lowDisk:
+      "Il reste {space} libres sur le disque du serveur. Une image peut prendre plusieurs gigaoctets : la récupération échoue si le disque se remplit.",
+    lowDiskUnknown:
+      "Le serveur manque de place pour récupérer l'image. Une image peut prendre plusieurs gigaoctets : la récupération échoue si le disque se remplit.",
+    imagePresent: "L'image est déjà présente sur le serveur : elle est utilisée telle quelle.",
+    imagePresentLatest: "Si une version plus récente existe, elle n'est pas récupérée.",
+    summaryAttentionNeeded: "Validez les points d'attention pour continuer.",
+    summaryEdit: "Modifier",
+    summarySubmit: "Déployer le service",
+    // Progression (BR-DEPLOY-016)
+    progressTitle: "Déploiement de {name}",
+    progressSteps: "Étapes du déploiement",
+    stepDone: "faite",
+    stepNow: "en cours",
+    stepLater: "à venir",
+    cancel: "Annuler le déploiement",
+    keep: "Garder le déploiement",
+    cancelTitle: "Annuler le déploiement de {name} ?",
+    background: "Continuer en arrière-plan",
+    tooLate: "Il est trop tard pour annuler : le service est en cours de création.",
+    cancelling: "L'annulation est en cours…",
+    cancelled: "Le déploiement a été annulé et rien n'a été créé.",
+    cancelNotFound: "Ce déploiement n'existe plus.",
+    cancelNotCancellable: "Ce déploiement ne peut plus être annulé.",
+    cancelChanged:
+      "Le déploiement a changé pendant votre demande. Relisez son état, puis réessayez.",
+    cancelOther: "L'annulation n'a pas pu être prise en compte.",
+    unknownResult: "Le résultat de cette action n'est pas connu.",
+    unknownAfter:
+      "Le lien avec le serveur s'est coupé avant sa réponse. L'issue du déploiement sera annoncée dès que le lien reviendra.",
+    modify: "Modifier",
+    seeLogs: "Voir les journaux",
+    success: "Le service {name} est en marche.",
+    // Échecs : aucun service n'est créé (BR-DEPLOY-017, 019, 034)
+    failImageNotFound: "Cette image est introuvable : vérifiez son nom.",
+    failTagNotFound: "Cette version n'existe pas pour cette image.",
+    failPrivate:
+      "Cette image est privée ou n'existe pas. Les images privées ne sont pas prises en charge pour l'instant.",
+    failRegistry:
+      "Le serveur n'a pas pu récupérer l'image : il ne joint pas le registre. Vérifiez sa connexion à Internet.",
+    failRateLimited: "Le registre limite les téléchargements anonymes. Réessayez plus tard.",
+    failPlatform: "Cette image n'existe pas pour l'architecture de votre serveur.",
+    failDisk: "Le disque du serveur est plein : l'image n'a pas pu être récupérée.",
+    failName: "Ce nom est déjà pris. Rien n'a été créé.",
+    failPort: "Un port demandé vient d'être pris sur le serveur. Rien n'a été créé.",
+    failEngineRefused: "Le moteur a refusé de créer le service. Rien n'a été créé.",
+    failEngineUnavailable: "Le moteur de conteneurs n'est pas accessible. Rien n'a été créé.",
+    failTimeout:
+      "La récupération de l'image prend trop de temps et a été arrêtée. Rien n'a été créé.",
+    failOther: "Le déploiement a échoué. Rien n'a été créé.",
+    // La même cause, en un fragment de phrase (« Le déploiement de {nom} a échoué : {cause}. »)
+    short: {
+      imageNotFound: "image introuvable",
+      tagNotFound: "version introuvable",
+      private: "image privée ou introuvable",
+      registry: "registre injoignable",
+      rateLimited: "limite du registre atteinte",
+      platform: "architecture incompatible",
+      disk: "disque plein",
+      name: "nom déjà pris",
+      port: "port déjà pris",
+      engineRefused: "refusé par le moteur",
+      engineUnavailable: "moteur inaccessible",
+      timeout: "délai dépassé",
+      other: "cause inconnue",
+    },
+    failedBackground: "Le déploiement de {name} a échoué : {cause}.",
+    interrupted:
+      "Le résultat du déploiement de {name} n'est pas connu. Vérifiez l'état du service dans la liste.",
+    // Après le lancement : le service est conservé (BR-DEPLOY-019, 020)
+    crashed: "Le service {name} s'est arrêté juste après son démarrage ({code}).",
+    endedAtOnce:
+      "Le service {name} s'est terminé juste après son démarrage (code 0). Ce programme n'est peut-être pas fait pour tourner en continu.",
+    loops:
+      "Le service {name} s'arrête dès qu'il démarre et le moteur le relance sans cesse ({code}). Pour arrêter ces relances, arrêtez le service.",
+    crashedBare: "Le service {name} s'est arrêté juste après son démarrage.",
   },
   rights: {
     tag: "Peut gérer les services",

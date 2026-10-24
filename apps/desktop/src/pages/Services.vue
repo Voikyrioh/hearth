@@ -5,6 +5,7 @@ import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
 import Callout from "@/components/molecules/Callout.vue";
+import DeployButton from "@/components/molecules/DeployButton.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import ServiceRightReason from "@/components/molecules/ServiceRightReason.vue";
 import UnreadableNote from "@/components/molecules/UnreadableNote.vue";
@@ -19,6 +20,7 @@ import { useNow } from "@/composables/useNow";
 import { usePageData } from "@/composables/usePageData";
 import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
+import { deployDoor } from "@/deploy/availability";
 import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
 import { getLinkBridge, type ServiceInfo } from "@/link";
@@ -191,6 +193,27 @@ const opened = computed(() =>
 );
 const engineReady = computed(() => engine.value?.state === "ready");
 
+/**
+ * Déployer une image (HRT-69, BR-DEPLOY-001, 027) : le bouton est absent quand le moteur n'est pas utilisable, visible
+ * et inactif avec sa raison sinon. Il ouvre le formulaire en page ; la saisie n'est jamais dans l'adresse.
+ */
+const door = computed(() =>
+  deployDoor({ engine: engine.value?.state ?? null, gate: rights.gate.value }),
+);
+/** Liste vide : le bouton est celui de l'état vide, il n'y en a qu'un (un seul bouton principal par vue). */
+const listEmpty = computed(() => list.value.kind === "empty");
+/** La barre cède sa place aux journaux, qui ont besoin de toute la hauteur (design, écran D). */
+const barShown = computed(
+  () =>
+    door.value.kind !== "hidden" &&
+    !listEmpty.value &&
+    shown.value.kind !== "loading" &&
+    !(opened.value && tab.value === "logs"),
+);
+function openDeploy() {
+  if (server.value) void router.push({ name: "services-deploy", params: { id: server.value.id } });
+}
+
 /** Les opérations en cours de CE serveur, la plus ancienne d'abord (visibles de tous les comptes, BR-SVC-029). */
 const running = computed(() => (server.value ? operations.of(server.value.id) : []));
 /** Qui a lancé l'opération : l'indication de la liste des services (`busy`), jamais deviné. */
@@ -336,6 +359,15 @@ async function openDocs() {
         <ServiceRightReason :gate="rights.gate.value" :id="rights.reasonId" @retry="rights.retry()" />
       </Callout>
 
+      <!-- Déployer un service : seul bouton principal de la section (BR-DEPLOY-001) -->
+      <div v-if="barShown" class="svc__bar">
+        <DeployButton
+          :door="door"
+          :rights-reason-id="rightsNotice ? rights.reasonId : undefined"
+          @click="openDeploy"
+        />
+      </div>
+
       <!-- Première détection : des lignes esquissées, jamais une fausse liste -->
       <div
         v-if="shown.kind === 'loading'"
@@ -417,7 +449,15 @@ async function openDocs() {
                 :text="t('services.emptyText')"
                 heading="h2"
                 data-services-empty
-              />
+              >
+                <template v-if="door.kind !== 'hidden'" #action>
+                  <DeployButton
+                    :door="door"
+                    :rights-reason-id="rightsNotice ? rights.reasonId : undefined"
+                    @click="openDeploy"
+                  />
+                </template>
+              </EmptyState>
             </div>
             <div v-if="opened && server" class="svc__detail">
               <ServiceDetail
@@ -448,7 +488,15 @@ async function openDocs() {
           :text="t('services.emptyText')"
           heading="h2"
           data-services-empty
-        />
+        >
+          <template v-if="door.kind !== 'hidden'" #action>
+            <DeployButton
+              :door="door"
+              :rights-reason-id="rightsNotice ? rights.reasonId : undefined"
+              @click="openDeploy"
+            />
+          </template>
+        </EmptyState>
 
         <UnreadableNote :count="entry?.unreadable ?? 0" />
       </template>
@@ -490,6 +538,11 @@ async function openDocs() {
   align-self: flex-start;
   width: 100%;
   max-width: var(--panel-max);
+}
+
+.svc__bar {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .svc__link {

@@ -623,6 +623,10 @@ const LOCAL_ENUMS: &[(&str, &str)] = &[
         "commande de la WebView (état annoncé, renvoyé à la coquille) ; lu de l'agent par `hearth_proto::TrustLevel`",
     ),
     (
+        "service_ops/deploy_dto.rs::DeployProtocolDto",
+        "commande de la WebView (protocole d'un port du formulaire) ; lu de l'agent par `hearth_proto::DeployProtocol`",
+    ),
+    (
         "service_ops/dto.rs::OperationChoiceDto",
         "commande de la WebView (choix de la décision) ; lu de l'agent par `hearth_proto::OperationChoice`",
     ),

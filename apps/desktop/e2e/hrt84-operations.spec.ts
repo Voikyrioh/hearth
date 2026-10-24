@@ -188,8 +188,8 @@ test("le retour du lien : l'opération en cours reprend sans message, l'issue se
   await sim(page, (s) => s.publish("forge", "connected"));
   await expect(rows(page)).toHaveCount(2);
   const toasts = page.getByLabel("Notifications");
-  await expect(toasts).toContainText("Le déploiement de terraria a réussi.");
-  await expect(toasts.getByText("Le déploiement de terraria a réussi.")).toHaveCount(1);
+  await expect(toasts).toContainText("Le service terraria est en marche.");
+  await expect(toasts.getByText("Le service terraria est en marche.")).toHaveCount(1);
   await shoot(page, page, "hrt84-retour-du-lien");
 });
 

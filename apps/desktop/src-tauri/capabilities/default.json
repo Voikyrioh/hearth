@@ -72,6 +72,10 @@
     "allow-service-start",
     "allow-service-stop",
     "allow-service-restart",
+    "allow-deploy-check",
+    "allow-deploy-service",
+    "allow-cancel-service-operation",
+    "allow-read-engine-capacity",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

@@ -108,10 +108,37 @@ impl LinkManager {
         token: &crate::domain::secret::Secret,
         path: String,
     ) -> Result<Value, LinkError> {
+        self.typed_read(target, token, Method::Get, path, None)
+            .await
+    }
+
+    /// Une CONSULTATION par `POST` (un `POST` qui ne modifie rien, sans suivi ni clé d'opération, comme
+    /// `POST /deployments/check`) : le corps ne porte aucun secret. Un acte qui modifie passe par `execute_act`.
+    pub(super) async fn typed_post(
+        &self,
+        target: &Target,
+        token: &crate::domain::secret::Secret,
+        path: String,
+        body: Value,
+    ) -> Result<Value, LinkError> {
+        self.typed_read(target, token, Method::Post, path, Some(body))
+            .await
+    }
+
+    /// Le corps commun de `typed_get` et `typed_post`. PRIVÉ : la méthode reste ouverte ici, jamais aux appelants
+    /// (un `Delete` ne doit pas pouvoir partir sans clé d'opération ni confirmation).
+    async fn typed_read(
+        &self,
+        target: &Target,
+        token: &crate::domain::secret::Secret,
+        method: Method,
+        path: String,
+        body: Option<Value>,
+    ) -> Result<Value, LinkError> {
         let request = ApiRequest {
-            method: Method::Get,
+            method,
             path,
-            body: None,
+            body,
             idempotency_key: None,
         };
         let deps = &self.inner.deps;
