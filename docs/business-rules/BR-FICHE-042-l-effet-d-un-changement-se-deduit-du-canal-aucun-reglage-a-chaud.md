@@ -18,11 +18,13 @@ L'effet est signé dans l'acte `GameSettingsSave` (`0x1E`) : l'agent le recalcul
 ## Application (code)
 - `crates/hearth-agent/src/domain/catalog/settings_state.rs::{effect_of, Effect}`
 - `crates/hearth-agent/src/application/game_settings.rs::GameSettings::save`
+- Client (HRT-109) : `apps/desktop/src/settings/messages.ts::effectText` (les quatre mentions), `apps/desktop/src/settings/edits.ts::heaviestEffect`, `apps/desktop/src/components/organisms/GameSettingsTab.vue` (case « Redémarrer maintenant », décochée ; la page ouvre la confirmation de `service_restart`), `apps/desktop/src/stores/gameSettingsPending.ts` (repère « À appliquer »)
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_state.rs::the_effect_of_a_change_is_deduced_from_the_channel_never_declared`
 - `crates/hearth-agent/tests/game_settings_https.rs::a_setting_received_by_argument_asks_for_a_recreation_this_agent_cannot_do`
 - `crates/hearth-agent/tests/game_settings_https.rs::the_effect_the_client_signed_must_be_the_one_the_agent_deduces`
+- `apps/desktop/src/components/organisms/gameSettingsTab.test.ts::enregistrer (BR-FICHE-042, 048, 053)`
 
 ## Cas limites
 - Un enregistrement qui ne change aucun octet n'a aucun effet (`none`) et n'écrit rien.
@@ -33,3 +35,4 @@ L'effet est signé dans l'acte `GameSettingsSave` (`0x1E`) : l'agent le recalcul
 
 ## Historique
 - 2026-10-24 — création (HRT-108, réglages d'un serveur de jeu : lecture, enregistrement, écart, import).
+- 2026-10-24 — pointeurs du client (HRT-109).
