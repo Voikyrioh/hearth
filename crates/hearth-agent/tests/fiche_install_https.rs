@@ -416,6 +416,8 @@ async fn an_install_without_the_agreement_is_refused_even_from_a_modified_client
     assert_eq!(journal.len(), 1, "{journal:?}");
     assert_eq!(journal[0].0, "failed");
     assert_eq!(journal[0].2.as_deref(), Some("contrat non accepté"));
+    // L'entrée vise la fiche (id et version), jamais une réponse (BR-FICHE-032).
+    assert_eq!(journal[0].1.as_deref(), Some("fiche rich (version 3)"));
     b.agent.shutdown().await;
 }
 
@@ -530,6 +532,27 @@ async fn a_disk_below_the_need_is_refused_without_a_box() {
         journal[0].2.as_deref(),
         Some("espace insuffisant pour l'installation")
     );
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn either_disk_below_the_measured_need_refuses_the_install() {
+    // Le besoin est jugé sur le disque de la racine de données ET sur celui des images (BR-FICHE-023).
+    let measured = rich_with(|text| {
+        text.replace(
+            "disk = { install_bytes = 1073741824, evidence = { publisher = \"https://example.org/size\" } }",
+            "disk = { install_bytes = 214748364800, evidence = \"measured\" }",
+        )
+    });
+    let b = bench(measured, true).await;
+    // Les images ont de la place (500 Gio par défaut) ; la racine de données n'en a pas assez.
+    b.free_space
+        .set_under(&b.env.dir.path().to_string_lossy(), 100 * GIB);
+    let reply = b.install(b.request("riche")).await;
+    assert_eq!(reply.status, 507, "{}", reply.text);
+    assert_eq!(code(&reply), "NO_SPACE");
+    assert_eq!(reply.body["error"]["details"]["free_bytes"], 100 * GIB);
+    b.assert_nothing_created().await;
     b.agent.shutdown().await;
 }
 

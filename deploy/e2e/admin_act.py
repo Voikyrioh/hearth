@@ -317,14 +317,7 @@ def deploy_params(spec):
         str(len(spec.get("env", []))).encode(),
         b"1" if command else b"0",
     ]
-    if fiche:
-        params += [
-            source["id"].encode(),
-            str(source["version"]).encode(),
-            source["digest"].encode(),
-            str(len(source.get("answers", []))).encode(),
-            b"1" if source.get("world_imported") else b"0",
-        ]
+    # La version, l'empreinte, les choix, le nombre de réponses et le monde repris sont dans l'empreinte (`deploy_digest`).
     return params
 
 

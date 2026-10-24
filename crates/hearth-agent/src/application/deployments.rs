@@ -439,6 +439,24 @@ impl Deployments {
         })
     }
 
+    /// L'espace libre qu'une installation depuis une fiche oppose à son besoin (BR-FICHE-023) : le disque de la
+    /// racine de données de Hearth ET celui où le moteur range ses images ; le plus petit des deux, car l'un OU
+    /// l'autre sous le besoin refuse. Un disque illisible n'est pas jugé (jamais lu comme « beaucoup de place »
+    /// ni comme « plein »).
+    async fn install_free_space(&self, info: Option<&EngineInfo>) -> Option<u64> {
+        let images = self.disk(info).await.map(|disk| disk.free_bytes);
+        let root = self.context.services_root.clone();
+        let free_space = self.free_space.clone();
+        let data = tokio::task::spawn_blocking(move || free_space.free_bytes(Path::new(&root)))
+            .await
+            .ok()
+            .and_then(Result::ok);
+        match (images, data) {
+            (Some(images), Some(data)) => Some(images.min(data)),
+            (images, data) => images.or(data),
+        }
+    }
+
     fn ready(&self) -> Result<(), DeployError> {
         let state = self.registry.engine_state();
         if state == EngineState::Ready {
@@ -635,7 +653,7 @@ impl Deployments {
         let (machine, info) = self.machine().await;
         // Une fiche est traduite puis jugée comme une image à la main ; sinon le formulaire (BR-FICHE-013).
         let (valid, files, install) = if spec.source.is_some() {
-            let free = self.disk(info.as_ref()).await.map(|disk| disk.free_bytes);
+            let free = self.install_free_space(info.as_ref()).await;
             let prepared = self.installer.prepare(&spec, &actor, machine, free)?;
             (prepared.valid, prepared.files, Some(prepared.audit))
         } else {
@@ -1101,7 +1119,7 @@ impl Deployments {
                 uid: file.owner_uid,
                 gid: file.owner_gid,
                 mode: file.mode,
-                bytes: file.content.expose().as_bytes().to_vec(),
+                bytes: zeroize::Zeroizing::new(file.content.expose().as_bytes().to_vec()),
             })
             .collect();
         let result = tokio::task::spawn_blocking(move || -> Result<(), ()> {
@@ -1114,7 +1132,7 @@ impl Deployments {
                 let rel = RelPath::parse(&source).map_err(|_| ())?;
                 root.mkdir(&rel, perms).map_err(|_| ())?;
             }
-            for mut file in files {
+            for file in files {
                 let rel =
                     RelPath::parse(&format!("{}/{}", file.folder, file.path)).map_err(|_| ())?;
                 // Les dossiers intermédiaires d'un chemin imbriqué, créés comme les autres.
@@ -1127,9 +1145,8 @@ impl Deployments {
                 let file_perms = Ownership::new(file.uid, file.gid)
                     .and_then(|owner| Perms::new(owner, file.mode))
                     .ok_or(())?;
-                let written = root.write_atomic(&rel, &file.bytes, file_perms);
-                zeroize::Zeroize::zeroize(&mut file.bytes);
-                written.map_err(|_| ())?;
+                root.write_atomic(&rel, &file.bytes, file_perms)
+                    .map_err(|_| ())?;
             }
             Ok(())
         })
@@ -1311,7 +1328,8 @@ struct ProducedBytes {
     uid: u32,
     gid: u32,
     mode: u32,
-    bytes: Vec<u8>,
+    /// Effacés de la mémoire quand le fichier est écrit ou abandonné, quelle que soit l'issue.
+    bytes: zeroize::Zeroizing<Vec<u8>>,
 }
 
 /// Le chemin d'un dossier dans le service, normalisé comme le domaine.

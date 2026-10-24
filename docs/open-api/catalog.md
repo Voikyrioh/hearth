@@ -18,7 +18,7 @@ Tout compte authentifié (niveau `Authenticated`). Non journalisée.
 }
 ```
 
-- `fiches` : les fiches que CET agent propose. Un agent de publication ne propose que les fiches `published` ; une construction d'essai (variable de construction `HEARTH_PREVIEW_FICHES`, refusée par le flux de publication) propose aussi les `preview`. Au jour de HRT-101, aucune fiche n'est `published` : la liste d'un agent publié est vide.
+- `fiches` : les fiches que CET agent propose. Un agent de publication ne propose que les fiches `published` ; une construction d'essai (variable de construction `HEARTH_PREVIEW_FICHES`, refusée par `cargo xtask agent --release`) propose aussi les `preview`. Au jour de HRT-101, aucune fiche n'est `published` : la liste d'un agent publié est vide.
 - `refused` : les fiches embarquées que le chargeur a écartées (dossier et invariant violé, jamais un contenu). Chacune est consignée une fois au démarrage dans le journal d'activité (`catalog.fiche.refused`, auteur : le système).
 - `status` : `published`, `preview` ou `unknown` (valeur d'une version plus récente). `installable: false` : la fiche est listée mais ne s'installe pas sur ce serveur.
 - Un élément illisible d'une version plus récente est écarté et compté par le client (`Items::unreadable`).

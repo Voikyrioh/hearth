@@ -231,19 +231,6 @@ pub fn check_keys(read: &dyn Fn(&str) -> Option<String>) -> Result<(), String> {
     Ok(())
 }
 
-/// Aucune fiche d'essai dans une construction de publication (HRT-101, ADR-0050) : la variable
-/// `HEARTH_PREVIEW_FICHES` ouvre le catalogue aux fiches `preview` et ne sert qu'aux constructions
-/// d'essai. Définie (même vide), la publication est refusée.
-pub fn check_preview_gate(value: Option<&std::ffi::OsStr>) -> Result<(), String> {
-    match value {
-        None => Ok(()),
-        Some(_) => Err(
-            "HEARTH_PREVIEW_FICHES est définie : une construction de publication n'embarque jamais              les fiches d'essai. Retirez la variable de l'environnement."
-                .to_owned(),
-        ),
-    }
-}
-
 // --- 5. HEAD ------------------------------------------------------------------------------------
 
 /// Le dépôt extrait est le commit lancé (`github.sha`) : tout le flux construit, signe et étiquette
@@ -592,14 +579,6 @@ pub fn run(args: &[String]) -> Result<(), RunError> {
         token: env("GH_TOKEN"),
         versions_only,
     };
-    let gate = std::env::var_os("HEARTH_PREVIEW_FICHES");
-    if let Err(message) = check_preview_gate(gate.as_deref()) {
-        return Err(if ci::fail(&message) {
-            RunError::Announced
-        } else {
-            RunError::Failed(message)
-        });
-    }
     let root = crate::client_release::root().map_err(RunError::Failed)?;
     let read = |path: &str| std::fs::read_to_string(root.join(path)).ok();
     match preflight(&System::new(), &root, &read, &inputs) {
@@ -1016,15 +995,6 @@ mod tests {
             let error =
                 check_keys(&Repo::at("0.3.1").with(path, "n'importe quoi").read()).unwrap_err();
             assert!(error.contains("clé publique minisign"), "{error}");
-        }
-    }
-
-    #[test]
-    fn a_publication_refuses_the_trial_fiches_variable() {
-        assert!(check_preview_gate(None).is_ok());
-        for value in ["1", ""] {
-            let error = check_preview_gate(Some(std::ffi::OsStr::new(value))).unwrap_err();
-            assert!(error.contains("HEARTH_PREVIEW_FICHES"), "{error}");
         }
     }
 

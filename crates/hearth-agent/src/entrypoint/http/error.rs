@@ -31,6 +31,12 @@ pub struct ErrorMark {
 #[derive(Debug, Clone, Copy)]
 pub struct OutcomeMark(pub crate::domain::audit::Outcome);
 
+/// Posé par une route sur sa réponse d'erreur quand l'entrée du journal d'activité doit viser autre chose que le
+/// motif de la route (HRT-101 : la fiche d'une installation refusée) ; la couche d'accès l'écrit à la place de la cible
+/// par défaut. Jamais une valeur secrète : c'est une `Target`, donc à champs fermés.
+#[derive(Debug, Clone)]
+pub struct TargetMark(pub crate::domain::audit::Target);
+
 /// Erreur d'API : toujours rendue au format `ErrorBody`, avec le statut du code.
 #[derive(Debug)]
 pub struct ApiError(pub ErrorBody);

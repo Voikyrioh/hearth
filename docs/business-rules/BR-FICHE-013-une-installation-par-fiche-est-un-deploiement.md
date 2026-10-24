@@ -23,9 +23,11 @@ La fiche, traduite en brouillon (`translate`), est jugée par le validateur du d
 - `crates/hearth-agent/src/domain/services/from_fiche.rs::a_request_without_memory_limit_is_refused`
 - `crates/hearth-agent/src/domain/catalog/tests_translate.rs::property_every_accepted_fiche_and_valid_answers_give_a_closed_description`
 - `crates/hearth-agent/src/domain/catalog/generate.rs::generated_secret_has_the_declared_length_and_alphabet_without_bias`
+- `crates/hearth-agent/tests/fiche_install_https.rs::a_fiche_install_creates_a_service_with_the_fiche_digest_the_pinned_image_and_a_0600_root_config_file`
+- `crates/hearth-agent/tests/fiche_install_secrets.rs::no_answer_value_nor_generated_secret_reaches_the_database_the_journal_the_traces_or_a_response`
 
 ## Cas limites
-- Le chemin HTTP (droit, acte, confirmation) arrive avec les étapes suivantes de HRT-101.
+- Le chemin HTTP (droit, acte confirmé, limites, ports, description durable, création) est celui de `POST /deployments` : voir `tests/fiche_install_https.rs`. Le disque jugé est celui des images ET celui de la racine de données (BR-FICHE-023).
 
 ## Règles liées
 - BR-FICHE-007, BR-FICHE-024, BR-DEPLOY-035, BR-DEPLOY-038

@@ -345,15 +345,39 @@ pub fn flatten_target(target: &str) -> Option<String> {
 
 /// Une demande jugée valable : la description durable à écrire, et ce que l'appelant doit encore savoir.
 #[derive(Debug)]
+// Le champ privé ferme la construction AUSSI dans la crate (`#[non_exhaustive]` ne la fermerait pas) : voulu.
+#[allow(clippy::manual_non_exhaustive)]
 pub struct ValidDeploy {
     pub body: SpecBody,
     pub secrets: SpecSecrets,
     pub accept: DeployAccept,
     /// Les ports demandés, pour les vérifier contre le serveur.
     pub ports: Vec<DeployPort>,
+    /// Champ privé : une `ValidDeploy` ne se construit nulle part ailleurs que par [`ValidDeploy::from_parts`], la
+    /// porte commune du formulaire et des fiches (HRT-101). Ses bornes sont donc toujours jugées.
+    _gate: (),
 }
 
 impl ValidDeploy {
+    /// La seule façon de produire une `ValidDeploy` : la description et ses secrets passent leurs bornes
+    /// (BR-EDIT-035). Le formulaire (`validate`) et une fiche (`from_fiche`) y arrivent tous deux.
+    pub fn from_parts(
+        body: SpecBody,
+        secrets: SpecSecrets,
+        accept: DeployAccept,
+        ports: Vec<DeployPort>,
+    ) -> Result<Self, SpecError> {
+        body.validate()?;
+        secrets.validate()?;
+        Ok(Self {
+            body,
+            secrets,
+            accept,
+            ports,
+            _gate: (),
+        })
+    }
+
     pub fn env_count(&self) -> usize {
         self.secrets.env.len()
     }
@@ -483,19 +507,12 @@ pub fn validate(spec: &DeploySpec, machine: Option<Machine>) -> Result<ValidDepl
         settings: SpecSettings::default(),
         fiche: None,
     };
-    body.validate().map_err(spec_refusal)?;
     let secrets = SpecSecrets {
         env,
         command,
         answers: Vec::new(),
     };
-    secrets.validate().map_err(spec_refusal)?;
-    Ok(ValidDeploy {
-        body,
-        secrets,
-        accept: spec.accept,
-        ports: spec.ports.clone(),
-    })
+    ValidDeploy::from_parts(body, secrets, spec.accept, spec.ports.clone()).map_err(spec_refusal)
 }
 
 /// Une borne de la description que les contrôles ci-dessus n'ont pas attrapée : refusée sur son champ.

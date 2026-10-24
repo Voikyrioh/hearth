@@ -216,7 +216,9 @@ impl FicheInstaller {
             TranslateError::UnknownVariant(_) => invalid("source.variant", "unknown"),
             TranslateError::PlatformUnavailable => invalid("source", "platform_unavailable"),
             TranslateError::PortRefused { .. } => invalid("source.ports", "refused"),
-            other => DeployError::Internal(format!("fiche non traduite : {other:?}")),
+            // Jamais `{error:?}` : une erreur de traduction peut porter un nom de variable de la fiche. Le message ne
+            // dit que la fiche, la trace de l'erreur interne est écrite par la route.
+            _ => DeployError::Internal(format!("fiche {} non traduite", fiche.id())),
         })?;
 
         // 7. Les limites sont obligatoires comme pour une image à la main.
@@ -290,7 +292,8 @@ impl FicheInstaller {
             use crate::domain::services::from_fiche::FromFicheError;
             match error {
                 FromFicheError::Name(found) => DeployError::Invalid(found),
-                other => DeployError::Internal(format!("fiche non jugée : {other}")),
+                // Le détail (un code `champ:raison`) n'est pas répété : le message ne dit que la fiche.
+                _ => DeployError::Internal(format!("fiche {} non jugée", fiche.id())),
             }
         })?;
 

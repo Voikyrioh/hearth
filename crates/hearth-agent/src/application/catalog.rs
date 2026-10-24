@@ -58,10 +58,7 @@ impl CatalogService {
 
     /// Un catalogue de ces fiches (tests).
     pub fn from_parts(fiches: Vec<Fiche>, refused: Vec<Refused>, include_preview: bool) -> Self {
-        let mut fiches: Vec<Fiche> = fiches
-            .into_iter()
-            .filter(|fiche| include_preview || fiche.file.status == Status::Published)
-            .collect();
+        let mut fiches = embedded::keep_offered(fiches, include_preview);
         fiches.sort_by(|a, b| a.id().cmp(b.id()));
         Self { fiches, refused }
     }
@@ -98,6 +95,12 @@ impl CatalogService {
                 ClientName::parse(&refused.dir),
                 ClientName::parse(refused.invariant),
             ) else {
+                // Ni le dossier ni l'invariant ne sont gardés ici : un dossier illisible n'a pas d'entrée, mais
+                // l'écart se voit (l'invariant est un code fixe, jamais une valeur).
+                tracing::warn!(
+                    invariant = refused.invariant,
+                    "fiche écartée non consignée : son dossier n'est pas un nom lisible"
+                );
                 continue;
             };
             sink.record(

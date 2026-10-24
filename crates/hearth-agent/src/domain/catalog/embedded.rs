@@ -43,23 +43,21 @@ pub fn load_all() -> (Vec<Fiche>, Vec<(&'static str, FicheRefusee)>) {
     (accepted, refused)
 }
 
-/// Les fiches que l'application a le droit de PROPOSER. Toute fiche est embarquée dans le binaire, `preview`
-/// comprise (la publication n'est pas bloquée par une fiche en cours de preuve), mais une fiche `preview` n'est
-/// proposée et installable que par une construction d'essai (`include_preview`, HRT-101, BR-FICHE-005) : les
+/// Ne garde que les fiches que l'application a le droit de PROPOSER. Toute fiche est embarquée dans le binaire,
+/// `preview` comprise (la publication n'est pas bloquée par une fiche en cours de preuve), mais une fiche `preview`
+/// n'est proposée et installable que par une construction d'essai (`include_preview`, HRT-101, BR-FICHE-002) : les
 /// fiches `published` seulement sinon. Fonction pure : la porte est un paramètre, jamais une lecture d'environnement.
-pub fn offered_with(include_preview: bool) -> Vec<Fiche> {
-    load_all()
-        .0
+/// C'est le SEUL endroit qui applique cette porte (`CatalogService` l'appelle, les tests aussi).
+pub fn keep_offered(fiches: Vec<Fiche>, include_preview: bool) -> Vec<Fiche> {
+    fiches
         .into_iter()
         .filter(|fiche| include_preview || fiche.file.status == Status::Published)
         .collect()
 }
 
-/// Les fiches proposées par CETTE construction : `published` seulement, plus les `preview` dans une
-/// construction d'essai (`HEARTH_PREVIEW_FICHES`, `build_info::PREVIEW_FICHES`). C'est la seule porte du
-/// catalogue vers l'application.
-pub fn offered() -> Vec<Fiche> {
-    offered_with(crate::build_info::PREVIEW_FICHES)
+/// Les fiches embarquées proposées par une construction qui a (ou n'a pas) la porte d'essai.
+pub fn offered_with(include_preview: bool) -> Vec<Fiche> {
+    keep_offered(load_all().0, include_preview)
 }
 
 #[cfg(test)]

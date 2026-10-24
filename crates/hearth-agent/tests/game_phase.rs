@@ -82,13 +82,13 @@ async fn a_game_is_ready_only_when_the_sign_appears_in_a_line_written_after_the_
         panic!("{ready:?}");
     };
     assert_eq!(at.unix_timestamp(), 13);
-    // Les lectures demandent les lignes depuis le lancement, sans suivre le journal.
+    // La première lecture part du lancement ; les suivantes reprennent à la dernière ligne lue (incrémental),
+    // et aucune ne suit le journal.
     let queries = engine.log_queries();
-    assert!(
-        queries
-            .iter()
-            .all(|q| q.since_ms == Some(10_000) && !q.follow)
-    );
+    assert_eq!(queries[0].since_ms, Some(10_000));
+    assert_eq!(queries[1].since_ms, Some(11_000), "après la ligne de 11 s");
+    assert_eq!(queries[2].since_ms, Some(12_000));
+    assert!(queries.iter().all(|q| !q.follow));
     // Une fois prêt, plus aucune lecture : la phase est connue.
     let reads = engine.log_read_count();
     assert_eq!(phases.refresh(&key()).await, Some(ready));

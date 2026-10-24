@@ -357,3 +357,75 @@ async fn no_answer_value_nor_generated_secret_reaches_the_database_the_journal_t
         );
     }
 }
+
+/// Une erreur de traduction qui porte un NOM de variable de la fiche (conflit entre une variable fixe et la clé d'un
+/// réglage) devient une erreur interne : ni la réponse ni les traces ne répètent ce nom (revue de HRT-101).
+#[tokio::test]
+async fn a_translation_error_carrying_a_variable_name_never_reaches_a_trace_or_a_response() {
+    const SENTINEL_NAME: &str = "SENTINEL_ENVNAME_71F3A9";
+    let traces = captured_traces();
+    let fiche_text = format!("{RICH_FICHE}\n[[env]]\nname = \"{SENTINEL_NAME}\"\nvalue = \"x\"\n");
+    let settings_text =
+        RICH_SETTINGS.replacen("key = \"MOTD\"", &format!("key = \"{SENTINEL_NAME}\""), 1);
+    let fiche = load(
+        Origin::Embedded,
+        fiche_text.as_bytes(),
+        settings_text.as_bytes(),
+    )
+    .expect("la fiche en conflit est valide pour le chargeur");
+
+    let env: Env = env().await;
+    let engine = Arc::new(FakeEngine::new());
+    engine.set_info(Some(EngineInfo {
+        cpus: 8,
+        memory_bytes: 16 * GIB,
+        storage_dir: Some("/var/lib/docker".into()),
+    }));
+    let mut parts = parts_supervised(
+        engine.clone(),
+        Arc::new(FakeSupervisor::new()),
+        fast_timings(),
+    );
+    parts.catalog.include_preview = true;
+    parts.catalog.service = Some(Arc::new(CatalogService::from_parts(
+        vec![fiche.clone()],
+        Vec::new(),
+        true,
+    )));
+    let agent = https::start_engined(&env, parts).await;
+    let ada = agent.actor(&env, "ada", Role::Admin).await;
+    env.grant_services("ada").await;
+    let body = json!({
+        "name": "en-conflit",
+        "resources": { "cpu_millis": 1000, "memory_bytes": 2 * GIB },
+        "source": {
+            "type": "fiche", "id": "rich", "version": fiche.file.version,
+            "digest": fiche.digest_hex(), "agreements": ["eula"]
+        }
+    });
+    let reply = agent
+        .confirmed(&ada, "POST", "/deployments", body)
+        .await
+        .send()
+        .await;
+    assert_eq!(reply.status, 500, "{}", reply.text);
+    assert!(!reply.text.contains(SENTINEL_NAME));
+    agent.flush_journal().await;
+    let journal: Vec<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT target, reason FROM audit_events")
+            .fetch_all(env.db.pool())
+            .await
+            .unwrap();
+    assert!(!format!("{journal:?}").contains(SENTINEL_NAME));
+    agent.shutdown().await;
+    let logged = traces.lock().unwrap().clone();
+    assert!(
+        contains(&logged, "déploiement refusé : erreur interne"),
+        "témoin : l'erreur interne est tracée, sans le nom"
+    );
+    assert!(
+        !contains(&logged, SENTINEL_NAME),
+        "un nom de variable dans une trace"
+    );
+    assert!(!contains(&all_bytes(env.dir.path()), SENTINEL_NAME));
+}

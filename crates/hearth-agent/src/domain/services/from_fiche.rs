@@ -251,8 +251,6 @@ pub fn body_and_secrets_from(
         settings: SpecSettings::default(),
         fiche: Some(fiche),
     };
-    body.validate().map_err(FromFicheError::Spec)?;
-
     let env = draft
         .env
         .iter()
@@ -268,17 +266,11 @@ pub fn body_and_secrets_from(
         command,
         answers: sealed_answers,
     };
-    secrets.validate().map_err(FromFicheError::Spec)?;
+    // La porte commune avec le formulaire : les bornes de la description et des secrets sont jugées là.
+    let valid = ValidDeploy::from_parts(body, secrets, inputs.accept, requested)
+        .map_err(FromFicheError::Spec)?;
 
-    Ok(FicheDeploy {
-        valid: ValidDeploy {
-            body,
-            secrets,
-            accept: inputs.accept,
-            ports: requested,
-        },
-        files,
-    })
+    Ok(FicheDeploy { valid, files })
 }
 
 // ---------------------------------------------------------------------------------------------------

@@ -25,7 +25,7 @@ use hearth_proto::headers;
 
 use tracing::Instrument;
 
-use super::error::{ErrorMark, OutcomeMark};
+use super::error::{ErrorMark, OutcomeMark, TargetMark};
 use super::{Access, ApiError, AppState, operations};
 use crate::application::sessions::CurrentSession;
 use crate::domain::accounts::AccountId;
@@ -384,6 +384,11 @@ pub async fn guard(State(guard): State<GuardState>, request: Request, next: Next
                 .and_then(failure_of),
         };
         if let Some(outcome) = outcome {
+            // Une route peut viser autre chose que son motif (la fiche d'une installation refusée).
+            let target = match response.extensions().get::<TargetMark>() {
+                Some(TargetMark(marked)) => marked.clone(),
+                None => target,
+            };
             guard.journal(&actor, target, outcome).await;
         }
     }

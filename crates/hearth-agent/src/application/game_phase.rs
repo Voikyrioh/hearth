@@ -4,6 +4,11 @@
 //! Les phases vivent **en mémoire** : jamais en base, jamais dans la description. Un redémarrage de l'agent les
 //! oublie, et le service retombe sur « Hearth ne peut pas savoir » : c'est vrai (l'agent n'a pas vu le signe).
 //!
+//! **État du branchement (HRT-101)** : `begin` est appelé au démarrage d'une installation (`Deployments`). `refresh`
+//! (vérification périodique), la lecture de la phase par le client (champ `game` de `ServiceItem`) et `forget` (à la
+//! suppression d'un service créé par Hearth, HRT-85) n'ont pas encore d'appelant : aucune route de suppression ni
+//! projection dans la liste n'existe dans `main`. Suivi : ticket « phases d'un serveur de jeu : projection et oubli ».
+//!
 //! Le signe « prêt » est cherché dans les seules lignes du journal du jeu écrites à partir du lancement
 //! (`domain::catalog::readiness`), comme une sous-chaîne littérale. Le texte d'une ligne est du contenu sensible :
 //! il n'est ni tracé, ni gardé, ni mis dans une erreur.
@@ -19,7 +24,7 @@ use super::ports::{Clock, ContainerEngine, LogQuery};
 use crate::domain::catalog::readiness::{GamePhase, ReadyRule, phase_of, ready_since};
 use crate::domain::services::ServiceKey;
 
-/// Au plus ce nombre de lignes lues par vérification : un jeu bavard ne fait pas lire tout son journal.
+/// Au plus ce nombre de lignes lues par vérification ; la suivante reprend à la dernière ligne lue (incrémental).
 const MAX_LINES_PER_CHECK: usize = 20_000;
 /// Au plus ce temps par vérification.
 const CHECK_BUDGET: Duration = Duration::from_secs(5);
@@ -31,6 +36,9 @@ struct Entry {
     /// Le lancement, en millisecondes depuis l'époque.
     started_ms: i64,
     ready_ms: Option<i64>,
+    /// L'heure de la dernière ligne lue : la vérification suivante reprend d'ici, jamais du lancement (un jeu
+    /// bavard ne fait pas relire tout son journal à chaque fois).
+    last_read_ms: i64,
 }
 
 pub struct GamePhases {
@@ -73,6 +81,7 @@ impl GamePhases {
                 first_start,
                 started_ms,
                 ready_ms: None,
+                last_read_ms: started_ms,
             },
         );
     }
@@ -109,11 +118,16 @@ impl GamePhases {
     /// Cherche le signe « prêt » dans les lignes écrites depuis le lancement, puis rend la phase. Une lecture qui
     /// échoue (moteur muet, journal illisible) ne change rien : la phase reste ce qu'elle était.
     pub async fn refresh(&self, key: &ServiceKey) -> Option<GamePhase> {
-        let (container, sign, started_ms) = {
+        let (container, sign, started_ms, from_ms) = {
             let inner = self.lock();
             let entry = inner.get(key.as_str())?;
             match (&entry.rule.sign, entry.ready_ms) {
-                (Some(sign), None) => (entry.container.clone(), sign.clone(), entry.started_ms),
+                (Some(sign), None) => (
+                    entry.container.clone(),
+                    sign.clone(),
+                    entry.started_ms,
+                    entry.last_read_ms,
+                ),
                 _ => return Some(self.phase_for(entry)),
             }
         };
@@ -122,36 +136,41 @@ impl GamePhases {
             LogQuery {
                 follow: false,
                 tail: None,
-                since_ms: Some(started_ms),
+                since_ms: Some(from_ms),
                 tty: false,
             },
         );
-        let found = tokio::time::timeout(CHECK_BUDGET, async {
+        // (heure du signe s'il est vu, heure de la dernière ligne lue)
+        let outcome = tokio::time::timeout(CHECK_BUDGET, async {
             let mut read = 0_usize;
+            let mut last = from_ms;
             while let Some(item) = stream.next().await {
-                let Ok(line) = item else { return None };
+                let Ok(line) = item else { break };
                 if let Some(at) = ready_since(
                     &sign,
                     started_ms,
                     std::iter::once((line.at_ms, line.text.as_str())),
                 ) {
-                    return Some(at);
+                    return (Some(at), line.at_ms);
                 }
+                last = last.max(line.at_ms);
                 read += 1;
                 if read >= MAX_LINES_PER_CHECK {
-                    return None;
+                    break;
                 }
             }
-            None
+            (None, last)
         })
         .await
-        .ok()
-        .flatten();
+        .ok();
         drop(stream);
         let mut inner = self.lock();
         let entry = inner.get_mut(key.as_str())?;
-        if let Some(at) = found {
-            entry.ready_ms = Some(at);
+        if let Some((found, last)) = outcome {
+            entry.last_read_ms = entry.last_read_ms.max(last);
+            if let Some(at) = found {
+                entry.ready_ms = Some(at);
+            }
         }
         Some(self.phase_for(entry))
     }

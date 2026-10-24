@@ -169,7 +169,6 @@ mod tests {
                     digest: [0; 32],
                     env_count: 0,
                     command: false,
-                    fiche: None,
                 },
                 false,
             ),
