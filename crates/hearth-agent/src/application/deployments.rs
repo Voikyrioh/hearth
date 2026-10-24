@@ -44,11 +44,11 @@ use super::fiche_install::{FicheInstaller, InstallAudit};
 use super::folders::{FolderFacts, check_mount_folder};
 use super::game_phase::GamePhases;
 use super::ports::{
-    AuditSink, Clock, ContainerEngine, EngineError, EngineInfo, FreeSpace, HostFolders, HostPorts,
-    IdGen, Ownership, Perms, PullProgress, SafeFs, SecretRandom, ServiceContainers,
+    Clock, ContainerEngine, EngineError, EngineInfo, FreeSpace, HostFolders, HostPorts, IdGen,
+    Ownership, Perms, PullProgress, SafeFs, SecretRandom, ServiceContainers,
 };
 use super::service_lifecycle::reason_of;
-use super::service_ops::{AcceptRequest, OpError, ServiceOps};
+use super::service_ops::{AcceptRequest, JournalEntry, OpError, ServiceOps};
 use super::service_specs::{ServiceSpecs, SpecServiceError};
 use super::services::ServicesRegistry;
 use crate::application::ports::Progress;
@@ -302,7 +302,6 @@ pub struct Deployments {
     free_space: Arc<dyn FreeSpace>,
     safe_fs: Arc<dyn SafeFs>,
     containers: Arc<dyn ServiceContainers>,
-    sink: Arc<dyn AuditSink>,
     ids: Arc<dyn IdGen>,
     clock: Arc<dyn Clock>,
     context: DeployContext,
@@ -359,7 +358,6 @@ impl Deployments {
         free_space: Arc<dyn FreeSpace>,
         safe_fs: Arc<dyn SafeFs>,
         containers: Arc<dyn ServiceContainers>,
-        sink: Arc<dyn AuditSink>,
         ids: Arc<dyn IdGen>,
         clock: Arc<dyn Clock>,
         context: DeployContext,
@@ -377,7 +375,6 @@ impl Deployments {
             free_space,
             safe_fs,
             containers,
-            sink,
             ids,
             clock,
             context,
@@ -1227,21 +1224,27 @@ impl Deployments {
             self.forget_spec(&job.key).await;
             self.remove_folders(job).await;
         }
-        // FIX:01M5NYA5W781YW5NFQ7W1JGR98 Trois temps : la transition est persistée sans annonce, la ligne du
-        // journal d'activité n'est écrite que si elle est acceptée (une annulation arrivée entre-temps la
-        // refuse), puis l'issue est annoncée : qui la lit relit un journal complet.
-        let closed = self
-            .ops
-            .finish_quietly(&job.id, finish.status, finish.cause)
-            .await;
-        match closed {
-            Ok(()) => self.record(job, &finish).await,
-            Err(ref error) => tracing::error!(%error, "déploiement non clos dans le journal"),
-        }
-        // La ligne « Déploiement en cours » part AVANT l'annonce : qui lit l'issue ne la voit plus dans la liste.
+        // La ligne « Déploiement en cours » part AVANT la clôture : qui lit l'issue ne la voit plus dans la liste.
         self.registry.end_deploying(&job.key);
-        if closed.is_ok() {
-            self.ops.announce(&job.id).await;
+        // FIX:01M5NYA5W781YW5NFQ7W1JGR98 L'issue et l'entrée du journal d'activité sont écrites dans UNE
+        // transaction, puis annoncées : une transition refusée (une annulation est passée entre-temps)
+        // n'écrit pas de ligne, et qui lit l'issue (flux ou GET) relit un journal complet.
+        match self
+            .ops
+            .finish_with(
+                &job.id,
+                finish.status,
+                finish.cause,
+                self.entry(job, &finish),
+            )
+            .await
+        {
+            Ok(()) => {}
+            Err(OpError::IllegalTransition | OpError::Stale) => tracing::info!(
+                operation = %job.id,
+                "déploiement non clos : l'opération a changé de statut entre-temps (annulation)"
+            ),
+            Err(error) => tracing::error!(%error, "déploiement non clos dans le journal"),
         }
         // La trace dit l'opération, jamais le service, l'image ni une variable.
         tracing::info!(
@@ -1255,12 +1258,12 @@ impl Deployments {
 
     /// Une entrée au journal d'activité (`BR-DEPLOY-025`) : le compte, le service, l'image et la version, les
     /// ports du serveur, le nombre de variables, la commande oui ou non, l'issue et sa cause typée.
-    async fn record(&self, job: &Job, finish: &Finish) {
+    fn entry(&self, job: &Job, finish: &Finish) -> Option<JournalEntry> {
         let (Some(service), Some(image)) = (
             ClientName::parse(&job.name),
             ClientName::parse(&job.reference),
         ) else {
-            return;
+            return None;
         };
         let stopped = finish.cause == Some(Cause::StoppedRightAfterStart);
         let outcome = match (finish.status, finish.cause) {
@@ -1271,9 +1274,7 @@ impl Deployments {
         // (BR-FICHE-032).
         let target = match &job.install {
             Some(install) => {
-                let Some(fiche) = ClientName::parse(&install.fiche) else {
-                    return;
-                };
+                let fiche = ClientName::parse(&install.fiche)?;
                 Target::GameInstall {
                     service,
                     fiche,
@@ -1299,14 +1300,12 @@ impl Deployments {
                 stopped_right_after_start: stopped,
             },
         };
-        self.sink
-            .record(
-                job.actor.clone(),
-                OpKind::Deploy.audit_action(),
-                target,
-                outcome,
-            )
-            .await;
+        Some(JournalEntry {
+            actor: job.actor.clone(),
+            action: OpKind::Deploy.audit_action(),
+            target,
+            outcome,
+        })
     }
 
     async fn forget_spec(&self, key: &ServiceKey) {

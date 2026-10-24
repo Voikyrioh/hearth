@@ -729,7 +729,8 @@ async fn a_service_that_stops_right_after_its_start_is_noted_on_the_finished_act
         assert!(started.elapsed() < Duration::from_secs(5), "{operation:?}");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    // FIX:01M5NYA5W781YW5NFQ7W1JGR98 La cause n'est annoncée qu'après la ligne du journal : pas d'attente.
+    // FIX:01M5NYA5W781YW5NFQ7W1JGR98 Le GET ci-dessus lit le journal des opérations : la cause et la ligne du
+    // journal d'activité sont écrites dans la même transaction, la ligne est donc là dès que la cause se lit.
     let journal = b.journal().await;
     assert!(
         journal

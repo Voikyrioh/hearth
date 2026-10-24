@@ -623,4 +623,24 @@ impl ServiceOpTx for SqliteUnitOfWork {
     ) -> Result<(), JournalError> {
         do_transition(&mut self.tx, id, from, to, cause, decision, at).await
     }
+
+    async fn annotate_cause(
+        &mut self,
+        id: &str,
+        cause: Cause,
+        at: OffsetDateTime,
+    ) -> Result<bool, JournalError> {
+        let at = format_date(RESOURCE, at)?;
+        let done = sqlx::query(
+            "UPDATE service_ops SET cause = ?, updated_at = ?
+              WHERE id = ? AND status = 'succeeded' AND cause = ''",
+        )
+        .bind(cause.as_str())
+        .bind(at)
+        .bind(id)
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(done.rows_affected() == 1)
+    }
 }

@@ -815,6 +815,10 @@ pub async fn start_engined(
         &observer,
     )
     .await?;
+    // Les clôtures et constats d'opérations écrivent leur entrée du journal d'activité dans leur transaction.
+    foundations
+        .ops
+        .bind_audit(services.store.clone(), services.trail.clone());
     let service_ops_sweep =
         tasks::spawn_service_ops_sweep(foundations.ops.clone(), tasks::SERVICE_OPS_SWEEP_PERIOD);
     let hello = HelloService::new(
@@ -864,7 +868,6 @@ pub async fn start_engined(
         container_engine.clone(),
         supervisor,
         service_repo.clone(),
-        services.audit_sink.clone(),
         adapters.clock.clone(),
         engine.lifecycle,
     );
@@ -929,7 +932,6 @@ pub async fn start_engined(
         engine.free_space,
         safe_fs,
         service_repo.clone(),
-        services.audit_sink.clone(),
         adapters.ids.clone(),
         adapters.clock.clone(),
         DeployContext {
