@@ -249,7 +249,8 @@ export const fr = {
       "Le délai est terminé. Saisissez de nouveau votre mot de passe pour continuer : ce que vous avez saisi est gardé.",
     nowRequired:
       "Le serveur demande maintenant votre mot de passe. Saisissez-le pour continuer : ce que vous avez saisi est gardé.",
-    wrongPassword: "Mot de passe actuel incorrect.",
+    wrongPassword: "Mot de passe incorrect.",
+    needPassword: "Saisissez votre mot de passe pour continuer.",
     waiting: "Trop d'essais. Attendez {n} s avant de réessayer.",
     busy: "Le serveur est occupé. Réessayez dans un instant.",
     loading: "Lecture de ce que le serveur attend de vous…",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, ref, watch } from "vue";
+import { computed, defineAsyncComponent, inject, nextTick, ref, watch } from "vue";
 import { routerKey } from "vue-router";
 import HButton from "@/components/atoms/HButton.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
@@ -28,6 +28,11 @@ import type { AdminActKind, Role } from "@/link";
 // demande le mot de passe SANS perdre la saisie de l'acte ; les
 // autres refus : le texte de l'acte (`refusalText`). Fait ou résultat inconnu : la fenêtre se ferme
 // (jamais rejoué, BR-RESIL-009). Échec déjà notifié : elle reste ouverte.
+
+// Mot de passe du compte simulé, rappelé en mode développement seulement (retiré du binaire livré).
+const DevPasswordHint = import.meta.env.DEV
+  ? defineAsyncComponent(() => import("@/components/organisms/DevPasswordHint.vue"))
+  : null;
 
 const props = withDefaults(
   defineProps<{
@@ -114,7 +119,8 @@ watch(
     const active = document.activeElement;
     if (active instanceof HTMLInputElement || active instanceof HTMLSelectElement) return;
     const first = firstActField();
-    if (first) first.focus();
+    // Sans défilement : un récapitulatif s'ouvre en haut pour être relu de haut en bas (revue UX 2026-10-24, constat 15).
+    if (first) first.focus({ preventScroll: true });
     else if (reauth.needsPassword.value) field.value?.focus();
   },
 );
@@ -151,6 +157,12 @@ async function goToSettings() {
 const awaiting = computed(() => !reauth.ready.value && !reauth.failed.value);
 const askPassword = computed(
   () => reauth.ready.value && !reauth.keyMissing.value && reauth.needsPassword.value,
+);
+/** Le mot de passe manque : c'est tout ce qui retient le bouton (revue UX 2026-10-24, constat 13). */
+const needPasswordReason = computed(() =>
+  props.canSubmit && askPassword.value && password.value === ""
+    ? t("reauth.needPassword")
+    : undefined,
 );
 const canSend = computed(
   () =>
@@ -219,6 +231,7 @@ async function submit() {
     :submit-label="submitLabel"
     :hide-submit="blocked"
     :can-submit="canSend"
+    :submit-reason="needPasswordReason"
     :busy="sending"
     :error="error"
     :destructive="destructive"
@@ -262,6 +275,7 @@ async function submit() {
         :help="notice ? undefined : t('reauth.help')"
         :error="passwordError"
       />
+      <component :is="DevPasswordHint" v-if="DevPasswordHint && askPassword" :server-id="serverId" />
       <slot name="after" />
     </template>
   </FormDialog>

@@ -23,7 +23,8 @@ const root = ref<HTMLElement | null>(null);
 
 /** Met le curseur dans le champ (à l'ouverture d'une fenêtre qui n'a pas d'autre champ). */
 function focus() {
-  root.value?.querySelector("input")?.focus();
+  // Sans défilement : la fenêtre qui porte ce champ reste ouverte sur son début.
+  root.value?.querySelector("input")?.focus({ preventScroll: true });
 }
 
 defineExpose({ focus });

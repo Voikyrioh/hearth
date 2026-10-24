@@ -91,7 +91,7 @@ test("alerte : le bandeau s'affiche sur toutes les pages, activer depuis l'alert
   // Mauvais mot de passe : refusé DANS la fenêtre, le champ est vidé.
   await dialog(page).getByLabel("Votre mot de passe").fill("Faux-Mot-De-Passe-1");
   await dialog(page).getByRole("button", { name: "Activer le mode attaque" }).click();
-  await expect(dialog(page)).toContainText("Mot de passe actuel incorrect.");
+  await expect(dialog(page)).toContainText("Mot de passe incorrect.");
   await expect(dialog(page).getByLabel("Votre mot de passe")).toHaveValue("");
   await dialog(page).getByLabel("Votre mot de passe").fill(GOOD);
   await dialog(page).getByRole("button", { name: "Activer le mode attaque" }).click();

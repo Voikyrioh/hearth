@@ -26,6 +26,8 @@ const props = withDefaults(
     hideSubmit?: boolean;
     /** Fenêtre large (640 px) : un récapitulatif qui défile, titre et boutons collants (HRT-69). */
     wide?: boolean;
+    /** Pourquoi le bouton d'envoi est inactif, écrit à côté de lui (revue UX 2026-10-24, constat 13) ; `undefined` : rien à dire. */
+    submitReason?: string;
   }>(),
   {
     submitLabel: undefined,
@@ -36,12 +38,14 @@ const props = withDefaults(
     cancelLabel: undefined,
     hideSubmit: false,
     wide: false,
+    submitReason: undefined,
   },
 );
 
 const emit = defineEmits<{ submit: []; cancel: [] }>();
 
 const titleId = useId();
+const reasonId = useId();
 const dialog = ref<HTMLDialogElement | null>(null);
 let opener: HTMLElement | null = null;
 
@@ -61,6 +65,9 @@ watch(
     if (open) {
       await nextTick();
       dialog.value?.showModal();
+      // Ouverte en haut : un récapitulatif se lit de haut en bas, quel que soit l'élément qui prend le focus.
+      const scroller = dialog.value?.querySelector<HTMLElement>(".dialog__scroll");
+      if (scroller) scroller.scrollTop = 0;
     } else {
       opener?.focus();
       opener = null;
@@ -109,6 +116,9 @@ function onNativeClose() {
         <div class="dialog__actions">
           <!-- `actions` remplace les deux boutons par défaut (une progression n'a ni envoi ni annulation à elle). -->
           <slot name="actions">
+            <p v-if="submitReason && !canSubmit" :id="reasonId" class="dialog__reason" data-dialog-reason>
+              {{ submitReason }}
+            </p>
             <HButton variant="secondary" :disabled="busy" @click="cancel">
               {{ cancelLabel ?? t("common.cancel") }}
             </HButton>
@@ -119,6 +129,7 @@ function onNativeClose() {
               :solid="destructive"
               :disabled="!canSubmit"
               :busy="busy"
+              :described-by="submitReason && !canSubmit ? reasonId : undefined"
             >
               {{ submitLabel }}
             </HButton>
@@ -194,7 +205,15 @@ function onNativeClose() {
 .dialog__actions {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: var(--space-3);
+}
+
+.dialog__reason {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--tx-secondary);
 }
 </style>

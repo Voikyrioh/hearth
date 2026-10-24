@@ -321,7 +321,7 @@ describe("le lancement et la progression (BR-DEPLOY-016)", () => {
     await settle();
     await confirmTop("Annuler le déploiement", "faux");
     await settle();
-    expect(dialogText()).toContain("Mot de passe actuel incorrect.");
+    expect(dialogText()).toContain("Mot de passe incorrect.");
     expect(bridge.deploys.cancels).toHaveLength(0);
     await confirmTop("Annuler le déploiement", OWN);
     await settle();
@@ -724,7 +724,7 @@ describe("les refus du serveur au lancement : le serveur a le dernier mot (BR-DE
     await flushPromises();
     dialogButton("Déployer le service")?.click();
     await settle();
-    expect(dialogText()).toContain("Mot de passe actuel incorrect.");
+    expect(dialogText()).toContain("Mot de passe incorrect.");
     expect(bridge.deploys.received).toHaveLength(0);
     wrapper.unmount();
   });

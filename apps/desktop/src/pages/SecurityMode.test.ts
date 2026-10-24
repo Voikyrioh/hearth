@@ -110,7 +110,7 @@ describe("Sécurité : le mode attaque", () => {
     await flushPromises();
     await confirm("Faux-Mot-De-Passe-1");
     expect(dialog()).not.toBeNull();
-    expect(dialog()?.textContent).toContain("Mot de passe actuel incorrect.");
+    expect(dialog()?.textContent).toContain("Mot de passe incorrect.");
     expect(dialog()?.querySelector<HTMLInputElement>("input[type=password]")?.value).toBe("");
     expect(bridge.security.current("forge").attackMode.state).toBe("off");
     // Aucun mot de passe dans le journal des commandes.
