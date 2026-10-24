@@ -1195,6 +1195,7 @@ export const fr = {
     sections: "Sections du service",
     tabDetail: "Détail",
     tabLogs: "Journaux",
+    tabSettings: "Réglages",
     loading: "Lecture du service…",
     gone: "Ce service n'existe plus.",
     goneBack: "Retour à la liste",
@@ -1750,6 +1751,271 @@ export const fr = {
       unknown: "Hearth ne peut pas savoir si le jeu est prêt.",
       label: "Premier démarrage du jeu",
     },
+  },
+  // L'onglet « Réglages » d'un serveur de jeu et « Voir tous les réglages » de l'installation (HRT-109,
+  // BR-FICHE-037, 040 à 049, 051 à 054). Textes de la spec `installer-serveur-de-jeu` et du design (sections 16 et 17), mis au
+  // vouvoiement ; les libellés, aides, bornes et choix d'un réglage viennent de la fiche, jamais d'ici.
+  gameSettings: {
+    loading: "Lecture des réglages en cours.",
+    readFailed: "Impossible de lire les réglages de ce service.",
+    absentTitle: "Ce service n'a pas de réglages de jeu.",
+    absentText: "Seuls les services créés depuis une fiche ont un onglet de réglages.",
+    ficheMissing:
+      "La fiche de ce service n'est plus proposée par ce serveur : ses réglages ne peuvent pas être montrés.",
+    noCatalogue:
+      "Ce serveur ne sait pas encore décrire les réglages de cette fiche. Mettez Hearth à jour sur le serveur.",
+    unreadable:
+      "{n} réglage(s) viennent d'une version plus récente de Hearth et ne sont pas montrés. Mettez le client à jour.",
+    // Recherche, filtres, vues
+    search: "Chercher un réglage",
+    found: "{n} réglage(s) trouvé(s).",
+    none: "Aucun réglage ne correspond.",
+    filterLabel: "Filtre",
+    filterAll: "Tous",
+    filterModified: "Modifiés",
+    scopeLabel: "Réglages affichés",
+    scopeCommon: "Courants",
+    scopeAll: "Tout afficher",
+    hiddenAdvanced:
+      "{n} réglage(s) avancé(s) ne sont pas affichés. Choisissez « Tout afficher » pour les voir.",
+    // Les cartes de thèmes
+    themeCount: "{n} réglage(s), {m} modifié(s)",
+    themeReset: "Remettre ce thème aux valeurs proposées",
+    // Une ligne de réglage
+    tagModified: "Modifié",
+    tagFrozen: "Figé",
+    tagImposed: "Imposé par la fiche",
+    technicalName: "Nom dans le jeu : {key}",
+    gameDefault: "Défaut du jeu : {value}",
+    gameDefaultEmpty: "Défaut du jeu : vide",
+    gameDefaultUnverified: "Défaut du jeu : non vérifié.",
+    unverifiedHint: "Tant que vous ne réglez rien, Hearth n'écrit pas ce réglage.",
+    proposed: "Valeur proposée : {value}",
+    proposedEmpty: "Valeur proposée : vide",
+    notWritten: "Non écrit : le jeu prend son défaut.",
+    secretSet: "Défini. Saisissez une nouvelle valeur pour le changer.",
+    secretNotSet: "Non défini.",
+    secretRemove: "Retirer",
+    resetOne: "Remettre la valeur proposée",
+    resetOneAria: "Remettre {label} à la valeur proposée",
+    resetNoProposal: "Remettre le réglage à son défaut",
+    resetNoProposalAria: "Remettre {label} à son défaut",
+    imposedWhy: "Imposé par la fiche : {why}",
+    recreateSoon: "Ce réglage se change en recréant le service. Cela arrive bientôt.",
+    goneSentence: "Ce réglage n'existe plus dans la version {version} : le jeu l'ignore.",
+    goneSentenceBare: "Ce réglage n'existe plus dans cette version du jeu : le jeu l'ignore.",
+    // Les mentions d'effet : quatre, jamais d'autre (BR-FICHE-042)
+    effect: {
+      restart: "Prend effet au prochain démarrage",
+      recreate:
+        "Prend effet quand Hearth recrée le service (bouton Redémarrer maintenant, ou prochain démarrage lancé depuis Hearth).",
+      frozen:
+        "Figé : ne peut plus changer après la création du monde. Il faudrait créer un autre monde.",
+      unknown: "Hearth ne sait pas si ce réglage existe dans cette version du jeu.",
+    },
+    // Une liste d'identifiants
+    listCount: "{n} sur {max}",
+    listNote: "Le jeu lit lui-même ces identifiants. Hearth ne les vérifie pas.",
+    listHelp: "Un identifiant par ligne.",
+    listIssue: {
+      digits: "Un identifiant ne peut contenir que des chiffres : {item}",
+      slug: "Un identifiant ne peut contenir que des lettres minuscules, des chiffres, le tiret et le souligné : {item}",
+      other: "Cet identifiant n'est pas valable : {item}",
+      tooMany: "La liste ne peut pas dépasser {max} identifiants.",
+      tooLong: "Un identifiant est trop long.",
+    },
+    // Les bandeaux, un seul à la fois, par priorité (design 16.2)
+    imposedBroken:
+      "L'arrêt propre de ce jeu n'est plus garanti : un réglage dont Hearth a besoin a été changé.",
+    imposedBrokenList: "Réglages concernés : {labels}.",
+    imposedBrokenFix: "Remettre les réglages imposés",
+    imposedBrokenSoon:
+      "Cette remise arrive bientôt. D'ici là, rétablissez ces lignes dans le fichier du jeu.",
+    fileChanged:
+      "Le fichier a changé depuis la dernière fois que Hearth l'a écrit : {n} réglage(s) sont différents.",
+    fileChangedNone:
+      "Le fichier a changé depuis la dernière fois que Hearth l'a écrit. Aucun réglage connu n'est différent ; ses lignes inconnues sont gardées.",
+    driftSetting: "Réglage",
+    driftMine: "Valeur de Hearth",
+    driftFile: "Valeur du fichier",
+    driftNone: "Non écrit",
+    driftKeepFile: "Garder la valeur du fichier",
+    driftKeepMine: "Remettre la mienne",
+    driftChoose: "Choix pour {label}",
+    driftInvalid:
+      "Le réglage n'accepte pas la valeur du fichier : seule « Remettre la mienne » est possible.",
+    pendingRestart: "À appliquer au prochain démarrage",
+    pendingRestartNow: "Redémarrer maintenant",
+    versionUnknown: "Hearth ne connaît pas la version installée du jeu.",
+    fileUnreadable:
+      "Hearth n'arrive pas à lire le fichier de réglages de ce jeu. Rien n'y sera changé tant qu'il n'est pas lisible.",
+    fileMissing:
+      "Le fichier de réglages n'existe plus. Hearth le recréera au prochain démarrage lancé depuis Hearth.",
+    // Le pied
+    save: "Enregistrer",
+    discard: "Annuler les changements",
+    import: "Importer des réglages",
+    resetAll: "Tout remettre aux valeurs proposées",
+    raw: "Modifier le fichier brut",
+    footerChanges: "{n} changement(s) à enregistrer.",
+    footerClean: "Aucun changement à enregistrer.",
+    footerFixIssues: "Corrigez les réglages signalés pour enregistrer.",
+    noRaw:
+      "Ce jeu réécrit son fichier de réglages à chaque démarrage d'après ses réglages : l'éditer à la main serait trompeur.",
+    importBlocked: "Choisissez d'abord, réglage par réglage, quelle valeur garder.",
+    // L'enregistrement
+    saveTitle: "Enregistrer les réglages",
+    saveSummary: "{n} réglage(s) à enregistrer.",
+    saveListSecret: "{label} (mot de passe modifié)",
+    saveListRemoved: "{label} (retiré du fichier)",
+    saveOthers: "{n} réglage(s) inconnu(s) du jeu modifié(s) ou retiré(s).",
+    saveRestartNow: "Redémarrer maintenant",
+    saveRestartAfter: "Les changements s'appliqueront au prochain démarrage.",
+    saveRecreateAfter:
+      "Les changements s'appliqueront quand Hearth recréera le service. Un redémarrage fait hors de Hearth ne les applique pas.",
+    saveStopped:
+      "Ce service est arrêté : il prendra ces réglages à son prochain démarrage lancé depuis Hearth.",
+    saveNoEngine:
+      "Le moteur n'est pas prêt : les réglages s'enregistrent, mais le service ne peut pas être redémarré maintenant.",
+    saved: "Réglages enregistrés.",
+    savedNoChange: "Rien n'a changé dans le fichier : il n'a pas été touché.",
+    savedAdopted: "{n} valeur(s) du fichier gardée(s).",
+    unknownReread: "Hearth relit les réglages pour savoir ce qui s'est passé.",
+    saveRefusals: {
+      conflict:
+        "Les réglages ont changé depuis que vous les avez lus. Ils ont été relus : vérifiez vos changements, puis recommencez.",
+      conflictBy:
+        "Les réglages ont changé depuis que vous les avez lus ({by} les a modifiés). Ils ont été relus : vérifiez vos changements, puis recommencez.",
+      effect:
+        "L'effet annoncé n'est plus celui de ces changements. Les réglages ont été relus : recommencez.",
+      fileChanged:
+        "Le fichier de réglages a changé depuis que vous l'avez lu. Il a été relu : choisissez, réglage par réglage, ce que vous gardez.",
+      fileUnreadable: "Hearth n'arrive pas à lire ce fichier. Rien n'a été enregistré.",
+      fileUnreadableLine:
+        "Hearth n'arrive pas à lire ce fichier (ligne {line}). Rien n'a été enregistré.",
+      recreate:
+        "Ces réglages demandent de recréer le service, ce que Hearth ne sait pas encore faire. Rien n'a été enregistré.",
+      busy: "Une action est en cours sur ce service. Réessayez quand elle sera finie.",
+      notFound: "Ce service n'existe plus.",
+      invalid: "Ces réglages ne sont pas valables. Rien n'a été enregistré.",
+      other: "Hearth n'a pas pu enregistrer ces réglages.",
+      setting: "Le réglage « {label} » n'est pas valable : {why}",
+      settingUnknown: "Un réglage n'est pas valable : {why}",
+    },
+    refusedReason: {
+      bounds: "le nombre est hors des bornes de la fiche.",
+      choice: "ce choix n'est pas proposé par la fiche.",
+      charset: "ce texte contient un caractère non permis.",
+      charsetChar: "ce texte contient un caractère non permis : {character}",
+      length: "la longueur de ce texte n'est pas permise.",
+      frozen: "ce réglage est figé dans le monde.",
+      imposed: "ce réglage est imposé par la fiche.",
+      retired: "ce réglage n'existe plus dans cette version du jeu.",
+      unknown_id: "ce réglage n'est pas connu de la fiche.",
+      variant: "ce réglage ne s'applique pas à la variante choisie.",
+      version: "ce réglage n'existe pas dans cette version du jeu.",
+      check: "la valeur ne passe pas la vérification du réglage.",
+      secret: "cette valeur ne peut pas être posée ainsi.",
+      carried_by_world: "ce réglage est porté par le monde repris.",
+      other: "la valeur n'est pas acceptée.",
+    },
+    // Remises en bloc (BR-FICHE-044)
+    resetThemeTitle: "Remettre ce thème aux valeurs proposées ?",
+    resetAllTitle: "Tout remettre aux valeurs proposées ?",
+    resetNote:
+      "Les réglages figés, les réglages imposés et les mots de passe ne sont pas touchés. La remise ne prend effet qu'à l'enregistrement.",
+    resetLine: "{label} : {current} devient {proposed}",
+    resetLineRemoved: "{label} : {current} sera retiré du fichier",
+    resetNoProposalWhy:
+      "Ce réglage n'a pas de valeur proposée : la remise retire sa ligne du fichier et le jeu reprend sa valeur par défaut.",
+    resetNothing: "Aucun réglage à remettre.",
+    resetConfirm: "Remettre",
+    valueEmpty: "vide",
+    valueNotWritten: "non écrit",
+    valueSecret: "mot de passe",
+    // Les réglages que la fiche ne connaît pas (BR-FICHE-047)
+    othersTitle: "Autres réglages",
+    othersNote: "Hearth ne connaît pas ce réglage.",
+    othersMasked: "Valeur masquée",
+    othersMaskedHelp: "Son nom évoque un secret : Hearth n'en montre pas la valeur.",
+    othersRemove: "Retirer",
+    othersRemoveTitle: "Retirer ce réglage du fichier ?",
+    othersRemoveText: "Le jeu reprendra sa valeur par défaut.",
+    othersRemoved: "Sera retiré du fichier à l'enregistrement.",
+    othersUndo: "Garder",
+    othersValue: "Valeur de {key}",
+    goneTitle: "Réglages que le jeu n'a plus",
+    // Ce qui attend la console (BR-FICHE-051)
+    consoleTitle: "Ce qui attend la console",
+    consoleLead: "Cette fonction attend la console de Hearth, qui n'est pas encore livrée.",
+    consoleSoon: "Bientôt",
+    consoleApply: "Appliquer un réglage sans redémarrer",
+    consoleApplyWay: "Enregistrez le réglage, puis redémarrez le service.",
+    consoleWho: "Voir qui est connecté",
+    consoleWhoWay:
+      "Hearth n'affiche pas les joueurs connectés. Demandez-leur, ou lisez les journaux du jeu.",
+    consoleTell: "Envoyer un message à tous les joueurs",
+    consoleTellWay: "Prévenez vos joueurs par votre propre canal avant d'arrêter le jeu.",
+    // Le fichier brut (BR-FICHE-046)
+    rawTitle: "Modifier le fichier brut",
+    rawWarning:
+      "Vous modifiez le fichier tel que le jeu le lit. Hearth ne vérifie pas ce que vous écrivez : une ligne fausse peut empêcher le jeu de démarrer. Hearth garde les valeurs voulues ; il retouche le fichier du jeu sans le réécrire.",
+    rawUnderstand: "Je comprends",
+    rawOpen: "Ouvrir le fichier",
+    rawSoon:
+      "L'éditeur de fichiers arrive avec l'onglet Fichiers. D'ici là, importez des réglages en les collant.",
+    rawClose: "Fermer",
+    // L'import par collage (BR-FICHE-052)
+    importTitle: "Importer des réglages",
+    importIntro:
+      "Collez le contenu d'un ancien fichier de réglages. Rien n'est appliqué avant « Appliquer ces réglages ».",
+    importLabel: "Texte à importer",
+    importPrivacy:
+      "Le texte collé est envoyé au serveur pour être lu. Il n'y est ni gardé ni écrit au journal.",
+    importRead: "Lire ce texte",
+    importReading: "Lecture du texte en cours.",
+    importApply: "Appliquer ces réglages",
+    importCancel: "Annuler",
+    importSetting: "Réglage",
+    importCurrent: "Valeur actuelle",
+    importPasted: "Valeur collée",
+    importState: "État",
+    importStates: {
+      take: "Reconnu",
+      same: "Déjà la valeur actuelle",
+      rejected: "Valeur que ce jeu ne connaît pas",
+      imposed: "Imposé par la fiche : ignoré",
+      frozen: "Figé : ignoré",
+      unknown: "Inconnu : sera gardé",
+    },
+    importRejectedLine:
+      "Valeur que ce jeu ne connaît pas : elle n'est pas dans la liste du réglage. Elle n'est pas appliquée : choisissez une valeur de la liste ou gardez l'ancienne.",
+    importRejectedOther:
+      "Cette valeur n'est pas acceptée par ce réglage. Elle n'est pas appliquée : l'ancienne valeur est gardée.",
+    importKeepOld: "Garder l'ancienne",
+    importPick: "Valeur pour {label}",
+    importSecret: "mot de passe",
+    importUnknown: "{n} ligne(s) inconnue(s) du jeu : elles seront gardées dans le fichier.",
+    importDuplicates: "{n} réglage(s) apparaissent plusieurs fois dans le texte.",
+    importUndone:
+      "Ce texte retire ou change un réglage dont Hearth a besoin pour arrêter le jeu proprement : {labels}. Ce réglage ne sera pas appliqué.",
+    importUnreadable:
+      "Hearth n'arrive pas à lire ce texte avec le format de ce jeu. Rien n'a été changé.",
+    importUnreadableLine:
+      "Hearth n'arrive pas à lire ce texte avec le format de ce jeu (ligne {line}). Rien n'a été changé.",
+    importNothing: "Ce texte n'apporte aucun changement.",
+    importCount: "{n} réglage(s) seront appliqués.",
+    // Dans l'installation (« Voir tous les réglages », BR-FICHE-040)
+    installShow: "Voir tous les réglages",
+    installHide: "Masquer les réglages",
+    installIntro:
+      "{n} réglages, dont {m} demandés plus haut. Les autres prennent la valeur proposée par la fiche.",
+    installChanged: "{n} réglage(s) différent(s) des valeurs proposées.",
+    installImport:
+      "L'import de réglages se fait une fois le service installé, dans son onglet Réglages.",
+    sheetCount:
+      "{n} réglages, dont {m} demandés à l'installation. Les autres se règlent ensuite dans l'onglet Réglages.",
+    sheetThemes: "Rangés par thèmes : {list}.",
   },
   // Déployer une image (HRT-69, BR-DEPLOY-001 à 009, 014 à 016, 020, 027 à 031, 033). Textes de la spec
   // `deployer-image` et du design du lot 1, mis au vouvoiement ; les autres sont marqués « hors spec ». Le moteur de

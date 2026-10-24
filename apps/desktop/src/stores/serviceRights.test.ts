@@ -24,7 +24,7 @@ describe("lecture du droit", () => {
     await pending;
     expect(store.of("forge")).toEqual({
       phase: "known",
-      rights: { known: true, granted: true, account: "marie" },
+      rights: { known: true, granted: true, gameSettings: true, account: "marie" },
     });
   });
 
@@ -61,10 +61,15 @@ describe("lecture du droit", () => {
             release = resolve;
           }),
       )
-      .mockImplementationOnce(async () => ({ known: true, granted: false, account: "marie" }));
+      .mockImplementationOnce(async () => ({
+        known: true,
+        granted: false,
+        gameSettings: true,
+        account: "marie",
+      }));
     const slow = store.load("forge");
     await store.load("forge");
-    release({ known: true, granted: true, account: "marie" });
+    release({ known: true, granted: true, gameSettings: true, account: "marie" });
     await slow;
     expect(store.of("forge")?.rights?.granted).toBe(false);
     expect(spy).toHaveBeenCalledTimes(2);
@@ -98,7 +103,7 @@ describe("échec et lien coupé", () => {
     await store.load("forge");
     expect(store.of("forge")).toEqual({
       phase: "known",
-      rights: { known: true, granted: true, account: "marie" },
+      rights: { known: true, granted: true, gameSettings: true, account: "marie" },
     });
   });
 
@@ -144,7 +149,12 @@ describe("changement de compte ou de session", () => {
     });
     const store = useServiceRightsStore();
     await store.load("forge");
-    expect(store.of("forge")?.rights).toEqual({ known: true, granted: true, account: "marie" });
+    expect(store.of("forge")?.rights).toEqual({
+      known: true,
+      granted: true,
+      gameSettings: true,
+      account: "marie",
+    });
     return { ...ctx, store };
   }
 
@@ -165,7 +175,12 @@ describe("changement de compte ou de session", () => {
     // Connecté en B, avant toute lecture : rien de A.
     expect(store.of("forge")).toBeUndefined();
     await store.load("forge");
-    expect(store.of("forge")?.rights).toEqual({ known: true, granted: false, account: "paul" });
+    expect(store.of("forge")?.rights).toEqual({
+      known: true,
+      granted: false,
+      gameSettings: true,
+      account: "paul",
+    });
     const shown = JSON.stringify(seen);
     expect(shown).not.toContain("marie");
     expect(shown).not.toContain('"granted":true');
@@ -190,7 +205,7 @@ describe("changement de compte ou de session", () => {
     const late = store.load("forge");
     await bridge.login("forge", "paul", "Correct-Horse-9", false);
     await flushPromises();
-    release({ known: true, granted: true, account: "marie" });
+    release({ known: true, granted: true, gameSettings: true, account: "marie" });
     await late;
     expect(JSON.stringify(store.of("forge") ?? null)).not.toContain("marie");
   });

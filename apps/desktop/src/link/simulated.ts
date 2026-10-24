@@ -12,6 +12,12 @@ import type {
   DeployRequest,
 } from "./deploy";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
+import type {
+  AnalyzeOutcome,
+  GameSettingsRead,
+  SaveOutcome,
+  SaveSettingsRequest,
+} from "./gameSettings";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
 import type {
@@ -45,6 +51,7 @@ import { SimulatedAudit } from "./simulated-audit";
 import { SimulatedCatalog } from "./simulated-catalog";
 import { SimulatedDeploys } from "./simulated-deploy";
 import { SimulatedDevices } from "./simulated-devices";
+import { SimulatedGameSettings } from "./simulated-game-settings";
 import { SimulatedLogs } from "./simulated-logs";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
 import { SimulatedReauth, simulatedPasswordNeed } from "./simulated-reauth";
@@ -229,6 +236,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly deploys: SimulatedDeploys;
   /** Le Catalogue et l'installation depuis une fiche (HRT-102) : l'agent simulé propose Terraria (`catalog.addRich()` en ajoute une plus riche). */
   readonly catalog: SimulatedCatalog;
+  /** Les réglages des services de jeu (HRT-109). */
+  readonly gameSettings: SimulatedGameSettings;
 
   constructor(options: SimulatedOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -263,6 +272,10 @@ export class SimulatedLinkBridge implements LinkBridge {
     );
     this.deploys = new SimulatedDeploys(this.services, this.serviceOps, this.now);
     this.catalog = new SimulatedCatalog(this.deploys);
+    this.gameSettings = new SimulatedGameSettings(this.catalog);
+    // Un service installé depuis une fiche a ses réglages dès que l'agent l'accepte.
+    this.catalog.onInstalled = (serverId, key, detail, answers) =>
+      this.gameSettings.register(serverId, key, detail, answers);
     this.agentUpdates = new SimulatedAgentUpdates({
       now: this.now,
       publishLink: (id, state) => this.publish(id, state),
@@ -664,6 +677,72 @@ export class SimulatedLinkBridge implements LinkBridge {
     }
     const by = server.username ?? "marie";
     const accept = () => this.catalog.install(serverId, request, by);
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) accept();
+      this.publish(serverId, "reconnecting");
+      const opId = `sim-op-${this.nextOperation++}`;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return accept();
+  }
+
+  // --- Les réglages d'un serveur de jeu (HRT-109) ---
+
+  async readGameSettings(serverId: string, key: string): Promise<GameSettingsRead> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("game settings read");
+    // Le niveau `Services` de l'agent : sans le droit, la lecture est refusée (rien d'un secret n'est rendu de toute façon).
+    if (!this.accounts.ownRights(server).granted) {
+      throw this.fail({ kind: "missing_services_right" });
+    }
+    return this.gameSettings.read(serverId, key);
+  }
+
+  async analyzeGameSettings(serverId: string, key: string, text: string): Promise<AnalyzeOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("game settings analyze");
+    if (!this.accounts.ownRights(server).granted) {
+      throw this.fail({ kind: "missing_services_right" });
+    }
+    return this.gameSettings.analyze(serverId, key, text);
+  }
+
+  async saveGameSettings(
+    serverId: string,
+    key: string,
+    request: SaveSettingsRequest,
+    adminPassword: string | null,
+  ): Promise<SaveOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("game settings save");
+    // Les contrôles dans l'ordre de l'agent : droit, confirmation (couverte par l'élévation), puis la demande.
+    if (!this.accounts.ownRights(server).granted) {
+      throw this.fail({ kind: "missing_services_right" });
+    }
+    const confirmation = this.reauth.confirm(
+      serverId,
+      "game_settings_save",
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    const by = server.username ?? "marie";
+    const accept = () => this.gameSettings.save(serverId, key, request, by);
     if (this.actionMode === "cut") {
       this.actionMode = "ok";
       if (this.executeBeforeCut) accept();

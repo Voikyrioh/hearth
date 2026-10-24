@@ -132,6 +132,15 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
     </DashCard>
 
     <DashCard :title="t('fiche.cardQuestions')" data-fiche-questions>
+      <!-- Tous les réglages du jeu et leurs thèmes (HRT-109, BR-FICHE-037, 041) -->
+      <template v-if="detail.settings.length > 0">
+        <p class="sheet__line" data-fiche-settings-count>
+          {{ t("gameSettings.sheetCount", { n: detail.settings.length, m: detail.questions.length }) }}
+        </p>
+        <p v-if="detail.themes.length > 0" class="sheet__muted" data-fiche-settings-themes>
+          {{ t("gameSettings.sheetThemes", { list: detail.themes.map((theme) => safeText(theme.label)).join(", ") }) }}
+        </p>
+      </template>
       <p v-if="detail.questions.length === 0" class="sheet__line">{{ t("fiche.questionsNone") }}</p>
       <template v-else>
         <p class="sheet__muted">{{ t("fiche.questionsCount", { n: detail.questions.length }) }}</p>

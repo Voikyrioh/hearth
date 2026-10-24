@@ -9,6 +9,7 @@ export type { LinkBridge } from "./bridge";
 export * from "./catalog";
 export * from "./deploy";
 export * from "./devices";
+export * from "./gameSettings";
 export * from "./logs";
 export * from "./machine";
 export * from "./messages";

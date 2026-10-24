@@ -6,7 +6,7 @@ import { useFicheDetail } from "@/composables/useFicheDetail";
 import type { PortVerdict } from "@/deploy/messages";
 import { portVerdict } from "@/deploy/messages";
 import { nameIssue } from "@/deploy/rules";
-import { answerIssues, visibleQuestions } from "@/fiche/answers";
+import { answerIssues, extraSettings, visibleQuestions } from "@/fiche/answers";
 import type { FicheDraft } from "@/fiche/draft";
 import { toInstallRequest } from "@/fiche/draft";
 import { diskVerdict, memoryNotices, minimumVerdicts, placement, tooSmall } from "@/fiche/fit";
@@ -22,6 +22,7 @@ import {
 } from "@/fiche/ports";
 import { type DeployCheckInput, type DeployRefusal, getLinkBridge, type ServiceInfo } from "@/link";
 import type { Resources } from "@/resources";
+import { problemText } from "@/settings/messages";
 import { useFicheInstallStore } from "@/stores/ficheInstall";
 import { useServicesStore } from "@/stores/services";
 
@@ -87,6 +88,23 @@ export function useFicheInstall(
   const answerProblems = computed(() =>
     draft.value ? answerIssues(questions.value, draft.value.answers) : new Map(),
   );
+  // Les réglages de « Voir tous les réglages » (HRT-109, BR-FICHE-040) : ceux qui ne sont pas des questions. Leur défaut de
+  // forme ne compte que s'ils ont été touchés (sinon la valeur est celle que la fiche propose).
+  const extras = computed(() =>
+    detail.value && draft.value ? extraSettings(detail.value, draft.value.variant) : [],
+  );
+  const extraProblems = computed(() => {
+    const found = new Map<string, string>();
+    const current = draft.value;
+    if (!current) return found;
+    for (const setting of extras.value) {
+      const value = current.answers[setting.question.id];
+      if (value === undefined) continue;
+      const problem = problemText(setting, value);
+      if (problem) found.set(setting.question.id, problem);
+    }
+    return found;
+  });
   const published = computed(() =>
     detail.value && draft.value
       ? publishedPorts(detail.value.ports, draft.value.optionalPorts, draft.value.variant)
@@ -110,7 +128,10 @@ export function useFicheInstall(
   /** Au moins un défaut de forme sur la page « Réponses ». */
   const answersInvalid = computed(
     () =>
-      nameProblem.value !== null || answerProblems.value.size > 0 || portProblems.value.size > 0,
+      nameProblem.value !== null ||
+      answerProblems.value.size > 0 ||
+      extraProblems.value.size > 0 ||
+      portProblems.value.size > 0,
   );
 
   // ── Les constats du serveur ──────────────────────────────────────────────────────────────────
@@ -211,6 +232,12 @@ export function useFicheInstall(
       current.answers[id] = value;
     });
   }
+  /** Remet un réglage de « Voir tous les réglages » à la valeur proposée par la fiche. */
+  function resetAnswer(id: string): void {
+    edit((current) => {
+      delete current.answers[id];
+    });
+  }
   function setHostPort(id: string, value: string): void {
     edit((current) => {
       current.hostPorts[id] = value;
@@ -271,6 +298,8 @@ export function useFicheInstall(
     draft,
     questions,
     answerProblems,
+    extras,
+    extraProblems,
     published,
     portProblems,
     nameProblem,
@@ -297,6 +326,7 @@ export function useFicheInstall(
     setName,
     setVariant,
     setAnswer,
+    resetAnswer,
     setHostPort,
     setOptionalPort,
     setResources,

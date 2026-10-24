@@ -27,8 +27,8 @@ use hearth_proto::admin_act::TrustLevel;
 use hearth_proto::api::accounts::{AccountInfo, RoleName};
 use hearth_proto::api::audit::{OriginKindName, OutcomeName};
 use hearth_proto::api::catalog::{
-    CharsetView, EvidenceView, FicheStatus, PortMappingView, QuestionKind, SecretKindView,
-    WorldSavedView,
+    CharsetView, EvidenceView, FicheStatus, ItemCharsetView, LevelView, PortMappingView,
+    QuestionKind, SecretKindView, WorldSavedView,
 };
 use hearth_proto::api::deploy::{
     DeployPlace, DeployProtocol, DeploySource, MountStatus, NameStatus, PortStatus,
@@ -185,6 +185,8 @@ fn enums() -> Vec<Entry> {
         entry!("api/catalog.rs::PortMappingView", Tolerant, PortMappingView),
         entry!("api/catalog.rs::CharsetView", Tolerant, CharsetView),
         entry!("api/catalog.rs::SecretKindView", Tolerant, SecretKindView),
+        entry!("api/catalog.rs::LevelView", Tolerant, LevelView),
+        entry!("api/catalog.rs::ItemCharsetView", Tolerant, ItemCharsetView),
         entry!("api/deploy.rs::NameStatus", Tolerant, NameStatus),
         entry!("api/deploy.rs::PortStatus", Tolerant, PortStatus),
         entry!("api/deploy.rs::MountStatus", Tolerant, MountStatus),
@@ -657,6 +659,22 @@ const LOCAL_ENUMS: &[(&str, &str)] = &[
     (
         "service_ops/catalog_dto.rs::FicheLinkKind",
         "commande de la WebView (quelle adresse de la fiche s'ouvre : un genre, jamais l'adresse)",
+    ),
+    (
+        "service_ops/game_settings_dto.rs::SettingEffectDto",
+        "commande de la WebView (effet annoncé, signé dans l'acte) ; lu de l'agent par `hearth_proto::SettingEffect`",
+    ),
+    (
+        "service_ops/game_settings_dto.rs::SaveOriginDto",
+        "commande de la WebView (d'où vient l'enregistrement) ; lu de l'agent par `hearth_proto::SaveOrigin`",
+    ),
+    (
+        "service_ops/game_settings_dto.rs::ChangeActionDto",
+        "commande de la WebView (geste sur un réglage) ; lu de l'agent par `hearth_proto::ChangeAction`",
+    ),
+    (
+        "service_ops/game_settings_dto.rs::DriftResolutionDto",
+        "commande de la WebView (choix d'un écart) ; lu de l'agent par `hearth_proto::DriftResolution`",
     ),
     (
         "service_ops/dto.rs::OperationChoiceDto",

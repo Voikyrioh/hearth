@@ -404,6 +404,17 @@ const EXPECTED: &[(&str, &str)] = &[
         "openFicheLink",
         "serverId: string, fiche: string, kind: FicheLinkKind, key: string",
     ),
+    // HRT-109 : les réglages d'un serveur de jeu. Deux lectures (la vue ; le texte collé, qui peut porter un mot de
+    // passe et ne traverse que cet appel) et l'enregistrement, un acte confirmé couvert par l'élévation.
+    ("readGameSettings", "serverId: string, key: string"),
+    (
+        "analyzeGameSettings",
+        "serverId: string, key: string, text: string",
+    ),
+    (
+        "saveGameSettings",
+        "serverId: string, key: string, settings: SaveSettingsRequestDto, adminPassword: string | null",
+    ),
 ];
 
 /// Les commandes qui portent UN ACTE D'ADMINISTRATION, avec le paramètre qui porte le mot de passe de
@@ -428,6 +439,7 @@ const ADMIN_COMMANDS: &[(&str, &str)] = &[
     ("serviceRestart", "adminPassword"),
     ("deployService", "adminPassword"),
     ("installFiche", "adminPassword"),
+    ("saveGameSettings", "adminPassword"),
     ("cancelServiceOperation", "adminPassword"),
 ];
 
@@ -491,6 +503,8 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "readCatalog",
     "readFiche",
     "openFicheLink",
+    "readGameSettings",
+    "analyzeGameSettings",
 ];
 
 /// Toute commande exposée est soit un acte d'administration de la liste fermée (avec son mot de passe de

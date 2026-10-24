@@ -35,6 +35,7 @@ import OperationCard from "../molecules/OperationCard.vue";
 import OriginTags from "../molecules/OriginTags.vue";
 import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
 import EnvVarsSection from "./EnvVarsSection.vue";
+import GameSettingsTab from "./GameSettingsTab.vue";
 import LogViewer from "./LogViewer.vue";
 
 // Le détail d'un service (HRT-63, BR-SVC-007, 016, 023, 027, 028), à droite de la liste. Les données viennent de la
@@ -53,8 +54,10 @@ const props = defineProps<{
   engineReady: boolean;
   /** Mettre le focus sur le titre à l'ouverture (ouvert par un geste, jamais par l'adresse). */
   focusTitle: boolean;
-  /** L'onglet affiché (dans l'adresse : `&onglet=journaux`). */
-  tab: "detail" | "logs";
+  /** L'onglet affiché (dans l'adresse : `&onglet=journaux` ou `&onglet=reglages`). */
+  tab: "detail" | "settings" | "logs";
+  /** L'agent annonce `game-settings` (`ServiceRights.gameSettings`) : l'onglet « Réglages » peut exister. */
+  gameSettings: boolean;
   /** Dernier contact avec le serveur (pour « Vu il y a… » dans les journaux). */
   lastContactAt: number | null;
 }>();
@@ -62,7 +65,7 @@ const emit = defineEmits<{
   back: [];
   openOther: [key: string];
   retryRights: [];
-  "update:tab": [tab: "detail" | "logs"];
+  "update:tab": [tab: "detail" | "settings" | "logs"];
   decide: [operation: TrackedOperation];
   gesture: [service: ServiceInfo, gesture: Gesture];
 }>();
@@ -106,8 +109,25 @@ const controls = computed<Controls | null>(() =>
 );
 const sameName = computed(() => (props.opened.kind === "gone" ? props.opened.sameName : null));
 
+// L'onglet « Réglages » (HRT-109, BR-FICHE-041, 054) : l'agent annonce la capacité `game-settings` (lue avec le droit) et le
+// service est un service créé par Hearth, ni adopté ni en cours de déploiement. La liste des services ne dit pas qu'il
+// vient d'une fiche : la vue n'est lue qu'à l'OUVERTURE de l'onglet, qui dit « pas de réglages de jeu » (`NOT_A_GAME_SERVICE`)
+// pour un service déployé à la main. Un repère léger dans la liste attend HRT-197.
+const hasSettings = computed(
+  () =>
+    props.gameSettings &&
+    canAct(props.gate) &&
+    service.value !== null &&
+    service.value.origin === "hearth" &&
+    service.value.adopted === null &&
+    service.value.state !== "deploying",
+);
+
 const tabs = computed(() => [
   { id: "detail" as const, label: t("serviceDetail.tabDetail") },
+  ...(hasSettings.value
+    ? [{ id: "settings" as const, label: t("serviceDetail.tabSettings") }]
+    : []),
   { id: "logs" as const, label: t("serviceDetail.tabLogs") },
 ]);
 /** Qui lit les journaux de ce service (BR-SLOG-018) : tous pour un service créé par Hearth, le droit pour un adopté. */
@@ -236,6 +256,26 @@ const commandNote = computed(() => {
         @update:model-value="emit('update:tab', $event)"
       />
     </header>
+
+    <!-- L'onglet Réglages (HRT-109) : les réglages du jeu, rangés par thèmes ; la fiche dit tout, l'agent juge -->
+    <div
+      v-if="service && tab === 'settings' && hasSettings"
+      :id="`${idBase}-panel-settings`"
+      class="detail__settings"
+      role="tabpanel"
+      :aria-labelledby="`${idBase}-tab-settings`"
+      :aria-hidden="gone ? 'true' : undefined"
+      :inert="gone ? true : undefined"
+      data-detail-settings
+    >
+      <GameSettingsTab
+        :server-id="serverId"
+        :service="service"
+        :connected="connected"
+        :engine-ready="engineReady"
+        @restart="emit('gesture', service, 'restart')"
+      />
+    </div>
 
     <!-- L'onglet Journaux : une seule lecture, ouverte avec l'onglet, fermée en le quittant (BR-SLOG-020) -->
     <div
@@ -508,6 +548,12 @@ const commandNote = computed(() => {
 }
 
 /* L'onglet Journaux prend toute la hauteur restante : une seule barre de défilement, celle des lignes. */
+.detail__settings {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .detail__logs {
   display: flex;
   flex: 1 1 0;

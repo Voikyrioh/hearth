@@ -80,6 +80,9 @@
     "allow-read-fiche",
     "allow-install-fiche",
     "allow-open-fiche-link",
+    "allow-read-game-settings",
+    "allow-analyze-game-settings",
+    "allow-save-game-settings",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

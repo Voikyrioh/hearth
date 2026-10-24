@@ -1,14 +1,9 @@
 import { nameIssue } from "@/deploy/rules";
-import type {
-  Catalog,
-  FicheDetail,
-  FicheInstallRequest,
-  FicheQuestion,
-  FicheRead,
-} from "./catalog";
+import type { Catalog, FicheDetail, FicheInstallRequest, FicheRead } from "./catalog";
 import type { DeployOutcome, DeployRefusal, DeployStep } from "./deploy";
 import type { SimulatedDeploys } from "./simulated-deploy";
 import { rich, terraria } from "./simulated-fiches";
+import { judgeValue } from "./simulated-judge";
 
 /**
  * Le Catalogue et l'installation depuis une fiche du pont SIMULÉ (navigateur de développement, Vitest, Playwright) :
@@ -45,6 +40,15 @@ export class SimulatedCatalog {
   unreadable = 0;
   /** `true` : la lecture du catalogue échoue (agent qui ne répond pas). */
   failRead = false;
+  /** Appelé quand une installation est ACCEPTÉE : le service de jeu a désormais ses réglages (HRT-109). */
+  onInstalled:
+    | ((
+        serverId: string,
+        key: string,
+        detail: FicheDetail,
+        answers: readonly { id: string; value: string }[],
+      ) => void)
+    | null = null;
   private readonly fiches = new Map<string, FicheDetail>();
 
   constructor(private readonly deploys: SimulatedDeploys) {
@@ -101,56 +105,6 @@ export class SimulatedCatalog {
 
   // ── L'installation (`POST /deployments` avec un membre `source`) ─────────────────────────────
 
-  /** Une valeur jugée comme le fait l'agent (`validate_value`) : la raison et, au plus, UN caractère refusé. */
-  private judgeValue(
-    question: FicheQuestion,
-    value: string,
-  ): { reason: string; character: string | null } | null {
-    const refuse = (reason: string, character: string | null = null) => ({ reason, character });
-    const length = [...value].length;
-    const lengthBad =
-      (question.minLen !== null && length < question.minLen) ||
-      (question.maxLen !== null && length > question.maxLen);
-    const risky = (char: string) =>
-      /[\p{Cc}\u2028\u2029\u200B-\u200F\u202A-\u202E\u2066-\u2069]/u.test(char);
-    switch (question.kind) {
-      case "text": {
-        if (lengthBad) return refuse("length");
-        for (const char of value) {
-          const bad =
-            question.charset === "file_stem"
-              ? !/^[A-Za-z0-9_-]$/.test(char)
-              : question.charset === "arg_safe"
-                ? !/^[A-Za-z0-9._:-]$/.test(char)
-                : risky(char);
-          if (bad) return refuse("charset", char);
-        }
-        if (question.charset === "arg_safe" && /^[-+]/.test(value)) {
-          return refuse("charset", value[0] ?? null);
-        }
-        return null;
-      }
-      case "secret": {
-        if (lengthBad) return refuse("length");
-        return [...value].some(risky) ? refuse("charset") : null;
-      }
-      case "int": {
-        const number = Number(value);
-        if (!/^-?\d+$/.test(value) || !Number.isSafeInteger(number) || String(number) !== value) {
-          return refuse("bounds");
-        }
-        const below = question.min !== null && number < question.min;
-        const above = question.max !== null && number > question.max;
-        return below || above ? refuse("bounds") : null;
-      }
-      case "bool":
-      case "choice":
-        return question.choices.some((choice) => choice.value === value) ? null : refuse("choice");
-      default:
-        return lengthBad ? refuse("length") : null;
-    }
-  }
-
   /**
    * Juge et accepte une installation, ou la refuse. Le droit, la confirmation et le moteur ont déjà été jugés par
    * l'appelant. Les contrôles dans l'ordre de l'agent : fiche proposée et inchangée, nom, contrats, réponses,
@@ -185,9 +139,20 @@ export class SimulatedCatalog {
     for (const answer of request.answers) {
       if (seen.has(answer.id)) return refused({ kind: "other" });
       seen.add(answer.id);
-      const question = detail.questions.find((item) => item.id === answer.id);
+      // Toute réponse est un réglage de la fiche, essentiel ou non (« Voir tous les réglages », BR-FICHE-040) ; un
+      // réglage imposé ne se répond pas. Une fiche qui n'a pas de catalogue complet (agent d'avant) n'a que ses questions.
+      const setting = detail.settings.find((item) => item.question.id === answer.id);
+      const question = detail.questions.find((item) => item.id === answer.id) ?? setting?.question;
       if (!question) {
         return refused({ kind: "answer_refused", id: null, reason: "unknown_id", character: null });
+      }
+      if (setting?.imposedWhy) {
+        return refused({
+          kind: "answer_refused",
+          id: question.id,
+          reason: "imposed",
+          character: null,
+        });
       }
       if (
         question.variants.length > 0 &&
@@ -200,7 +165,7 @@ export class SimulatedCatalog {
           character: null,
         });
       }
-      const judged = this.judgeValue(question, answer.value);
+      const judged = judgeValue(question, answer.value, setting?.list ?? null);
       if (judged) {
         return refused({
           kind: "answer_refused",
@@ -280,7 +245,7 @@ export class SimulatedCatalog {
       return refused({ kind: "no_space", freeBytes: free });
     }
 
-    return this.deploys.admit(
+    const outcome = this.deploys.admit(
       serverId,
       {
         name: request.name,
@@ -298,6 +263,10 @@ export class SimulatedCatalog {
       by,
       () => this.received.push({ serverId, request: structuredClone(request) }),
     );
+    if (outcome.kind === "accepted") {
+      this.onInstalled?.(serverId, outcome.serviceKey, detail, request.answers);
+    }
+    return outcome;
   }
 
   /** Les déploiements en cours d'un serveur, de quoi les piloter (même suite qu'un déploiement d'image). */

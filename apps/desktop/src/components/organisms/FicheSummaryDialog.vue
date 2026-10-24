@@ -11,7 +11,7 @@ import AgreementDialog from "@/components/organisms/AgreementDialog.vue";
 import { useFicheLinks } from "@/composables/useFicheLinks";
 import type { ActReport } from "@/composables/useReauth";
 import { portVerdict, refusalText } from "@/deploy/messages";
-import { changedAnswers, currentAnswer } from "@/fiche/answers";
+import { changedAnswers, changedExtras, currentAnswer } from "@/fiche/answers";
 import { type AttentionPoint, acceptOf, allValidated, attentionPoints } from "@/fiche/attention";
 import type { FicheDraft } from "@/fiche/draft";
 import { registryOf } from "@/fiche/image";
@@ -28,7 +28,7 @@ import {
 import { forVariant, publishedPorts, readableHostPorts } from "@/fiche/ports";
 import { proofOf } from "@/fiche/proof";
 import { t } from "@/i18n";
-import type { DeployCheck, FicheDetail, FicheQuestion } from "@/link";
+import type { DeployCheck, FicheDetail, FicheQuestion, FicheSetting } from "@/link";
 import { type EngineCapacity, formatCpu, formatMemory } from "@/resources";
 import { formatSize } from "@/serviceOps/messages";
 
@@ -47,6 +47,8 @@ const props = defineProps<{
   detail: FicheDetail;
   draft: FicheDraft;
   questions: readonly FicheQuestion[];
+  /** Les réglages de « Voir tous les réglages » (HRT-109) : seuls ceux qui diffèrent de la valeur proposée sont listés. */
+  extras?: readonly FicheSetting[];
   capacity: EngineCapacity | null;
   /** Les constats frais du serveur à l'ouverture ; `null` : la consultation n'a pas pu être faite. */
   check: DeployCheck | null;
@@ -120,12 +122,17 @@ function answerOf(question: FicheQuestion, proposed: boolean): { text: string; p
   return { text: safeText(choice ? choice.label : value), proposed };
 }
 const changed = computed(() => changedAnswers(props.questions, props.draft.answers));
-const answers = computed(() =>
-  props.questions.map((question) => ({
+const changedMore = computed(() => changedExtras(props.extras ?? [], props.draft.answers));
+const answers = computed(() => [
+  ...props.questions.map((question) => ({
     question,
     ...answerOf(question, !changed.value.includes(question)),
   })),
-);
+  ...changedMore.value.map((setting) => ({
+    question: setting.question,
+    ...answerOf(setting.question, false),
+  })),
+]);
 
 const memory = computed(() =>
   props.draft.resources?.memoryBytes != null ? formatMemory(props.draft.resources.memoryBytes) : "",
@@ -297,7 +304,7 @@ function refusal(refused: { kind: string }): string | undefined {
             </li>
           </ul>
           <span v-if="answers.length > 0" class="sum__note" data-sum-changed>
-            {{ t("fiche.sumChanged", { n: changed.length }) }}
+            {{ t("fiche.sumChanged", { n: changed.length + changedMore.length }) }}
           </span>
         </dd>
       </div>

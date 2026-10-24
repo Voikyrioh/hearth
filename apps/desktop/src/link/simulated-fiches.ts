@@ -1,5 +1,6 @@
 import { GIB } from "@/resources";
-import type { FicheDetail, FicheQuestion } from "./catalog";
+import type { FicheDetail, FicheQuestion, FicheSetting, FicheTheme } from "./catalog";
+import { TERRARIA_DIGEST, TERRARIA_SETTINGS, TERRARIA_THEMES } from "./simulated-terraria-settings";
 
 /**
  * Les fiches du pont SIMULÉ (navigateur de développement, Vitest, Playwright). Jamais livré (derrière
@@ -13,7 +14,6 @@ import type { FicheDetail, FicheQuestion } from "./catalog";
  *   Elle sert à prouver que l'écran n'a aucune règle propre à un jeu.
  */
 
-const DIGEST_TERRARIA = "7c1f0d5a9e3b24c6a8d0f1e2b3a495867c1f0d5a9e3b24c6a8d0f1e2b3a49586";
 const DIGEST_RICH = "e4b2a1c3d5f60718293a4b5c6d7e8f90e4b2a1c3d5f60718293a4b5c6d7e8f90";
 
 function question(
@@ -52,7 +52,7 @@ export function terraria(): FicheDetail {
       status: "preview",
       installable: true,
     },
-    digest: DIGEST_TERRARIA,
+    digest: TERRARIA_DIGEST,
     image: { repository: "ryshe/terraria", tag: "vanilla-1.4.5.8", digest: null },
     ownerUid: 0,
     ownerGid: 0,
@@ -80,70 +80,10 @@ export function terraria(): FicheDetail {
       { id: "config", role: "config", target: "/config", backup: true, onlyVariants: [] },
     ],
     agreements: [],
-    questions: [
-      question(
-        "world_name",
-        "Nom du monde",
-        "Le nom du monde que le jeu crée au premier lancement. Il nomme aussi le fichier du monde : lettres, chiffres, tiret et souligné seulement. Il ne peut plus changer une fois le monde créé.",
-        {
-          kind: "text",
-          proposed: "Monde",
-          charset: "file_stem",
-          minLen: 0,
-          maxLen: 100,
-          frozenAfterCreation: true,
-        },
-      ),
-      question(
-        "password",
-        "Mot de passe du serveur",
-        "Ce que vos joueurs tapent pour entrer sur le serveur. Laissez vide pour que tout le monde puisse entrer. Hearth ne l'affiche jamais.",
-        { kind: "secret", secretKind: "game_password", minLen: 0, maxLen: 100 },
-      ),
-      question(
-        "motd",
-        "Message d'accueil",
-        "Le message que chaque joueur voit en arrivant sur le serveur. Laissez vide pour n'afficher aucun message.",
-        { kind: "text", charset: "line", minLen: 0, maxLen: 100 },
-      ),
-      question(
-        "max_players",
-        "Nombre de joueurs",
-        "Combien de joueurs peuvent être connectés en même temps, de 1 à 255. Plus il y en a, plus le serveur travaille : surveillez l'onglet Ressources.",
-        { kind: "int", proposed: "8", min: 1, max: 255 },
-      ),
-      question(
-        "world_size",
-        "Taille du monde",
-        "La taille du monde que le jeu crée s'il n'existe pas encore : petit, moyen ou grand. Elle est gravée dans le monde et ne change plus ensuite.",
-        {
-          kind: "choice",
-          proposed: "3",
-          choices: [
-            { value: "1", label: "Petit" },
-            { value: "2", label: "Moyen" },
-            { value: "3", label: "Grand" },
-          ],
-          frozenAfterCreation: true,
-        },
-      ),
-      question(
-        "difficulty",
-        "Difficulté",
-        "La difficulté du monde créé : classique, expert, maître ou voyage. Elle est gravée dans le monde et ne change plus ensuite.",
-        {
-          kind: "choice",
-          proposed: "2",
-          choices: [
-            { value: "0", label: "Classique" },
-            { value: "1", label: "Expert" },
-            { value: "2", label: "Maître" },
-            { value: "3", label: "Voyage" },
-          ],
-          frozenAfterCreation: true,
-        },
-      ),
-    ],
+    // Les questions de l'installation sont les réglages essentiels que la fiche n'impose pas (BR-FICHE-038).
+    questions: structuredClone(TERRARIA_SETTINGS)
+      .filter((setting) => setting.level === "essential" && setting.imposedWhy === null)
+      .map((setting) => setting.question),
     resources: {
       cpu: { minMillis: null, recommendedMillis: null, evidence: { kind: "unmeasured" } },
       memory: { minBytes: null, recommendedBytes: null, evidence: { kind: "unmeasured" } },
@@ -168,6 +108,9 @@ export function terraria(): FicheDetail {
         why: "Un service ne modifie pas la box de votre réseau.",
       },
     ],
+    themes: structuredClone(TERRARIA_THEMES),
+    settings: structuredClone(TERRARIA_SETTINGS),
+    settingsUnreadable: 0,
     unreadable: 0,
   };
 }
@@ -251,59 +194,7 @@ export function rich(): FicheDetail {
         sentence: "L'éditeur exige que vous acceptiez son contrat avant d'installer son serveur.",
       },
     ],
-    questions: [
-      question("server_name", "Nom du serveur", "Le nom que voient les joueurs.", {
-        kind: "text",
-        proposed: "Mon serveur",
-        charset: "line",
-        minLen: 1,
-        maxLen: 40,
-      }),
-      question(
-        "slots",
-        "Nombre de places",
-        "Combien de joueurs peuvent se connecter en même temps.",
-        { kind: "int", proposed: "10", min: 2, max: 64 },
-      ),
-      question("mode", "Mode de jeu", "Le mode de la partie.", {
-        kind: "choice",
-        proposed: "survival",
-        choices: [
-          { value: "survival", label: "Survie" },
-          { value: "creative", label: "Créatif" },
-        ],
-        frozenAfterCreation: true,
-      }),
-      question("pvp", "Combat entre joueurs", "Autorise les joueurs à se battre entre eux.", {
-        kind: "bool",
-        proposed: "false",
-        // Les deux valeurs que le jeu comprend : activé, puis désactivé.
-        choices: [
-          { value: "true", label: "true" },
-          { value: "false", label: "false" },
-        ],
-      }),
-      question(
-        "server_token",
-        "Jeton de serveur",
-        "Le jeton propre à ce serveur, créé sur le site de la plateforme.",
-        {
-          kind: "secret",
-          secretKind: "server_token",
-          minLen: 1,
-          maxLen: 64,
-          obtainUrl: "https://example.org/jetons",
-        },
-      ),
-      question("mod_pack", "Pack de mods", "Le pack chargé au démarrage.", {
-        kind: "text",
-        charset: "arg_safe",
-        proposed: "base",
-        minLen: 1,
-        maxLen: 30,
-        variants: ["modded"],
-      }),
-    ],
+    questions: richQuestions(),
     resources: {
       cpu: {
         minMillis: 1000,
@@ -341,6 +232,222 @@ export function rich(): FicheDetail {
         why: "Le serveur vérifie le compte de chaque joueur.",
       },
     ],
+    ...richSettings(),
     unreadable: 0,
   };
+}
+
+function setting(
+  theme: string,
+  level: FicheSetting["level"],
+  key: string,
+  made: FicheQuestion,
+  rest: Partial<Omit<FicheSetting, "question" | "key" | "theme" | "level">> = {},
+): FicheSetting {
+  return {
+    question: made,
+    key,
+    theme,
+    level,
+    gameDefault: null,
+    imposedWhy: null,
+    since: null,
+    until: null,
+    replacedBy: null,
+    list: null,
+    ...rest,
+  };
+}
+
+/**
+ * Le catalogue de réglages de la fiche d'essai : tout ce qu'un réglage peut être et que Terraria n'a pas (une liste
+ * d'identifiants, un texte opaque, un choix long, un interrupteur, un réglage imposé, un réglage d'une variante, un défaut
+ * non vérifié, un réglage ajouté dans une version).
+ */
+function richSettings(): Pick<FicheDetail, "themes" | "settings" | "settingsUnreadable"> {
+  const themes: FicheTheme[] = [
+    { id: "server", label: "Serveur", order: 1 },
+    { id: "gameplay", label: "Partie", order: 2 },
+    { id: "mods", label: "Mods", order: 3 },
+  ];
+  const base = richQuestions();
+  const byId = (id: string) => base.find((item) => item.id === id) as FicheQuestion;
+  const settings: FicheSetting[] = [
+    setting("server", "essential", "server-name", byId("server_name"), { gameDefault: "Serveur" }),
+    setting("server", "essential", "slots", byId("slots"), { gameDefault: "10" }),
+    setting("server", "essential", "token", byId("server_token")),
+    setting(
+      "server",
+      "common",
+      "motd",
+      question("motd", "Message d'accueil", "Le message que chaque joueur voit en arrivant.", {
+        kind: "text",
+        charset: "line",
+        minLen: 0,
+        maxLen: 60,
+      }),
+      { gameDefault: "" },
+    ),
+    setting(
+      "server",
+      "advanced",
+      "region",
+      question("region", "Région", "La région annoncée dans la liste publique des serveurs.", {
+        kind: "choice",
+        proposed: "eu",
+        choices: [
+          { value: "eu", label: "Europe" },
+          { value: "na", label: "Amérique du Nord" },
+          { value: "sa", label: "Amérique du Sud" },
+          { value: "as", label: "Asie" },
+          { value: "oc", label: "Océanie" },
+          { value: "af", label: "Afrique" },
+        ],
+      }),
+      { gameDefault: "eu" },
+    ),
+    setting(
+      "server",
+      "advanced",
+      "online-mode",
+      question(
+        "online_mode",
+        "Vérification des comptes",
+        "Le serveur vérifie le compte de chaque joueur.",
+        {
+          kind: "bool",
+          choices: [
+            { value: "true", label: "true" },
+            { value: "false", label: "false" },
+          ],
+        },
+      ),
+      { gameDefault: "true", imposedWhy: "Le serveur vérifie le compte de chaque joueur." },
+    ),
+    setting("gameplay", "essential", "mode", byId("mode"), { gameDefault: "survival" }),
+    setting("gameplay", "essential", "pvp", byId("pvp"), { gameDefault: "false" }),
+    setting(
+      "gameplay",
+      "common",
+      "whitelist",
+      question("whitelist", "Liste blanche", "Seuls les joueurs de la liste peuvent entrer.", {
+        kind: "bool",
+        proposed: "false",
+        choices: [
+          { value: "true", label: "true" },
+          { value: "false", label: "false" },
+        ],
+      }),
+      { gameDefault: "false" },
+    ),
+    setting(
+      "gameplay",
+      "advanced",
+      "damage-scale",
+      question("damage_scale", "Force des dégâts", "Multiplie les dégâts, de 0 à 10.", {
+        kind: "int",
+        proposed: "5",
+        min: 0,
+        max: 10,
+      }),
+      { gameDefault: "5" },
+    ),
+    setting(
+      "gameplay",
+      "advanced",
+      "sandbox",
+      question(
+        "sandbox_code",
+        "Code des options de partie",
+        "Réglez vos choix dans le jeu, copiez le code et collez-le ici. Hearth ne peut ni le lire ni le fabriquer.",
+        { kind: "opaque", maxLen: 400 },
+      ),
+      { since: "3.0" },
+    ),
+    setting(
+      "gameplay",
+      "advanced",
+      "old-difficulty",
+      question(
+        "old_difficulty",
+        "Ancienne difficulté",
+        "Remplacée par le code des options de partie.",
+        {
+          kind: "int",
+          min: 0,
+          max: 5,
+        },
+      ),
+      { until: "3.0", replacedBy: "sandbox_code" },
+    ),
+    setting("mods", "essential", "mod-pack", byId("mod_pack")),
+    setting(
+      "mods",
+      "common",
+      "mod-ids",
+      question("mod_ids", "Numéros des mods", "Les numéros des mods que le jeu charge.", {
+        kind: "id_list",
+        variants: ["modded"],
+      }),
+      { list: { itemCharset: "digits", separator: ",", maxItems: 5 } },
+    ),
+  ];
+  return { themes, settings, settingsUnreadable: 0 };
+}
+
+/** Les questions d'installation de la fiche d'essai. */
+function richQuestions(): FicheQuestion[] {
+  return [
+    question("server_name", "Nom du serveur", "Le nom que voient les joueurs.", {
+      kind: "text",
+      proposed: "Mon serveur",
+      charset: "line",
+      minLen: 1,
+      maxLen: 40,
+    }),
+    question(
+      "slots",
+      "Nombre de places",
+      "Combien de joueurs peuvent se connecter en même temps.",
+      { kind: "int", proposed: "10", min: 2, max: 64 },
+    ),
+    question("mode", "Mode de jeu", "Le mode de la partie.", {
+      kind: "choice",
+      proposed: "survival",
+      choices: [
+        { value: "survival", label: "Survie" },
+        { value: "creative", label: "Créatif" },
+      ],
+      frozenAfterCreation: true,
+    }),
+    question("pvp", "Combat entre joueurs", "Autorise les joueurs à se battre entre eux.", {
+      kind: "bool",
+      proposed: "false",
+      // Les deux valeurs que le jeu comprend : activé, puis désactivé.
+      choices: [
+        { value: "true", label: "true" },
+        { value: "false", label: "false" },
+      ],
+    }),
+    question(
+      "server_token",
+      "Jeton de serveur",
+      "Le jeton propre à ce serveur, créé sur le site de la plateforme.",
+      {
+        kind: "secret",
+        secretKind: "server_token",
+        minLen: 1,
+        maxLen: 64,
+        obtainUrl: "https://example.org/jetons",
+      },
+    ),
+    question("mod_pack", "Pack de mods", "Le pack chargé au démarrage.", {
+      kind: "text",
+      charset: "arg_safe",
+      proposed: "base",
+      minLen: 1,
+      maxLen: 30,
+      variants: ["modded"],
+    }),
+  ];
 }

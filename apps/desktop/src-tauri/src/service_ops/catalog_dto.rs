@@ -10,8 +10,9 @@
 use hearth_proto::api::catalog::{
     AgreementView, CatalogView, CharsetView, CpuNeed, DiskNeed, DownloadView, EvidenceView,
     FicheCard, FicheDetail, FicheStatus, FirstStartView, FolderView, ImageView, ImposedView,
-    MemoryNeed, PortMappingView, PortView, QuestionKind, QuestionView, ResourcesView,
-    SecretKindView, StopView, VariantView, WorldSavedView,
+    ItemCharsetView, LevelView, ListView, MemoryNeed, PortMappingView, PortView, QuestionKind,
+    QuestionView, ResourcesView, SecretKindView, SettingView, StopView, ThemeView, VariantView,
+    WorldSavedView,
 };
 use hearth_proto::api::deploy::{
     DeployAccept, DeployResources, DeploySource, DeploySpec, FicheAnswer, FichePort,
@@ -488,6 +489,122 @@ pub struct FicheImposedDto {
     pub why: String,
 }
 
+/// Un thème en mots simples (BR-FICHE-041).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FicheThemeDto {
+    pub id: String,
+    pub label: String,
+    pub order: u32,
+}
+
+impl From<&ThemeView> for FicheThemeDto {
+    fn from(theme: &ThemeView) -> Self {
+        Self {
+            id: theme.id.clone(),
+            label: theme.label.clone(),
+            order: theme.order,
+        }
+    }
+}
+
+/// Le niveau d'un réglage ; une valeur plus récente se lit `Unknown` (traitée comme avancée par l'interface).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FicheLevelDto {
+    Essential,
+    Common,
+    Advanced,
+    Unknown,
+}
+
+impl From<LevelView> for FicheLevelDto {
+    fn from(level: LevelView) -> Self {
+        match level {
+            LevelView::Essential => Self::Essential,
+            LevelView::Common => Self::Common,
+            LevelView::Advanced => Self::Advanced,
+            LevelView::Unknown => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FicheItemCharsetDto {
+    Digits,
+    Slug,
+    Unknown,
+}
+
+impl From<ItemCharsetView> for FicheItemCharsetDto {
+    fn from(charset: ItemCharsetView) -> Self {
+        match charset {
+            ItemCharsetView::Digits => Self::Digits,
+            ItemCharsetView::Slug => Self::Slug,
+            ItemCharsetView::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// Ce que la fiche dit d'une liste d'identifiants.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FicheListDto {
+    pub item_charset: FicheItemCharsetDto,
+    pub separator: String,
+    pub max_items: u32,
+}
+
+impl From<&ListView> for FicheListDto {
+    fn from(list: &ListView) -> Self {
+        Self {
+            item_charset: list.item_charset.into(),
+            separator: list.separator.clone(),
+            max_items: list.max_items,
+        }
+    }
+}
+
+/// Un réglage du catalogue de la fiche (BR-FICHE-037) : son contrôle et tout ce qu'il faut pour le montrer.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FicheSettingDto {
+    pub question: FicheQuestionDto,
+    pub key: String,
+    pub theme: String,
+    pub level: FicheLevelDto,
+    pub game_default: Option<String>,
+    pub imposed_why: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+    pub replaced_by: Option<String>,
+    pub list: Option<FicheListDto>,
+}
+
+impl From<&SettingView> for FicheSettingDto {
+    fn from(setting: &SettingView) -> Self {
+        let question = FicheQuestionDto::from(&setting.question);
+        Self {
+            // Un secret ne porte jamais de défaut, même si un agent en envoyait un.
+            game_default: if question.secret {
+                None
+            } else {
+                setting.game_default.clone()
+            },
+            question,
+            key: setting.key.clone(),
+            theme: setting.theme.clone(),
+            level: setting.level.into(),
+            imposed_why: setting.imposed_why.clone(),
+            since: setting.since.clone(),
+            until: setting.until.clone(),
+            replaced_by: setting.replaced_by.clone(),
+            list: setting.list.as_ref().map(Into::into),
+        }
+    }
+}
+
 /// Le détail d'une fiche (`GET /catalog/{id}`).
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -506,6 +623,13 @@ pub struct FicheDetailDto {
     pub first_start: Option<FicheFirstStartDto>,
     pub stop: Option<FicheStopDto>,
     pub imposed: Vec<FicheImposedDto>,
+    /// Les thèmes en mots simples (HRT-109) ; vide d'un agent plus ancien.
+    pub themes: Vec<FicheThemeDto>,
+    /// Le catalogue complet de réglages (HRT-109) ; vide d'un agent plus ancien.
+    pub settings: Vec<FicheSettingDto>,
+    /// Des réglages ou thèmes d'une version plus récente que ce client, illisibles ici : l'onglet le dit, mais la
+    /// fiche reste installable (ils ne changent pas ce que l'installation écrit).
+    pub settings_unreadable: u32,
     /// Des éléments d'une version plus récente que ce client, illisibles ici : une fiche incomplète pour ce
     /// client ne s'installe pas.
     pub unreadable: u32,
@@ -528,6 +652,8 @@ impl From<&FicheDetail> for FicheDetailDto {
             first_start,
             stop,
             imposed,
+            themes,
+            settings,
         } = detail;
         let ImageView {
             repository,
@@ -563,6 +689,9 @@ impl From<&FicheDetail> for FicheDetailDto {
             first_start: first_start.as_ref().map(first_start_dto),
             stop: stop.as_ref().map(stop_dto),
             imposed: imposed.iter().map(imposed_dto).collect(),
+            themes: themes.iter().map(FicheThemeDto::from).collect(),
+            settings: settings.iter().map(FicheSettingDto::from).collect(),
+            settings_unreadable: themes.unreadable().saturating_add(settings.unreadable()),
             unreadable,
         }
     }

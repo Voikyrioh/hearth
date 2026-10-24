@@ -216,6 +216,7 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::SettingRefused => Some(Outcome::Failed(Reason::Validation)), // valeur de réglage refusée
         // Ressource inexistante.
         ErrorCode::ServiceNotFound // service inconnu
+        | ErrorCode::NotAGameService // service qui n'est pas un serveur de jeu créé depuis une fiche
         | ErrorCode::OperationNotFound // opération inconnue, ou sur un service que le compte ne voit pas
         | ErrorCode::BackupNotFound => Some(Outcome::Failed(Reason::NotFound)), // sauvegarde inconnue
         // Installer depuis une fiche (HRT-101, BR-FICHE-032) : une cause typée par refus.

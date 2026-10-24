@@ -105,6 +105,10 @@ pub enum ErrorCode {
     EngineUnavailable,
     /// Aucun service de cette clé, ou un service que ce compte ne peut pas voir.
     ServiceNotFound,
+    /// Ce service n'est pas un serveur de jeu créé depuis une fiche que cet agent propose : il n'a pas de réglages de
+    /// jeu (HRT-109). Distinct de `SERVICE_NOT_FOUND` (clé mal formée) et de `NOT_FOUND` (route qu'un agent plus
+    /// ancien ne sert pas) : le client sait ainsi s'il montre l'onglet « Réglages ».
+    NotAGameService,
     /// Une opération tient déjà ce service (`details.by`, `details.kind`).
     ServiceBusy,
     /// Le service est déjà dans l'état demandé (`details.state`).
@@ -159,6 +163,7 @@ impl ErrorCode {
             Self::NotFound
             | Self::FicheUnknown
             | Self::ServiceNotFound
+            | Self::NotAGameService
             | Self::OperationNotFound
             | Self::BackupNotFound => 404,
             Self::MethodNotAllowed => 405,
@@ -384,7 +389,7 @@ mod tests {
         assert_eq!(ErrorCode::Unknown.or_from_status(200), ErrorCode::Unknown);
     }
 
-    const ALL: [(ErrorCode, &str, u16); 68] = [
+    const ALL: [(ErrorCode, &str, u16); 69] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -442,6 +447,7 @@ mod tests {
         (ErrorCode::TooLateToCancel, "TOO_LATE_TO_CANCEL", 409),
         (ErrorCode::EngineUnavailable, "ENGINE_UNAVAILABLE", 503),
         (ErrorCode::ServiceNotFound, "SERVICE_NOT_FOUND", 404),
+        (ErrorCode::NotAGameService, "NOT_A_GAME_SERVICE", 404),
         (ErrorCode::ServiceBusy, "SERVICE_BUSY", 409),
         (
             ErrorCode::ServiceAlreadyInState,

@@ -7,3 +7,5 @@ Une question d'installation d'une fiche (HRT-102, BR-FICHE-016, 017, 059) rendue
 - Props : `question` (`FicheQuestion`), `modelValue` (la réponse), `error` (le défaut déjà en phrase), `disabled`
 - Événements et slots : `update:modelValue`, `blur`, `link` (ouvrir l'adresse où créer le jeton)
 - Notes : Règles pures : `fiche/answers.ts`, textes `fiche/messages.ts`. Tests : `pages/InstallFromFiche.test.ts`.
+
+HRT-109 : `secretKept` (un secret DÉFINI sur le serveur dont la valeur n'est jamais lue) supprime les avertissements d'un champ vide (mot de passe de jeu vide, jeton manquant) : vide veut alors dire « inchangé ». Utilisé par `GameSettingRow` dans l'onglet « Réglages ».

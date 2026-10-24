@@ -7,3 +7,5 @@ Organisme · `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
 - Props : `open`, `serverId`, `detail`, `draft`, `questions`, `capacity`, `check`, `forceLowDisk`, `agentVersion`, `perform(adminPassword, accept)`
 - Événements et slots : `close`, `agree` (les contrats acceptés), `imposed`
 - Notes : Règles pures : `fiche/attention.ts`. Tests : `pages/InstallFromFiche.test.ts`.
+
+HRT-109 : `extras` (les réglages de « Voir tous les réglages ») : ceux qui diffèrent de la valeur proposée sont listés après les réponses et comptés dans « {n} réglage(s) différent(s) des valeurs proposées ».

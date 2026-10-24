@@ -7,3 +7,5 @@ Les cartes de lecture de la fiche d'un jeu (HRT-102, BR-FICHE-004, 008, 010) : I
 - Props : `detail` (`FicheDetail`), `capacity` (`EngineCapacity | null`)
 - Événements et slots : `source`, `agreement` (identifiant du contrat à lire), `imposed` (ouvrir la liste)
 - Notes : Posé par `pages/FicheDetail.vue`. Tests : `pages/FicheDetail.test.ts`.
+
+HRT-109 : la carte « Questions » dit « {n} réglages, dont {m} demandés à l'installation » et les thèmes de la fiche quand l'agent sert le catalogue complet.

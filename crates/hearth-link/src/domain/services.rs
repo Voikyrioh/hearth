@@ -11,6 +11,7 @@
 //! Rien ici ne porte une valeur ou un nom de variable d'environnement ni une commande : les types du
 //! protocole n'en ont pas dans cette tranche.
 
+use hearth_proto::api::game_settings::CAPABILITY_GAME_SETTINGS;
 use hearth_proto::api::services::{
     CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES, EngineView, ServiceItem, ServicesState,
 };
@@ -32,6 +33,14 @@ pub fn agent_knows_service_rights(capabilities: &[String]) -> bool {
     capabilities
         .iter()
         .any(|capability| capability == CAPABILITY_SERVICE_RIGHTS)
+}
+
+/// L'agent sert-il les réglages d'un serveur de jeu (capacité `game-settings`, HRT-109) ? Sinon le client ne montre
+/// pas l'onglet « Réglages ».
+pub fn agent_serves_game_settings(capabilities: &[String]) -> bool {
+    capabilities
+        .iter()
+        .any(|capability| capability == CAPABILITY_GAME_SETTINGS)
 }
 
 /// Les sujets à demander à un agent : les mesures, la fin de session et la mise à jour de l'agent

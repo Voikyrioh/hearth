@@ -7,3 +7,5 @@ Les « Réponses » de l'installation (HRT-102, BR-FICHE-014 à 019) : la varian
 - Props : `install` (`FicheInstallState`, le résultat de `useFicheInstall`)
 - Événements et slots : `link` (ouvrir l'adresse où créer un jeton) ; expose `focusQuestion(id)`
 - Notes : Tests : `pages/InstallFromFiche.test.ts`.
+
+HRT-109 : `InstallSettings` (« Voir tous les réglages ») est sous la carte des questions.

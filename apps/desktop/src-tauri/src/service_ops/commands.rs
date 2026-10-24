@@ -18,6 +18,10 @@ use super::deploy_dto::{
     EngineCapacityDto,
 };
 use super::dto::{DecisionOutcome, OperationChoiceDto, ServiceOperationEvent};
+use super::game_settings;
+use super::game_settings_dto::{
+    AnalyzeOutcomeDto, SaveOutcome, SaveSettingsRequestDto, SettingsReadDto,
+};
 use super::lifecycle::{self, GestureDto, LifecycleOutcome};
 use super::service;
 use crate::link::LinkRuntime;
@@ -235,4 +239,49 @@ pub async fn open_fiche_link(
         Some(url) if crate::browser::open_in_browser(&url) => Ok(()),
         _ => Err(LinkFailure::Internal),
     }
+}
+
+/// Les réglages voulus et l'état du fichier d'un service de jeu (`GET /services/{key}/settings`) : une lecture, qui
+/// exige le droit « gérer les services ». Un service sans réglages de jeu se lit `Absent`, jamais comme une panne.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_game_settings(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+) -> Result<SettingsReadDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    game_settings::read(link.manager(), &id, &key).await
+}
+
+/// Lit un texte collé (`POST /services/{key}/settings/analyze`) : une consultation, rien n'est écrit. Le texte peut
+/// porter un mot de passe : il ne traverse que cet appel, n'est ni gardé ni tracé.
+#[tauri::command]
+#[specta::specta]
+pub async fn analyze_game_settings(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+    text: String,
+) -> Result<AnalyzeOutcomeDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let text = Secret::new(text);
+    game_settings::analyze(link.manager(), &id, &key, &text).await
+}
+
+/// Enregistre des réglages (`PUT /services/{key}/settings`) : un acte d'administration confirmé, couvert par
+/// l'élévation de cinq minutes. L'agent ne redémarre rien ; redémarrer est `service_restart`. Jamais rejoué : un résultat
+/// inconnu se relit sur le fichier. Une valeur peut être un mot de passe : elle ne traverse que cet appel.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_game_settings(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+    settings: SaveSettingsRequestDto,
+    admin_password: Option<String>,
+) -> Result<SaveOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let admin_password = admin_password.map(Secret::new);
+    game_settings::save(link.manager(), &id, &key, settings, admin_password.as_ref()).await
 }

@@ -252,9 +252,16 @@ export function toServicesEvent(dto: BoundServicesEvent): ServicesEvent {
 export interface ServiceRights {
   known: boolean;
   granted: boolean;
+  /** L'agent annonce `game-settings` : l'onglet « Réglages » d'un service de fiche peut exister (HRT-109). */
+  gameSettings: boolean;
   account: string;
 }
 
 export function toServiceRights(dto: ServiceRightsDto): ServiceRights {
-  return { known: dto.known, granted: dto.granted, account: dto.account };
+  return {
+    known: dto.known,
+    granted: dto.granted,
+    gameSettings: dto.gameSettings,
+    account: dto.account,
+  };
 }

@@ -1,0 +1,910 @@
+{
+  "fiche": {
+    "digest": "445855f4c44590913b08656a3a2fd5af8b8e43e90c7348d72182e0338b85dee5",
+    "id": "terraria",
+    "version": 2
+  },
+  "settings": [
+    {
+      "channel": "config",
+      "key": "worldname",
+      "level": "essential",
+      "question": {
+        "charset": "file_stem",
+        "choices": [],
+        "frozen_after_creation": true,
+        "help": "Le nom du monde que le jeu crée au premier lancement. Il nomme aussi le fichier du monde : lettres, chiffres, tiret et souligné seulement. Il ne peut plus changer une fois le monde créé.",
+        "id": "world_name",
+        "kind": "text",
+        "label": "Nom du monde",
+        "max_len": 100,
+        "min_len": 0,
+        "proposed": "Monde",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "game"
+    },
+    {
+      "channel": "config",
+      "key": "password",
+      "level": "essential",
+      "question": {
+        "choices": [],
+        "frozen_after_creation": false,
+        "help": "Ce que vos joueurs tapent pour entrer sur le serveur. Laissez vide pour que tout le monde puisse entrer. Hearth ne l'affiche jamais.",
+        "id": "password",
+        "kind": "secret",
+        "label": "Mot de passe du serveur",
+        "max_len": 100,
+        "min_len": 0,
+        "secret": true,
+        "secret_kind": "game_password",
+        "variants": []
+      },
+      "theme": "game"
+    },
+    {
+      "channel": "config",
+      "game_default": "",
+      "key": "motd",
+      "level": "essential",
+      "question": {
+        "charset": "line",
+        "choices": [],
+        "frozen_after_creation": false,
+        "help": "Le message que chaque joueur voit en arrivant sur le serveur. Laissez vide pour n'afficher aucun message.",
+        "id": "motd",
+        "kind": "text",
+        "label": "Message d'accueil",
+        "max_len": 100,
+        "min_len": 0,
+        "secret": false,
+        "variants": []
+      },
+      "theme": "game"
+    },
+    {
+      "channel": "config",
+      "game_default": "en-US",
+      "key": "language",
+      "level": "common",
+      "question": {
+        "choices": [
+          {
+            "label": "Anglais",
+            "value": "en-US"
+          },
+          {
+            "label": "Français",
+            "value": "fr-FR"
+          },
+          {
+            "label": "Allemand",
+            "value": "de-DE"
+          },
+          {
+            "label": "Italien",
+            "value": "it-IT"
+          },
+          {
+            "label": "Espagnol",
+            "value": "es-ES"
+          },
+          {
+            "label": "Russe",
+            "value": "ru-RU"
+          },
+          {
+            "label": "Chinois simplifié",
+            "value": "zh-Hans"
+          },
+          {
+            "label": "Portugais du Brésil",
+            "value": "pt-BR"
+          },
+          {
+            "label": "Polonais",
+            "value": "pl-PL"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "La langue utilisée par le serveur, parmi celles que le jeu propose. Si le fichier porte une autre valeur, Hearth la garde telle quelle tant que vous ne la changez pas.",
+        "id": "language",
+        "kind": "choice",
+        "label": "Langue du serveur",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "game"
+    },
+    {
+      "channel": "config",
+      "key": "maxplayers",
+      "level": "essential",
+      "question": {
+        "choices": [],
+        "frozen_after_creation": false,
+        "help": "Combien de joueurs peuvent être connectés en même temps, de 1 à 255. Plus il y en a, plus le serveur travaille : surveillez l'onglet Ressources.",
+        "id": "max_players",
+        "kind": "int",
+        "label": "Nombre de joueurs",
+        "max": 255,
+        "min": 1,
+        "proposed": "8",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "players"
+    },
+    {
+      "channel": "config",
+      "key": "autocreate",
+      "level": "essential",
+      "question": {
+        "choices": [
+          {
+            "label": "Petit",
+            "value": "1"
+          },
+          {
+            "label": "Moyen",
+            "value": "2"
+          },
+          {
+            "label": "Grand",
+            "value": "3"
+          }
+        ],
+        "frozen_after_creation": true,
+        "help": "La taille du monde que le jeu crée s'il n'existe pas encore : petit, moyen ou grand. Elle est gravée dans le monde et ne change plus ensuite. Sans cette ligne, le jeu ne crée aucun monde.",
+        "id": "world_size",
+        "kind": "choice",
+        "label": "Taille du monde",
+        "proposed": "3",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "world"
+    },
+    {
+      "channel": "config",
+      "key": "difficulty",
+      "level": "essential",
+      "question": {
+        "choices": [
+          {
+            "label": "Classique",
+            "value": "0"
+          },
+          {
+            "label": "Expert",
+            "value": "1"
+          },
+          {
+            "label": "Maître",
+            "value": "2"
+          },
+          {
+            "label": "Voyage",
+            "value": "3"
+          }
+        ],
+        "frozen_after_creation": true,
+        "help": "La difficulté du monde créé : classique, expert, maître ou voyage. Elle est gravée dans le monde et ne change plus ensuite. Les réglages du mode Voyage ne servent que dans un monde de difficulté « Voyage ».",
+        "id": "difficulty",
+        "kind": "choice",
+        "label": "Difficulté",
+        "proposed": "2",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "world"
+    },
+    {
+      "channel": "config",
+      "key": "seed",
+      "level": "common",
+      "question": {
+        "charset": "line",
+        "choices": [],
+        "frozen_after_creation": true,
+        "help": "Un texte qui sert à générer le monde créé. Laissez vide pour ne rien imposer. Elle est gravée dans le monde et ne change plus ensuite.",
+        "id": "seed",
+        "kind": "text",
+        "label": "Graine du monde",
+        "max_len": 100,
+        "min_len": 0,
+        "secret": false,
+        "variants": []
+      },
+      "theme": "world"
+    },
+    {
+      "channel": "config",
+      "imposed_why": "Le jeu doit charger le monde rangé dans le dossier du service.",
+      "key": "world",
+      "level": "advanced",
+      "question": {
+        "charset": "line",
+        "choices": [],
+        "frozen_after_creation": true,
+        "help": "Le fichier du monde que le jeu charge au démarrage. Hearth le déduit du nom du monde : vous ne pouvez pas le modifier.",
+        "id": "world_file",
+        "kind": "text",
+        "label": "Fichier du monde",
+        "max_len": 200,
+        "min_len": 0,
+        "secret": false,
+        "variants": []
+      },
+      "theme": "world"
+    },
+    {
+      "channel": "config",
+      "imposed_why": "C'est le dossier que Hearth garde et sauvegarde.",
+      "key": "worldpath",
+      "level": "advanced",
+      "question": {
+        "charset": "line",
+        "choices": [],
+        "frozen_after_creation": false,
+        "help": "Le dossier où le jeu range ses mondes. C'est le dossier que Hearth garde et sauvegarde : vous ne pouvez pas le modifier.",
+        "id": "world_path",
+        "kind": "text",
+        "label": "Dossier des mondes",
+        "max_len": 200,
+        "min_len": 0,
+        "secret": false,
+        "variants": []
+      },
+      "theme": "world"
+    },
+    {
+      "channel": "config",
+      "game_default": "7777",
+      "imposed_why": "Il doit rester celui que Hearth relie au port du serveur.",
+      "key": "port",
+      "level": "advanced",
+      "question": {
+        "choices": [],
+        "frozen_after_creation": false,
+        "help": "Le port sur lequel le jeu écoute à l'intérieur du service. Le port que vos joueurs utilisent se règle dans « Modifier ». Hearth le garde relié à ce dernier : vous ne pouvez pas le modifier ici.",
+        "id": "port",
+        "kind": "int",
+        "label": "Port d'écoute dans le service",
+        "max": 65535,
+        "min": 1024,
+        "secret": false,
+        "variants": []
+      },
+      "theme": "network"
+    },
+    {
+      "channel": "config",
+      "imposed_why": "Hearth n'ouvre jamais de port sur votre box, et un service ne le fait pas non plus.",
+      "key": "upnp",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "1",
+            "value": "1"
+          },
+          {
+            "label": "0",
+            "value": "0"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Demande à votre box d'ouvrir les ports toute seule. Hearth n'ouvre jamais de port sur votre box : ce réglage reste désactivé et vous ne pouvez pas le modifier.",
+        "id": "upnp",
+        "kind": "bool",
+        "label": "Ouverture automatique des ports (UPnP)",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "network"
+    },
+    {
+      "channel": "config",
+      "key": "secure",
+      "level": "common",
+      "question": {
+        "choices": [
+          {
+            "label": "1",
+            "value": "1"
+          },
+          {
+            "label": "0",
+            "value": "0"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Le jeu exclut un joueur dont il juge le comportement anormal. Elle peut exclure à tort un joueur honnête : désactivez-la si cela vous arrive.",
+        "id": "secure",
+        "kind": "bool",
+        "label": "Protection contre la triche",
+        "proposed": "1",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "anticheat"
+    },
+    {
+      "channel": "args",
+      "key": "-disableannouncementbox",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "1",
+            "value": "1"
+          },
+          {
+            "label": "0",
+            "value": "0"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Empêche les boîtes d'annonce posées par les joueurs d'envoyer des messages. Ce réglage est transmis au jeu à sa création : le service doit être recréé pour qu'il s'applique.",
+        "id": "announcement_box_off",
+        "kind": "bool",
+        "label": "Couper les boîtes d'annonce",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "anticheat"
+    },
+    {
+      "channel": "args",
+      "key": "-announcementboxrange",
+      "level": "advanced",
+      "question": {
+        "choices": [],
+        "frozen_after_creation": false,
+        "help": "Jusqu'où une boîte d'annonce est lue, en pixels. -1 : tout le serveur. Ce réglage est transmis au jeu à sa création : le service doit être recréé pour qu'il s'applique.",
+        "id": "announcement_box_range",
+        "kind": "int",
+        "label": "Portée des boîtes d'annonce",
+        "min": -1,
+        "secret": false,
+        "variants": []
+      },
+      "theme": "anticheat"
+    },
+    {
+      "channel": "config",
+      "game_default": "60",
+      "key": "npcstream",
+      "level": "advanced",
+      "question": {
+        "choices": [],
+        "frozen_after_creation": false,
+        "help": "Réduit les saccades des ennemis chez vos joueurs, au prix de plus de bande passante. La valeur va de 0 à 60 et au-delà.",
+        "id": "npc_stream",
+        "kind": "int",
+        "label": "Fluidité des ennemis",
+        "min": 0,
+        "secret": false,
+        "variants": []
+      },
+      "theme": "performance"
+    },
+    {
+      "channel": "config",
+      "game_default": "1",
+      "key": "priority",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Temps réel",
+            "value": "0"
+          },
+          {
+            "label": "Haute",
+            "value": "1"
+          },
+          {
+            "label": "Au-dessus de la normale",
+            "value": "2"
+          },
+          {
+            "label": "Normale",
+            "value": "3"
+          },
+          {
+            "label": "Sous la normale",
+            "value": "4"
+          },
+          {
+            "label": "Repos",
+            "value": "5"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "La priorité que le système donne au programme du serveur. Son effet sous Linux, dans un service, n'est pas vérifié : pour limiter le serveur, utilisez plutôt les limites de l'onglet Ressources.",
+        "id": "priority",
+        "kind": "choice",
+        "label": "Priorité du serveur",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "performance"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_time_setfrozen",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut arrêter l'écoulement du temps. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_time_freeze",
+        "kind": "choice",
+        "label": "Figer le temps",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_time_setdawn",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut mettre l'heure à l'aube. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_time_dawn",
+        "kind": "choice",
+        "label": "Passer à l'aube",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_time_setnoon",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut mettre l'heure à midi. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_time_noon",
+        "kind": "choice",
+        "label": "Passer à midi",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_time_setdusk",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut mettre l'heure au crépuscule. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_time_dusk",
+        "kind": "choice",
+        "label": "Passer au crépuscule",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_time_setmidnight",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut mettre l'heure à minuit. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_time_midnight",
+        "kind": "choice",
+        "label": "Passer à minuit",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_time_setspeed",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut accélérer ou ralentir le temps. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_time_speed",
+        "kind": "choice",
+        "label": "Vitesse du temps",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_godmode",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut se rendre invincible. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_godmode",
+        "kind": "choice",
+        "label": "Invincibilité",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_wind_setstrength",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut régler la force du vent. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_wind_strength",
+        "kind": "choice",
+        "label": "Force du vent",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_wind_setfrozen",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut figer le vent. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_wind_freeze",
+        "kind": "choice",
+        "label": "Figer le vent",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_rain_setstrength",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut régler la force de la pluie. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_rain_strength",
+        "kind": "choice",
+        "label": "Force de la pluie",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_rain_setfrozen",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut figer la pluie. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_rain_freeze",
+        "kind": "choice",
+        "label": "Figer la pluie",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_increaseplacementrange",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut poser des blocs de plus loin. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_placement_range",
+        "kind": "choice",
+        "label": "Portée de pose allongée",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_setdifficulty",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut changer la difficulté en cours de partie. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_difficulty",
+        "kind": "choice",
+        "label": "Changer la difficulté",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_biomespread_setfrozen",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut empêcher les biomes de s'étendre. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_biome_spread",
+        "kind": "choice",
+        "label": "Figer l'extension des biomes",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    },
+    {
+      "channel": "config",
+      "key": "journeypermission_setspawnrate",
+      "level": "advanced",
+      "question": {
+        "choices": [
+          {
+            "label": "Personne (verrouillé)",
+            "value": "0"
+          },
+          {
+            "label": "L'hôte seulement",
+            "value": "1"
+          },
+          {
+            "label": "Tout le monde",
+            "value": "2"
+          }
+        ],
+        "frozen_after_creation": false,
+        "help": "Qui peut régler la fréquence d'apparition des ennemis. Ne sert que dans un monde de difficulté « Voyage ».",
+        "id": "journey_spawn_rate",
+        "kind": "choice",
+        "label": "Fréquence des ennemis",
+        "secret": false,
+        "variants": []
+      },
+      "theme": "journey"
+    }
+  ],
+  "themes": [
+    {
+      "id": "game",
+      "label": "Ma partie",
+      "order": 1
+    },
+    {
+      "id": "players",
+      "label": "Joueurs",
+      "order": 2
+    },
+    {
+      "id": "world",
+      "label": "Monde",
+      "order": 3
+    },
+    {
+      "id": "network",
+      "label": "Réseau",
+      "order": 4
+    },
+    {
+      "id": "anticheat",
+      "label": "Triche et sécurité",
+      "order": 5
+    },
+    {
+      "id": "journey",
+      "label": "Mode Voyage",
+      "order": 6
+    },
+    {
+      "id": "performance",
+      "label": "Performances",
+      "order": 7
+    }
+  ]
+}

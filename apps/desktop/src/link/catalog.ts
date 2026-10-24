@@ -5,6 +5,8 @@ import type {
   FicheLinkKind,
   FicheQuestionDto,
   FicheReadDto,
+  FicheSettingDto,
+  FicheThemeDto,
 } from "@/bindings";
 
 export type { FicheLinkKind };
@@ -145,6 +147,44 @@ export interface ImposedSetting {
   why: string;
 }
 
+/** Le niveau d'un réglage (BR-FICHE-037, BR-FICHE-045) ; un niveau plus récent que ce client se lit `unknown`. */
+export type SettingLevel = "essential" | "common" | "advanced" | "unknown";
+
+/** Un thème en mots simples (BR-FICHE-041). */
+export interface FicheTheme {
+  id: string;
+  label: string;
+  order: number;
+}
+
+/** Ce que la fiche dit d'une liste d'identifiants : séparateur, jeu de caractères d'un identifiant, nombre maximal. */
+export interface FicheList {
+  itemCharset: "digits" | "slug" | "unknown";
+  separator: string;
+  maxItems: number;
+}
+
+/**
+ * Un réglage du catalogue de la fiche (HRT-109, BR-FICHE-037) : le contrôle (`question`, le même objet qu'une question
+ * d'installation : genre, bornes, choix, jeu de caractères, valeur proposée) et tout ce qu'il faut pour le ranger et le
+ * dire sans rien inventer. `gameDefault` à `null` : « non vérifié » (BR-FICHE-057), Hearth n'écrit pas ce réglage tant
+ * qu'on ne le règle pas.
+ */
+export interface FicheSetting {
+  question: FicheQuestion;
+  /** Le nom technique du jeu, montré en petit. */
+  key: string;
+  theme: string;
+  level: SettingLevel;
+  gameDefault: string | null;
+  /** Imposé par la fiche : la raison. Un réglage imposé est montré, jamais modifiable. */
+  imposedWhy: string | null;
+  since: string | null;
+  until: string | null;
+  replacedBy: string | null;
+  list: FicheList | null;
+}
+
 /** Le détail d'une fiche, avec l'empreinte que l'installation doit reprendre. */
 export interface FicheDetail {
   card: FicheCard;
@@ -166,6 +206,12 @@ export interface FicheDetail {
   firstStart: FicheFirstStart | null;
   stop: FicheStop | null;
   imposed: ImposedSetting[];
+  /** Les thèmes en mots simples, dans l'ordre de la fiche ; vide d'un agent plus ancien (HRT-109). */
+  themes: FicheTheme[];
+  /** Le catalogue complet de réglages, imposés compris ; vide d'un agent plus ancien (HRT-109). */
+  settings: FicheSetting[];
+  /** Réglages ou thèmes d'une version plus récente que ce client, illisibles : l'onglet le dit, l'installation continue. */
+  settingsUnreadable: number;
   /** Des éléments d'une version plus récente que ce client, illisibles : la fiche ne s'installe pas à l'aveugle. */
   unreadable: number;
 }
@@ -224,6 +270,26 @@ export function toCatalog(dto: CatalogDto): Catalog {
   };
 }
 
+function toTheme(dto: FicheThemeDto): FicheTheme {
+  return { id: dto.id, label: dto.label, order: dto.order };
+}
+
+function toSetting(dto: FicheSettingDto): FicheSetting {
+  return {
+    question: toQuestion(dto.question),
+    key: dto.key,
+    theme: dto.theme,
+    level: dto.level,
+    // Un secret ne porte jamais de défaut, même si un agent en envoyait un.
+    gameDefault: dto.question.secret ? null : dto.gameDefault,
+    imposedWhy: dto.imposedWhy,
+    since: dto.since,
+    until: dto.until,
+    replacedBy: dto.replacedBy,
+    list: dto.list ? { ...dto.list } : null,
+  };
+}
+
 function toFicheDetail(dto: FicheDetailDto): FicheDetail {
   return {
     card: { ...dto.card },
@@ -260,6 +326,9 @@ function toFicheDetail(dto: FicheDetailDto): FicheDetail {
       : null,
     stop: dto.stop ? { ...dto.stop } : null,
     imposed: dto.imposed.map((setting) => ({ ...setting })),
+    themes: dto.themes.map(toTheme),
+    settings: dto.settings.map(toSetting),
+    settingsUnreadable: dto.settingsUnreadable,
     unreadable: dto.unreadable,
   };
 }
