@@ -3,7 +3,9 @@
 //! chaque serveur et les issues pas encore annoncées, rejouées à l'abonnement, ADR-0013 point 3),
 //! `service` (la décision, un acte confirmé), `lifecycle` (démarrer, arrêter, redémarrer : trois actes
 //! confirmés, HRT-65), `deploy` et `deploy_dto` (déployer une image, annuler son opération, consulter le formulaire et
-//! lire les bornes de la machine, HRT-69) et `commands` (lister, acquitter, décider, piloter ; aucune commande n'annule ni ne crée une opération).
+//! lire les bornes de la machine, HRT-69) et `commands` (lister, acquitter, décider, piloter). Les seules commandes
+//! qui créent ou annulent une opération sont celles de `deploy` (déployer, annuler) et de `lifecycle` (démarrer, arrêter, redémarrer) : chacune est un acte
+//! confirmé, jamais rejoué.
 
 pub mod book;
 pub mod commands;

@@ -177,7 +177,7 @@ mod tests {
                 (Kind::AttackModeDisable, None, Yes),
                 (Kind::AccountPasswordOwn, None, Yes),
                 (Kind::ReauthSetting, None, Yes),
-                // Déployer : jamais couvert par l'élévation (BR-DEPLOY-030). Annuler : la table de l'élévation.
+                // Déployer : jamais couvert par l'élévation (BR-DEPLOY-015). Annuler : la table de l'élévation.
                 (Kind::ServiceDeploy, None, Yes),
                 (Kind::OperationCancel, None, UnlessElevated),
             ] {

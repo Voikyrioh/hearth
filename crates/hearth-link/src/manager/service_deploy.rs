@@ -2,7 +2,7 @@
 //! du formulaire et les bornes de la machine. Chemins fixes construits ici, jamais fournis par l'appelant.
 //!
 //! - **Déployer** (`POST /deployments`) est un ACTE d'administration confirmé, JAMAIS couvert par l'élévation
-//!   (le mot de passe à chaque fois, BR-DEPLOY-030). L'acte signé est reconstruit depuis le corps par
+//!   (le mot de passe à chaque fois, BR-DEPLOY-015). L'acte signé est reconstruit depuis le corps par
 //!   `domain/act.rs` (`AdminAct::service_deploy`, source unique partagée avec l'agent) : ni valeur, ni nom de
 //!   variable, ni commande dans la signature. L'agent répond `202` ; l'issue arrive par le suivi des
 //!   opérations. Jamais rejoué : un lien tombé avant la réponse donne `ResultUnknown` (BR-DEPLOY-028).
@@ -20,7 +20,7 @@ use super::{ActionOutcome, ActionRequest, LinkManager};
 use crate::domain::secret::Secret;
 use crate::domain::server::ServerId;
 use crate::error::LinkError;
-use crate::ports::transport::{ApiRequest, Method};
+use crate::ports::transport::Method;
 
 const DEPLOYMENTS_PATH: &str = "/deployments";
 const CHECK_PATH: &str = "/deployments/check";
@@ -62,23 +62,16 @@ impl LinkManager {
         let (target, token) = self.credentials(id)?;
         let body = serde_json::to_value(request)
             .map_err(|_| LinkError::Protocol("consultation illisible".into()))?;
-        let request = ApiRequest {
-            method: Method::Post,
-            path: CHECK_PATH.to_owned(),
-            body: Some(body),
-            idempotency_key: None,
-        };
-        let deps = &self.inner.deps;
-        let response = tokio::time::timeout(
-            deps.config.request_timeout,
-            deps.transport.request(&target, &token, &request),
-        )
-        .await
-        .map_err(|_| LinkError::Timeout)??;
-        if !(200..300).contains(&response.status) {
-            return Err(super::audit::rejection_at(&response.body, response.status));
-        }
-        parse(response.body, "constats du déploiement")
+        let answer = self
+            .typed_request(
+                &target,
+                &token,
+                Method::Post,
+                CHECK_PATH.to_owned(),
+                Some(body),
+            )
+            .await?;
+        parse(answer, "constats du déploiement")
     }
 
     /// Les bornes de la machine et la part déjà engagée (`GET /engine/capacity`, BR-DEPLOY-038). Moteur pas

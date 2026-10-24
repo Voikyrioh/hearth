@@ -103,6 +103,15 @@ fn stable_code(text: &str) -> Option<String> {
     valid.then(|| text.to_owned())
 }
 
+/// Le code stable d'un refus (`details.reason`), ou `invalid` : jamais un texte libre de l'agent.
+fn reason_code(details: &Value) -> String {
+    details
+        .get("reason")
+        .and_then(Value::as_str)
+        .and_then(stable_code)
+        .unwrap_or_else(|| "invalid".to_owned())
+}
+
 fn number<T: TryFrom<u64>>(details: &Value, key: &str) -> Option<T> {
     details
         .get(key)
@@ -157,22 +166,14 @@ pub fn interpret_deploy(status: u16, body: &Value) -> Result<DeployOutcome, Link
             match field {
                 Some(field) => refused(DeployRefusal::Invalid {
                     field,
-                    reason: details
-                        .get("reason")
-                        .and_then(Value::as_str)
-                        .and_then(stable_code)
-                        .unwrap_or_else(|| "invalid".to_owned()),
+                    reason: reason_code(details),
                 }),
                 None => refused(DeployRefusal::Other),
             }
         }
         ErrorCode::FolderRefused => refused(DeployRefusal::Invalid {
             field: DeployFieldDto::Mounts,
-            reason: details
-                .get("reason")
-                .and_then(Value::as_str)
-                .and_then(stable_code)
-                .unwrap_or_else(|| "invalid".to_owned()),
+            reason: reason_code(details),
         }),
         ErrorCode::PlanSettingRefused => refused(DeployRefusal::SettingRefused),
         ErrorCode::LimitsRequired => refused(DeployRefusal::LimitsRequired),

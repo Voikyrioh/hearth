@@ -108,10 +108,24 @@ impl LinkManager {
         token: &crate::domain::secret::Secret,
         path: String,
     ) -> Result<Value, LinkError> {
+        self.typed_request(target, token, Method::Get, path, None)
+            .await
+    }
+
+    /// Comme [`Self::typed_get`], avec la méthode et le corps : une CONSULTATION (un `POST` qui ne modifie rien, sans
+    /// suivi ni clé d'opération, comme `POST /deployments/check`). Le corps ne porte aucun secret.
+    pub(super) async fn typed_request(
+        &self,
+        target: &Target,
+        token: &crate::domain::secret::Secret,
+        method: Method,
+        path: String,
+        body: Option<Value>,
+    ) -> Result<Value, LinkError> {
         let request = ApiRequest {
-            method: Method::Get,
+            method,
             path,
-            body: None,
+            body,
             idempotency_key: None,
         };
         let deps = &self.inner.deps;

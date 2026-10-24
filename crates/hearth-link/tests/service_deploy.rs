@@ -1,7 +1,7 @@
 //! Déployer une image PAR LA LIAISON contre un VRAI agent (TLS 1.3, SQLite, vrai flux WebSocket, faux moteur) :
 //! le défi, la preuve de la clé de ce poste et le mot de passe sont ceux de l'acte réel. L'acte que la liaison
 //! reconstruit depuis le corps (`ServiceDeploy`, `0x0F`) est celui que l'agent reconstruit : la signature passe
-//! (HRT-69, BR-DEPLOY-030). Aucune attente de durée : des attentes sur des faits observables.
+//! (HRT-69, BR-DEPLOY-015). Aucune attente de durée : des attentes sur des faits observables.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod support;
@@ -74,7 +74,7 @@ async fn a_deployment_sent_by_the_link_is_signed_like_the_agent_reads_it_and_nev
     let world = World::connected(options()).await;
     world.agent.grant_services("marie").await;
 
-    // Jamais couvert par l'élévation : sans mot de passe, rien ne part (BR-DEPLOY-030).
+    // Jamais couvert par l'élévation : sans mot de passe, rien ne part (BR-DEPLOY-015).
     let refused = world
         .manager
         .deploy_service(&world.id, &spec("web"), None)
