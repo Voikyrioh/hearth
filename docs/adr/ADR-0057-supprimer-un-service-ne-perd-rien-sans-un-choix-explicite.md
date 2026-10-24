@@ -1,5 +1,5 @@
 ---
-id: ADR-0056
+id: ADR-0057
 titre: Supprimer un service ne perd jamais une donnée sans un choix explicite : conteneur sans volumes ni force, données après le conteneur, dossier rejugé avant d'être effacé, rien repris après un redémarrage
 type: securite
 statut: acceptée
@@ -9,7 +9,7 @@ remplace: — (complète l'ADR-0039 pour la suppression, l'ADR-0045 pour le plan
 liens: [ADR-0039, ADR-0045, ADR-0046, HRT-85, HRT-179, HRT-197, BR-DEL-001 à BR-DEL-031, SECURITY.md]
 ---
 
-# ADR-0056 : Supprimer un service ne perd rien sans un choix explicite
+# ADR-0057 : Supprimer un service ne perd rien sans un choix explicite
 
 ## Contexte
 
