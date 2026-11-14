@@ -101,6 +101,22 @@ enum Spec {
         erase_data: bool,
         erase_backups: bool,
     },
+    /// Sauvegarder ce service (HRT-97) : la clé du service, le mode et le nombre d'éléments ignorés pour cette fois
+    /// sont signés ; ni la note ni un chemin.
+    BackupCreate {
+        key: String,
+        body: Value,
+    },
+    /// Supprimer cette sauvegarde (HRT-97) : l'identifiant est signé.
+    BackupDelete {
+        id: String,
+    },
+    /// Régler les éléments ignorés de ce service (HRT-97) : la clé, le nombre d'éléments et l'empreinte de la liste
+    /// sont signés ; jamais un chemin.
+    BackupSettings {
+        key: String,
+        body: Value,
+    },
 }
 
 fn role_wire(role: RoleName) -> &'static str {
@@ -168,6 +184,22 @@ impl Spec {
                 data: *erase_data,
                 backups: *erase_backups,
             },
+            Self::BackupCreate { key, body } => AdminAct::BackupCreate {
+                target: key.as_str().into(),
+                mode: body["mode"].as_str().unwrap_or_default(),
+                ignored: u32::try_from(body["ignore_once"].as_array().map_or(0, Vec::len)).unwrap(),
+            },
+            Self::BackupDelete { id } => AdminAct::BackupDelete { target: id },
+            Self::BackupSettings { key, body } => {
+                let settings: hearth_proto::api::backups::BackupSettings =
+                    serde_json::from_value(body.clone()).expect("corps des éléments ignorés");
+                let (count, digest) = settings.act_digest();
+                AdminAct::BackupSettings {
+                    target: key.as_str().into(),
+                    count,
+                    digest,
+                }
+            }
         }
     }
 
@@ -254,6 +286,17 @@ impl Spec {
                 Method::DELETE,
                 format!("/services/{key}"),
                 json!({ "erase_data": erase_data, "erase_backups": erase_backups }),
+            ),
+            Self::BackupCreate { key, body } => (
+                Method::POST,
+                format!("/services/{key}/backups"),
+                body.clone(),
+            ),
+            Self::BackupDelete { id } => (Method::DELETE, format!("/backups/{id}"), json!({})),
+            Self::BackupSettings { key, body } => (
+                Method::PUT,
+                format!("/services/{key}/backup-settings"),
+                body.clone(),
             ),
         }
     }
@@ -409,6 +452,53 @@ impl Spec {
                     erase_backups: !erase_backups,
                 },
             ],
+            // La clé, le mode et le nombre d'éléments ignorés pour cette fois sont signés.
+            Self::BackupCreate { key, body } => {
+                let changed = |change: &dyn Fn(&mut Value)| {
+                    let mut other = body.clone();
+                    change(&mut other);
+                    Self::BackupCreate {
+                        key: key.clone(),
+                        body: other,
+                    }
+                };
+                vec![
+                    Self::BackupCreate {
+                        key: "h_01JZ0000000000000000000098".into(),
+                        body: body.clone(),
+                    },
+                    changed(&|b| b["mode"] = json!("stop_copy_start")),
+                    changed(&|b| b["ignore_once"] = json!([{ "root": "/data", "path": "x" }])),
+                ]
+            }
+            Self::BackupDelete { .. } => vec![Self::BackupDelete {
+                id: "01J9ZY0G3Q8M2K6W4T7V5N1B9X".into(),
+            }],
+            // La clé, le nombre d'éléments et l'empreinte de leur liste sont signés.
+            Self::BackupSettings { key, body } => {
+                let changed = |change: &dyn Fn(&mut Value)| {
+                    let mut other = body.clone();
+                    change(&mut other);
+                    Self::BackupSettings {
+                        key: key.clone(),
+                        body: other,
+                    }
+                };
+                vec![
+                    Self::BackupSettings {
+                        key: "h_01JZ0000000000000000000098".into(),
+                        body: body.clone(),
+                    },
+                    changed(&|b| b["ignored"] = json!([{ "root": "/data", "path": "autre" }])),
+                    changed(&|b| {
+                        b["ignored"] = json!([
+                            { "root": "/data", "path": "logs" },
+                            { "root": "/data", "path": "cache" }
+                        ]);
+                    }),
+                    changed(&|b| b["included"] = json!([{ "root": "/data", "path": "logs" }])),
+                ]
+            }
             // L'identifiant ET le choix sont signés : changer l'un ou l'autre est un autre acte.
             Self::Decide { target, choice } => vec![
                 Self::Decide {
@@ -680,6 +770,42 @@ impl Bench {
                     erase_backups: false,
                 }
             }
+            ActKind::BackupCreate => {
+                // Un service créé par Hearth qui monte un dossier géré, arrivé en marche.
+                let key = self.backup_service().await;
+                Spec::BackupCreate {
+                    key,
+                    body: json!({ "mode": "hot" }),
+                }
+            }
+            ActKind::BackupDelete => {
+                // Une sauvegarde de Hearth, déjà faite et vérifiée.
+                let key = self.backup_service().await;
+                let setup = self.marie.reopened(&self.api).await;
+                let created = self
+                    .act(
+                        &setup,
+                        &Spec::BackupCreate {
+                            key: key.clone(),
+                            body: json!({ "mode": "hot" }),
+                        },
+                        PASSWORD,
+                    )
+                    .await;
+                let id = created.body["backup_id"]
+                    .as_str()
+                    .expect("identifiant de la sauvegarde")
+                    .to_owned();
+                self.wait_operations_done().await;
+                Spec::BackupDelete { id }
+            }
+            ActKind::BackupSettings => {
+                let key = self.backup_service().await;
+                Spec::BackupSettings {
+                    key,
+                    body: json!({ "ignored": [{ "root": "/data", "path": "logs" }] }),
+                }
+            }
             ActKind::GameSettingsSave => {
                 self.env.grant_services("marie").await;
                 let key = self.game_service().await;
@@ -699,9 +825,87 @@ impl Bench {
                     }),
                 }
             }
-            other => {
-                panic!("{other:?} : pas de scénario dans la matrice générique (voir generic_kinds)")
+        }
+    }
+
+    /// Un service créé par Hearth qui monte un dossier géré (`/data`), déployé et arrivé en marche (HRT-97).
+    async fn backup_service(&self) -> String {
+        self.env.grant_services("marie").await;
+        self.engine.have_image("nginx:latest");
+        let n = self
+            .services
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // Une SESSION À PART monte le service : un mot de passe donné ici n'ouvre pas l'élévation de celle qui essaie
+        // l'acte (les actes couverts par l'élévation se jugent sans mot de passe déjà donné).
+        let setup = self.marie.reopened(&self.api).await;
+        let deployed = self
+            .act(
+                &setup,
+                &Spec::Deploy {
+                    body: json!({
+                        "name": format!("a-sauvegarder-{n}"), "image": "nginx",
+                        "mounts": [{ "target": "/data" }],
+                        "resources": { "cpu_millis": 500, "memory_bytes": 134_217_728_u64 }
+                    }),
+                },
+                PASSWORD,
+            )
+            .await;
+        let key = deployed.body["service_key"]
+            .as_str()
+            .expect("clé du service déployé")
+            .to_owned();
+        let parsed = hearth_agent::domain::services::ServiceKey::parse(&key).unwrap();
+        let started = std::time::Instant::now();
+        loop {
+            let running = self
+                .state
+                .services
+                .lifecycle_target(&parsed)
+                .is_some_and(|t| {
+                    t.state == hearth_agent::domain::services::ServiceStateKind::Running
+                });
+            let unfinished: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM service_ops
+                 WHERE service_key = ?
+                   AND status NOT IN ('succeeded', 'failed', 'cancelled', 'rolled_back', 'interrupted')",
+            )
+            .bind(&key)
+            .fetch_one(self.env.db.pool())
+            .await
+            .unwrap();
+            if running && unfinished == 0 {
+                break;
             }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(10),
+                "le service à sauvegarder n'arrive pas en marche"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        key
+    }
+
+    /// Attend que plus aucune sauvegarde ne soit en cours (elle répond `202`).
+    async fn wait_operations_done(&self) {
+        let started = std::time::Instant::now();
+        loop {
+            let unfinished: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM service_ops
+                 WHERE kind = 'backup'
+                   AND status NOT IN ('succeeded', 'failed', 'cancelled', 'rolled_back', 'interrupted')",
+            )
+            .fetch_one(self.env.db.pool())
+            .await
+            .unwrap();
+            if unfinished == 0 {
+                return;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(10),
+                "les sauvegardes ne finissent pas"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
     }
 
@@ -842,7 +1046,7 @@ impl Bench {
         // leur action terminée, pas pendant.
         let started = std::time::Instant::now();
         while sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM service_ops WHERE kind IN ('start', 'stop', 'restart') AND finished_at IS NULL",
+            "SELECT COUNT(*) FROM service_ops WHERE kind IN ('start', 'stop', 'restart', 'backup') AND finished_at IS NULL",
         )
         .fetch_one(self.env.db.pool())
         .await
@@ -920,6 +1124,7 @@ async fn every_admin_act_with_a_valid_confirmation_succeeds_and_leaves_one_succe
                 | ActKind::ServiceRestart
                 | ActKind::ServiceDeploy
                 | ActKind::ServiceDelete
+                | ActKind::BackupCreate
         ) {
             // Démarrer, arrêter, redémarrer répondent `202` (HRT-64), comme déployer (HRT-68) : leur entrée
             // réussie est écrite à la fin de l'action, à l'arrière-plan.
@@ -1021,7 +1226,7 @@ async fn a_proof_for_another_act_target_account_session_or_replayed_is_refused_a
         let first = b.send(who, &spec, Some(member.clone()), current).await;
         assert!(first.status.is_success(), "{kind:?} : {:?}", first.body);
         // Une suppression répond `202` et finit à l'arrière-plan : la base de comparaison est prise une fois finie.
-        if kind == ActKind::ServiceDelete {
+        if matches!(kind, ActKind::ServiceDelete | ActKind::BackupCreate) {
             let started = std::time::Instant::now();
             loop {
                 let unfinished: i64 = sqlx::query_scalar(
@@ -2458,107 +2663,20 @@ async fn a_decision_with_a_choice_this_version_does_not_know_is_refused_before_a
     assert_eq!(b.env.hasher.verifications(), verifications);
 }
 
-/// Un acte déclaré sans route (HRT-144 : sauvegarder, supprimer une sauvegarde ; démarrer, arrêter et redémarrer
-/// ont leur route depuis HRT-64, supprimer un service depuis HRT-85, et sont dans la matrice générique) n'a AUCUNE voie : ni route, ni lecture de corps par la couche
-/// générique, et une preuve valide signée pour lui n'est acceptée par aucune route existante, ne confirme
-/// rien et ne change rien.
+/// Un acte déclaré sans route n'a AUCUNE voie : ni route, ni lecture de corps par la couche générique, et une preuve
+/// valide signée pour lui n'est acceptée par aucune route existante. Depuis HRT-97 (sauvegarder, supprimer une
+/// sauvegarde, régler les éléments ignorés), plus aucun acte n'est déclaré sans route : la matrice générique les
+/// couvre tous. Un acte déclaré pour un lot futur s'ajoute à `DECLARED_WITHOUT_ROUTE` ET à ce test, avec sa preuve.
 #[tokio::test]
 async fn the_acts_declared_without_a_route_are_accepted_by_no_route_and_confirm_nothing() {
     use hearth_proto::admin_act::ROUTES;
-    let b = bench().await;
-    b.env.grant_services("marie").await;
-    let key = "c_0123abcd";
-    let declared: Vec<(ActKind, AdminAct<'_>)> = vec![
-        (
-            ActKind::BackupCreate,
-            AdminAct::BackupCreate {
-                target: key.into(),
-                mode: "stopped",
-                ignored: 0,
-            },
-        ),
-        (
-            ActKind::BackupDelete,
-            AdminAct::BackupDelete { target: "01BK" },
-        ),
-    ];
-    assert_eq!(declared.len(), ActKind::DECLARED_WITHOUT_ROUTE.len());
-    for kind in ActKind::DECLARED_WITHOUT_ROUTE {
+    assert!(ActKind::DECLARED_WITHOUT_ROUTE.is_empty());
+    for kind in ActKind::ALL {
         assert!(
-            declared
-                .iter()
-                .any(|(declared_kind, _)| *declared_kind == kind),
-            "{kind:?}"
-        );
-        // Aucune route d'acte ne le porte.
-        assert!(
-            ROUTES.iter().all(|route| !route.kinds.contains(&kind)),
-            "{kind:?}"
+            ROUTES.iter().any(|route| route.kinds.contains(&kind)),
+            "{kind:?} n'a pas de route"
         );
     }
-    // Des chemins où un lot futur mettrait ces gestes : rien n'y répond tant qu'il n'existe pas.
-    let candidates = [
-        (Method::POST, "/services"),
-        (Method::PUT, "/services/c_0123abcd"),
-        (Method::PATCH, "/services/c_0123abcd"),
-        (Method::POST, "/services/c_0123abcd/backups"),
-        (Method::POST, "/backups"),
-        (Method::DELETE, "/backups/01BK"),
-        (Method::POST, "/operations/services"),
-    ];
-    let before = b.snapshot().await;
-    let verifications = b.env.hasher.verifications();
-    for (kind, act) in &declared {
-        let member =
-            reauth_member(&b.api, &b.marie.key, "marie", &b.marie.token, act, PASSWORD).await;
-        // 1. Aucune route à ce chemin ne l'accepte.
-        for (method, path) in &candidates {
-            let reply = b
-                .api
-                .call(method.clone(), path)
-                .token(&b.marie.token)
-                .json(&json!({ "reauth": member }))
-                .send()
-                .await;
-            assert!(
-                matches!(reply.status.as_u16(), 404 | 405),
-                "{kind:?} {method} {path} : {} {:?}",
-                reply.status,
-                reply.body
-            );
-        }
-        // 2. Aucune route d'acte existante ne prend sa preuve pour la sienne : elle est refusée (preuve
-        //    d'un autre acte, ou corps illisible pour la route), jamais acceptée.
-        for route in ROUTES {
-            let path = route
-                .pattern
-                .replace("{id}", "x")
-                .replace("{key}", "c_0123abcd");
-            let method = Method::from_bytes(route.method.as_bytes()).unwrap();
-            let reply = b
-                .api
-                .call(method, &path)
-                .token(&b.marie.token)
-                .json(&json!({ "reauth": member }))
-                .send()
-                .await;
-            assert!(
-                !reply.status.is_success(),
-                "{kind:?} sur {} {path} : {} {:?}",
-                route.method,
-                reply.status,
-                reply.body
-            );
-        }
-        // 3. Rien n'a été écrit au journal d'activité comme réussi pour cet acte.
-        assert_eq!(b.ok_entries(*kind).await, 0, "{kind:?}");
-    }
-    assert_eq!(b.snapshot().await, before, "rien n'a changé");
-    assert_eq!(
-        b.env.hasher.verifications(),
-        verifications,
-        "aucun mot de passe n'a été essayé : la preuve d'un autre acte est refusée avant"
-    );
 }
 
 /// Le droit « gérer les services » est exigé AVANT la confirmation : un compte sans le droit (administrateur

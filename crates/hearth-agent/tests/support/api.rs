@@ -77,6 +77,8 @@ pub struct DeployRig {
     pub delete: hearth_agent::application::delete::DeleteTimings,
     /// Ce que l'agent lit des chemins du serveur (liens, parents, montages) pour juger un dossier partagé.
     pub host_paths: Arc<dyn hearth_agent::application::ports::HostPaths>,
+    /// La racine des sauvegardes, en mémoire (HRT-97).
+    pub backup_files: Arc<super::fake_backup_files::FakeBackupFiles>,
 }
 
 impl DeployRig {
@@ -93,6 +95,7 @@ impl DeployRig {
             },
             delete: super::engine::fast_delete(),
             host_paths: Arc::new(hearth_agent::infrastructure::host::paths::SystemHostPaths),
+            backup_files: Arc::new(super::fake_backup_files::FakeBackupFiles::new()),
         }
     }
 }
@@ -214,6 +217,31 @@ fn state_over_rig(
             timings: rig.delete,
         },
     );
+    let backups = hearth_agent::application::backups::Backups::new(
+        services.clone(),
+        ops.clone(),
+        specs.clone(),
+        engine.clone(),
+        repo.clone(),
+        Arc::new(
+            hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(env.db.pool().clone()),
+        ),
+        rig.safe_fs.clone(),
+        rig.backup_files.clone(),
+        Arc::new(hearth_agent::infrastructure::sqlite::SqliteBackupRepo::new(
+            env.db.pool().clone(),
+        )),
+        rig.host_paths.clone(),
+        env.audit_sink.clone(),
+        env.clock.clone(),
+        Arc::new(hearth_agent::infrastructure::ids::UlidGen),
+        hearth_agent::application::backups::BackupContext {
+            services_root: "/var/lib/hearth/services".into(),
+            backups_root: "/var/lib/hearth-backups".into(),
+            agent_version: "test".into(),
+            timings: super::engine::fast_backup(),
+        },
+    );
     let deployments = hearth_agent::application::deployments::Deployments::new(
         services.clone(),
         ops.clone(),
@@ -263,6 +291,7 @@ fn state_over_rig(
         service_lifecycle,
         deployments,
         service_deletion,
+        backups,
         game_settings,
         catalog: Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         hello: Arc::new(HelloService::new(

@@ -13,6 +13,7 @@ pub mod crash;
 pub mod device;
 pub mod engine;
 pub mod engine_contract;
+pub mod fake_backup_files;
 pub mod fake_daemon;
 pub mod fake_engine;
 pub mod fake_host;

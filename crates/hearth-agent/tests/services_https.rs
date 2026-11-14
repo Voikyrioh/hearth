@@ -174,7 +174,8 @@ async fn hello_announces_the_services_capability() {
             "catalog",
             "game-settings",
             "game-services",
-            "service-delete"
+            "service-delete",
+            "service-backups"
         ])
     );
     // L'interface ne monte pas : un client ancien parle encore à cet agent (ADR-0033, ADR-0038).
@@ -791,6 +792,7 @@ async fn no_variable_value_reaches_a_message_a_response_or_a_trace_and_no_name_o
             free_space: std::sync::Arc::new(support::fake_host::FakeFreeSpace::new()),
             deploy: support::engine::fast_deploy(),
             delete: support::engine::fast_delete(),
+            backups: hearth_agent::app::BackupParts::production(),
             safe_fs: None,
             host_paths: None,
             catalog: hearth_agent::app::CatalogParts::production(),
@@ -1577,6 +1579,7 @@ async fn a_revealed_value_reaches_only_the_admin_response_never_a_trace_the_jour
             free_space: std::sync::Arc::new(support::fake_host::FakeFreeSpace::new()),
             deploy: support::engine::fast_deploy(),
             delete: support::engine::fast_delete(),
+            backups: hearth_agent::app::BackupParts::production(),
             safe_fs: None,
             host_paths: None,
             catalog: hearth_agent::app::CatalogParts::production(),
@@ -1942,6 +1945,7 @@ async fn nothing_of_a_container_that_is_not_adopted_leaves_the_agent_by_any_rout
             free_space: std::sync::Arc::new(support::fake_host::FakeFreeSpace::new()),
             deploy: support::engine::fast_deploy(),
             delete: support::engine::fast_delete(),
+            backups: hearth_agent::app::BackupParts::production(),
             safe_fs: None,
             host_paths: None,
             catalog: hearth_agent::app::CatalogParts::production(),
