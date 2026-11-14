@@ -217,12 +217,12 @@ fn state_over_rig(
     let deployments = hearth_agent::application::deployments::Deployments::new(
         services.clone(),
         ops.clone(),
-        specs,
+        specs.clone(),
         engine.clone(),
         rig.host_ports.clone(),
         rig.free_space.clone(),
         rig.safe_fs.clone(),
-        repo,
+        repo.clone(),
         Arc::new(hearth_agent::infrastructure::ids::UlidGen),
         env.clock.clone(),
         hearth_agent::application::deployments::DeployContext {
@@ -235,6 +235,27 @@ fn state_over_rig(
         Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         Arc::new(super::fake_random::FakeRandom::counting_from(0)),
         phases,
+    );
+    let service_updates = hearth_agent::application::service_update::ServiceUpdates::new(
+        services.clone(),
+        ops.clone(),
+        specs.clone(),
+        engine.clone(),
+        repo.clone(),
+        Arc::new(
+            hearth_agent::infrastructure::sqlite::SqliteServiceRepo::new(env.db.pool().clone()),
+        ),
+        rig.safe_fs.clone(),
+        deployments.clone(),
+        env.clock.clone(),
+        hearth_agent::application::service_update::UpdateContext {
+            install_id: "install-test".into(),
+            services_root: "/var/lib/hearth/services".into(),
+            timings: hearth_agent::application::service_update::UpdateTimings::derived(
+                rig.timings,
+                rig.delete,
+            ),
+        },
     );
     let service_lifecycle = hearth_agent::application::service_lifecycle::ServiceLifecycle::new(
         services.clone(),
@@ -258,7 +279,9 @@ fn state_over_rig(
             env.trail.clone(),
         ),
     );
+    service_ops.set_effects(service_updates.clone());
     AppState {
+        service_updates,
         service_ops,
         service_lifecycle,
         deployments,

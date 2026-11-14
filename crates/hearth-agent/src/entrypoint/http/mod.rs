@@ -27,6 +27,7 @@ mod security;
 mod server;
 mod service_delete;
 mod service_ops;
+mod service_spec;
 mod services;
 mod sessions;
 mod update;
@@ -97,6 +98,9 @@ pub struct AppState {
     pub deployments: Arc<Deployments>,
     /// Supprimer un service (HRT-85) : la fenêtre de suppression et l'acte `0x14`.
     pub service_deletion: Arc<ServiceDeletion>,
+    /// Modifier un service par recréation (HRT-87) : la description, l'acte `0x13` et les lignes du nouveau service
+    /// qui n'a pas démarré.
+    pub service_updates: Arc<crate::application::service_update::ServiceUpdates>,
     /// Les fiches de serveurs de jeu que cet agent propose (HRT-101, ADR-0050).
     pub catalog: Arc<crate::application::catalog::CatalogService>,
     /// Les réglages d'un serveur de jeu : lire, analyser un texte collé, enregistrer (HRT-108, ADR-0051).
@@ -402,6 +406,38 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: true,
         audit: Some(AuditAction::ServiceDeploy),
         route: || post(deployments::create),
+    },
+    // Modifier un service par recréation (HRT-87, ADR-0044, BR-EDIT-*) : lire sa description (sans valeur ni commande,
+    // une consultation du droit « gérer les services »), l'enregistrer (acte `ServiceUpdate` `0x13`, jamais couvert par
+    // l'élévation) et lire les dernières lignes du nouveau service qui n'a pas démarré (du contenu sensible : le droit).
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/spec",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        // Une consultation réservée au droit de gérer les services : seul un refus est consigné, sous l'action de la
+        // modification.
+        audit: Some(AuditAction::ServiceUpdate),
+        route: || get(service_spec::view),
+    },
+    Endpoint {
+        method: Method::PUT,
+        path: "/services/{key}/spec",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceUpdate),
+        route: || put(service_spec::update),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/operations/services/{id}/tail",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::ServiceUpdate),
+        route: || get(service_spec::tail),
     },
     // Supprimer un service (HRT-85, ADR-0045, BR-DEL-*) : la fenêtre « Supprimer {nom} ? » se bâtit sur une
     // consultation du droit « gérer les services » (dossiers, tailles, sort de chacun ; aucun journal) ;
@@ -989,6 +1025,11 @@ mod tests {
         // Supprimer un service (HRT-85) : la fenêtre se bâtit sur une consultation du même droit ; supprimer est un
         // acte confirmé (`0x14`).
         ("GET", "/services/{key}/delete-preview", Service),
+        // Modifier un service (HRT-87) : le droit est exigé par le niveau, la confirmation par la table des actes ; les
+        // lignes du nouveau service qui n'a pas démarré sont du contenu sensible, réservé au droit.
+        ("GET", "/services/{key}/spec", Service),
+        ("PUT", "/services/{key}/spec", Service),
+        ("GET", "/operations/services/{id}/tail", Service),
         ("DELETE", "/services/{key}", Service),
         // Les opérations de service (HRT-144) : lire est ouvert à tout compte (la visibilité du service est
         // jugée par `ServiceOpAccess`), annuler et décider exigent le droit et la confirmation de l'acte.
@@ -1175,11 +1216,13 @@ mod tests {
             [
                 ("DELETE", "/operations/services/{id}"),
                 ("DELETE", "/services/{key}"),
+                ("GET", "/operations/services/{id}/tail"),
                 ("GET", "/services/external"),
                 ("GET", "/services/{key}/delete-preview"),
                 ("GET", "/services/{key}/env"),
                 ("GET", "/services/{key}/game-secret"),
                 ("GET", "/services/{key}/settings"),
+                ("GET", "/services/{key}/spec"),
                 ("POST", "/deployments"),
                 ("POST", "/operations/services/{id}/decision"),
                 ("POST", "/services/adopt"),
@@ -1188,6 +1231,7 @@ mod tests {
                 ("POST", "/services/{key}/start"),
                 ("POST", "/services/{key}/stop"),
                 ("PUT", "/services/{key}/settings"),
+                ("PUT", "/services/{key}/spec"),
             ]
         );
         // Et les deux seules routes protégées de l'inventaire : le mot de passe d'autrui et la suppression.

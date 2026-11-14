@@ -141,6 +141,12 @@ struct DeployScript {
     remove_error: Option<EngineError>,
     /// `remove_keeping_volumes` panique (une exécution qui s'effondre après l'ordre de suppression).
     panic_on_remove: bool,
+    /// Les renommages reçus (identifiant, nouveau nom), dans l'ordre (HRT-87).
+    renamed: Vec<(String, String)>,
+    /// `rename` échoue avec cette erreur, ou seulement pour un nom (HRT-87).
+    rename_error: Option<EngineError>,
+    /// `rename` échoue quand le nouveau nom contient ce texte (le retour arrière seul, par exemple).
+    rename_error_to: Option<(String, EngineError)>,
     create_error: Option<EngineError>,
     /// Le moteur crée le conteneur, puis met ce temps à répondre (la réponse peut ne jamais être lue).
     create_reply_delay: Duration,
@@ -149,6 +155,11 @@ struct DeployScript {
     next_id: u64,
     /// Le programme du conteneur de ce NOM s'arrête aussitôt démarré, avec ce code (BR-DEPLOY-020).
     exit_on_start: BTreeMap<String, i64>,
+    /// Comme `exit_on_start`, mais pour le PROCHAIN démarrage seulement (une modification dont le nouveau service
+    /// échoue, puis dont l'ancien est remis sous le même nom, HRT-87).
+    exit_once_on_start: BTreeMap<String, i64>,
+    /// Le programme du conteneur de ce NOM écrit cette ligne dans ses journaux à chaque démarrage (HRT-87).
+    log_on_start: BTreeMap<String, String>,
 }
 
 /// Un ordre d'écriture reçu par le faux, dans l'ordre.
@@ -573,6 +584,22 @@ impl FakeEngine {
     }
 
     /// `create` échoue avec cette erreur (None : rétablit).
+    /// Les renommages reçus, dans l'ordre : (identifiant, nouveau nom).
+    pub fn renamed(&self) -> Vec<(String, String)> {
+        self.lock().deploy.renamed.clone()
+    }
+
+    /// `rename` échoue avec cette erreur (`None` : rétablit).
+    pub fn fail_rename(&self, error: Option<EngineError>) {
+        self.lock().deploy.rename_error = error;
+    }
+
+    /// `rename` échoue quand le nouveau nom est exactement celui-ci (le retour arrière d'une modification, par
+    /// exemple : l'ancien conteneur reprend son nom).
+    pub fn fail_rename_to(&self, name: &str, error: Option<EngineError>) {
+        self.lock().deploy.rename_error_to = error.map(|error| (name.to_owned(), error));
+    }
+
     pub fn fail_create(&self, error: Option<EngineError>) {
         self.lock().deploy.create_error = error;
     }
@@ -593,6 +620,22 @@ impl FakeEngine {
             .deploy
             .exit_on_start
             .insert(name.to_owned(), code);
+    }
+
+    /// Le programme du conteneur de ce nom s'arrête aussitôt démarré, avec ce code, UNE SEULE fois.
+    pub fn exit_once_on_start(&self, name: &str, code: i64) {
+        self.lock()
+            .deploy
+            .exit_once_on_start
+            .insert(name.to_owned(), code);
+    }
+
+    /// Le programme du conteneur de ce nom écrit cette ligne dans ses journaux à chaque démarrage.
+    pub fn log_on_start(&self, name: &str, text: &str) {
+        self.lock()
+            .deploy
+            .log_on_start
+            .insert(name.to_owned(), text.to_owned());
     }
 
     pub fn fail_info(&self, error: Option<EngineError>) {
@@ -775,10 +818,23 @@ impl FakeEngine {
                 return Err(EngineError::PortInUse);
             }
             Self::mark_running(&mut state, id);
-            let exits = state
+            let name = state
                 .containers
                 .get(id)
-                .and_then(|container| state.deploy.exit_on_start.get(&container.name).copied());
+                .map(|container| container.name.clone())
+                .unwrap_or_default();
+            if let Some(text) = state.deploy.log_on_start.get(&name).cloned() {
+                let at_ms = Self::script_now(&state).unix_timestamp() * 1000;
+                let mut bytes = text.into_bytes();
+                bytes.push(b'\n');
+                state.logs.entry(id.to_owned()).or_default().push(RawLog {
+                    source: LogSource::Out,
+                    at_ms,
+                    bytes,
+                });
+            }
+            let once = state.deploy.exit_once_on_start.remove(&name);
+            let exits = once.or_else(|| state.deploy.exit_on_start.get(&name).copied());
             if let Some(code) = exits {
                 Self::mark_exited(&mut state, id, code);
             }
@@ -1325,6 +1381,43 @@ impl ContainerEngine for FakeEngine {
             self.wake_logs();
             self.emit(id, "destroy");
         }
+        Ok(())
+    }
+
+    async fn rename(&self, id: &str, new_name: &str) -> Result<(), EngineError> {
+        {
+            let mut state = self.lock();
+            if let Some(error) = state.list_error {
+                return Err(error);
+            }
+            if let Some(error) = state.deploy.rename_error {
+                return Err(error);
+            }
+            if let Some((name, error)) = state.deploy.rename_error_to.clone()
+                && name == new_name
+            {
+                return Err(error);
+            }
+            if !state.containers.contains_key(id) {
+                return Err(EngineError::NotFound);
+            }
+            if state
+                .containers
+                .iter()
+                .any(|(other, container)| other != id && container.name == new_name)
+            {
+                return Err(EngineError::NameTaken);
+            }
+            state
+                .deploy
+                .renamed
+                .push((id.to_owned(), new_name.to_owned()));
+            if let Some(container) = state.containers.get_mut(id) {
+                container.name = new_name.to_owned();
+            }
+        }
+        self.wake_logs();
+        self.emit(id, "rename");
         Ok(())
     }
 

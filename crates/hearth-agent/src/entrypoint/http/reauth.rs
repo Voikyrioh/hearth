@@ -37,6 +37,8 @@ use hearth_proto::api::reauth::{
 use hearth_proto::api::security::SetAttackModeRequest;
 use hearth_proto::api::service_delete::DeleteRequest;
 use hearth_proto::api::service_ops::{OperationChoice, OperationDecision};
+use hearth_proto::api::service_spec::DriftView;
+use hearth_proto::api::service_update::{CommandOp, EnvOp, SpecChange};
 use hearth_proto::api::services::AdoptRequest;
 use hearth_proto::api::update::AgentUpdateRequest;
 use hearth_proto::error::{ErrorBody, ErrorCode, UpgradeTarget};
@@ -92,6 +94,10 @@ enum Parsed {
     /// Supprimer un service (HRT-85) : la clé du chemin est la cible, les deux cases du corps sont les paramètres
     /// signés (`BR-DEL-012`). Le nom retapé n'est pas signé : le cas d'usage le compare à celui qu'il connaît.
     Delete(DeleteRequest),
+    /// Modifier un service (HRT-87) : la clé du chemin est la cible, la révision de base, l'empreinte de la partie
+    /// non secrète, les NOMBRES de variables posées et retirées et la présence d'une commande sont signés
+    /// (`AdminAct::service_update`, la fonction de la liaison cliente) ; jamais un nom, une valeur ni la commande.
+    ServiceChange(Box<SpecChange>),
     /// Acte dont la cible est dans le chemin et dont aucun paramètre ne vient du corps.
     TargetOnly,
 }
@@ -190,6 +196,19 @@ impl Parsed {
             }
             // Déclarés pour les tranches suivantes : aucune route ne les porte, donc aucun corps à lire.
             ActKind::BackupCreate | ActKind::BackupDelete => None,
+            // Modifier : un corps illisible (ou un membre d'énumération que cette version ne connaît pas) n'est
+            // jamais un acte signé avec un repli.
+            ActKind::ServiceUpdate => serde_json::from_slice::<SpecChange>(bytes)
+                .ok()
+                .filter(|change| {
+                    change.env.iter().all(|line| line.op != EnvOp::Unknown)
+                        && change
+                            .command
+                            .as_ref()
+                            .is_none_or(|command| command.op != CommandOp::Unknown)
+                        && change.seen_drift != Some(DriftView::Unknown)
+                })
+                .map(|change| Self::ServiceChange(Box::new(change))),
         }
     }
 
@@ -248,6 +267,9 @@ impl Parsed {
                 data: request.erase_data,
                 backups: request.erase_backups,
             },
+            (Self::ServiceChange(change), _) => {
+                AdminAct::service_update(std::borrow::Cow::Borrowed(id), change)
+            }
             (Self::Decide(request), _) => AdminAct::OperationDecide {
                 target: id,
                 choice: request.choice,
@@ -272,6 +294,7 @@ impl Parsed {
                 | ActKind::OperationDecide
                 | ActKind::ServiceDeploy
                 | ActKind::ServiceDelete
+                | ActKind::ServiceUpdate
                 | ActKind::BackupCreate
                 | ActKind::BackupDelete
                 | ActKind::GameSettingsSave,

@@ -174,7 +174,8 @@ async fn hello_announces_the_services_capability() {
             "catalog",
             "game-settings",
             "game-services",
-            "service-delete"
+            "service-delete",
+            "service-update"
         ])
     );
     // L'interface ne monte pas : un client ancien parle encore à cet agent (ADR-0033, ADR-0038).

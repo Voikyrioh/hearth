@@ -112,7 +112,17 @@ pub enum CancelDone {
     Already(OpSnapshot),
 }
 
+/// Ce qu'une décision du compte déclenche sur le service, une fois la décision écrite (HRT-87, BR-EDIT-031) :
+/// « Revenir à l'état d'avant » et « Garder la nouvelle configuration » d'une modification interrompue sont des
+/// gestes sur le moteur, exécutés par le cas d'usage du genre. L'opération a déjà son nouveau statut (`rolling_back`
+/// pour « revenir », `succeeded` pour « garder ») ; l'exécuteur la clôt.
+#[async_trait::async_trait]
+pub trait DecisionEffects: Send + Sync {
+    async fn decided(self: Arc<Self>, snapshot: OpSnapshot, choice: Choice);
+}
+
 pub struct ServiceOpAccess {
+    effects: std::sync::OnceLock<Arc<dyn DecisionEffects>>,
     ops: Arc<ServiceOps>,
     registry: Arc<ServicesRegistry>,
     store: Arc<dyn Store>,
@@ -129,11 +139,19 @@ impl ServiceOpAccess {
         trail: Arc<AuditTrail>,
     ) -> Self {
         Self {
+            effects: std::sync::OnceLock::new(),
             ops,
             registry,
             store,
             clock,
             trail,
+        }
+    }
+
+    /// Branche l'exécuteur des décisions (une seule fois, à la composition).
+    pub fn set_effects(&self, effects: Arc<dyn DecisionEffects>) {
+        if self.effects.set(effects).is_err() {
+            tracing::warn!("exécuteur des décisions déjà branché");
         }
     }
 
@@ -350,6 +368,16 @@ impl ServiceOpAccess {
         if next == OpStatus::Cancelled {
             self.ops.clean_after_cancel(&before).await;
         }
-        self.ops.snapshot(id).await?.ok_or(AccessError::NotFound)
+        let snapshot = self.ops.snapshot(id).await?.ok_or(AccessError::NotFound)?;
+        // « Revenir » et « Garder » d'une opération à vérifier sont des gestes sur le moteur : exécutés après la
+        // décision, hors de la requête (le retour peut durer), jamais rejoués.
+        if matches!(choice, Choice::Revert | Choice::Keep)
+            && before.record.status == OpStatus::NeedsAttention
+            && let Some(effects) = self.effects.get()
+        {
+            let (effects, done) = (Arc::clone(effects), snapshot.clone());
+            tokio::spawn(async move { effects.decided(done, choice).await });
+        }
+        Ok(snapshot)
     }
 }

@@ -370,6 +370,56 @@ impl ServiceSpecRepo for SqliteSpecRepo {
         Ok(done.rows_affected())
     }
 
+    async fn abandon_current(&self, key: &ServiceKey, rev: u32) -> Result<bool, StoreError> {
+        let Some(previous) = rev.checked_sub(1).filter(|previous| *previous >= 1) else {
+            return Ok(false);
+        };
+        let key = key.as_str();
+        let (rev, previous) = (i64::from(rev), i64::from(previous));
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(storage(RESOURCE))?;
+        let current: Option<i64> = sqlx::query_scalar(
+            "SELECT rev FROM service_specs WHERE service_key = ? AND current = 1",
+        )
+        .bind(key)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        let previous_exists: Option<i64> =
+            sqlx::query_scalar("SELECT rev FROM service_specs WHERE service_key = ? AND rev = ?")
+                .bind(key)
+                .bind(previous)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(storage(RESOURCE))?;
+        if current != Some(rev) || previous_exists.is_none() {
+            return Ok(false);
+        }
+        sqlx::query("DELETE FROM service_spec_secrets WHERE service_key = ? AND rev = ?")
+            .bind(key)
+            .bind(rev)
+            .execute(&mut *tx)
+            .await
+            .map_err(storage(RESOURCE))?;
+        sqlx::query("DELETE FROM service_specs WHERE service_key = ? AND rev = ?")
+            .bind(key)
+            .bind(rev)
+            .execute(&mut *tx)
+            .await
+            .map_err(storage(RESOURCE))?;
+        sqlx::query("UPDATE service_specs SET current = 1 WHERE service_key = ? AND rev = ?")
+            .bind(key)
+            .bind(previous)
+            .execute(&mut *tx)
+            .await
+            .map_err(storage(RESOURCE))?;
+        tx.commit().await.map_err(storage(RESOURCE))?;
+        Ok(true)
+    }
+
     async fn forget(&self, key: &ServiceKey) -> Result<u64, StoreError> {
         let key = key.as_str();
         let mut tx = self

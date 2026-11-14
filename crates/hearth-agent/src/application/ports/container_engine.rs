@@ -241,6 +241,13 @@ pub trait ContainerEngine: Send + Sync {
     /// (volumes anonymes compris) : les deux gestes n'ont pas les mêmes garanties.
     async fn remove_keeping_volumes(&self, id: &str) -> Result<(), EngineError>;
 
+    /// Renomme un conteneur (HRT-87, BR-EDIT-018) : l'ancien conteneur d'un service qu'on modifie est mis de côté
+    /// sous un nom provisoire pour libérer le nom du service, puis remis sous son nom si la modification échoue.
+    /// Un conteneur renommé garde son identifiant, son état (en marche ou arrêté), ses dossiers montés et ses
+    /// journaux : seul son nom change. `NotFound` s'il n'existe plus ; `NameTaken` si un autre conteneur porte déjà
+    /// ce nom. Renommer un conteneur sous son nom actuel réussit sans rien changer.
+    async fn rename(&self, id: &str, new_name: &str) -> Result<(), EngineError>;
+
     /// Les bornes de la machine et le dossier des images (HRT-68).
     async fn info(&self) -> Result<EngineInfo, EngineError>;
 }

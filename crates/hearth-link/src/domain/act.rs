@@ -19,6 +19,8 @@ use hearth_proto::api::deploy::DeploySpec;
 use hearth_proto::api::game_settings::SaveSettingsRequest;
 use hearth_proto::api::reauth::ReauthMode;
 use hearth_proto::api::service_ops::OperationChoice;
+use hearth_proto::api::service_spec::DriftView;
+use hearth_proto::api::service_update::{CommandOp, EnvOp, SpecChange};
 use serde_json::Value;
 
 /// Un identifiant de compte de l'agent : lettres et chiffres, rien d'autre (jamais `/`, `..`, `?`).
@@ -228,6 +230,25 @@ fn build<'a>(
             data: flag(body, "erase_data")?,
             backups: flag(body, "erase_backups")?,
         },
+        // Modifier un service (HRT-87, BR-EDIT-017) : la clé du service, lue du chemin, est la cible signée ; la
+        // révision de base, l'empreinte de la partie non secrète, les nombres de variables posées et retirées et la
+        // présence d'une commande se lisent du corps. Jamais un nom, une valeur ni la commande (une seule fonction,
+        // partagée avec l'agent : `AdminAct::service_update`). Un corps avec une valeur d'énumération que ce client
+        // ne connaît pas n'est pas un acte.
+        ActKind::ServiceUpdate => {
+            let change: SpecChange =
+                serde_json::from_value(body.cloned().ok_or(Unreadable)?).map_err(|_| Unreadable)?;
+            if change.env.iter().any(|line| line.op == EnvOp::Unknown)
+                || change
+                    .command
+                    .as_ref()
+                    .is_some_and(|command| command.op == CommandOp::Unknown)
+                || change.seen_drift == Some(DriftView::Unknown)
+            {
+                return Err(Unreadable);
+            }
+            AdminAct::service_update(id, &change)
+        }
         // Déclarés pour les tranches suivantes, sans route dans `ROUTES` : aucune requête ne peut les viser
         // (`route_of` ne lit que `ROUTES`). Le lot qui ajoute leur route écrit ici comment les reconstruire.
         ActKind::BackupCreate | ActKind::BackupDelete => {
@@ -281,6 +302,7 @@ mod tests {
                 "base_rev": 2, "file_stamp": "ab", "origin": "form", "effect": "restart",
                 "changes": [{ "id": "motd", "action": "set", "value": "Salut" }]
             }),
+            "/services/{key}/spec" => json!({ "base_rev": 2, "tag": "1.2", "repull": false }),
             "/deployments" => {
                 json!({ "name": "web", "image": "nginx", "env": [{ "name": "A", "value": "v" }] })
             }

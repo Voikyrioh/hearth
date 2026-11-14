@@ -57,7 +57,7 @@ pub fn deploy_image_ref(image: &str, tag: Option<&str>) -> String {
     format!("{repository}:{tag}")
 }
 
-fn put(hasher: &mut Sha256, bytes: &[u8]) {
+pub(crate) fn put(hasher: &mut Sha256, bytes: &[u8]) {
     let length = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
     hasher.update(length.to_be_bytes());
     hasher.update(&bytes[..length as usize]);

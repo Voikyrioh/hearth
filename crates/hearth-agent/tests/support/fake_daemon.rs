@@ -524,6 +524,16 @@ async fn handle(
         write_reply(&mut stream, reply).await;
         return;
     }
+    // Renommer (HRT-87) : `POST /containers/{id}/rename?name=…`.
+    if method == "POST"
+        && let Some(id) = route
+            .strip_prefix("/containers/")
+            .and_then(|rest| rest.strip_suffix("/rename"))
+    {
+        let reply = rename_container(&state, &events, id, &query);
+        write_reply(&mut stream, reply).await;
+        return;
+    }
     // Créer, supprimer, récupérer (HRT-68).
     if method == "POST" && route == "/containers/create" {
         let body: Value = serde_json::from_slice(&body_bytes).unwrap_or(Value::Null);
@@ -1082,6 +1092,47 @@ async fn stream_logs(mut stream: TcpStream, state: Arc<Mutex<State>>, id: String
     let _ = stream.shutdown().await;
 }
 
+/// `POST /containers/{id}/rename?name=…` : comme le moteur. Un conteneur inconnu répond `404`, un nom déjà
+/// porté par un autre conteneur `409 Conflict`, sinon `204`. Le conteneur garde son identifiant et son état.
+fn rename_container(
+    state: &Arc<Mutex<State>>,
+    events: &broadcast::Sender<String>,
+    id: &str,
+    query: &str,
+) -> Reply {
+    let name = query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("name="))
+        .unwrap_or_default()
+        .to_owned();
+    let mut guard = state.lock().unwrap_or_else(PoisonError::into_inner);
+    if !guard.containers.contains_key(id) {
+        return json_reply(
+            404,
+            json!({ "message": format!("No such container: {id}") }),
+        );
+    }
+    if let Some(existing) = guard
+        .containers
+        .values()
+        .find(|c| c.name == name && c.id != id)
+    {
+        return json_reply(
+            409,
+            json!({ "message": format!(
+                "Conflict. The name \"/{name}\" is already in use by container \"{}\". You have to remove (or rename) that container to be able to reuse that name.",
+                existing.id
+            ) }),
+        );
+    }
+    if let Some(container) = guard.containers.get_mut(id) {
+        container.name = name;
+    }
+    drop(guard);
+    announce(events, id, "rename");
+    empty_reply(204)
+}
+
 /// `POST /containers/create?name=…` : comme le moteur. Une image absente répond `404 No such image`, un nom pris
 /// `409 Conflict`. Le corps lu (étiquettes, variables, commande, limites, ports, montages, règle de
 /// redémarrage) est ce que l'inspection rendra ensuite.
@@ -1111,6 +1162,11 @@ fn create_container(
         );
     }
     let mut container = DaemonContainer::new(&name, "created");
+    // Comme le vrai moteur, un identifiant est unique : un conteneur renommé garde le sien, et un nouveau conteneur
+    // qui reprend son nom n'en hérite pas (HRT-87).
+    while guard.containers.contains_key(&container.id) {
+        container.id = format!("{}x", container.id);
+    }
     container.image = image;
     container.cmd = body["Cmd"]
         .as_array()

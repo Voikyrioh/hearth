@@ -38,7 +38,7 @@ use crate::application::sessions::Reauthenticated;
 use crate::domain::audit::{ClientName, Target};
 use crate::entrypoint::services_wire;
 
-fn deploy_error(error: DeployError) -> ApiError {
+pub(super) fn deploy_error(error: DeployError) -> ApiError {
     match error {
         DeployError::EngineUnavailable(engine) => ApiError(ErrorBody::with_details(
             ErrorCode::EngineUnavailable,

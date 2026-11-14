@@ -9,6 +9,7 @@ use hearth_proto::api::service_delete::CAPABILITY_SERVICE_DELETE;
 use hearth_proto::api::service_logs::CAPABILITY_SERVICE_LOGS;
 use hearth_proto::api::service_ops::CAPABILITY_SERVICE_OPS;
 use hearth_proto::api::service_ops::{CAPABILITY_CATALOG, CAPABILITY_GAME_SERVICES};
+use hearth_proto::api::service_update::CAPABILITY_SERVICE_UPDATE;
 use hearth_proto::api::services::{
     CAPABILITY_SERVICE_ADOPTION, CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES,
 };
@@ -70,6 +71,9 @@ impl HelloService {
                     CAPABILITY_GAME_SERVICES,
                     // Supprimer un service (HRT-85) : `GET /services/{key}/delete-preview` et `DELETE /services/{key}`.
                     CAPABILITY_SERVICE_DELETE,
+                    // Modifier un service par recréation (HRT-87) : `GET` et `PUT /services/{key}/spec`, les lignes du
+                    // nouveau service qui n'a pas démarré.
+                    CAPABILITY_SERVICE_UPDATE,
                 ],
             },
         }
@@ -127,7 +131,8 @@ mod tests {
                 "catalog",
                 "game-settings",
                 "game-services",
-                "service-delete"
+                "service-delete",
+                "service-update"
             ]
         );
     }

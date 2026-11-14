@@ -265,6 +265,13 @@ pub enum Target {
         service: ClientName,
         note: DeleteNote,
     },
+    /// Un service modifié par recréation, réussi ou non (HRT-87, BR-EDIT-033) : le nom du service et ce que la
+    /// modification a changé, en CATÉGORIES et en NOMBRES. **Jamais le nom ni la valeur d'une variable, la commande,
+    /// un chemin de dossier géré ou une ligne de journal** : le type n'a pas de champ pour eux.
+    ServiceUpdate {
+        service: ClientName,
+        note: UpdateNote,
+    },
     /// Une fiche visée par une demande refusée avant de connaître le service (fiche inconnue, empreinte
     /// changée, contrat non accepté...) : son identifiant, nettoyé et borné.
     Fiche(ClientName),
@@ -273,6 +280,27 @@ pub enum Target {
         dir: ClientName,
         invariant: ClientName,
     },
+}
+
+/// Ce que la modification d'un service a changé (BR-EDIT-033) : des catégories et des nombres seulement.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UpdateNote {
+    /// La nouvelle version de l'image, quand elle change.
+    pub tag: Option<ClientName>,
+    pub ports: bool,
+    pub mounts: bool,
+    pub command: bool,
+    /// Variables posées (nouvelles ou remplacées) et retirées : leur NOMBRE, jamais leurs noms.
+    pub env_set: u32,
+    pub env_removed: u32,
+    /// L'adresse à donner aux joueurs a changé.
+    pub public_address: bool,
+    /// Les ports du SERVEUR après la modification.
+    pub host_ports: Vec<u16>,
+    /// Le service était arrêté et l'est resté (BR-EDIT-015), ou a été arrêté pendant la modification.
+    pub stopped_during: bool,
+    /// Le nouveau service a échoué et l'ancien a été remis (BR-EDIT-020).
+    pub rolled_back: bool,
 }
 
 /// Ce que la suppression d'un service a fait de plus que le retirer (BR-DEL-029) : des nombres seulement.
@@ -547,6 +575,49 @@ impl Target {
                 }
                 if note.left > 0 {
                     text.push_str(&format!(", données non effacées ({})", note.left));
+                }
+                Some(text)
+            }
+            Self::ServiceUpdate { service, note } => {
+                let mut text = format!("service {}", service.as_str());
+                let mut changed: Vec<String> = Vec::new();
+                if let Some(tag) = &note.tag {
+                    changed.push(format!("version {}", tag.as_str()));
+                }
+                if note.ports {
+                    changed.push("ports".to_owned());
+                }
+                if note.mounts {
+                    changed.push("dossiers".to_owned());
+                }
+                if note.command {
+                    changed.push("commande modifiée".to_owned());
+                }
+                if note.env_set > 0 || note.env_removed > 0 {
+                    changed.push(format!(
+                        "variables ({} posée{}, {} retirée{})",
+                        note.env_set,
+                        if note.env_set > 1 { "s" } else { "" },
+                        note.env_removed,
+                        if note.env_removed > 1 { "s" } else { "" }
+                    ));
+                }
+                if note.public_address {
+                    changed.push("adresse des joueurs".to_owned());
+                }
+                if !changed.is_empty() {
+                    text.push_str(&format!(" : {}", changed.join(", ")));
+                }
+                if !note.host_ports.is_empty() {
+                    let ports: Vec<String> =
+                        note.host_ports.iter().map(ToString::to_string).collect();
+                    text.push_str(&format!(", ports du serveur {}", ports.join(" ")));
+                }
+                if note.stopped_during {
+                    text.push_str(", service arrêté pendant la modification");
+                }
+                if note.rolled_back {
+                    text.push_str(", retour arrière effectué");
                 }
                 Some(text)
             }
@@ -1468,5 +1539,44 @@ mod delete_tests {
     #[test]
     fn refusing_an_adopted_service_has_its_own_reason() {
         assert_eq!(Reason::ServiceAdopted.text(), "service adopté");
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+
+    fn text(note: UpdateNote) -> String {
+        Target::ServiceUpdate {
+            service: ClientName::parse("terraria").expect("nom"),
+            note,
+        }
+        .text()
+        .expect("texte")
+    }
+
+    #[test]
+    fn a_plain_recreation_says_only_the_service() {
+        assert_eq!(text(UpdateNote::default()), "service terraria");
+    }
+
+    #[test]
+    fn the_entry_says_categories_and_numbers_never_a_name_or_a_value() {
+        let note = UpdateNote {
+            tag: ClientName::parse("1.28"),
+            ports: true,
+            mounts: false,
+            command: true,
+            env_set: 2,
+            env_removed: 1,
+            public_address: false,
+            host_ports: vec![7777, 7778],
+            stopped_during: true,
+            rolled_back: true,
+        };
+        assert_eq!(
+            text(note),
+            "service terraria : version 1.28, ports, commande modifiée, variables (2 posées, 1 retirée), ports du serveur 7777 7778, service arrêté pendant la modification, retour arrière effectué"
+        );
     }
 }
