@@ -12,6 +12,7 @@ import UnreadableNote from "@/components/molecules/UnreadableNote.vue";
 import DeleteProgressDialog from "@/components/organisms/DeleteProgressDialog.vue";
 import DeleteServiceDialog from "@/components/organisms/DeleteServiceDialog.vue";
 import EnginePanel from "@/components/organisms/EnginePanel.vue";
+import GameSequenceDialog from "@/components/organisms/GameSequenceDialog.vue";
 import OperationDecisionDialog from "@/components/organisms/OperationDecisionDialog.vue";
 import OperationsStrip from "@/components/organisms/OperationsStrip.vue";
 import ServiceDetail from "@/components/organisms/ServiceDetail.vue";
@@ -233,6 +234,11 @@ function launchedByOf(operation: TrackedOperation["operation"]): string | null {
 /** « Voir » ouvre le détail du service touché, où se trouve la carte de l'opération. */
 function seeOperation(tracked: TrackedOperation) {
   openDetail(tracked.operation.key);
+  // Un arrêt ou un redémarrage de serveur de jeu : « Voir » rouvre la séquence, avec son étape et son décompte.
+  const service = listServices.value.find((item) => item.key === tracked.operation.key);
+  if (service && (tracked.operation.kind === "stop" || tracked.operation.kind === "restart")) {
+    void lifecycle.resumeSequence(service, tracked.operation);
+  }
 }
 /**
  * La fenêtre de décision, ouverte sur l'opération qui attend. On retient son identifiant et on relit le magasin :
@@ -260,6 +266,48 @@ const lifecycle = useServiceLifecycle(
   () => server.value?.id ?? "",
   () => listServices.value,
 );
+/**
+ * La séquence d'un arrêt de jeu s'arrête avant d'arrêter quoi que ce soit quand la confirmation manque (BR-JEU-006,
+ * BR-JEU-007) : la fenêtre de décision s'ouvre d'elle-même, une fois par demande (« Décider plus tard » la ferme, la
+ * séquence garde son bouton « Répondre »).
+ */
+const decisionAsked = ref<string | null>(null);
+watch(
+  () => lifecycle.sequenceOperation.value,
+  (operation) => {
+    if (
+      operation?.decision != null &&
+      lifecycle.sequenceOpen.value &&
+      decisionAsked.value !== operation.id
+    ) {
+      decisionAsked.value = operation.id;
+      decidingId.value = operation.id;
+    }
+  },
+);
+/**
+ * « Décider plus tard » : rien n'est répondu, la fenêtre de séquence ne revient pas non plus (elle montrerait un arrêt
+ * qui n'a pas commencé) ; la bande « Opérations en cours » garde « Répondre » (revue UX de Nora du 14/11, constat 6).
+ */
+function closeDecision() {
+  const asked = decidingId.value;
+  decidingId.value = null;
+  if (asked !== null && lifecycle.sequence.value?.opId === asked && lifecycle.sequenceOpen.value) {
+    const waiting = lifecycle.sequenceOperation.value?.decision != null;
+    if (waiting) lifecycle.closeSequence();
+  }
+}
+function decideSequence() {
+  const operation = lifecycle.sequenceOperation.value;
+  if (operation) decidingId.value = operation.id;
+}
+/** Le nom du jeu de la séquence que cette fenêtre de décision a lancée (sinon le nom du service tient lieu de nom de jeu). */
+const decidingGameName = computed(() => {
+  const sequence = lifecycle.sequence.value;
+  return deciding.value !== null && sequence?.opId === deciding.value.operation.id
+    ? sequence.game.name
+    : null;
+});
 /**
  * Supprimer un service (HRT-86) : la page tient la fenêtre de confirmation puis celle du suivi ; seul le bouton de la
  * carte « Suppression » du détail la demande (BR-DEL-026), jamais le menu de la ligne.
@@ -569,9 +617,20 @@ async function openDocs() {
       :gesture="lifecycle.pending.value.gesture"
       :service="lifecycle.pending.value.service"
       :current="lifecycle.current.value"
+      :game="lifecycle.pending.value.game"
       :locked="lifecycleLocked"
       :perform="lifecycle.perform"
       @close="closeLifecycle"
+    />
+
+    <GameSequenceDialog
+      v-if="server && lifecycle.sequence.value"
+      :open="lifecycle.sequenceOpen.value && decidingId === null"
+      :sequence="lifecycle.sequence.value"
+      :operation="lifecycle.sequenceOperation.value"
+      :ended="lifecycle.sequenceEnded.value"
+      @close="lifecycle.closeSequence"
+      @decide="decideSequence"
     />
 
     <DeleteServiceDialog
@@ -604,7 +663,8 @@ async function openDocs() {
       :open="deciding !== null"
       :server-id="server.id"
       :tracked="deciding"
-      @close="decidingId = null"
+      :game-name="decidingGameName"
+      @close="closeDecision"
     />
   </div>
 </template>
