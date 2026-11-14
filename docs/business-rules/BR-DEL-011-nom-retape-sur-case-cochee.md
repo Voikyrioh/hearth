@@ -5,7 +5,7 @@ titre: Une case cochée exige le nom du service retapé, vérifié par l'agent
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-supprimer-service.md (BR-DEL-011), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md §5 et §9, HRT-85
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-DEL-011 : Une case cochée exige le nom du service retapé, vérifié par l'agent
@@ -15,9 +15,13 @@ Quand une case est cochée, `confirm_name` doit être égal au nom du service, c
 
 ## Application (code)
 - `crates/hearth-agent/src/application/delete.rs::ServiceDeletion::delete`
+- `apps/desktop/src/services/delete.ts::{mustRetype, nameMatches, requestOf}` (nom retapé dès qu'une case est cochée, casse comprise, jamais envoyé sans case)
+- `apps/desktop/src/components/organisms/DeleteServiceDialog.vue`
 
 ## Vérification
 - `crates/hearth-agent/tests/service_delete_https.rs::the_data_box_needs_the_exact_name_and_nothing_is_touched_before_it_is_right`
+- `apps/desktop/src/services/delete.test.ts`
+- `apps/desktop/src/pages/ServicesDelete.test.ts` (cocher les données exige le nom)
 
 ## Cas limites
 - Aucun.
@@ -28,3 +32,4 @@ Quand une case est cochée, `confirm_name` doit être égal au nom du service, c
 
 ## Historique
 - 2026-10-24 : création (HRT-85, côté agent).
+- 2026-11-14 : côté client (HRT-86).

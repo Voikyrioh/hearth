@@ -63,6 +63,8 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
     case "reauth_setting":
     // Déployer une image n'est JAMAIS couvert par l'élévation (BR-DEPLOY-015) : le mot de passe est redemandé.
     case "service_deploy":
+    // Supprimer un service n'est JAMAIS couvert par l'élévation (BR-DEL-012) : le mot de passe est redemandé.
+    case "service_delete":
     // Répondre à une opération n'est jamais couvert par l'élévation seule (agent d'avant la grille).
     case "operation_decide":
       return false;
@@ -88,6 +90,7 @@ function isPiloting(kind: AdminActKind): boolean {
     case "account_password_own":
     case "reauth_setting":
     case "service_deploy":
+    case "service_delete":
     case "operation_cancel":
     case "game_settings_save":
       return false;

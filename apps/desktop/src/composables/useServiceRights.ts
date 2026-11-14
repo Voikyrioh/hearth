@@ -56,6 +56,8 @@ export function useServiceRights() {
     reasonId,
     /** L'agent annonce les réglages de jeu (capacité `game-settings`) : l'onglet « Réglages » peut exister. */
     gameSettings: computed(() => rights.value?.rights?.gameSettings ?? false),
+    /** L'agent annonce `service-delete` : la carte « Suppression » d'un service créé par Hearth peut exister (HRT-86). */
+    serviceDelete: computed(() => rights.value?.rights?.serviceDelete ?? false),
     /** Le compte connecté, tel que l'agent le connaît (à valider avant tout affichage). */
     account: computed(() => rights.value?.rights?.account ?? ""),
     /** Relit le droit tout de suite (« Vérifier à nouveau » sous l'échec de lecture). */

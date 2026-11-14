@@ -67,6 +67,8 @@ pub enum AdminActKindDto {
     OperationCancel,
     /// Enregistrer les réglages d'un serveur de jeu (HRT-109) : couvert par l'élévation de cinq minutes.
     GameSettingsSave,
+    /// Supprimer un service (HRT-86, BR-DEL-012) : le mot de passe à chaque fois, jamais couvert par l'élévation.
+    ServiceDelete,
 }
 
 /// L'état de confiance du compte que l'agent annonce (HRT-194, BR-TRUST-052) : de lui dépend si piloter un

@@ -6,11 +6,19 @@ import bindings from "@/bindings.ts?raw";
 import { portVerdict } from "@/deploy/messages";
 import { kindText, stopTexts } from "@/fiche/messages";
 import { type MessageKey, t } from "@/i18n";
-import type { AuditEntry, ImportState, QuestionKind, SettingEffect, WorldSaved } from "@/link";
+import type {
+  AuditEntry,
+  FolderFate,
+  ImportState,
+  QuestionKind,
+  SettingEffect,
+  WorldSaved,
+} from "@/link";
 import { type OperationChoice, type OperationKind, toOperation } from "@/link/serviceOps";
 import { endNotice, gapKindOf, gapText, LOG_STATE_KEYS, sourceTag } from "@/logs/view";
 import { ATTACK_STATE_KEYS } from "@/security/messages";
 import { CHOICE_KEYS, LABEL_KEYS, outcomeText, statusText } from "@/serviceOps/messages";
+import { fateText } from "@/services/delete";
 import { mountView, restartText } from "@/services/detail";
 import { STATE_KEYS } from "@/services/format";
 import { effectText, importStateText } from "@/settings/messages";
@@ -126,6 +134,25 @@ const SAYS: Record<string, (value: string) => void> = {
     });
     expect(lines[0], value).toBeTruthy();
     expect(lines[0]).not.toMatch(/^fiche\./);
+  },
+  FolderFateDto: (value) => {
+    // Le sort d'un dossier géré à la suppression (HRT-86, BR-DEL-006 à 008) : un sort inconnu se lit « Conservé », jamais « Effacé ».
+    const said = fateText(
+      {
+        path: "/x",
+        bytes: 0,
+        items: 0,
+        partial: false,
+        unmeasured: false,
+        fate: value as FolderFate,
+        sharedWith: [],
+        sharedWithUnmanaged: false,
+      },
+      true,
+    );
+    key(said);
+    expect(said).not.toMatch(/^serviceDelete\./);
+    if (value === "unknown") expect(said).toBe("Conservé");
   },
   AgentUpdateStepDto: (value) => {
     // Une étape inconnue n'a volontairement pas de libellé : l'écran ne marque aucune étape (« en cours »).

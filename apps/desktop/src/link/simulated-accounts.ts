@@ -194,6 +194,14 @@ export class SimulatedAccounts {
     else this.withoutGameSettings.add(serverId);
   }
 
+  /** La capacité `service-delete` de l'agent simulé (vraie par défaut ; `false` : un agent d'avant HRT-85). */
+  private readonly withoutServiceDelete = new Set<string>();
+
+  setServiceDeleteServed(serverId: string, served: boolean): void {
+    if (served) this.withoutServiceDelete.delete(serverId);
+    else this.withoutServiceDelete.add(serverId);
+  }
+
   setRightsKnown(serverId: string, known: boolean): void {
     if (known) this.oldAgents.delete(serverId);
     else this.oldAgents.add(serverId);
@@ -219,6 +227,7 @@ export class SimulatedAccounts {
       // Par défaut l'agent qui connaît le droit annonce aussi les réglages de jeu (comme la fiche de référence) ;
       // `setGameSettingsServed(…, false)` retire la capacité SEULE.
       gameSettings: known && !this.withoutGameSettings.has(server.id),
+      serviceDelete: known && !this.withoutServiceDelete.has(server.id),
       account: me?.username ?? server.username.toLowerCase(),
     };
   }

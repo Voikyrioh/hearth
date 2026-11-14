@@ -254,6 +254,8 @@ export interface ServiceRights {
   granted: boolean;
   /** L'agent annonce `game-settings` : l'onglet « Réglages » d'un service de fiche peut exister (HRT-109). */
   gameSettings: boolean;
+  /** L'agent annonce `service-delete` : la carte « Suppression » d'un service créé par Hearth peut exister (HRT-86). */
+  serviceDelete: boolean;
   account: string;
 }
 
@@ -262,6 +264,7 @@ export function toServiceRights(dto: ServiceRightsDto): ServiceRights {
     known: dto.known,
     granted: dto.granted,
     gameSettings: dto.gameSettings,
+    serviceDelete: dto.serviceDelete,
     account: dto.account,
   };
 }

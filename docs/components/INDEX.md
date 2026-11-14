@@ -110,12 +110,15 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`OperationCard`](./OperationCard.md) — La carte d'une opération de service : étape, progression, qui l'a lancée, bouton de la décision.
 - [`OperationsStrip`](./OperationsStrip.md) — La bande « Opérations en cours » de la section Services.
 - [`LifecycleButtons`](./LifecycleButtons.md) — Démarrer, arrêter, redémarrer : les gestes de l'état, la raison écrite dessous.
+- [`DeleteServiceCard`](./DeleteServiceCard.md) — La carte « Suppression » du détail : le bouton, sa raison, ou la phrase d'un service adopté (HRT-86).
 - [`ServiceLifecycleDialog`](./ServiceLifecycleDialog.md) — La fenêtre de confirmation (effet, avertissements, socle) des trois gestes.
 - [`DeployForm`](./DeployForm.md) — Le formulaire « Déployer un service » : Général, variables, ports, commande, ressources, pied (HRT-69).
 - [`EnvVarRows`](./EnvVarRows.md) — La section Variables d'environnement du formulaire de déploiement (HRT-69).
 - [`PortMappingRows`](./PortMappingRows.md) — La section Ports du formulaire de déploiement (HRT-69).
 - [`DeploySummaryDialog`](./DeploySummaryDialog.md) — Le récapitulatif « Vérifiez avant de lancer » et ses points d'attention (HRT-69).
 - [`DeployProgressDialog`](./DeployProgressDialog.md) — La progression d'un déploiement, l'annulation et les issues (HRT-69).
+- [`DeleteServiceDialog`](./DeleteServiceDialog.md) — La fenêtre « Supprimer {nom} ? » : effet, dossiers et sort, deux cases décochées, nom retapé, socle (HRT-86).
+- [`DeleteProgressDialog`](./DeleteProgressDialog.md) — Le suivi d'une suppression, l'annulation avant le point de non-retour et les issues (HRT-86).
 - [`ServiceRowMenu`](./ServiceRowMenu.md) — Le menu d'actions d'une ligne de la liste des services.
 - [`OperationDecisionDialog`](./OperationDecisionDialog.md) — La fenêtre de décision d'une opération (acte confirmé, mot de passe à chaque réponse).
 - [`AgentUpdateSteps`](./AgentUpdateSteps.md) — Les étapes d'une mise à jour de l'agent (téléchargement, vérification, installation, redémarrage, contrôle).

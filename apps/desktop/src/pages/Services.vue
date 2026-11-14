@@ -9,6 +9,8 @@ import DeployButton from "@/components/molecules/DeployButton.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import ServiceRightReason from "@/components/molecules/ServiceRightReason.vue";
 import UnreadableNote from "@/components/molecules/UnreadableNote.vue";
+import DeleteProgressDialog from "@/components/organisms/DeleteProgressDialog.vue";
+import DeleteServiceDialog from "@/components/organisms/DeleteServiceDialog.vue";
 import EnginePanel from "@/components/organisms/EnginePanel.vue";
 import OperationDecisionDialog from "@/components/organisms/OperationDecisionDialog.vue";
 import OperationsStrip from "@/components/organisms/OperationsStrip.vue";
@@ -18,6 +20,7 @@ import ServiceTable from "@/components/organisms/ServiceTable.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { useNow } from "@/composables/useNow";
 import { usePageData } from "@/composables/usePageData";
+import { useServiceDelete } from "@/composables/useServiceDelete";
 import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { deployDoor } from "@/deploy/availability";
@@ -257,6 +260,53 @@ const lifecycle = useServiceLifecycle(
   () => server.value?.id ?? "",
   () => listServices.value,
 );
+/**
+ * Supprimer un service (HRT-86) : la page tient la fenêtre de confirmation puis celle du suivi ; seul le bouton de la
+ * carte « Suppression » du détail la demande (BR-DEL-026), jamais le menu de la ligne.
+ */
+const removal = useServiceDelete(
+  () => server.value?.id ?? "",
+  () => listServices.value,
+);
+/** Une action tient le service visé par la fenêtre de suppression ouverte (BR-DEL-021, BR-LIFE-022). */
+const removalLocked = computed(() => {
+  const current = removal.current.value;
+  return current !== null && server.value
+    ? pilotLock(
+        current,
+        operations.forService(server.value.id, current.key) !== undefined,
+        server.value.username,
+      ).locked
+    : false;
+});
+/** La fenêtre se ferme : le focus revient au bouton d'origine, sinon au titre du détail (la carte a pu disparaître). */
+async function closeRemoval() {
+  removal.closeConfirm();
+  await nextTick();
+  const active = document.activeElement;
+  if (active === null || active === document.body) {
+    document.querySelector<HTMLElement>("[data-detail-title]")?.focus();
+  }
+}
+/**
+ * La fenêtre de suivi se ferme. Le service est supprimé (la fenêtre vient de le dire) : le détail qu'elle laissait ouvert
+ * ne montre plus rien d'utile, la page revient à la liste (revue UX de Nora du 14/11, constat 5) ; sinon (fermée en
+ * cours, échec, annulation) le détail reste où il est.
+ */
+async function closeRemovalProgress() {
+  const key = removal.target.value?.key ?? null;
+  const gone = removal.ended.value?.status === "succeeded";
+  removal.closeProgress();
+  if (gone && key !== null && selectedKey.value === key) {
+    await closeDetail();
+    return;
+  }
+  await nextTick();
+  const active = document.activeElement;
+  if (active === null || active === document.body) {
+    document.querySelector<HTMLElement>("[data-services-work], [data-detail-title]")?.focus();
+  }
+}
 function controlsFor(service: ServiceInfo): Controls | null {
   if (!server.value) return null;
   const running = operations.forService(server.value.id, service.key) !== undefined;
@@ -479,12 +529,14 @@ async function openDocs() {
                 :tab="tab"
                 :last-contact-at="lastContactAt"
                 :game-settings="rights.gameSettings.value"
+                :service-delete="rights.serviceDelete.value"
                 @update:tab="setTab"
                 @back="closeDetail"
                 @open-other="openDetail"
                 @retry-rights="rights.retry()"
                 @decide="decide"
                 @gesture="lifecycle.request"
+                @delete="removal.request"
               />
             </div>
           </div>
@@ -520,6 +572,31 @@ async function openDocs() {
       :locked="lifecycleLocked"
       :perform="lifecycle.perform"
       @close="closeLifecycle"
+    />
+
+    <DeleteServiceDialog
+      v-if="server && removal.target.value"
+      :open="removal.phase.value === 'confirm'"
+      :server-id="server.id"
+      :service="removal.target.value"
+      :current="removal.current.value"
+      :locked="removalLocked"
+      :engine-ready="engineReady"
+      :preview="removal.preview.value"
+      :perform="removal.perform"
+      @close="closeRemoval"
+      @retry="removal.loadPreview"
+    />
+
+    <DeleteProgressDialog
+      v-if="server && removal.launch.value"
+      :open="removal.phase.value === 'progress'"
+      :server-id="server.id"
+      :launch="removal.launch.value"
+      :operation="removal.operation.value"
+      :ended="removal.ended.value"
+      :perform-cancel="removal.performCancel"
+      @close="closeRemovalProgress"
     />
 
     <OperationDecisionDialog

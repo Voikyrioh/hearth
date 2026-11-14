@@ -87,6 +87,13 @@ import {
   toSecurityState,
 } from "./security";
 import {
+  type DeleteOutcome,
+  type DeletePreviewOutcome,
+  type DeleteRequest,
+  toDeleteOutcome,
+  toDeletePreviewOutcome,
+} from "./serviceDelete";
+import {
   type LifecycleGesture,
   type LifecycleOutcome,
   toLifecycleOutcome,
@@ -652,6 +659,22 @@ export class TauriLinkBridge implements LinkBridge {
   ): Promise<CancelOutcome> {
     return toCancelOutcome(
       unwrap(await commands.cancelServiceOperation(serverId, opId, adminPassword)),
+    );
+  }
+
+  // Supprimer un service (HRT-86) : une consultation et un acte confirmé, jamais couvert par l'élévation.
+  async readDeletePreview(serverId: string, key: string): Promise<DeletePreviewOutcome> {
+    return toDeletePreviewOutcome(unwrap(await commands.deletePreview(serverId, key)));
+  }
+
+  async deleteService(
+    serverId: string,
+    key: string,
+    request: DeleteRequest,
+    adminPassword: string | null,
+  ): Promise<DeleteOutcome> {
+    return toDeleteOutcome(
+      unwrap(await commands.deleteService(serverId, key, request, adminPassword)),
     );
   }
 

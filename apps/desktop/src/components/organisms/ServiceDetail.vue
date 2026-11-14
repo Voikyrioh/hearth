@@ -10,6 +10,7 @@ import { formatDateTime } from "@/composables/format";
 import { useNow } from "@/composables/useNow";
 import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
+import { deleteDoor } from "@/services/delete";
 import {
   adoptedLine,
   commandText,
@@ -30,6 +31,7 @@ import { useServersStore } from "@/stores/servers";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import Callout from "../molecules/Callout.vue";
 import DashCard from "../molecules/DashCard.vue";
+import DeleteServiceCard from "../molecules/DeleteServiceCard.vue";
 import LifecycleButtons from "../molecules/LifecycleButtons.vue";
 import OperationCard from "../molecules/OperationCard.vue";
 import OriginTags from "../molecules/OriginTags.vue";
@@ -58,6 +60,8 @@ const props = defineProps<{
   tab: "detail" | "settings" | "logs";
   /** L'agent annonce `game-settings` (`ServiceRights.gameSettings`) : l'onglet « Réglages » peut exister. */
   gameSettings: boolean;
+  /** L'agent annonce `service-delete` (`ServiceRights.serviceDelete`) : la carte « Suppression » peut exister (HRT-86). */
+  serviceDelete: boolean;
   /** Dernier contact avec le serveur (pour « Vu il y a… » dans les journaux). */
   lastContactAt: number | null;
 }>();
@@ -68,6 +72,7 @@ const emit = defineEmits<{
   "update:tab": [tab: "detail" | "settings" | "logs"];
   decide: [operation: TrackedOperation];
   gesture: [service: ServiceInfo, gesture: Gesture];
+  delete: [service: ServiceInfo];
 }>();
 
 const now = useNow();
@@ -106,6 +111,19 @@ const controls = computed<Controls | null>(() =>
         engineReady: props.engineReady,
       })
     : null,
+);
+/** La carte « Suppression » du bas du détail (HRT-86, BR-DEL-002, 003, 026) : jamais dans le menu de la ligne. */
+const door = computed(() =>
+  service.value
+    ? deleteDoor({
+        service: service.value,
+        gone: gone.value,
+        supported: props.serviceDelete,
+        gate: props.gate,
+        lock: lock.value,
+        engineReady: props.engineReady,
+      })
+    : ({ kind: "hidden" } as const),
 );
 const sameName = computed(() => (props.opened.kind === "gone" ? props.opened.sameName : null));
 
@@ -436,6 +454,13 @@ const commandNote = computed(() => {
       <DashCard :title="t('serviceDetail.restart')" data-detail-restart>
         <p class="detail__sentence">{{ restartText(service.restart) }}</p>
       </DashCard>
+
+      <DeleteServiceCard
+        :door="door"
+        :gate="gate"
+        :rights-reason-id="reasonId"
+        @delete="emit('delete', service)"
+      />
     </div>
   </section>
 </template>

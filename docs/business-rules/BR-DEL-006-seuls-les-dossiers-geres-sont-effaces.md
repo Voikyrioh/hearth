@@ -5,7 +5,7 @@ titre: « Supprimer aussi les données » n'efface que les dossiers gérés par 
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-supprimer-service.md (BR-DEL-006), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md §5 et §9, HRT-85
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-DEL-006 : « Supprimer aussi les données » n'efface que les dossiers gérés par Hearth, jamais un dossier du serveur
@@ -17,11 +17,14 @@ La case « données » efface le contenu des dossiers gérés par Hearth de ce s
 - `crates/hearth-agent/src/domain/services/delete.rs::{split_mounts, MountSplit}`
 - `crates/hearth-agent/src/application/ports/container_engine.rs::ContainerEngine::remove_keeping_volumes`
 - `crates/hearth-agent/src/application/delete.rs::ServiceDeletion::erase`
+- `apps/desktop/src/services/delete.ts::{folderRows, fateText, erasableFolders}` (seul un dossier « effaçable » passe à « Effacé », jamais un dossier partagé, non vérifiable ou du serveur)
 
 ## Vérification
 - `crates/hearth-agent/src/domain/services/delete.rs::tests` (`managed_folders_are_split_from_server_folders_and_never_mixed`, `a_managed_name_that_climbs_or_nests_is_kept_as_unmanaged_never_erased`)
 - `crates/hearth-agent/tests/service_delete_https.rs::volumes_are_counted_and_kept_the_removal_never_asks_the_engine_to_take_them`
 - `crates/hearth-agent/tests/engine_fake_daemon.rs::removing_for_a_deletion_keeps_the_volumes_and_never_forces`
+- `apps/desktop/src/services/delete.test.ts`
+- `apps/desktop/src/pages/ServicesDelete.test.ts` (dossier partagé et dossier du serveur)
 
 ## Cas limites
 - Cette version ne monte aucun dossier du serveur (FOLDER_REFUSED, HRT-70) : le tri est prêt pour quand elles existeront.
@@ -33,3 +36,4 @@ La case « données » efface le contenu des dossiers gérés par Hearth de ce s
 
 ## Historique
 - 2026-10-24 : création (HRT-85, côté agent).
+- 2026-11-14 : côté client (HRT-86).

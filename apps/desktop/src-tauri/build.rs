@@ -71,6 +71,8 @@ const COMMANDS: &[&str] = &[
     "service_start",
     "service_stop",
     "service_restart",
+    "delete_preview",
+    "delete_service",
     "deploy_check",
     "deploy_service",
     "cancel_service_operation",

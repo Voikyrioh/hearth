@@ -109,7 +109,7 @@ describe("le magasin des opérations de service", () => {
     store.apply(upsert(op({ kind: "delete" }), 1));
     bridge.services.remove("forge", "h_1");
     store.apply(upsert(op({ kind: "delete", status: "succeeded" }), 2));
-    expect(toasts.items[0]?.message).toBe("La suppression de terraria a réussi.");
+    expect(toasts.items[0]?.message).toBe("Le service terraria est supprimé.");
     store.reset();
   });
 

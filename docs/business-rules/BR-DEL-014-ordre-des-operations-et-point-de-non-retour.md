@@ -5,7 +5,7 @@ titre: Verrou, arrêt, conteneur, description, puis données ; le conteneur est 
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-supprimer-service.md (BR-DEL-014), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md §5 et §9, HRT-85
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-DEL-014 : Verrou, arrêt, conteneur, description, puis données ; le conteneur est le point de non-retour
@@ -16,10 +16,14 @@ Dans l'ordre : verrou du service (et nom réservé), arrêt, suppression du cont
 ## Application (code)
 - `crates/hearth-agent/src/domain/ops/delete.rs::{op_plan, step}`
 - `crates/hearth-agent/src/application/delete.rs::ServiceDeletion::run`
+- `apps/desktop/src/components/organisms/DeleteProgressDialog.vue` + `apps/desktop/src/services/delete.ts::stepsOf` (étapes dans l'ordre du plan, « Annuler » seulement avant le point de non-retour)
+- `apps/desktop/src/composables/useServiceDelete.ts::performCancel`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/ops/delete.rs::tests`
 - `crates/hearth-agent/tests/service_delete_https.rs::the_data_goes_only_after_the_container_while_the_name_is_reserved_and_the_service_busy`
+- `apps/desktop/src/pages/ServicesDelete.test.ts` (point de non-retour, annulation)
+- `apps/desktop/src/services/delete.test.ts`
 
 ## Cas limites
 - Aucun.
@@ -31,3 +35,4 @@ Dans l'ordre : verrou du service (et nom réservé), arrêt, suppression du cont
 
 ## Historique
 - 2026-10-24 : création (HRT-85, côté agent).
+- 2026-11-14 : côté client (HRT-86).

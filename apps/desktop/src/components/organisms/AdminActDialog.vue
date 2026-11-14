@@ -53,6 +53,8 @@ const props = withDefaults(
     cancelLabel?: string;
     /** Fenêtre large (640 px), pour un récapitulatif (HRT-69). */
     wide?: boolean;
+    /** Ce que l'acte attend encore avant d'être possible, écrit à côté du bouton quand `canSubmit` est faux (HRT-86). */
+    blockedReason?: string;
     /**
      * Une question à poser AVANT l'acte, une fois le bouton pressé (le contrat de licence d'une fiche, HRT-102) : `false`
      * annule l'envoi sans rien perdre (le mot de passe saisi reste dans son champ, rien n'est parti).
@@ -70,6 +72,7 @@ const props = withDefaults(
     passwordLabel: undefined,
     cancelLabel: undefined,
     wide: false,
+    blockedReason: undefined,
     beforeSubmit: undefined,
     refusalText: undefined,
   },
@@ -160,11 +163,11 @@ const askPassword = computed(
   () => reauth.ready.value && !reauth.keyMissing.value && reauth.needsPassword.value,
 );
 /** Le mot de passe manque : c'est tout ce qui retient le bouton (revue UX 2026-10-24, constat 13). */
-const needPasswordReason = computed(() =>
-  props.canSubmit && askPassword.value && password.value === ""
-    ? t("reauth.needPassword")
-    : undefined,
-);
+const needPasswordReason = computed(() => {
+  // L'acte lui-même n'est pas prêt : sa raison d'abord (le nom à retaper, HRT-86) ; ensuite le mot de passe.
+  if (!props.canSubmit) return props.blockedReason;
+  return askPassword.value && password.value === "" ? t("reauth.needPassword") : undefined;
+});
 const canSend = computed(
   () =>
     props.canSubmit &&

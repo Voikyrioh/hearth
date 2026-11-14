@@ -135,6 +135,22 @@ impl LinkManager {
         path: String,
         body: Option<Value>,
     ) -> Result<Value, LinkError> {
+        let limit = self.inner.deps.config.request_timeout;
+        self.typed_read_within(target, token, method, path, body, limit)
+            .await
+    }
+
+    /// Comme `typed_read`, avec un délai propre : la consultation de la suppression d'un service mesure des dossiers
+    /// jusqu'à 10 secondes (BR-DEL-009), plus que le délai ordinaire d'une requête.
+    async fn typed_read_within(
+        &self,
+        target: &Target,
+        token: &crate::domain::secret::Secret,
+        method: Method,
+        path: String,
+        body: Option<Value>,
+        limit: std::time::Duration,
+    ) -> Result<Value, LinkError> {
         let request = ApiRequest {
             method,
             path,
@@ -142,16 +158,26 @@ impl LinkManager {
             idempotency_key: None,
         };
         let deps = &self.inner.deps;
-        let response = timeout(
-            deps.config.request_timeout,
-            deps.transport.request(target, token, &request),
-        )
-        .await
-        .map_err(|_| LinkError::Timeout)??;
+        let response = timeout(limit, deps.transport.request(target, token, &request))
+            .await
+            .map_err(|_| LinkError::Timeout)??;
         if !(200..300).contains(&response.status) {
             return Err(rejection_at(&response.body, response.status));
         }
         Ok(response.body)
+    }
+
+    /// Une lecture lente (`GET`), au délai ordinaire plus `extra` : la mesure des dossiers d'une suppression.
+    pub(super) async fn typed_get_slow(
+        &self,
+        target: &Target,
+        token: &crate::domain::secret::Secret,
+        path: String,
+        extra: std::time::Duration,
+    ) -> Result<Value, LinkError> {
+        let limit = self.inner.deps.config.request_timeout + extra;
+        self.typed_read_within(target, token, Method::Get, path, None, limit)
+            .await
     }
 
     async fn audit_get(

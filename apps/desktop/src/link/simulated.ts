@@ -30,6 +30,12 @@ import type {
 } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
 import {
+  DELETE_ACT_KIND,
+  type DeleteOutcome,
+  type DeletePreviewOutcome,
+  type DeleteRequest,
+} from "./serviceDelete";
+import {
   LIFECYCLE_ACT_KINDS,
   type LifecycleGesture,
   type LifecycleOutcome,
@@ -49,6 +55,7 @@ import {
 import { SimulatedAgentUpdates } from "./simulated-agent-update";
 import { SimulatedAudit } from "./simulated-audit";
 import { SimulatedCatalog } from "./simulated-catalog";
+import { SimulatedDeletes } from "./simulated-delete";
 import { SimulatedDeploys } from "./simulated-deploy";
 import { SimulatedDevices } from "./simulated-devices";
 import { SimulatedGameSettings } from "./simulated-game-settings";
@@ -234,6 +241,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly logs = new SimulatedLogs();
   /** Déployer une image (HRT-69) : l'agent simulé juge comme le vrai ; la suite est pilotée (`deploys.progress`, `toStep`, `succeed`, `fail`). */
   readonly deploys: SimulatedDeploys;
+  /** Supprimer un service (HRT-86) : l'agent simulé juge comme le vrai ; la suite est pilotée (`deletes.toStep`, `erasing`, `succeed`, `fail`). */
+  readonly deletes: SimulatedDeletes;
   /** Le Catalogue et l'installation depuis une fiche (HRT-102) : l'agent simulé propose Terraria (`catalog.addRich()` en ajoute une plus riche). */
   readonly catalog: SimulatedCatalog;
   /** Les réglages des services de jeu (HRT-109). */
@@ -273,6 +282,7 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.deploys = new SimulatedDeploys(this.services, this.serviceOps, this.now, (id) =>
       this.machine.hostOf(id),
     );
+    this.deletes = new SimulatedDeletes(this.services, this.serviceOps, this.deploys);
     this.catalog = new SimulatedCatalog(this.deploys);
     this.gameSettings = new SimulatedGameSettings(this.catalog);
     // Un service installé depuis une fiche a ses réglages dès que l'agent l'accepte.
@@ -594,7 +604,68 @@ export class SimulatedLinkBridge implements LinkBridge {
       this.own(serverId),
     );
     if (confirmation.kind === "refused") return confirmation;
+    // Une opération de suppression s'annule comme une autre : avant le point de non-retour seulement.
+    if (this.deletes.running(serverId).some((item) => item.operationId === opId)) {
+      return this.deletes.cancel(serverId, opId);
+    }
     return this.deploys.cancel(serverId, opId);
+  }
+
+  async readDeletePreview(serverId: string, key: string): Promise<DeletePreviewOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("delete preview");
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    // La mesure des dossiers dure (BR-DEL-009) : un test peut ralentir la réponse.
+    if (this.deletes.previewDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.deletes.previewDelayMs));
+    }
+    if (this.deletes.failPreview) throw this.fail({ kind: "unreachable" });
+    return this.deletes.preview(serverId, key);
+  }
+
+  async deleteService(
+    serverId: string,
+    key: string,
+    request: DeleteRequest,
+    adminPassword: string | null,
+  ): Promise<DeleteOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("service delete");
+    // Les contrôles dans l'ordre de l'agent : droit, confirmation (jamais couverte par l'élévation), moteur, demande.
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    const confirmation = this.reauth.confirm(
+      serverId,
+      DELETE_ACT_KIND,
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    const engine = this.services.engineState(serverId);
+    if (engine !== "ready") {
+      return { kind: "refused", refusal: { kind: "engine_unavailable", engine } };
+    }
+    const by = server.username ?? "marie";
+    const accept = () => this.deletes.accept(serverId, key, request, by);
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) accept();
+      this.publish(serverId, "reconnecting");
+      const opId = "sim-op-" + this.nextOperation++;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return accept();
   }
 
   async readEngineCapacity(serverId: string): Promise<EngineCapacity | null> {

@@ -5,7 +5,7 @@ titre: Un service se supprime en marche, arrêté, en erreur ou en redémarrage 
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-supprimer-service.md (BR-DEL-003), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md §5 et §9, HRT-85
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-DEL-003 : Un service se supprime en marche, arrêté, en erreur ou en redémarrage en boucle
@@ -15,9 +15,12 @@ Les états « En marche », « Arrêté », « En erreur » et « Redémarre en 
 
 ## Application (code)
 - `crates/hearth-agent/src/application/delete.rs::{deletable, ServiceDeletion::delete}`
+- `apps/desktop/src/services/delete.ts::{deleteDoor, isDeletable, staleNotice}` (états supprimables, raisons des boutons désactivés)
 
 ## Vérification
 - `crates/hearth-agent/tests/service_delete_https.rs::a_paused_service_is_refused_with_its_reason_and_nothing_is_touched`
+- `apps/desktop/src/services/delete.test.ts`
+- `apps/desktop/src/pages/ServicesDelete.test.ts` (action en cours, état non piloté)
 
 ## Cas limites
 - Un service dont le conteneur a disparu n'a pas d'état : il reste supprimable (BR-DEL-018).
@@ -28,3 +31,4 @@ Les états « En marche », « Arrêté », « En erreur » et « Redémarre en 
 
 ## Historique
 - 2026-10-24 : création (HRT-85, côté agent).
+- 2026-11-14 : côté client (HRT-86).

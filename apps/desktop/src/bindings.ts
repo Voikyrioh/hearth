@@ -239,6 +239,20 @@ export const commands = {
 	/**  Redémarre un service (`POST /services/{key}/restart`). */
 	serviceRestart: (serverId: string, key: string, adminPassword: string | null) => typedError<LifecycleOutcome, LinkFailure>(__TAURI_INVOKE("service_restart", { serverId, key, adminPassword })),
 	/**
+	 *  De quoi bâtir la fenêtre « Supprimer {nom} ? » (`GET /services/{key}/delete-preview`) : une CONSULTATION, rien n'est
+	 *  écrit ni journalisé (BR-DEL-009 : la mesure des dossiers dure 10 secondes au plus). Les chemins des dossiers ne
+	 *  sortent que vers les comptes qui ont le droit de gérer les services ; sans le droit : `MissingServicesRight`.
+	 */
+	deletePreview: (serverId: string, key: string) => typedError<DeletePreviewOutcome, LinkFailure>(__TAURI_INVOKE("delete_preview", { serverId, key })),
+	/**
+	 *  Supprime un service (`DELETE /services/{key}`) : un acte d'administration confirmé, JAMAIS couvert par
+	 *  l'élévation (le mot de passe à chaque fois, BR-DEL-012). Par défaut rien n'est perdu : les données ne partent que
+	 *  sur la case cochée et le nom retapé (BR-DEL-005, BR-DEL-011). L'agent répond `202` : l'issue ne se lit jamais ici,
+	 *  elle arrive par le suivi des opérations. Jamais rejoué : un résultat inconnu se lit sur le flux (BR-DEL-023). Sans
+	 *  le droit « gérer les services » : `MissingServicesRight`.
+	 */
+	deleteService: (serverId: string, key: string, deletion: DeleteRequestDto, adminPassword: string | null) => typedError<DeleteOutcome, LinkFailure>(__TAURI_INVOKE("delete_service", { serverId, key, deletion, adminPassword })),
+	/**
 	 *  Les constats du formulaire de déploiement sur le nom, les ports et l'image (`POST /deployments/check`) : une
 	 *  CONSULTATION, ni suivi ni journal (BR-DEPLOY-033), jamais un secret. Hors « Connecté » : `NotConnected`.
 	 */
@@ -425,7 +439,9 @@ export type AdminActKindDto = "account_create" | "account_role" | "account_passw
 /**  Annuler l'opération d'un service (HRT-69) : couvert par l'élévation de cinq minutes. */
 "operation_cancel" | 
 /**  Enregistrer les réglages d'un serveur de jeu (HRT-109) : couvert par l'élévation de cinq minutes. */
-"game_settings_save";
+"game_settings_save" | 
+/**  Supprimer un service (HRT-86, BR-DEL-012) : le mot de passe à chaque fois, jamais couvert par l'élévation. */
+"service_delete";
 
 /**  Qui a adopté un service, et quand (HRT-79). */
 export type AdoptionDto = {
@@ -788,6 +804,58 @@ export type DecisionRefusal =
 { kind: "busy" } | 
 /**  Tout autre refus. */
 { kind: "other" };
+
+/**
+ *  L'issue de l'envoi : accepté (`202`, l'opération court à l'arrière-plan), refusé, ou résultat inconnu (le
+ *  lien est tombé avant la réponse : jamais rejoué, BR-DEL-023).
+ */
+export type DeleteOutcome = { kind: "accepted"; operationId: string } | { kind: "refused"; refusal: DeleteRefusal } | { kind: "unknown"; opId: string };
+
+/**  De quoi bâtir la fenêtre « Supprimer {nom} ? ». */
+export type DeletePreviewDto = {
+	name: string,
+	image: string,
+	running: boolean,
+	stopGraceS: number,
+	containerMissing: boolean,
+	folders: FolderPreviewDto[],
+	serverFolders: string[],
+	volumes: number,
+	measuredInTime: boolean,
+	backups: number,
+};
+
+/**  La réponse de la consultation : prête, ou refusée par son code. */
+export type DeletePreviewOutcome = { kind: "ready"; preview: DeletePreviewDto } | { kind: "refused"; refusal: DeletePreviewRefusal };
+
+/**  Pourquoi l'agent n'a pas donné la prévisualisation. */
+export type DeletePreviewRefusal = 
+/**  Le service n'existe plus (BR-DEL-018). */
+{ kind: "service_not_found" } | 
+/**  Un service adopté ou créé hors de Hearth : Hearth ne le supprime jamais (BR-DEL-002). */
+{ kind: "service_adopted" } | 
+/**  Le moteur n'est pas prêt (BR-DEL-022) ; son état, si l'agent l'a dit. */
+{ kind: "engine_unavailable"; engine: EngineStateDto | null } | { kind: "other" };
+
+/**  Pourquoi l'agent a refusé la suppression. Sans texte : l'interface choisit le message d'après `kind`. */
+export type DeleteRefusal = { kind: "wrong_password" } | { kind: "password_required" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "busy" } | { kind: "engine_unavailable"; engine: EngineStateDto | null } | { kind: "service_not_found" } | 
+/**  Un service adopté : jamais supprimé (BR-DEL-002). */
+{ kind: "service_adopted" } | 
+/**  Une action tient déjà le service (BR-DEL-021) ; qui, et laquelle. */
+{ kind: "service_busy"; by: string | null; action: OperationKindDto | null } | 
+/**  L'état du service ne permet pas la suppression (BR-DEL-003). */
+{ kind: "not_drivable"; state: ServiceStateDto | null } | 
+/**  Le nom retapé ne correspond pas (BR-DEL-011). */
+{ kind: "name_mismatch" } | 
+/**  La case des sauvegardes est refusée : l'agent n'en a pas encore. */
+{ kind: "backups_unavailable" } | { kind: "other" };
+
+/**  La demande de suppression : les deux cases (décochées par défaut) et le nom retapé. */
+export type DeleteRequestDto = {
+	eraseData: boolean,
+	eraseBackups: boolean,
+	confirmName: string | null,
+};
 
 /**  Les points d'attention validés dans le récapitulatif. */
 export type DeployAcceptDto = {
@@ -1278,6 +1346,23 @@ export type FingerprintEvent = {
 	expected: string,
 	presented: string,
 	presentedHex: string,
+};
+
+/**  Ce que la suppression fera d'un dossier géré par Hearth. */
+export type FolderFateDto = "erasable" | "kept_shared" | "kept_unverifiable" | "kept_outside_root" | "unknown";
+
+/**  Un dossier géré par Hearth, tel que la fenêtre le montre. */
+export type FolderPreviewDto = {
+	path: string,
+	bytes: number | null,
+	items: number | null,
+	/**  La mesure a été coupée : « plus de {taille} ». */
+	partial: boolean,
+	/**  Le dossier n'a pas pu être mesuré du tout. */
+	unmeasured: boolean,
+	fate: FolderFateDto,
+	sharedWith: string[],
+	sharedWithUnmanaged: boolean,
 };
 
 export type GapReasonDto = "slow" | "rotated" | "resume_lost" | "first_page" | "unknown";
@@ -1900,6 +1985,8 @@ export type ServiceRightsDto = {
 	granted: boolean,
 	/**  L'agent annonce `game-settings` (HRT-109) : seul cas où l'onglet « Réglages » peut exister. */
 	gameSettings: boolean,
+	/**  L'agent annonce `service-delete` (HRT-85) : seul cas où la carte « Suppression » peut exister (HRT-86). */
+	serviceDelete: boolean,
 	account: string,
 };
 
