@@ -12,6 +12,7 @@
 //! protocole n'en ont pas dans cette tranche.
 
 use hearth_proto::api::game_settings::CAPABILITY_GAME_SETTINGS;
+use hearth_proto::api::service_delete::CAPABILITY_SERVICE_DELETE;
 use hearth_proto::api::services::{
     CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES, EngineView, ServiceItem, ServicesState,
 };
@@ -41,6 +42,14 @@ pub fn agent_serves_game_settings(capabilities: &[String]) -> bool {
     capabilities
         .iter()
         .any(|capability| capability == CAPABILITY_GAME_SETTINGS)
+}
+
+/// L'agent sait-il supprimer un service (capacité `service-delete`, HRT-85) ? Sinon le client ne montre pas la carte
+/// « Suppression » : un agent d'avant refuserait la route.
+pub fn agent_serves_service_delete(capabilities: &[String]) -> bool {
+    capabilities
+        .iter()
+        .any(|capability| capability == CAPABILITY_SERVICE_DELETE)
 }
 
 /// Les sujets à demander à un agent : les mesures, la fin de session et la mise à jour de l'agent
@@ -136,6 +145,14 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn deleting_a_service_is_offered_only_to_an_agent_that_announces_it() {
+        let announced = vec!["services".to_owned(), "service-delete".to_owned()];
+        assert!(agent_serves_service_delete(&announced));
+        assert!(!agent_serves_service_delete(&["services".to_owned()]));
+        assert!(!agent_serves_service_delete(&[]));
+    }
 
     fn engine(state: EngineState) -> EngineView {
         EngineView {

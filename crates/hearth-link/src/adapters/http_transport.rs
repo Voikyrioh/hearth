@@ -110,6 +110,17 @@ impl HttpTransport {
         Ok((client, state))
     }
 
+    /// Le délai d'une requête : celui de la configuration, allongé pour la seule consultation qui mesure des
+    /// dossiers jusqu'à `MEASURE_BUDGET_S` secondes (`GET /services/{key}/delete-preview`, BR-DEL-009).
+    fn timeout_for(&self, path: &str) -> Duration {
+        if path.ends_with("/delete-preview") {
+            self.config.request_timeout
+                + Duration::from_secs(hearth_proto::api::service_delete::MEASURE_BUDGET_S)
+        } else {
+            self.config.request_timeout
+        }
+    }
+
     /// Envoie une requête et lit la réponse (statut, en-têtes, corps borné).
     async fn send(
         &self,
@@ -142,7 +153,9 @@ impl HttpTransport {
             url_host(&target.host),
             target.port
         );
-        let mut request = client.request(reqwest_method(method), url);
+        let mut request = client
+            .request(reqwest_method(method), url)
+            .timeout(self.timeout_for(path));
         let mut headers = HeaderMap::new();
         headers.insert(headers::API_VERSION, HeaderValue::from(API_VERSION));
         if let Ok(value) = HeaderValue::from_str(&self.config.client_name) {
