@@ -423,6 +423,9 @@ const EXPECTED: &[(&str, &str)] = &[
         "saveGameSettings",
         "serverId: string, key: string, settings: SaveSettingsRequestDto, adminPassword: string | null",
     ),
+    // HRT-104 : le quotidien d'un serveur de jeu, deux lectures (la vue ; le mot de passe, réservé au droit).
+    ("readGameView", "serverId: string, key: string"),
+    ("revealGamePassword", "serverId: string, key: string"),
 ];
 
 /// Les commandes qui portent UN ACTE D'ADMINISTRATION, avec le paramètre qui porte le mot de passe de
@@ -515,6 +518,8 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "openFicheLink",
     "readGameSettings",
     "analyzeGameSettings",
+    "readGameView",
+    "revealGamePassword",
 ];
 
 /// Toute commande exposée est soit un acte d'administration de la liste fermée (avec son mot de passe de

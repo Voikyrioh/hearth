@@ -84,6 +84,8 @@ const COMMANDS: &[&str] = &[
     "read_game_settings",
     "analyze_game_settings",
     "save_game_settings",
+    "read_game_view",
+    "reveal_game_password",
 ];
 
 fn main() {

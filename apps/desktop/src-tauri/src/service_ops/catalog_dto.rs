@@ -727,7 +727,7 @@ fn first_start_dto(view: &FirstStartView) -> FicheFirstStartDto {
     }
 }
 
-fn stop_dto(view: &StopView) -> FicheStopDto {
+pub(super) fn stop_dto(view: &StopView) -> FicheStopDto {
     let StopView {
         grace_s,
         world_saved,

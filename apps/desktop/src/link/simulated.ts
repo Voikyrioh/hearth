@@ -12,6 +12,7 @@ import type {
   DeployRequest,
 } from "./deploy";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
+import type { GameRead, GameSecret } from "./game";
 import type {
   AnalyzeOutcome,
   GameSettingsRead,
@@ -59,6 +60,7 @@ import { SimulatedDeletes } from "./simulated-delete";
 import { SimulatedDeploys } from "./simulated-deploy";
 import { SimulatedDevices } from "./simulated-devices";
 import { SimulatedGameSettings } from "./simulated-game-settings";
+import { SimulatedGames } from "./simulated-games";
 import { SimulatedLogs } from "./simulated-logs";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
 import { SimulatedReauth, simulatedPasswordNeed } from "./simulated-reauth";
@@ -247,6 +249,7 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly catalog: SimulatedCatalog;
   /** Les réglages des services de jeu (HRT-109). */
   readonly gameSettings: SimulatedGameSettings;
+  readonly games = new SimulatedGames();
 
   constructor(options: SimulatedOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -286,8 +289,10 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.catalog = new SimulatedCatalog(this.deploys);
     this.gameSettings = new SimulatedGameSettings(this.catalog);
     // Un service installé depuis une fiche a ses réglages dès que l'agent l'accepte.
-    this.catalog.onInstalled = (serverId, key, detail, answers) =>
+    this.catalog.onInstalled = (serverId, key, detail, answers) => {
       this.gameSettings.register(serverId, key, detail, answers);
+      this.games.registerInstalled(serverId, key, detail, answers);
+    };
     this.agentUpdates = new SimulatedAgentUpdates({
       now: this.now,
       publishLink: (id, state) => this.publish(id, state),
@@ -368,7 +373,31 @@ export class SimulatedLinkBridge implements LinkBridge {
       this.own(serverId),
     );
     if (confirmation.kind === "refused") return confirmation;
+    const waiting = this.serviceOps.of(serverId).find((operation) => operation.id === opId);
+    const gameStop =
+      waiting !== undefined &&
+      (waiting.kind === "stop" || waiting.kind === "restart") &&
+      this.games.has(serverId, waiting.key);
     const outcome = this.serviceOps.decide(serverId, opId, choice);
+    if (gameStop && outcome.kind === "done") {
+      // Le choix d'un arrêt de jeu (BR-JEU-006) : « Annuler » ferme l'opération, le service tourne toujours et le
+      // verrou est rendu ; « Arrêter quand même » demande l'arrêt au moteur (l'état change alors).
+      if (choice === "cancel") {
+        this.serviceOps.finish(serverId, opId, "cancelled", "cancelled_by_account");
+        outcome.operation = { ...outcome.operation, status: "cancelled" };
+      } else if (choice === "continue") {
+        this.serviceOps.update(serverId, opId, {
+          step: "stop",
+          steps: [{ step: "stop", state: "intent" }],
+        });
+        this.services.upsert(serverId, {
+          key: waiting.key,
+          name: this.services.find(serverId, waiting.key)?.name ?? waiting.key,
+          state: "stopping",
+          since: new Date(this.now()).toISOString(),
+        });
+      }
+    }
     // Un mot de passe saisi n'ouvre aucune élévation pour cet acte.
     return outcome;
   }
@@ -459,6 +488,11 @@ export class SimulatedLinkBridge implements LinkBridge {
     graceS: number,
   ): LifecycleOutcome {
     const by = this.servers.find((candidate) => candidate.id === serverId)?.username ?? "marie";
+    // Un serveur de jeu arrêté ou redémarré suit ce que sa fiche déclare (HRT-103, BR-JEU-002) : la suite qui
+    // enregistre le monde, ou une décision quand la confirmation manque (BR-JEU-007, BR-JEU-038).
+    const stop = gesture === "start" ? null : this.games.stopOf(serverId, key);
+    if (stop)
+      return this.acceptGameStop(serverId, key, gesture as "stop" | "restart", stop, graceS, by);
     const operation = this.serviceOps.accept(
       serverId,
       { key, kind: gesture, cancellable: false },
@@ -471,6 +505,52 @@ export class SimulatedLinkBridge implements LinkBridge {
       since: new Date(this.now()).toISOString(),
     });
     if (this.gestureCompletesAfterMs !== null) {
+      setTimeout(() => this.finishGesture(serverId, key), this.gestureCompletesAfterMs);
+    }
+    return { kind: "accepted", actionId: operation.id, graceS };
+  }
+
+  /**
+   * L'agent simulé accepte l'arrêt (ou le redémarrage) d'un serveur de jeu, comme le vrai : la suite « Sauvegarde du
+   * monde » puis « Arrêt » quand la fiche en déclare une qui a été essayée ; seulement « Arrêt » quand l'image enregistre
+   * toute seule ; sinon RIEN n'est envoyé ni arrêté et l'opération attend une décision (« Arrêter quand même » ou
+   * « Annuler »). Le service ne change d'état qu'à l'arrêt effectif.
+   */
+  private acceptGameStop(
+    serverId: string,
+    key: string,
+    gesture: "stop" | "restart",
+    stop: NonNullable<ReturnType<SimulatedGames["stopOf"]>>,
+    graceS: number,
+    by: string,
+  ): LifecycleOutcome {
+    const sequence = stop.worldSaved === "by_sequence" && stop.sequenceTested;
+    const decide = !sequence && stop.worldSaved !== "by_image_on_signal";
+    const tail = gesture === "restart" ? ["stop", "start"] : ["stop"];
+    const plan = sequence ? ["save_world", ...tail] : tail;
+    const first = plan[0] ?? "stop";
+    const operation = this.serviceOps.accept(
+      serverId,
+      {
+        key,
+        kind: gesture,
+        cancellable: true,
+        step: decide ? null : first,
+        steps: decide ? [] : [{ step: first, state: "intent" }],
+      },
+      by,
+    );
+    if (decide) {
+      this.serviceOps.askDecision(serverId, operation.id, ["continue", "cancel"]);
+    } else {
+      this.services.upsert(serverId, {
+        key,
+        name: this.services.find(serverId, key)?.name ?? key,
+        state: "stopping",
+        since: new Date(this.now()).toISOString(),
+      });
+    }
+    if (this.gestureCompletesAfterMs !== null && !decide) {
       setTimeout(() => this.finishGesture(serverId, key), this.gestureCompletesAfterMs);
     }
     return { kind: "accepted", actionId: operation.id, graceS };
@@ -775,6 +855,35 @@ export class SimulatedLinkBridge implements LinkBridge {
       throw this.fail({ kind: "missing_services_right" });
     }
     return this.gameSettings.read(serverId, key);
+  }
+
+  // --- Le quotidien d'un serveur de jeu (HRT-104) ---
+
+  async readGameView(serverId: string, key: string): Promise<GameRead> {
+    this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("game view read");
+    if (this.games.failRead) throw this.fail({ kind: "unreachable" });
+    return this.games.read(serverId, key);
+  }
+
+  async revealGamePassword(serverId: string, key: string): Promise<GameSecret> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("game password reveal");
+    // Le niveau `Services` de l'agent : sans le droit, rien n'est rendu (BR-JEU-025).
+    if (!this.accounts.ownRights(server).granted) {
+      throw this.fail({ kind: "missing_services_right" });
+    }
+    if (!this.games.has(serverId, key)) throw this.fail({ kind: "unreachable" });
+    if (this.games.failReveal) throw this.fail({ kind: "unreachable" });
+    return this.games.reveal(serverId, key);
   }
 
   async analyzeGameSettings(serverId: string, key: string, text: string): Promise<AnalyzeOutcome> {

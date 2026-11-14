@@ -1,3 +1,4 @@
+import { ref } from "vue";
 import type { ActReport } from "@/composables/useReauth";
 import { useServerAction } from "@/composables/useServerAction";
 import { getLinkBridge, type LifecycleGesture } from "@/link";
@@ -10,12 +11,15 @@ import { getLinkBridge, type LifecycleGesture } from "@/link";
  */
 export function useLifecycleActions(serverId: () => string) {
   const action = useServerAction(serverId);
+  /** L'opération que l'agent vient d'accepter pour le dernier geste (HRT-104 : la séquence d'un arrêt de jeu la suit). */
+  const lastActionId = ref<string | null>(null);
 
   async function perform(
     key: string,
     gesture: LifecycleGesture,
     adminPassword: string | null,
   ): Promise<ActReport> {
+    lastActionId.value = null;
     const result = await action.run(
       () => getLinkBridge().pilotService(serverId(), key, gesture, adminPassword),
       {
@@ -29,10 +33,13 @@ export function useLifecycleActions(serverId: () => string) {
       return { kind: "refused", refusal: { kind: "password_required" } };
     }
     if (!result) return action.failedReport();
-    if (result.kind === "accepted") return { kind: "done" };
+    if (result.kind === "accepted") {
+      lastActionId.value = result.actionId;
+      return { kind: "done" };
+    }
     if (result.kind === "refused") return { kind: "refused", refusal: result.refusal };
     return { kind: "unknown" };
   }
 
-  return { perform, busy: action.busy };
+  return { perform, busy: action.busy, lastActionId };
 }

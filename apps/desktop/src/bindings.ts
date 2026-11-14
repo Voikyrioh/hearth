@@ -315,6 +315,18 @@ export const commands = {
 	 *  inconnu se relit sur le fichier. Une valeur peut être un mot de passe : elle ne traverse que cet appel.
 	 */
 	saveGameSettings: (serverId: string, key: string, settings: SaveSettingsRequestDto, adminPassword: string | null) => typedError<SaveOutcome, LinkFailure>(__TAURI_INVOKE("save_game_settings", { serverId, key, settings, adminPassword })),
+	/**
+	 *  Ce que le détail d'un serveur de jeu montre (`GET /services/{key}/game`) : la fiche, la façon d'arrêter, les ports
+	 *  publiés, le mot de passe oui ou non. Une lecture ouverte à tout compte. Un service qui n'est pas un serveur de jeu
+	 *  créé depuis une fiche se lit `Absent`, jamais comme une panne.
+	 */
+	readGameView: (serverId: string, key: string) => typedError<GameReadDto, LinkFailure>(__TAURI_INVOKE("read_game_view", { serverId, key })),
+	/**
+	 *  Le mot de passe du serveur de jeu (`GET /services/{key}/game-secret`, `BR-JEU-025`) : une lecture réservée au droit
+	 *  « gérer les services », consignée au journal sans la valeur. La valeur est rendue à l'appelant et à lui seul : la
+	 *  coquille ne la garde pas, ne la trace pas, ne la met pas dans un événement. Hors « Connecté » : `NotConnected`.
+	 */
+	revealGamePassword: (serverId: string, key: string) => typedError<GameSecretDto, LinkFailure>(__TAURI_INVOKE("reveal_game_password", { serverId, key })),
 };
 
 /* Types */
@@ -1363,6 +1375,35 @@ export type FolderPreviewDto = {
 	fate: FolderFateDto,
 	sharedWith: string[],
 	sharedWithUnmanaged: boolean,
+};
+
+/**  Un port publié par le serveur de jeu (`BR-JEU-017`, `BR-JEU-019`). */
+export type GamePortDto = {
+	hostPort: number,
+	protocol: string,
+	role: string,
+	changed: boolean,
+};
+
+/**
+ *  La lecture de la vue : un service qui n'est pas un serveur de jeu créé depuis une fiche n'est pas une panne, c'est
+ *  `Absent` (`BR-JEU-001`).
+ */
+export type GameReadDto = { kind: "found"; view: GameViewDto } | { kind: "absent" };
+
+/**  Le mot de passe du serveur de jeu (`BR-JEU-025`) ; absent quand le serveur n'en a pas (`BR-JEU-027`). */
+export type GameSecretDto = {
+	password: HiddenText | null,
+};
+
+/**  La vue d'un serveur de jeu : fiche, façon d'arrêter, ports publiés, mot de passe oui ou non. */
+export type GameViewDto = {
+	fiche: string,
+	name: string,
+	ficheVersion: number,
+	stop: FicheStopDto,
+	ports: GamePortDto[],
+	hasPassword: boolean,
 };
 
 export type GapReasonDto = "slow" | "rotated" | "resume_lost" | "first_page" | "unknown";

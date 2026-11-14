@@ -10,6 +10,7 @@ import type {
   DeployRequest,
 } from "./deploy";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
+import type { GameRead, GameSecret } from "./game";
 import type {
   AnalyzeOutcome,
   GameSettingsRead,
@@ -445,6 +446,23 @@ export interface LinkBridge {
    * ancien), jamais une panne. Hors « Connecté » : échec `not_connected`.
    */
   readGameSettings(serverId: string, key: string): Promise<GameSettingsRead>;
+
+  // Le quotidien d'un serveur de jeu (HRT-104, BR-JEU-017 à 021, 025 à 027).
+
+  /**
+   * Ce que le détail d'un serveur de jeu montre (`GET /services/{key}/game`) : la fiche, la façon dont le monde est
+   * enregistré à l'arrêt, les ports publiés, le mot de passe oui ou non (jamais sa valeur). Une lecture ouverte à tout
+   * compte. `absent` : ce service n'est pas un serveur de jeu créé depuis une fiche (adopté, ordinaire, agent plus
+   * ancien), jamais une panne. Hors « Connecté » : échec `not_connected`.
+   */
+  readGameView(serverId: string, key: string): Promise<GameRead>;
+  /**
+   * Le mot de passe du serveur de jeu (`GET /services/{key}/game-secret`, BR-JEU-025) : une lecture réservée au droit
+   * « gérer les services » (échec `missing_services_right` sinon), consignée au journal par l'agent sans la valeur.
+   * `password: null` : le serveur n'en a pas (BR-JEU-027). La valeur n'est ni gardée ni tracée par la coquille :
+   * l'appelant la tient en mémoire le temps de l'affichage et l'efface au remasquage.
+   */
+  revealGamePassword(serverId: string, key: string): Promise<GameSecret>;
   /**
    * Lit un texte collé et dit, réglage par réglage, ce qu'il apporterait (`POST /services/{key}/settings/analyze`) :
    * une consultation, rien n'est écrit. Le texte peut porter un mot de passe : il ne traverse que cet appel, est lu par

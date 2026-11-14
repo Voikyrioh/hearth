@@ -18,6 +18,8 @@ Une opération `awaiting_decision` porte les choix offerts et la date de la dema
 - `crates/hearth-agent/src/application/service_ops.rs::ServiceOps::{ask_decision, decide, sweep}`
 - `crates/hearth-agent/src/entrypoint/tasks.rs::spawn_service_ops_sweep`
 - `crates/hearth-agent/src/application/game_stop.rs::GameStop::ask` (la décision d'un arrêt de jeu : « Arrêter quand même » = `continue`, « Annuler » = `cancel`, HRT-103)
+- `apps/desktop/src/components/organisms/OperationDecisionDialog.vue` (HRT-104 : la décision d'un arrêt de jeu, « Annuler » présélectionné, « Arrêter quand même » en rouge)
+- `apps/desktop/src/services/game.ts::decisionReason`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/ops/decision.rs::tests::a_decision_expires_after_exactly_fifteen_minutes`
@@ -39,3 +41,4 @@ Une opération `awaiting_decision` porte les choix offerts et la date de la dema
 - 2026-10-24 — l'arrêt d'un serveur de jeu demande cette décision (HRT-103).
 - 2026-10-14 — la route de décision refuse une décision expirée avant même le balayage, et le balayage retire ce que l'opération avait créé pour elle-même (HRT-144, BR-OPS-003).
 - 2026-10-13 — création (HRT-83, ADR-0044 et ADR-0045 : socle des services créés par Hearth, côté agent).
+- 2026-11-14 : côté client (HRT-104), la fenêtre de décision d'un arrêt de jeu.

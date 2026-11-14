@@ -37,6 +37,7 @@ import OperationCard from "../molecules/OperationCard.vue";
 import OriginTags from "../molecules/OriginTags.vue";
 import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
 import EnvVarsSection from "./EnvVarsSection.vue";
+import GameCards from "./GameCards.vue";
 import GameSettingsTab from "./GameSettingsTab.vue";
 import LogViewer from "./LogViewer.vue";
 
@@ -338,6 +339,19 @@ const commandNote = computed(() => {
       :aria-hidden="gone ? 'true' : undefined"
       :inert="gone ? true : undefined"
     >
+      <!-- Un serveur de jeu : l'adresse, les ports à ouvrir, le mot de passe et l'arrêt du jeu, au-dessus de « Général » (HRT-104) -->
+      <GameCards
+        :server-id="serverId"
+        :service="service"
+        :gate="gate"
+        :reason-id="reasonId"
+        :connected="connected"
+        :engine-ready="engineReady"
+        :gone="gone"
+        :supported="gameSettings"
+        @retry-rights="emit('retryRights')"
+      />
+
       <DashCard :title="t('serviceDetail.general')" data-detail-general>
         <dl class="defs">
           <div class="defs__row">

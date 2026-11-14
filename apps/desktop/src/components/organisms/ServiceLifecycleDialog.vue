@@ -3,7 +3,8 @@ import { computed } from "vue";
 import Callout from "@/components/molecules/Callout.vue";
 import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import type { ActReport } from "@/composables/useReauth";
-import { LIFECYCLE_ACT_KINDS, type ServiceInfo } from "@/link";
+import { type GameView, LIFECYCLE_ACT_KINDS, type ServiceInfo } from "@/link";
+import { gameEffectText } from "@/services/game";
 import {
   effectText,
   type Gesture,
@@ -19,8 +20,10 @@ import {
 // fenêtre pour l'effet ET la confirmation du socle (`AdminActDialog`, qui ajoute « Votre mot de passe » selon ce que
 // l'agent annonce). Arrêter et redémarrer disent toujours ce qui va se passer, avec le délai d'arrêt RÉEL du service
 // (jamais une constante de l'interface), puis les avertissements propres au service : créé hors de Hearth, règle
-// « Redémarre toujours », service géré par le système du serveur. Démarrer n'a pas d'effet à confirmer : seul le champ
-// du socle. Fermer (Annuler, Échap) ne change rien et n'envoie rien (BR-LIFE-017). Si le service change sous la
+// « Redémarre toujours », service géré par le système du serveur. Pour un serveur de jeu (HRT-104, BR-JEU-004) la phrase
+// de la fiche remplace la phrase générale « Hearth ne peut pas encore envoyer d'ordre de sauvegarde » : Hearth va
+// d'abord demander au jeu d'enregistrer son monde, ou le jeu l'enregistre en s'arrêtant, ou Hearth ne peut rien lui
+// demander. Démarrer n'a pas d'effet à confirmer : seul le champ du socle. Fermer (Annuler, Échap) ne change rien et n'envoie rien (BR-LIFE-017). Si le service change sous la
 // fenêtre (BR-LIFE-022) elle le dit et le bouton de confirmation devient inactif ; « Annuler » reste actif.
 const props = defineProps<{
   open: boolean;
@@ -30,6 +33,8 @@ const props = defineProps<{
   service: ServiceInfo;
   /** Le service tel qu'il est maintenant dans la liste ; `null` : il a disparu. */
   current: ServiceInfo | null;
+  /** Ce que l'agent dit du jeu ; `null` : pas un serveur de jeu, la phrase générale s'applique. */
+  game?: GameView | null;
   /** Une action tient le service depuis l'ouverture de la fenêtre. */
   locked: boolean;
   perform: (adminPassword: string | null) => Promise<ActReport>;
@@ -40,9 +45,12 @@ const kind = computed(() => LIFECYCLE_ACT_KINDS[props.gesture]);
 const shown = computed(() => props.current ?? props.service);
 const name = computed(() => nameOf(props.service));
 const stale = computed(() => staleNotice(props.gesture, props.current, props.locked));
-const effect = computed(() =>
-  props.gesture === "start" ? null : effectText(props.gesture, shown.value),
-);
+const effect = computed(() => {
+  if (props.gesture === "start") return null;
+  return props.game
+    ? gameEffectText(props.gesture, props.game)
+    : effectText(props.gesture, shown.value);
+});
 const warnings = computed(() => (props.gesture === "start" ? [] : warningsOf(shown.value)));
 
 function refusal(refused: { kind: string }): string {

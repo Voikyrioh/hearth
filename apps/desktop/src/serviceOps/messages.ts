@@ -8,6 +8,7 @@ import type {
   OperationStatus,
   ServiceOperation,
 } from "@/link";
+import { worldSaved } from "@/services/game";
 
 /**
  * Les textes des opérations de service (HRT-84) : des fonctions pures, sans E/S. Aucun texte ne vient de l'agent :
@@ -59,6 +60,7 @@ const STEP_KEYS: Record<string, MessageKey> = {
   erase: "serviceOps.steps.erase",
   remove_container: "serviceOps.steps.removeContainer",
   forget: "serviceOps.steps.forget",
+  save_world: "game.sequence.saveWorld",
 };
 
 /** Le texte d'un statut EN COURS ; un statut définitif n'en a pas (son issue se dit par `outcomeText`). */
@@ -151,6 +153,13 @@ export type OutcomeTone = "success" | "error" | "warn" | "info";
 
 const LIFECYCLE_KINDS: readonly OperationKind[] = ["start", "stop", "restart"];
 
+/** La suite d'un jeu a ouvert son étape « Sauvegarde du monde » (le plan d'un arrêt ordinaire n'en a pas). */
+function hasSaveStep(operation: ServiceOperation): boolean {
+  return (
+    operation.step === "save_world" || operation.steps.some((line) => line.step === "save_world")
+  );
+}
+
 /**
  * L'issue d'une opération de pilotage (démarrer, arrêter, redémarrer), dite par sa CAUSE (HRT-65, BR-LIFE-004, 005,
  * 009, 011, 012, 019, 021) : jamais un texte de l'agent. `null` : pas une opération de pilotage, ou un statut qui
@@ -166,6 +175,15 @@ function lifecycleOutcome(
   switch (operation.status) {
     case "succeeded":
       if (cause === "forced_stop") return say("lifecycle.outcome.forcedStop", "warn");
+      // Un jeu arrêté par sa suite : le monde a été enregistré avant l'arrêt (BR-JEU-005).
+      if (operation.kind !== "start" && worldSaved(operation) && cause !== "restarted_by_host") {
+        return say(
+          operation.kind === "stop"
+            ? "game.sequence.successStopSaved"
+            : "game.sequence.successRestartSaved",
+          "success",
+        );
+      }
       if (cause === "restarted_by_host") return say("lifecycle.outcome.restartedByHost", "warn");
       if (cause === "stopped_right_after_start") {
         return say("lifecycle.outcome.stoppedRightAfterStart", "error");
@@ -190,7 +208,16 @@ function lifecycleOutcome(
         default:
           return null;
       }
+    case "cancelled":
+      // Un arrêt de jeu sans confirmation, annulé ou resté sans réponse : le service tourne toujours (BR-JEU-006).
+      if (cause === "decision_expired") return say("game.outcome.expired", "info");
+      if (cause === "cancelled_by_account") return say("game.outcome.cancelled", "info");
+      return null;
     case "interrupted":
+      // Un arrêt de jeu interrompu entre l'ordre et l'arrêt : le service tourne toujours (BR-JEU-011).
+      if (cause === "interrupted" && operation.kind !== "start" && hasSaveStep(operation)) {
+        return say("game.outcome.interrupted", "warn");
+      }
       if (cause === "timeout") return say("lifecycle.outcome.timeout", "warn");
       if (cause === "engine_unavailable") return say("lifecycle.outcome.engineLost", "warn");
       if (cause === "interrupted") return say("lifecycle.outcome.agentRestarted", "warn");
