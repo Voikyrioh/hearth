@@ -228,10 +228,31 @@ fn build<'a>(
             data: flag(body, "erase_data")?,
             backups: flag(body, "erase_backups")?,
         },
-        // Déclarés pour les tranches suivantes, sans route dans `ROUTES` : aucune requête ne peut les viser
-        // (`route_of` ne lit que `ROUTES`). Le lot qui ajoute leur route écrit ici comment les reconstruire.
-        ActKind::BackupCreate | ActKind::BackupDelete => {
-            return Err(Unreadable);
+        // Sauvegarder (HRT-97) : la clé du service, lue du chemin, est la cible signée ; le mode et le nombre
+        // d'éléments ignorés pour cette fois se lisent du corps. Jamais la note, jamais un chemin.
+        ActKind::BackupCreate => AdminAct::BackupCreate {
+            target: id,
+            mode: text(body, "mode")?,
+            ignored: u32::try_from(
+                body.and_then(|body| body.get("ignore_once"))
+                    .and_then(Value::as_array)
+                    .map_or(0, Vec::len),
+            )
+            .map_err(|_| Unreadable)?,
+        },
+        // Supprimer une sauvegarde : l'identifiant, lu du chemin ; aucun paramètre.
+        ActKind::BackupDelete => AdminAct::BackupDelete { target: id_ref()? },
+        // Régler les éléments ignorés : la clé du service est la cible ; le nombre d'éléments et l'empreinte de
+        // leur liste, jamais un chemin (une seule fonction, partagée avec l'agent : `BackupSettings::act_digest`).
+        ActKind::BackupSettings => {
+            let settings: hearth_proto::api::backups::BackupSettings =
+                serde_json::from_value(body.cloned().ok_or(Unreadable)?).map_err(|_| Unreadable)?;
+            let (count, digest) = settings.act_digest();
+            AdminAct::BackupSettings {
+                target: id,
+                count,
+                digest,
+            }
         }
     })
 }
@@ -277,6 +298,14 @@ mod tests {
             "/services/adopt" => json!({ "keys": ["c_0123abcd", "u_docker-x.service"] }),
             "/operations/services/{id}/decision" => json!({ "choice": "keep" }),
             "/services/{key}" => json!({ "erase_data": true, "confirm_name": "terraria" }),
+            "/services/{key}/backups" => json!({
+                "mode": "hot", "note": "Avant la mise à jour",
+                "ignore_once": [{ "root": "/data", "path": "logs/gros.log" }]
+            }),
+            "/services/{key}/backup-settings" => json!({
+                "ignored": [{ "root": "/data", "path": "logs" }],
+                "included": [{ "root": "/data", "path": "saves/a.bak" }]
+            }),
             "/services/{key}/settings" => json!({
                 "base_rev": 2, "file_stamp": "ab", "origin": "form", "effect": "restart",
                 "changes": [{ "id": "motd", "action": "set", "value": "Salut" }]
@@ -585,6 +614,55 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn the_backup_acts_sign_a_target_and_numbers_never_the_note_nor_a_path() {
+        let key = "h_01J9ZY0G3Q8M2K6W4T7V5N1B9D";
+        let body = json!({
+            "mode": "stop_copy_start", "note": "secrète", "reauth": { "x": 1 },
+            "ignore_once": [{ "root": "/data", "path": "a" }, { "root": "/data", "path": "b" }]
+        });
+        let create_path = format!("/services/{key}/backups");
+        let Ok(Route::Act(create)) = classify("POST", &create_path, Some(&body)) else {
+            panic!("acte attendu");
+        };
+        assert_eq!(create.kind(), ActKind::BackupCreate);
+        assert_eq!(create.target(), key);
+        assert_eq!(
+            create.params(),
+            vec![b"stop_copy_start".to_vec(), b"2".to_vec()]
+        );
+        // Supprimer : l'identifiant du chemin, aucun paramètre.
+        let Ok(Route::Act(delete)) =
+            classify("DELETE", "/backups/01J9ZY0G3Q8M2K6W4T7V5N1B9D", None)
+        else {
+            panic!("acte attendu");
+        };
+        assert_eq!(delete.kind(), ActKind::BackupDelete);
+        assert!(delete.params().is_empty());
+        // Régler : le nombre d'éléments et l'empreinte de la liste, la même que celle de l'agent.
+        let settings = json!({ "ignored": [{ "root": "/data", "path": "logs" }], "included": [] });
+        let settings_path = format!("/services/{key}/backup-settings");
+        let Ok(Route::Act(act)) = classify("PUT", &settings_path, Some(&settings)) else {
+            panic!("acte attendu");
+        };
+        let expected: hearth_proto::api::backups::BackupSettings =
+            serde_json::from_value(settings.clone()).unwrap();
+        let (count, digest) = expected.act_digest();
+        assert_eq!(
+            act.params(),
+            vec![count.to_string().into_bytes(), digest.to_vec()]
+        );
+        // Un mode que ce client ne sait pas lire n'est pas un acte.
+        assert_eq!(
+            classify(
+                "POST",
+                &format!("/services/{key}/backups"),
+                Some(&json!({}))
+            ),
+            Err(Unreadable)
+        );
     }
 
     #[test]

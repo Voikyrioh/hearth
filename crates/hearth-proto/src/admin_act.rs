@@ -61,6 +61,8 @@ pub enum ActKind {
     BackupCreate,
     /// Supprimer une sauvegarde (HRT-97).
     BackupDelete,
+    /// Régler les éléments ignorés des sauvegardes d'un service (HRT-97).
+    BackupSettings,
     /// Décider d'une opération qui attend le compte (HRT-144, ADR-0045).
     OperationDecide,
     /// Enregistrer les réglages d'un serveur de jeu (HRT-108).
@@ -69,7 +71,7 @@ pub enum ActKind {
 
 impl ActKind {
     /// Tous les actes `0x05`, dans l'ordre des codes.
-    pub const ALL: [ActKind; 22] = [
+    pub const ALL: [ActKind; 23] = [
         Self::AccountCreate,
         Self::AccountRole,
         Self::AccountPassword,
@@ -90,15 +92,17 @@ impl ActKind {
         Self::ServiceDelete,
         Self::BackupCreate,
         Self::BackupDelete,
+        Self::BackupSettings,
         Self::OperationDecide,
         Self::GameSettingsSave,
     ];
 
     /// Les actes DÉCLARÉS dont la route n'existe pas encore : leur lot l'ajoute à `ROUTES` et à `ENDPOINTS`
     /// en la retirant d'ici. Tant qu'un acte est ici, aucune route ne le porte, aucune requête ne peut le
-    /// produire, et le test de `ROUTES` le sait. `0x13` (`ServiceUpdate`), `0x15` à `0x18`, `0x1A` et `0x1C`
-    /// sont réservés par la conception et ne sont pas encore déclarés.
-    pub const DECLARED_WITHOUT_ROUTE: [ActKind; 2] = [Self::BackupCreate, Self::BackupDelete];
+    /// produire, et le test de `ROUTES` le sait. `0x13` (`ServiceUpdate`), `0x15` à `0x18` et `0x1A`
+    /// sont réservés par la conception et ne sont pas encore déclarés. Aucun acte n'est plus déclaré sans route
+    /// depuis HRT-97.
+    pub const DECLARED_WITHOUT_ROUTE: [ActKind; 0] = [];
 
     /// L'octet du code de l'acte dans le message signé. `0x09` est réservé (jamais utilisé : le retrait
     /// d'un poste garde l'usage `0x04`).
@@ -124,6 +128,7 @@ impl ActKind {
             Self::ServiceDelete => 0x14,
             Self::BackupCreate => 0x19,
             Self::BackupDelete => 0x1B,
+            Self::BackupSettings => 0x1C,
             Self::OperationDecide => 0x1D,
             Self::GameSettingsSave => 0x1E,
         }
@@ -155,6 +160,7 @@ impl ActKind {
             Self::ServiceDelete => action::SERVICE_DELETE,
             Self::BackupCreate => action::SERVICE_BACKUP_CREATE,
             Self::BackupDelete => action::SERVICE_BACKUP_DELETE,
+            Self::BackupSettings => action::SERVICE_BACKUP_SETTINGS,
             Self::OperationDecide => action::OPERATION_DECIDE,
             Self::GameSettingsSave => action::SERVICE_GAME_SETTINGS,
         }
@@ -163,7 +169,9 @@ impl ActKind {
 
 /// Le nombre d'éléments et l'empreinte SHA-256 de leurs textes triés (ordre des octets), chacun précédé de sa longueur
 /// sur deux octets. Source unique de l'empreinte de l'adoption (clés) et de l'enregistrement des réglages (identifiants).
-fn sorted_digest<'k>(items: impl IntoIterator<Item = &'k str>) -> (u32, [u8; FINGERPRINT_LEN]) {
+pub(crate) fn sorted_digest<'k>(
+    items: impl IntoIterator<Item = &'k str>,
+) -> (u32, [u8; FINGERPRINT_LEN]) {
     use sha2::{Digest, Sha256};
     let mut sorted: Vec<&str> = items.into_iter().collect();
     sorted.sort_unstable();
@@ -250,6 +258,13 @@ pub enum AdminAct<'a> {
     },
     /// Supprimer la sauvegarde `target` (son identifiant).
     BackupDelete { target: &'a str },
+    /// Régler les éléments ignorés des sauvegardes du service `target` : le nombre d'éléments et l'empreinte de
+    /// la liste (jamais un chemin), voir `BackupSettings::act_digest`.
+    BackupSettings {
+        target: Cow<'a, str>,
+        count: u32,
+        digest: [u8; FINGERPRINT_LEN],
+    },
     /// Décider de l'opération `target` : le choix, qui est signé (il change le sens de l'acte).
     OperationDecide {
         target: &'a str,
@@ -377,6 +392,7 @@ impl AdminAct<'_> {
             Self::ServiceDelete { .. } => ActKind::ServiceDelete,
             Self::BackupCreate { .. } => ActKind::BackupCreate,
             Self::BackupDelete { .. } => ActKind::BackupDelete,
+            Self::BackupSettings { .. } => ActKind::BackupSettings,
             Self::OperationDecide { .. } => ActKind::OperationDecide,
             Self::GameSettingsSave { .. } => ActKind::GameSettingsSave,
         }
@@ -400,6 +416,7 @@ impl AdminAct<'_> {
             | Self::ServiceRestart { target }
             | Self::ServiceDelete { target, .. }
             | Self::BackupCreate { target, .. }
+            | Self::BackupSettings { target, .. }
             | Self::GameSettingsSave { target, .. } => target,
             Self::ServiceDeploy { name, .. } => name,
             Self::OperationCancel { target }
@@ -442,6 +459,9 @@ impl AdminAct<'_> {
             Self::ServiceDelete { data, backups, .. } => vec![flag(*data), flag(*backups)],
             Self::BackupCreate { mode, ignored, .. } => {
                 vec![mode.as_bytes().to_vec(), ignored.to_string().into_bytes()]
+            }
+            Self::BackupSettings { count, digest, .. } => {
+                vec![count.to_string().into_bytes(), digest.to_vec()]
             }
             Self::OperationDecide { choice, .. } => vec![choice.as_str().as_bytes().to_vec()],
             Self::GameSettingsSave {
@@ -517,6 +537,7 @@ pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
         | AdminAct::ServiceRestart { .. }
         | AdminAct::OperationCancel { .. }
         | AdminAct::BackupCreate { .. }
+        | AdminAct::BackupSettings { .. }
         | AdminAct::GameSettingsSave { .. } => true,
         AdminAct::OperationDecide { .. }
         | AdminAct::ServiceDeploy { .. }
@@ -579,6 +600,7 @@ pub const fn is_piloting(kind: ActKind) -> bool {
         | ActKind::ServiceDelete
         | ActKind::BackupCreate
         | ActKind::BackupDelete
+        | ActKind::BackupSettings
         | ActKind::GameSettingsSave => false,
     }
 }
@@ -781,6 +803,29 @@ pub const ROUTES: &[RouteAct] = &[
         kinds: &[ActKind::ServiceDelete],
         contract: Contract::Reauth,
     },
+    // Sauvegarder les données d'un service (HRT-97, BR-BACKUP-001) : la clé du service est la cible signée, le mode
+    // et le nombre d'éléments ignorés pour cette fois sont les paramètres signés ; couvert par l'élévation.
+    RouteAct {
+        method: "POST",
+        pattern: "/services/{key}/backups",
+        kinds: &[ActKind::BackupCreate],
+        contract: Contract::Reauth,
+    },
+    // Supprimer une sauvegarde : l'identifiant de la sauvegarde est la cible signée ; le mot de passe à chaque fois.
+    RouteAct {
+        method: "DELETE",
+        pattern: "/backups/{id}",
+        kinds: &[ActKind::BackupDelete],
+        contract: Contract::Reauth,
+    },
+    // Régler les éléments ignorés : la clé du service est la cible signée, le nombre d'éléments et l'empreinte de
+    // la liste sont les paramètres signés (jamais un chemin) ; couvert par l'élévation.
+    RouteAct {
+        method: "PUT",
+        pattern: "/services/{key}/backup-settings",
+        kinds: &[ActKind::BackupSettings],
+        contract: Contract::Reauth,
+    },
     // Enregistrer les réglages d'un serveur de jeu (HRT-108, ADR-0051, BR-FICHE-048) : la clé du service est la
     // cible signée ; couvert par l'élévation.
     RouteAct {
@@ -854,7 +899,7 @@ mod tests {
             codes,
             vec![
                 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-                0x10, 0x11, 0x12, 0x14, 0x19, 0x1B, 0x1D, 0x1E
+                0x10, 0x11, 0x12, 0x14, 0x19, 0x1B, 0x1C, 0x1D, 0x1E
             ]
         );
         let mut sorted = codes.clone();
@@ -879,14 +924,14 @@ mod tests {
             // Une route ET une seule, ou « déclaré, route à venir » : jamais les deux, jamais aucun.
             assert_eq!(routed + waiting, 1, "{kind:?}");
         }
-        // Vingt-deux actes en 0x05 : vingt ont leur route (dont deux pour le mode attaque), deux sont
-        // déclarés pour les tranches suivantes ; dix-neuf routes d'acte (dont le retrait d'un poste, sous son
-        // contrat) en plus du réglage de fréquence.
-        assert_eq!(in_routes.len(), 20);
-        assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 2);
+        // Vingt-trois actes en 0x05 : tous ont leur route (dont deux pour le mode attaque), aucun n'est plus
+        // déclaré sans route (HRT-97) ; vingt-deux routes d'acte (dont le retrait d'un poste, sous son contrat)
+        // en plus du réglage de fréquence.
+        assert_eq!(in_routes.len(), 23);
+        assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 0);
         assert_eq!(
             ROUTES.iter().filter(|r| r.pattern != "/me/reauth").count(),
-            19
+            22
         );
     }
 
@@ -1088,6 +1133,17 @@ mod tests {
         };
         assert_eq!(backup.params(), vec![b"stopped".to_vec(), b"2".to_vec()]);
         assert!(covered_by_elevation(&backup));
+        let backup_settings = AdminAct::BackupSettings {
+            target: key.into(),
+            count: 2,
+            digest: [3; FINGERPRINT_LEN],
+        };
+        assert_eq!(backup_settings.code(), 0x1C);
+        assert_eq!(
+            backup_settings.params(),
+            vec![b"2".to_vec(), vec![3; FINGERPRINT_LEN]]
+        );
+        assert!(covered_by_elevation(&backup_settings));
         let settings = AdminAct::GameSettingsSave {
             target: key.into(),
             base_rev: 4,
@@ -1289,6 +1345,11 @@ mod tests {
                 ignored: 0,
             },
             ActKind::BackupDelete => AdminAct::BackupDelete { target: "01BK" },
+            ActKind::BackupSettings => AdminAct::BackupSettings {
+                target: target.into(),
+                count: 0,
+                digest: [0; FINGERPRINT_LEN],
+            },
             ActKind::OperationDecide => AdminAct::OperationDecide {
                 target: "01OP",
                 choice: OperationChoice::Keep,

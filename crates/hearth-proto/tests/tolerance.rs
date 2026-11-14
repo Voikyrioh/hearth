@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 use hearth_proto::admin_act::TrustLevel;
 use hearth_proto::api::accounts::{AccountInfo, RoleName};
 use hearth_proto::api::audit::{OriginKindName, OutcomeName};
+use hearth_proto::api::backups::{BackupFlag, BackupIntegrity, BackupMode, IgnoredWhy};
 use hearth_proto::api::catalog::{
     CharsetView, EvidenceView, FicheStatus, ItemCharsetView, LevelView, PortMappingView,
     QuestionKind, SecretKindView, WorldSavedView,
@@ -163,6 +164,10 @@ fn enums() -> Vec<Entry> {
         entry!("api/service_ops.rs::StepStateView", Tolerant, StepStateView),
         entry!("api/service_spec.rs::DriftView", Tolerant, DriftView),
         entry!("api/service_delete.rs::FolderFate", Tolerant, FolderFate),
+        entry!("api/backups.rs::BackupMode", Tolerant, BackupMode),
+        entry!("api/backups.rs::BackupFlag", Tolerant, BackupFlag),
+        entry!("api/backups.rs::BackupIntegrity", Tolerant, BackupIntegrity),
+        entry!("api/backups.rs::IgnoredWhy", Tolerant, IgnoredWhy),
         entry!("api/game_settings.rs::ChangeAction", Tolerant, ChangeAction),
         entry!(
             "api/game_settings.rs::DriftResolution",
