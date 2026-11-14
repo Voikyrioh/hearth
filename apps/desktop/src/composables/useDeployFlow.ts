@@ -1,6 +1,7 @@
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import type { RouteLocationRaw } from "vue-router";
 import type { DeployFormState } from "@/composables/useDeployForm";
+import { useOperationFollow } from "@/composables/useOperationFollow";
 import type { ActReport } from "@/composables/useReauth";
 import { useServerAction } from "@/composables/useServerAction";
 import { toRequest } from "@/deploy/form";
@@ -23,7 +24,6 @@ import {
   type ServiceInfo,
   type ServiceOperation,
 } from "@/link";
-import { useServiceOpsStore } from "@/stores/serviceOps";
 import { useServicesStore } from "@/stores/services";
 import { useToastsStore } from "@/stores/toasts";
 
@@ -129,7 +129,6 @@ export function useDeployFlow(
 ) {
   const { serverId } = options;
   const form: DeployFlowSource = "source" in options ? options.source : sourceOfForm(options.form);
-  const operations = useServiceOpsStore();
   const services = useServicesStore();
   const toasts = useToastsStore();
   const action = useServerAction(() => serverId());
@@ -207,7 +206,7 @@ export function useDeployFlow(
     }
     if (result.kind === "accepted") {
       // La fenêtre de progression suit l'opération elle-même : son issue ne passe pas par une notification.
-      operations.watch(id, result.operationId);
+      follow.begin(result.operationId);
       launch.value = {
         operationId: result.operationId,
         serviceKey: result.serviceKey,
@@ -250,18 +249,10 @@ export function useDeployFlow(
 
   // ── 3. La progression ────────────────────────────────────────────────────────────────────────
 
-  const tracked = computed(() => {
-    const current = launch.value;
-    return current?.operationId ? operations.get(serverId(), current.operationId) : undefined;
-  });
+  const follow = useOperationFollow(serverId, () => launch.value?.operationId ?? null);
   /** L'opération telle qu'elle court (étape, progression, annulable). */
-  const operation = computed<ServiceOperation | null>(() => tracked.value?.operation ?? null);
-  const finished = computed(() => {
-    const current = launch.value;
-    return current?.operationId
-      ? operations.finishedOf(serverId(), current.operationId)
-      : undefined;
-  });
+  const operation = follow.operation;
+  const finished = follow.finished;
   /** Le service tel qu'il est dans la liste, quand il y est (code de sortie, boucle). */
   const service = computed<ServiceInfo | null>(() => {
     const key = launch.value?.serviceKey;
@@ -269,10 +260,7 @@ export function useDeployFlow(
     return services.of(serverId())?.services.find((item) => item.key === key) ?? null;
   });
 
-  function settle(): void {
-    const current = launch.value;
-    if (current?.operationId) operations.settle(serverId(), current.operationId);
-  }
+  const settle = follow.settle;
 
   watch(finished, (done) => {
     const current = launch.value;
@@ -311,8 +299,7 @@ export function useDeployFlow(
 
   /** « Continuer en arrière-plan » : le déploiement continue, la liste porte sa progression (BR-DEPLOY-024). */
   function background(): void {
-    const current = launch.value;
-    if (current?.operationId) operations.release(serverId(), current.operationId);
+    follow.release();
     form.wipe();
     launch.value = null;
     options.navigate({ name: "services", params: { id: serverId() } });
@@ -380,12 +367,6 @@ export function useDeployFlow(
     if (result.kind === "unknown") return { kind: "unknown" };
     return { kind: "refused", refusal: result.refusal };
   }
-
-  // La page se ferme avec une fenêtre de progression ouverte : l'issue sera annoncée comme les autres.
-  onBeforeUnmount(() => {
-    const current = launch.value;
-    if (current?.operationId) operations.release(serverId(), current.operationId);
-  });
 
   return {
     summaryOpen,

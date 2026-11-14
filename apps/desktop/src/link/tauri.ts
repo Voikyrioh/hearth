@@ -58,6 +58,7 @@ import {
   toDeviceRemovalOutcome,
   toTrustedDevices,
 } from "./devices";
+import { type GameRead, type GameSecret, toGameRead, toGameSecret } from "./game";
 import {
   type AnalyzeOutcome,
   type GameSettingsRead,
@@ -703,6 +704,15 @@ export class TauriLinkBridge implements LinkBridge {
   // Les réglages d'un serveur de jeu (HRT-109) : deux lectures et un acte confirmé.
   async readGameSettings(serverId: string, key: string): Promise<GameSettingsRead> {
     return toGameSettingsRead(unwrap(await commands.readGameSettings(serverId, key)));
+  }
+
+  // Le quotidien d'un serveur de jeu (HRT-104) : deux lectures.
+  async readGameView(serverId: string, key: string): Promise<GameRead> {
+    return toGameRead(unwrap(await commands.readGameView(serverId, key)));
+  }
+
+  async revealGamePassword(serverId: string, key: string): Promise<GameSecret> {
+    return toGameSecret(unwrap(await commands.revealGamePassword(serverId, key)));
   }
 
   async analyzeGameSettings(serverId: string, key: string, text: string): Promise<AnalyzeOutcome> {
