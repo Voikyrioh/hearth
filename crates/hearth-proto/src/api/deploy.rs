@@ -172,6 +172,27 @@ pub struct FichePort {
     pub host_port: u16,
 }
 
+/// Le monde choisi pour une reprise (HRT-105) : sa désignation et ce que l'utilisateur a accepté par un geste.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldPick {
+    #[serde(flatten)]
+    pub world: crate::api::worlds::WorldRef,
+    /// « Je comprends » : Hearth ne sait pas avec quelle version du jeu le monde a été enregistré (BR-MONDE-016).
+    /// L'agent refuse sans ce geste, même si le client est modifié.
+    #[serde(default)]
+    pub version_understood: bool,
+    /// « Garder cette copie » d'avance : si des fichiers changent pendant la copie, la copie est gardée et porte
+    /// le repère « peut être incohérente » ; sinon elle est retirée et rien n'est créé (BR-MONDE-009).
+    #[serde(default)]
+    pub keep_if_changed: bool,
+}
+
+impl fmt::Debug for WorldPick {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("WorldPick(..)")
+    }
+}
+
 /// D'où vient le service : une fiche du catalogue de l'agent (HRT-101, BR-FICHE-013). Le corps ne dit JAMAIS
 /// l'image, les variables, les dossiers ni la commande : la fiche les décide, l'agent les traduit et les juge
 /// comme un déploiement ordinaire.
@@ -196,9 +217,12 @@ pub enum DeploySource {
         /// Les ports facultatifs que l'utilisateur publie aussi (identifiants).
         #[serde(default)]
         optional_ports: Vec<String>,
-        /// Reprise d'un monde existant : refusée par cette version (seul `false` est accepté).
+        /// Reprise d'un monde existant : `true` seulement avec `world` (HRT-105).
         #[serde(default)]
         world_imported: bool,
+        /// Le monde à reprendre par copie vérifiée (HRT-105, BR-MONDE-002 à 026).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        world: Option<WorldPick>,
     },
 }
 
@@ -463,6 +487,7 @@ mod tests {
                 ports: vec![],
                 optional_ports: vec![],
                 world_imported: false,
+                world: None,
             }),
             extra: BTreeMap::new(),
         };

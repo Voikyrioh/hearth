@@ -70,6 +70,10 @@ pub struct ServicesConfig {
     /// (`/var/lib/hearth-backups`, voisine du dossier de données hors Linux). Elle ne peut ni contenir ni être
     /// dans un dossier de données (`BR-BACKUP-004` (b)).
     pub backups_root: Option<PathBuf>,
+    /// Les dossiers du serveur ouverts aux services (`[services] allowed_roots` de `agent.toml`,
+    /// ADR-0046) : vide par défaut. Hearth en lit les mondes à reprendre (HRT-105) ; il ne les écrit jamais
+    /// et aucun écran ne les déclare.
+    pub allowed_roots: Vec<AllowedRoot>,
 }
 
 impl Default for ServicesConfig {
@@ -77,6 +81,47 @@ impl Default for ServicesConfig {
         Self {
             adoption: true,
             backups_root: None,
+            allowed_roots: Vec::new(),
+        }
+    }
+}
+
+/// Ce que Hearth peut faire dans un dossier ouvert (ADR-0046) : lire seulement par défaut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RootAccess {
+    #[default]
+    Ro,
+    Rw,
+}
+
+/// Un dossier ouvert aux services, tel qu'il est écrit dans la configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllowedRoot {
+    pub path: PathBuf,
+    pub access: RootAccess,
+}
+
+/// `"/chemin"` (lecture seule) ou `{ path = "/chemin", access = "ro" | "rw" }`.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum FileRoot {
+    Plain(PathBuf),
+    Full {
+        path: PathBuf,
+        #[serde(default)]
+        access: RootAccess,
+    },
+}
+
+impl FileRoot {
+    fn into_root(self) -> AllowedRoot {
+        match self {
+            Self::Plain(path) => AllowedRoot {
+                path,
+                access: RootAccess::Ro,
+            },
+            Self::Full { path, access } => AllowedRoot { path, access },
         }
     }
 }
@@ -161,6 +206,7 @@ struct FileBackups {
 #[serde(deny_unknown_fields)]
 struct FileServices {
     adoption: Option<bool>,
+    allowed_roots: Option<Vec<FileRoot>>,
 }
 
 /// La table `[engine]` de `agent.toml`.
@@ -193,12 +239,16 @@ pub fn load(
             .unwrap_or_else(|| PathBuf::from(DEFAULT_ENGINE_SOCKET)),
     };
 
+    let file_services = file.services.unwrap_or_default();
     let mut services = ServicesConfig {
-        adoption: file
-            .services
-            .and_then(|services| services.adoption)
-            .unwrap_or(true),
+        adoption: file_services.adoption.unwrap_or(true),
         backups_root: file.backups.and_then(|backups| backups.root),
+        allowed_roots: file_services
+            .allowed_roots
+            .unwrap_or_default()
+            .into_iter()
+            .map(FileRoot::into_root)
+            .collect(),
     };
     if let Some(value) = env(ENV_BACKUPS_ROOT) {
         services.backups_root = Some(PathBuf::from(value));
@@ -642,6 +692,44 @@ root = \"/srv/sauvegardes\"
         assert_eq!(
             config.services.backups_root(&config.data_dir),
             PathBuf::from("/mnt/autre")
+        );
+    }
+
+    #[test]
+    fn the_open_folders_come_from_the_file_read_only_unless_written_rw() {
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
+        let cli = cli_with_empty_file(dir.path());
+        let data = (ENV_DATA_DIR, "/d");
+        let config = load(&cli, &env_of(&[data])).expect("config");
+        assert!(config.services.allowed_roots.is_empty());
+        std::fs::write(
+            dir.path().join("agent.toml"),
+            "[services]
+allowed_roots = [\"/srv/jeux\", { path = \"/srv/rw\", access = \"rw\" }, { path = \"/srv/ro\" }]
+",
+        )
+        .expect("write");
+        let config = load(&cli, &env_of(&[data])).expect("config");
+        let roots: Vec<(String, RootAccess)> = config
+            .services
+            .allowed_roots
+            .iter()
+            .map(|r| {
+                (
+                    r.path
+                        .to_string_lossy()
+                        .replace(std::path::MAIN_SEPARATOR, "/"),
+                    r.access,
+                )
+            })
+            .collect();
+        assert_eq!(
+            roots,
+            vec![
+                ("/srv/jeux".to_owned(), RootAccess::Ro),
+                ("/srv/rw".to_owned(), RootAccess::Rw),
+                ("/srv/ro".to_owned(), RootAccess::Ro),
+            ]
         );
     }
 

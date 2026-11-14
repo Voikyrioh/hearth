@@ -36,3 +36,4 @@ pub mod sessions;
 pub mod trust;
 pub mod update;
 pub mod update_supervisor;
+pub mod world_import;

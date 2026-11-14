@@ -14,7 +14,7 @@ pub use csv::{BOM, SEPARATOR, field as csv_field, render as render_csv};
 pub use event::{
     Actor, AdoptionCause, AlertPhase, AuditEvent, AuditRecord, BackupModeNote, BackupNote,
     ClientName, DeleteNote, ErasedData, LifecycleNote, MAX_CLIENT_NAME, OperationGesture, Origin,
-    OriginKind, Outcome, OutcomeKind, Reason, SaveMention, Target, UpdateNote,
+    OriginKind, Outcome, OutcomeKind, Reason, SaveMention, Target, UpdateNote, WorldNote, WorldResult,
 };
 pub use filter::{AuditFilter, FilterError, MAX_PAGE_SIZE, RawFilter, SearchQuery};
 pub use policy::{

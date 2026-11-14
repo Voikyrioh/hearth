@@ -32,7 +32,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use hearth_proto::api::deploy::{
     CapacityHost, DEPLOY_TIMEOUT_S, DeployAccepted, DeployCheck, DeployCheckRequest, DeployPlace,
-    DeployProtocol, DeploySpec, DiskCheck, EngineCapacity, LOW_DISK_BYTES,
+    DeployProtocol, DeploySource, DeploySpec, DiskCheck, EngineCapacity, LOW_DISK_BYTES,
     MAX_CONCURRENT_DEPLOYMENTS, MountCheck, MountStatus, NameStatus, PortCheck, PortStatus,
     reserve_bytes,
 };
@@ -40,29 +40,36 @@ use thiserror::Error;
 use tokio::time::Instant;
 
 use super::catalog::CatalogService;
-use super::fiche_install::{FicheInstaller, InstallAudit};
+use super::fiche_install::{FicheInstaller, InstallAudit, WorldPrep};
 use super::folders::{FolderFacts, check_mount_folder};
 use super::game_phase::GamePhases;
 use super::ports::{
     Clock, ContainerEngine, EngineError, EngineInfo, FreeSpace, HostFolders, HostPorts, IdGen,
-    Ownership, Perms, PullProgress, SafeFs, SecretRandom, ServiceContainers,
+    ImportDir, Ownership, Perms, PullProgress, SafeFs, SecretRandom, ServiceContainers,
 };
 use super::service_lifecycle::reason_of;
 use super::service_ops::{AcceptRequest, AuditDraft, OpError, ServiceOps};
 use super::service_specs::{ServiceSpecs, SpecServiceError};
 use super::services::ServicesRegistry;
+use super::world_import::copy::{Control, CopyError, CopyReport, copy_world};
+use super::world_import::{Prepared as WorldPrepared, WorldImport};
 use crate::application::ports::Progress;
-use crate::domain::audit::{Actor, ClientName, Outcome, Reason, Target};
+use crate::domain::audit::{Actor, ClientName, Outcome, Reason, Target, WorldNote, WorldResult};
 use crate::domain::files::RelPath;
-use crate::domain::ops::{Cause, OpKind, OpStatus, Refusal as LockRefusal, UndoInfo};
+use crate::domain::ops::{
+    Cause, CreatedObject, ObjectKind, ObjectRoot, OpKind, OpStatus, Refusal as LockRefusal,
+    UndoInfo,
+};
 use crate::domain::services::deploy::{
-    self, ImageRef, Invalid, Machine, Refusal, ValidDeploy, op_plan, step, validate, validate_name,
+    self, ImageRef, Invalid, Machine, Refusal, ValidDeploy, op_plan, op_plan_world, step, validate,
+    validate_name,
 };
 use crate::domain::services::from_fiche::ProducedFile;
 use crate::domain::services::plan::{PlanContext, image_reference};
 use crate::domain::services::ports::{Listener, PortWorld, duplicates, suggest, verdict};
 use crate::domain::services::spec::{SecretsAccess, fold_name};
 use crate::domain::services::{EngineState, RunState, ServiceKey};
+use crate::domain::worlds::COPY_MAX;
 
 /// Les durées d'un déploiement. Les tests les raccourcissent.
 #[derive(Debug, Clone, Copy)]
@@ -135,6 +142,10 @@ pub enum DeployError {
     },
     #[error("deux déploiements déjà en cours")]
     DeployLimit,
+    /// Une sauvegarde, une restauration ou une reprise de monde tient déjà la place des opérations lourdes
+    /// (`BR-MONDE-013`).
+    #[error("opération lourde déjà en cours")]
+    HeavyIoBusy,
     /// L'espace libre est sous le seuil et la case n'est pas cochée (`BR-DEPLOY-018`).
     #[error("espace disque bas")]
     LowDisk { free_bytes: u64 },
@@ -215,10 +226,59 @@ struct Job {
     files: Vec<ProducedFile>,
     /// Ce que le journal dit d'une installation depuis une fiche (BR-FICHE-032).
     install: Option<InstallAudit>,
+    /// Le monde existant à reprendre par copie vérifiée (HRT-105).
+    world: Option<WorldJob>,
     /// L'ordre de création est parti (ou va partir) : passé ce point, un délai dépassé laisse un résultat
     /// INCONNU, même si le conteneur n'est pas encore consigné (le moteur peut l'avoir créé sans que l'agent
     /// ait lu sa réponse).
     create_sent: AtomicBool,
+}
+
+/// Le fil de copie d'un monde. Si le futur qui l'attend est abandonné (délai, arrêt de l'agent), il est arrêté ET
+/// attendu : la copie ne continue pas d'écrire dans un dossier d'import que `settle` retire aussitôt, et la place
+/// `heavy_io` n'est pas rendue pendant qu'elle tourne. L'arrêt est vu à chaque morceau lu (256 Kio).
+struct CopyWorker {
+    control: Arc<Control>,
+    handle: Option<std::thread::JoinHandle<Result<CopyReport, CopyError>>>,
+}
+
+impl CopyWorker {
+    fn is_finished(&self) -> bool {
+        self.handle
+            .as_ref()
+            .is_none_or(std::thread::JoinHandle::is_finished)
+    }
+
+    fn join(&mut self) -> Option<Result<CopyReport, CopyError>> {
+        self.handle.take().and_then(|handle| handle.join().ok())
+    }
+}
+
+impl Drop for CopyWorker {
+    fn drop(&mut self) {
+        self.control.cancel.store(true, Ordering::SeqCst);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// La reprise d'un monde, telle que le travail l'emporte (HRT-105).
+struct WorldJob {
+    prepared: WorldPrepared,
+    /// « Garder cette copie » d'avance (`BR-MONDE-009`).
+    keep_if_changed: bool,
+    /// Le dossier d'import tant qu'il n'est pas mis en place : retiré si l'opération ne va pas au bout.
+    import: std::sync::Mutex<Option<ImportDir>>,
+    /// Ce que la copie a fait, pour le journal d'activité (`BR-MONDE-023`).
+    note: std::sync::Mutex<WorldProgress>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct WorldProgress {
+    files: u64,
+    bytes: u64,
+    result: WorldResult,
 }
 
 /// Ce que l'exécution a décidé de son issue.
@@ -312,6 +372,8 @@ pub struct Deployments {
     installer: FicheInstaller,
     /// Les phases d'un serveur de jeu installé depuis une fiche (BR-FICHE-028), en mémoire.
     phases: Arc<GamePhases>,
+    /// Reprendre un monde existant (HRT-105) ; absent : la reprise est refusée.
+    world_import: Option<Arc<WorldImport>>,
 }
 
 /// Les ports du serveur tels que le domaine les juge (`PortWorld`) : le moteur, les sockets en écoute, le port de
@@ -366,6 +428,7 @@ impl Deployments {
         catalog: Arc<CatalogService>,
         random: Arc<dyn SecretRandom>,
         phases: Arc<GamePhases>,
+        world_import: Option<Arc<WorldImport>>,
     ) -> Arc<Self> {
         let installer = FicheInstaller::new(catalog, random, Arc::clone(&clock));
         Arc::new(Self {
@@ -383,6 +446,7 @@ impl Deployments {
             running: Arc::new(AtomicUsize::new(0)),
             installer,
             phases,
+            world_import,
         })
     }
 
@@ -657,10 +721,19 @@ impl Deployments {
     ) -> Result<DeployAccepted, DeployError> {
         self.ready()?;
         let (machine, info) = self.machine().await;
+        // Reprendre un monde (HRT-105) : jugé AVANT la traduction, qui en prend le nom et la place à copier.
+        let world = self.judge_world(&spec).await?;
         // Une fiche est traduite puis jugée comme une image à la main ; sinon le formulaire (BR-FICHE-013).
         let (valid, files, install) = if spec.source.is_some() {
             let free = self.install_free_space(info.as_ref()).await;
-            let prepared = self.installer.prepare(&spec, &actor, machine, free)?;
+            let prep = world.as_ref().map(|(prepared, _)| WorldPrep {
+                name: &prepared.name,
+                names_setting: &prepared.rules.names_setting,
+                bytes: prepared.bytes,
+            });
+            let prepared = self
+                .installer
+                .prepare(&spec, &actor, machine, free, prep.as_ref())?;
             (prepared.valid, prepared.files, Some(prepared.audit))
         } else {
             let valid = validate(&spec, machine).map_err(|refusal| self.refusal(&spec, refusal))?;
@@ -696,7 +769,12 @@ impl Deployments {
         let key = ServiceKey::for_hearth(&self.ids.new_id())
             .ok_or_else(|| DeployError::Internal("identifiant de service illisible".into()))?;
         let account = account_of(&actor);
-        let plan = op_plan().map_err(|error| DeployError::Internal(error.to_string()))?;
+        let plan = if world.is_some() {
+            op_plan_world()
+        } else {
+            op_plan()
+        }
+        .map_err(|error| DeployError::Internal(error.to_string()))?;
         let id = self
             .ops
             .accept(AcceptRequest {
@@ -708,10 +786,12 @@ impl Deployments {
                 plan,
                 forced: false,
                 reserve_name: Some(folded),
-                heavy_io: false,
+                // La reprise d'un monde partage la place des opérations lourdes (`BR-MONDE-013`).
+                heavy_io: world.is_some(),
             })
             .await
             .map_err(|error| match error {
+                OpError::Locked(LockRefusal::HeavyIoBusy { .. }) => DeployError::HeavyIoBusy,
                 OpError::Locked(LockRefusal::NameReserved { by }) => {
                     if by == OpKind::Delete {
                         DeployError::NameBeingDeleted
@@ -764,6 +844,16 @@ impl Deployments {
             reference,
             files,
             install,
+            world: world.map(|(prepared, keep_if_changed)| WorldJob {
+                prepared,
+                keep_if_changed,
+                import: std::sync::Mutex::new(None),
+                note: std::sync::Mutex::new(WorldProgress {
+                    files: 0,
+                    bytes: 0,
+                    result: WorldResult::NotReached,
+                }),
+            }),
             create_sent: AtomicBool::new(false),
         };
         let shown = Shown {
@@ -798,6 +888,36 @@ impl Deployments {
             operation_id: id,
             service_key: key.as_str().to_owned(),
         })
+    }
+
+    /// Juge la reprise d'un monde demandée par une fiche : le monde existe sous un dossier ouvert, c'est un monde de
+    /// la fiche, sa forme est reprise par cette version, son nom est accepté. Rien n'est écrit.
+    async fn judge_world(
+        &self,
+        spec: &DeploySpec,
+    ) -> Result<Option<(WorldPrepared, bool)>, DeployError> {
+        let Some(DeploySource::Fiche {
+            id,
+            world: Some(pick),
+            ..
+        }) = &spec.source
+        else {
+            return Ok(None);
+        };
+        let invalid = |reason| {
+            DeployError::Invalid(Invalid {
+                field: "source.world",
+                reason,
+            })
+        };
+        let Some(world_import) = &self.world_import else {
+            return Err(invalid("unavailable"));
+        };
+        let prepared = world_import
+            .prepare(id, &pick.world)
+            .await
+            .map_err(|error| invalid(error.reason()))?;
+        Ok(Some((prepared, pick.keep_if_changed)))
     }
 
     /// Un refus du domaine devient l'erreur typée que la route rend. Un dossier du serveur : jugé ici, parce que
@@ -860,8 +980,16 @@ impl Deployments {
 
     async fn execute(&self, job: Job) {
         let started = Instant::now();
+        // La copie d'un monde a son propre plafond (six heures, `BR-MONDE-011`) en plus de celui du déploiement.
+        // Un budget fixe de cinq minutes reste après la copie pour créer, démarrer et surveiller.
+        let copy = if job.world.is_some() {
+            COPY_MAX + Duration::from_secs(300)
+        } else {
+            Duration::ZERO
+        };
         let deadline = started + self.context.timings.deadline;
-        let finish = match tokio::time::timeout_at(deadline, self.run(&job, deadline)).await {
+        let outer = deadline + copy;
+        let finish = match tokio::time::timeout_at(outer, self.run(&job, deadline)).await {
             Ok(finish) => finish,
             // Trente minutes (BR-DEPLOY-034) : ce qui n'a pas été créé n'existe pas ; sinon le résultat est inconnu.
             // L'ordre de création parti suffit : le délai peut couper l'attente de sa réponse, le conteneur existe
@@ -933,6 +1061,13 @@ impl Deployments {
 
         // 2. Récupération, annulable. Une image déjà présente est utilisée telle quelle (BR-DEPLOY-018).
         if !present && let Err(finish) = self.pull(job, &reference, deadline).await {
+            return finish;
+        }
+
+        // 2 bis. Copie du monde repris, annulable (`BR-MONDE-013`) : dans un dossier d'import neuf, relue.
+        if let Some(world) = &job.world
+            && let Err(finish) = self.import_world(job, world, deadline + COPY_MAX).await
+        {
             return finish;
         }
 
@@ -1127,6 +1262,23 @@ impl Deployments {
         let fs = self.safe_fs.clone();
         let key = job.key.clone();
         let sources = job.mounts.clone();
+        // Le monde repris est mis en place dans son dossier géré, une fois ce dossier créé et AVANT la création du
+        // conteneur : renommage du dossier d'import, jamais par-dessus un contenu (`BR-MONDE-014`).
+        let placement = match (&job.world, &self.world_import) {
+            (Some(world), Some(world_import)) => world
+                .import
+                .lock()
+                .ok()
+                .and_then(|held| held.clone())
+                .map(|import| {
+                    (
+                        Arc::clone(world_import.fs()),
+                        import,
+                        world.prepared.rules.folder_source.clone(),
+                    )
+                }),
+            _ => None,
+        };
         // Les fichiers produits (BR-FICHE-024) : octets, chemin, propriétaire et droits décidés par le domaine.
         let files: Vec<ProducedBytes> = job
             .files
@@ -1150,6 +1302,9 @@ impl Deployments {
                 let rel = RelPath::parse(&source).map_err(|_| ())?;
                 root.mkdir(&rel, perms).map_err(|_| ())?;
             }
+            if let Some((world_fs, import, folder)) = &placement {
+                world_fs.place(import, &key, folder).map_err(|_| ())?;
+            }
             for file in files {
                 let rel =
                     RelPath::parse(&format!("{}/{}", file.folder, file.path)).map_err(|_| ())?;
@@ -1170,12 +1325,260 @@ impl Deployments {
         })
         .await;
         match result {
-            Ok(Ok(())) => Ok(()),
+            Ok(Ok(())) => {
+                // Mis en place : le dossier d'import n'existe plus sous son nom, il n'y a plus rien à retirer.
+                if let Some(world) = &job.world
+                    && let Ok(mut held) = world.import.lock()
+                {
+                    *held = None;
+                }
+                Ok(())
+            }
             _ => {
                 tracing::error!("dossiers de données non créés : rien n'est lancé");
                 Err(Finish::failed(Cause::StepFailed))
             }
         }
+    }
+
+    /// Écrit l'`intent` d'une étape avec ce qu'elle a créé (le dossier d'import, `BR-MONDE-026`).
+    async fn begin_with(&self, job: &Job, name: &str, undo: &UndoInfo) -> Result<(), Finish> {
+        match self.ops.intent(&job.id, name, undo).await {
+            Ok(_) => Ok(()),
+            Err(OpError::Stale | OpError::OutOfOrder) if self.is_cancelling(&job.id).await => {
+                Err(Finish::cancelled())
+            }
+            Err(error) => {
+                tracing::error!(%error, step = name, "journal du déploiement illisible : l'étape n'est pas lancée");
+                Err(Finish::failed(Cause::StepFailed))
+            }
+        }
+    }
+
+    fn note_world(&self, world: &WorldJob, files: u64, bytes: u64, result: WorldResult) {
+        if let Ok(mut note) = world.note.lock() {
+            *note = WorldProgress {
+                files,
+                bytes,
+                result,
+            };
+        }
+    }
+
+    /// Copie le monde dans un dossier d'import neuf, sur un fil dédié à priorité basse, en suivant la progression
+    /// et l'annulation, puis relit la copie (`BR-MONDE-004`, `009`, `010`, `011`, `013`). La source n'est que lue.
+    async fn import_world(
+        &self,
+        job: &Job,
+        world: &WorldJob,
+        limit: Instant,
+    ) -> Result<(), Finish> {
+        let Some(world_import) = self.world_import.clone() else {
+            return Err(Finish::failed(Cause::StepFailed));
+        };
+        // Le plan est refait ici : l'image s'est récupérée avant, le monde a pu changer depuis la demande.
+        let plan = match world_import.replan(&world.prepared).await {
+            Ok(plan) => plan,
+            Err(_) => {
+                self.note_world(world, 0, 0, WorldResult::Failed);
+                return Err(Finish::failed(Cause::StepFailed));
+            }
+        };
+        let total_bytes = plan.bytes;
+        // Le monde a pu grossir depuis le contrôle d'espace de la demande : la différence est revérifiée
+        // (`BR-MONDE-012`), sans case pour passer outre.
+        let grown = plan.bytes.saturating_sub(world.prepared.bytes);
+        if grown > 0
+            && self
+                .free_bytes_at(self.context.services_root.clone())
+                .await
+                .is_some_and(|free| free < grown)
+        {
+            self.note_world(world, 0, 0, WorldResult::Failed);
+            return Err(Finish::failed(Cause::DiskFull));
+        }
+        let world_fs = Arc::clone(world_import.fs());
+        let (op, owner) = (job.id.clone(), world.prepared.owner);
+        let created = tokio::task::spawn_blocking({
+            let world_fs = Arc::clone(&world_fs);
+            move || world_fs.create_import(&op, owner)
+        })
+        .await;
+        let (sink, import) = match created {
+            Ok(Ok(made)) => made,
+            _ => {
+                self.note_world(world, 0, 0, WorldResult::Failed);
+                return Err(Finish::failed(Cause::StepFailed));
+            }
+        };
+        if let Ok(mut held) = world.import.lock() {
+            *held = Some(import.clone());
+        }
+        // Le dossier d'import est nommé au journal AVANT la première donnée : un agent qui s'arrête pendant la copie
+        // le retire au démarrage, après vérification de l'inode (`BR-MONDE-026`).
+        let undo = UndoInfo {
+            created: vec![CreatedObject {
+                root: ObjectRoot::Staging,
+                rel: import.rel.clone(),
+                dev: import.dev,
+                ino: import.ino,
+                kind: ObjectKind::ImportDir,
+            }],
+        };
+        self.begin_with(job, step::WORLD, &undo).await?;
+
+        let control = Arc::new(Control::default());
+        // Le plafond de six heures ne dépasse jamais ce qui reste au déploiement.
+        let until = (std::time::Instant::now() + COPY_MAX).min(limit.into_std());
+        let worker = {
+            let (control, root, copy_fs) = (
+                Arc::clone(&control),
+                world.prepared.root.clone(),
+                Arc::clone(&world_fs),
+            );
+            std::thread::Builder::new()
+                .name("hearth-world-copy".into())
+                .spawn(move || -> Result<CopyReport, CopyError> {
+                    // Priorité basse pour ne pas ralentir les autres services (`BR-MONDE-011`).
+                    copy_fs.lower_priority();
+                    let source = copy_fs.open_source(&root).map_err(CopyError::Source)?;
+                    copy_world(source.as_ref(), sink.as_ref(), &plan, &control, until)
+                })
+        };
+        let Ok(handle) = worker else {
+            journal(self.ops.failed(&job.id, step::WORLD).await, "failed");
+            self.note_world(world, 0, 0, WorldResult::Failed);
+            return Err(Finish::failed(Cause::StepFailed));
+        };
+        let mut worker = CopyWorker {
+            control: Arc::clone(&control),
+            handle: Some(handle),
+        };
+        let mut ticks = 0u32;
+        while !worker.is_finished() {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            ticks += 1;
+            if !ticks.is_multiple_of(4) {
+                continue;
+            }
+            // Une fois par seconde : la progression, et l'annulation éventuelle.
+            let (files, bytes) = (
+                control.files_done.load(Ordering::SeqCst),
+                control.bytes_done.load(Ordering::SeqCst),
+            );
+            let percent = (total_bytes > 0)
+                .then(|| u8::try_from((bytes.saturating_mul(100) / total_bytes).min(100)).ok())
+                .flatten();
+            journal(
+                self.ops
+                    .set_progress(
+                        &job.id,
+                        &Progress {
+                            percent,
+                            items_done: Some(files),
+                            bytes_done: Some(bytes),
+                            bytes_total: Some(total_bytes),
+                        },
+                    )
+                    .await,
+                "progress",
+            );
+            if self.is_cancelling(&job.id).await {
+                control.cancel.store(true, Ordering::SeqCst);
+            }
+        }
+        let outcome = worker.join().ok_or(());
+        let (files, bytes) = (
+            control.files_done.load(Ordering::SeqCst),
+            control.bytes_done.load(Ordering::SeqCst),
+        );
+        match outcome {
+            Ok(Ok(report)) if report.changed == 0 => {
+                self.note_world(world, report.files, report.bytes, WorldResult::Copied);
+                journal(self.ops.done(&job.id, step::WORLD, &undo).await, "done");
+                if self.is_cancelling(&job.id).await {
+                    return Err(Finish::cancelled());
+                }
+                Ok(())
+            }
+            // Des fichiers ont changé pendant la copie : elle est gardée si le compte l'a demandé d'avance
+            // (« Garder cette copie »), sinon retirée (« Recommencer », `BR-MONDE-009`).
+            Ok(Ok(report)) if world.keep_if_changed => {
+                self.note_world(world, report.files, report.bytes, WorldResult::KeptChanged);
+                journal(self.ops.done(&job.id, step::WORLD, &undo).await, "done");
+                if self.is_cancelling(&job.id).await {
+                    return Err(Finish::cancelled());
+                }
+                Ok(())
+            }
+            Ok(Ok(report)) => {
+                self.note_world(
+                    world,
+                    report.files,
+                    report.bytes,
+                    WorldResult::ChangedDiscarded,
+                );
+                journal(self.ops.failed(&job.id, step::WORLD).await, "failed");
+                Err(Finish::failed(Cause::StepFailed))
+            }
+            Ok(Err(CopyError::Cancelled)) => {
+                self.note_world(world, files, bytes, WorldResult::Cancelled);
+                journal(self.ops.failed(&job.id, step::WORLD).await, "failed");
+                Err(Finish::cancelled())
+            }
+            Ok(Err(CopyError::Incomplete)) => {
+                self.note_world(world, files, bytes, WorldResult::Incomplete);
+                journal(self.ops.failed(&job.id, step::WORLD).await, "failed");
+                Err(Finish::failed(Cause::StepFailed))
+            }
+            Ok(Err(CopyError::TimedOut)) => {
+                self.note_world(world, files, bytes, WorldResult::Failed);
+                journal(self.ops.failed(&job.id, step::WORLD).await, "failed");
+                Err(Finish::failed(Cause::Timeout))
+            }
+            Ok(Err(_)) | Err(_) => {
+                self.note_world(world, files, bytes, WorldResult::Failed);
+                journal(self.ops.failed(&job.id, step::WORLD).await, "failed");
+                Err(Finish::failed(Cause::StepFailed))
+            }
+        }
+    }
+
+    /// Retire le dossier d'import s'il n'a pas été mis en place : seulement lui, vérifié par son inode.
+    async fn discard_import(&self, job: &Job) {
+        let (Some(world), Some(world_import)) = (&job.world, &self.world_import) else {
+            return;
+        };
+        let import = world.import.lock().ok().and_then(|mut held| held.take());
+        let Some(import) = import else {
+            return;
+        };
+        let world_fs = Arc::clone(world_import.fs());
+        let removed = tokio::task::spawn_blocking(move || world_fs.remove_import(&import)).await;
+        if !matches!(removed, Ok(Ok(()))) {
+            tracing::warn!(operation = %job.id, "dossier d'import non retiré");
+        }
+    }
+
+    /// Ce que la reprise a fait, pour le journal d'activité : le dossier ouvert tel qu'il est écrit, des nombres.
+    fn world_note(&self, job: &Job, finish: &Finish) -> Option<WorldNote> {
+        let world = job.world.as_ref()?;
+        let progress = *world.note.lock().ok()?;
+        // Une copie réussie suivie d'un échec plus tard (création) garde son résultat ; une annulation ou une
+        // erreur avant la fin de la copie est dite telle.
+        let result = match (progress.result, finish.status) {
+            (WorldResult::Copied | WorldResult::KeptChanged, OpStatus::Cancelled) => {
+                WorldResult::Cancelled
+            }
+            (result, _) => result,
+        };
+        Some(WorldNote {
+            folder: ClientName::parse(&world.prepared.folder)?,
+            files: progress.files,
+            bytes: progress.bytes,
+            not_copied: world.prepared.not_copied,
+            result,
+        })
     }
 
     /// Le conteneur créé a été refusé au démarrage : il est supprimé, et avec lui tout ce que le déploiement a
@@ -1240,6 +1643,8 @@ impl Deployments {
         } else {
             finish
         };
+        // Un dossier d'import pas mis en place est retiré, quelle que soit l'issue (seul lui, `BR-MONDE-013`).
+        self.discard_import(job).await;
         if finish.clean {
             self.forget_spec(&job.key).await;
             self.remove_folders(job).await;
@@ -1309,6 +1714,7 @@ impl Deployments {
                         .iter()
                         .filter_map(|title| ClientName::parse(title))
                         .collect(),
+                    world: self.world_note(job, finish),
                 }
             }
             None => Target::ServiceDeploy {

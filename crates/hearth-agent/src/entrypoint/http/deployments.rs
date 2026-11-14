@@ -112,6 +112,11 @@ pub(super) fn deploy_error(error: DeployError) -> ApiError {
             ErrorCode::DeployLimit,
             "Deux déploiements sont déjà en cours sur ce serveur. Attends la fin de l'un d'eux.",
         ),
+        // Une reprise de monde, une sauvegarde ou une restauration tient déjà la place (`BR-MONDE-013`).
+        DeployError::HeavyIoBusy => ApiError::new(
+            ErrorCode::HeavyIoBusy,
+            "Une reprise de monde est déjà en cours sur ce serveur. Attends sa fin.",
+        ),
         DeployError::LowDisk { free_bytes } => ApiError(ErrorBody::with_details(
             ErrorCode::NoSpace,
             "Il reste peu de place sur le disque des images. Coche « Continuer malgré le manque de place » pour lancer quand même.",

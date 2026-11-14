@@ -27,3 +27,4 @@ pub mod service_update;
 pub mod services;
 pub mod sessions;
 pub mod update;
+pub mod worlds;

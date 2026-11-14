@@ -53,6 +53,7 @@ use crate::application::services::{EngineTimings, ServicesRegistry};
 use crate::application::services_right::ServicesRightService;
 use crate::application::sessions::SessionService;
 use crate::application::trust::TrustService;
+use crate::application::world_import::WorldImport;
 use crate::domain::ops::ObjectRoot;
 use crate::domain::services::BrakeSettings;
 use crate::entrypoint::account::{self, AccountCliError};
@@ -99,6 +100,7 @@ use crate::infrastructure::system::{
     ProcBootInfo, SysinfoProbe, SystemHostEnvironment, SystemMachineInfo,
 };
 use crate::infrastructure::tls::{self, FileIdentityStore, TlsError};
+use crate::infrastructure::world_fs::{STAGING_DIR, SystemWorldFs};
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -255,6 +257,9 @@ pub struct CatalogParts {
     /// Les phases d'un serveur de jeu, tenues par l'installation (qui les commence) ET par la suppression (qui les
     /// oublie, HRT-85, HRT-197). `None` : les siennes ; les tests y posent les leurs pour les lire.
     pub phases: Option<Arc<GamePhases>>,
+    /// La lecture des mondes à reprendre et leur copie (HRT-105). `None` : le vrai, sous le dossier de données de
+    /// l'agent ; les tests y posent un faux en mémoire.
+    pub world_fs: Option<Arc<dyn crate::application::ports::WorldFs>>,
 }
 
 impl CatalogParts {
@@ -265,6 +270,7 @@ impl CatalogParts {
             random: Arc::new(OsSecretRandom),
             service: None,
             phases: None,
+            world_fs: None,
         }
     }
 }
@@ -452,7 +458,6 @@ pub async fn service_foundations(
 /// la configuration (HRT-97, `BR-BACKUP-005`), ce défaut ne sert qu'aux assemblages sans configuration (tests). Une
 /// racine qui n'existe pas encore ne retire rien (« déjà parti »).
 const BACKUPS_DIR: &str = "backups";
-const STAGING_DIR: &str = "staging";
 
 /// Assemble le socle, DIT l'état de la clé des secrets, et classe les opérations restées en plein geste
 /// (reprendre le verrou de celles à vérifier, retirer ce que les autres avaient créé pour elles-mêmes).
@@ -1075,6 +1080,18 @@ pub async fn start_engined(
         },
     );
     backups.recover_at_startup().await;
+    // Reprendre un monde existant (HRT-105) : les dossiers ouverts aux services, tels que la configuration les écrit.
+    let world_import = WorldImport::new(
+        catalog.clone(),
+        engine
+            .catalog
+            .world_fs
+            .clone()
+            .unwrap_or_else(|| Arc::new(SystemWorldFs::new(config.data_dir.clone()))),
+        config.services.allowed_roots.clone(),
+        engine.free_space.clone(),
+        config.data_dir.clone(),
+    );
     let deployments = Deployments::new(
         registry.clone(),
         foundations.ops.clone(),
@@ -1096,6 +1113,7 @@ pub async fn start_engined(
         catalog.clone(),
         engine.catalog.random.clone(),
         phases,
+        Some(world_import.clone()),
     );
     // Modifier un service par recréation (HRT-87) : l'ancien est mis de côté, le nouveau créé depuis la description,
     // l'ancien remis si le nouveau échoue.
@@ -1161,6 +1179,7 @@ pub async fn start_engined(
         service_updates,
         backups,
         catalog,
+        world_import,
         game_settings,
         stream,
         erasure_pending: database.erasure_pending(),

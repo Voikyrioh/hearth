@@ -147,7 +147,24 @@ pub async fn start_booted(
 /// Comme `start`, avec ce moteur de conteneurs (le pilotage des services permis) au lieu du réglage
 /// de la configuration, qui ne touche jamais le vrai socket dans les tests.
 pub async fn start_engined(env: &Env, engine: hearth_agent::app::EngineParts) -> Agent {
-    start_engine_with(env, engine, super::probe::metering(), true, true).await
+    start_engine_with(
+        env,
+        engine,
+        super::probe::metering(),
+        true,
+        true,
+        Vec::new(),
+    )
+    .await
+}
+
+/// Comme `start_engined`, avec ces dossiers ouverts aux services dans la configuration (HRT-105).
+pub async fn start_with_roots(
+    env: &Env,
+    engine: hearth_agent::app::EngineParts,
+    roots: Vec<hearth_agent::infrastructure::config::AllowedRoot>,
+) -> Agent {
+    start_engine_with(env, engine, super::probe::metering(), true, true, roots).await
 }
 
 /// Comme `start_engined`, avec ces sondes et ces délais de flux.
@@ -156,17 +173,33 @@ pub async fn start_engined_metered(
     engine: hearth_agent::app::EngineParts,
     metering: Metering,
 ) -> Agent {
-    start_engine_with(env, engine, metering, true, true).await
+    start_engine_with(env, engine, metering, true, true, Vec::new()).await
 }
 
 /// Comme `start_engined`, avec `engine.enabled = false` dans la configuration.
 pub async fn start_engine_disabled(env: &Env, engine: hearth_agent::app::EngineParts) -> Agent {
-    start_engine_with(env, engine, super::probe::metering(), false, true).await
+    start_engine_with(
+        env,
+        engine,
+        super::probe::metering(),
+        false,
+        true,
+        Vec::new(),
+    )
+    .await
 }
 
 /// Comme `start_engined`, avec `services.adoption = false` dans la configuration (`BR-ADOPT-020`).
 pub async fn start_without_adoption(env: &Env, engine: hearth_agent::app::EngineParts) -> Agent {
-    start_engine_with(env, engine, super::probe::metering(), true, false).await
+    start_engine_with(
+        env,
+        engine,
+        super::probe::metering(),
+        true,
+        false,
+        Vec::new(),
+    )
+    .await
 }
 
 async fn start_engine_with(
@@ -175,6 +208,7 @@ async fn start_engine_with(
     metering: Metering,
     enabled: bool,
     adoption: bool,
+    roots: Vec<hearth_agent::infrastructure::config::AllowedRoot>,
 ) -> Agent {
     let config = AgentConfig {
         listen_addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -187,6 +221,7 @@ async fn start_engine_with(
         },
         services: hearth_agent::infrastructure::config::ServicesConfig {
             adoption,
+            allowed_roots: roots,
             ..hearth_agent::infrastructure::config::ServicesConfig::default()
         },
     };

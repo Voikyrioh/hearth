@@ -52,6 +52,7 @@ mod system_probe;
 mod token_gen;
 mod unit_of_work;
 mod update;
+mod world_fs;
 
 pub use account_repo::{AccountRepo, AccountTx};
 pub use admin_accounts::{AdminAccounts, AdminAccountsError, AdminCredential};
@@ -125,4 +126,8 @@ pub use unit_of_work::{Store, UnitOfWork};
 pub use update::{
     Downloader, FetchError, FreeSpace, Greeting, HelloProbe, SignatureError, SignatureVerifier,
     SupervisorLock, UpdateFeed, UpdateHost, UpdateHostError,
+};
+pub use world_fs::{
+    ImportDir, SinkFile, WorldDirEntry, WorldDirListing, WorldEntryKind, WorldFileStat, WorldFs,
+    WorldFsError, WorldSink, WorldSource,
 };

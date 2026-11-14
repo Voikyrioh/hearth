@@ -610,6 +610,8 @@ impl DeploymentValidator for OrdinaryDeployment {
 pub mod step {
     pub const CHECK: &str = "check";
     pub const PULL: &str = "pull";
+    /// La copie du monde repris, entre la récupération de l'image et la création (HRT-105, `BR-MONDE-013`).
+    pub const WORLD: &str = "world";
     pub const CREATE: &str = "create";
     pub const START: &str = "start";
     pub const WATCH: &str = "watch";
@@ -619,6 +621,16 @@ pub mod step {
 /// surveillance. Création et démarrage écrivent leur `intent` avant le geste : un agent qui s'arrête entre les
 /// deux laisse une opération « à vérifier », jamais « tout va bien » (ADR-0045).
 pub fn op_plan() -> Result<crate::domain::ops::OpPlan, crate::domain::ops::PlanError> {
+    plan(false)
+}
+
+/// Le plan d'un déploiement qui reprend un monde : la copie du monde est une étape de plus, non destructive
+/// (rien n'existe encore que le dossier d'import, créé par l'opération et retiré avec elle).
+pub fn op_plan_world() -> Result<crate::domain::ops::OpPlan, crate::domain::ops::PlanError> {
+    plan(true)
+}
+
+fn plan(world: bool) -> Result<crate::domain::ops::OpPlan, crate::domain::ops::PlanError> {
     use crate::domain::ops::{OpPlan, PlannedStep, StepName};
     let name = |text: &str| StepName::parse(text).ok_or(crate::domain::ops::PlanError::StepName);
     let step = |text: &str, destructive| {
@@ -627,16 +639,14 @@ pub fn op_plan() -> Result<crate::domain::ops::OpPlan, crate::domain::ops::PlanE
             destructive,
         })
     };
-    OpPlan::new(
-        vec![
-            step(step::CHECK, false)?,
-            step(step::PULL, false)?,
-            step(step::CREATE, true)?,
-            step(step::START, true)?,
-            step(step::WATCH, false)?,
-        ],
-        Some(name(step::CREATE)?),
-    )
+    let mut steps = vec![step(step::CHECK, false)?, step(step::PULL, false)?];
+    if world {
+        steps.push(step(step::WORLD, false)?);
+    }
+    steps.push(step(step::CREATE, true)?);
+    steps.push(step(step::START, true)?);
+    steps.push(step(step::WATCH, false)?);
+    OpPlan::new(steps, Some(name(step::CREATE)?))
 }
 
 #[cfg(test)]

@@ -76,6 +76,7 @@ pub fn parts_supervised(
             random: Arc::new(super::fake_random::FakeRandom::counting_from(0)),
             service: None,
             phases: None,
+            world_fs: None,
         },
     }
 }

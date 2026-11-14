@@ -54,6 +54,15 @@ pub struct InstallAudit {
 
 /// Une demande jugée : la même description qu'un déploiement ordinaire, les fichiers à produire avant la création
 /// du conteneur, et le texte du journal.
+/// Le monde repris, jugé par `world_import` avant la traduction (HRT-105).
+pub struct WorldPrep<'a> {
+    /// Le nom du monde, qui devient la réponse du réglage de la fiche (`BR-MONDE-014`).
+    pub name: &'a str,
+    pub names_setting: &'a str,
+    /// Octets à copier : ils s'ajoutent à l'espace que la fiche exige (`BR-MONDE-012`).
+    pub bytes: u64,
+}
+
 pub struct Prepared {
     pub valid: crate::domain::services::deploy::ValidDeploy,
     pub files: Vec<ProducedFile>,
@@ -126,6 +135,7 @@ impl FicheInstaller {
         actor: &Actor,
         machine: Option<Machine>,
         free_disk: Option<u64>,
+        world_prep: Option<&WorldPrep<'_>>,
     ) -> Result<Prepared, DeployError> {
         let Some(DeploySource::Fiche {
             id,
@@ -137,6 +147,7 @@ impl FicheInstaller {
             ports,
             optional_ports,
             world_imported,
+            world,
         }) = &spec.source
         else {
             return Err(DeployError::SettingNotAllowed);
@@ -152,9 +163,19 @@ impl FicheInstaller {
         {
             return Err(DeployError::SettingNotAllowed);
         }
-        // La reprise d'un monde existant n'est pas dans cette version.
-        if *world_imported {
-            return Err(invalid("source", "world_import_unavailable"));
+        // Reprendre un monde (HRT-105) : le drapeau, le choix et son jugement vont ensemble ; le geste « Je
+        // comprends » (`BR-MONDE-016`) est exigé ici, donc même d'un client modifié.
+        match (*world_imported, world, world_prep) {
+            (false, None, None) => {}
+            (true, Some(pick), Some(_)) => {
+                if !pick.version_understood {
+                    return Err(invalid("source.world", "version_not_understood"));
+                }
+            }
+            (true, _, None) | (_, Some(_), None) => {
+                return Err(invalid("source", "world_import_unavailable"));
+            }
+            _ => return Err(invalid("source", "world_import_inconsistent")),
         }
         // 2. La fiche est proposée par cet agent, et c'est celle que le client a vue.
         let fiche = self.catalog.fiche(id).ok_or(DeployError::FicheUnknown)?;
@@ -182,6 +203,16 @@ impl FicheInstaller {
             {
                 return Err(invalid("source.answers", "duplicate"));
             }
+        }
+        // Le nom du monde repris est la réponse du réglage de la fiche, jamais celle du client (`BR-MONDE-014`).
+        if let Some(prep) = world_prep {
+            if answer_map
+                .get(prep.names_setting)
+                .is_some_and(|given| given != prep.name)
+            {
+                return Err(invalid("source.answers", "world_name_fixed"));
+            }
+            answer_map.insert(prep.names_setting.to_owned(), prep.name.to_owned());
         }
         let agreed: BTreeSet<String> = agreements.iter().cloned().collect();
         let mut host_ports: BTreeMap<String, u16> = BTreeMap::new();
@@ -218,7 +249,7 @@ impl FicheInstaller {
                 host_ports: &host_ports,
                 optional_ports: &optional,
                 generated: &generated,
-                world_imported: false,
+                world_imported: world_prep.is_some(),
             },
         )
         .map_err(|error| match error {
@@ -257,7 +288,9 @@ impl FicheInstaller {
             memory_bytes: u64::MAX,
         });
         let free = free_disk.unwrap_or(u64::MAX);
-        match fit(fiche, fit_machine, free) {
+        let world_bytes = world_prep.map_or(0, |prep| prep.bytes);
+        // La place du monde copié s'ajoute au besoin de la fiche, sans case pour passer outre (`BR-MONDE-012`).
+        match fit(fiche, fit_machine, free.saturating_sub(world_bytes)) {
             Fit::Ok => {}
             Fit::HostTooSmall { lack, needed, has } => {
                 return Err(DeployError::HostTooSmall {
@@ -271,18 +304,18 @@ impl FicheInstaller {
             }
             Fit::NoSpace {
                 needed,
-                free,
+                free: _,
                 missing,
             } => {
                 return Err(DeployError::NotEnoughSpace {
-                    needed,
+                    needed: needed.saturating_add(world_bytes),
                     free,
                     missing,
                 });
             }
         }
         if !spec.accept.low_disk
-            && fit_warnings(fiche, fit_machine, free)
+            && fit_warnings(fiche, fit_machine, free.saturating_sub(world_bytes))
                 .iter()
                 .any(|warning| matches!(warning, FitWarning::PublisherSpace { .. }))
         {
