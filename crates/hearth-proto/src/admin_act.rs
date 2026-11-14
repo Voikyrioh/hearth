@@ -941,14 +941,14 @@ mod tests {
             // Une route ET une seule, ou « déclaré, route à venir » : jamais les deux, jamais aucun.
             assert_eq!(routed + waiting, 1, "{kind:?}");
         }
-        // Vingt-deux actes en 0x05 : vingt ont leur route (dont deux pour le mode attaque), deux sont
-        // déclarés pour les tranches suivantes ; dix-neuf routes d'acte (dont le retrait d'un poste, sous son
+        // Vingt-trois actes en 0x05 : vingt et un ont leur route (dont deux pour le mode attaque), deux sont
+        // déclarés pour les tranches suivantes ; vingt routes d'acte (dont le retrait d'un poste, sous son
         // contrat) en plus du réglage de fréquence.
-        assert_eq!(in_routes.len(), 20);
+        assert_eq!(in_routes.len(), 21);
         assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 2);
         assert_eq!(
             ROUTES.iter().filter(|r| r.pattern != "/me/reauth").count(),
-            19
+            20
         );
     }
 

@@ -358,7 +358,9 @@ pub fn apply(
             });
         }
         Some(CommandOp::Clear) => next_secrets.command = None,
-        Some(CommandOp::Set | CommandOp::Unknown) => {}
+        // Posée : la commande vient de la description jugée plus haut (`validate`).
+        Some(CommandOp::Set) => {}
+        Some(CommandOp::Unknown) => return Err(invalid("command", "bad_op")),
     }
     if let Some(address) = &change.public_address {
         if !valid_public_address(address) {

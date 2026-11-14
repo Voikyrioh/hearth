@@ -49,6 +49,7 @@ use hearth_proto::api::service_ops::{
     StepStateView,
 };
 use hearth_proto::api::service_spec::DriftView;
+use hearth_proto::api::service_update::{CommandOp, EnvOp, EnvOrigin};
 use hearth_proto::api::services::{
     AdoptionResult, EngineState, InitSystem, MountKind, PortProtocol, PortScope, RestartMode,
     ServiceDriver, ServiceOrigin, ServiceState,
@@ -162,6 +163,9 @@ fn enums() -> Vec<Entry> {
         ),
         entry!("api/service_ops.rs::StepStateView", Tolerant, StepStateView),
         entry!("api/service_spec.rs::DriftView", Tolerant, DriftView),
+        entry!("api/service_update.rs::EnvOrigin", Tolerant, EnvOrigin),
+        entry!("api/service_update.rs::EnvOp", Tolerant, EnvOp),
+        entry!("api/service_update.rs::CommandOp", Tolerant, CommandOp),
         entry!("api/service_delete.rs::FolderFate", Tolerant, FolderFate),
         entry!("api/game_settings.rs::ChangeAction", Tolerant, ChangeAction),
         entry!(
