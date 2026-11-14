@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use hearth_agent::application::ports::{FsError, Ownership, Perms, SafeFs};
+use hearth_agent::application::ports::{EntryKind, FsError, Ownership, Perms, SafeFs};
 use hearth_agent::domain::files::RelPath;
 use hearth_agent::domain::services::ServiceKey;
 
@@ -65,6 +65,41 @@ pub fn run(fs: &dyn SafeFs, uid: u32, gid: u32) {
     assert_eq!(measure.items, 2);
     assert!(!measure.partial);
     assert!(measure.bytes_on_disk > 0);
+
+    // Lire pour sauvegarder (HRT-97) : lister (trié, avec les types), relever, ouvrir en flux avec son propre
+    // relevé ; jamais autre chose qu'un fichier ordinaire à l'ouverture, jamais un lien là où il n'y en a pas.
+    let listing = root.list_dir(&rel("world")).unwrap();
+    let names: Vec<(&str, EntryKind)> = listing
+        .entries
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.meta.kind))
+        .collect();
+    assert_eq!(
+        names,
+        [("saves", EntryKind::Dir), ("server.cfg", EntryKind::File)]
+    );
+    assert_eq!(listing.skipped_names, 0);
+    assert_eq!(root.list_dir(&rel("absent")).err(), Some(FsError::NotFound));
+    assert_eq!(root.stat(&RelPath::root()).unwrap().kind, EntryKind::Dir);
+    let meta = root.stat(&rel("world/server.cfg")).unwrap();
+    assert_eq!((meta.kind, meta.size), (EntryKind::File, 9));
+    let mut opened = root.open_read(&rel("world/server.cfg")).unwrap();
+    assert_eq!(opened.meta().unwrap().size, 9);
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut opened, &mut text).unwrap();
+    assert_eq!(text, "port=7778");
+    assert_eq!(
+        root.open_read(&rel("world")).err(),
+        Some(FsError::NotRegular)
+    );
+    assert_eq!(
+        root.open_read(&rel("world/absent")).err(),
+        Some(FsError::NotFound)
+    );
+    assert_eq!(
+        root.read_link(&rel("world/server.cfg")).err(),
+        Some(FsError::NotRegular)
+    );
 
     // Retrait : un arbre, jamais la racine, une cible absente est dite absente.
     assert_eq!(root.remove_tree(&RelPath::root()), Err(FsError::Refused));

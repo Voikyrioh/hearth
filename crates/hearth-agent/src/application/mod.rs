@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod attack_mode;
 pub mod audit;
+pub mod backups;
 pub mod catalog;
 pub mod closing_gates;
 pub mod delete;
@@ -27,6 +28,7 @@ pub mod service_logs;
 pub mod service_op_access;
 pub mod service_ops;
 pub mod service_specs;
+pub mod service_stop;
 pub mod services;
 pub mod services_right;
 pub mod sessions;

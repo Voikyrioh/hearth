@@ -4,6 +4,7 @@
 pub mod accounts;
 pub mod archive;
 pub mod audit;
+pub mod backups;
 pub mod catalog;
 pub mod compat;
 pub mod eviction;

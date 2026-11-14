@@ -133,6 +133,9 @@ pub enum SecretField {
     /// seul fait que retirer, ajouter ou permuter un scellé en base est une description altérée, jamais
     /// une description plus courte rendue comme valide.
     Manifest,
+    /// La note d'une sauvegarde (HRT-97, BR-BACKUP-012) : scellée sous l'identifiant de la sauvegarde (en
+    /// minuscules), service et révision 0 pour le reste du contexte. Jamais au manifeste, jamais au journal.
+    BackupNote(AnswerId),
 }
 
 impl SecretField {
@@ -143,6 +146,7 @@ impl SecretField {
             Self::Command => "command".to_owned(),
             Self::Answer(id) => format!("answer:{}", id.as_str()),
             Self::Manifest => "manifest".to_owned(),
+            Self::BackupNote(id) => format!("backup-note:{}", id.as_str()),
         }
     }
 
@@ -160,6 +164,9 @@ impl SecretField {
                 rank == "0" || (!rank.starts_with('0') && rank.bytes().all(|b| b.is_ascii_digit()));
             let rank: u16 = rank.parse().ok().filter(|_| canonical)?;
             return (rank < MAX_ENV_RANK).then_some(Self::Env(rank));
+        }
+        if let Some(id) = text.strip_prefix("backup-note:") {
+            return AnswerId::parse(id).map(Self::BackupNote);
         }
         text.strip_prefix("answer:")
             .and_then(AnswerId::parse)

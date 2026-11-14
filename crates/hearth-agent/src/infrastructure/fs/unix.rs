@@ -15,12 +15,14 @@ use std::time::{Duration, Instant};
 
 use rustix::fs::{
     AtFlags, CWD, Dir, FileType, Mode, OFlags, Stat, fchmod, fstat, fsync, mkdirat, openat,
-    renameat, statat, unlinkat,
+    readlinkat, renameat, statat, unlinkat,
 };
 use rustix::io::Errno;
 
 use super::SERVICES_DIR;
-use crate::application::ports::{Erased, FsError, Measure, Perms};
+use crate::application::ports::{
+    DirListing, EntryKind, EntryMeta, Erased, FsError, ListedEntry, Measure, Perms, ReadFile,
+};
 use crate::domain::files::{MAX_DEPTH, RelPath};
 use crate::domain::services::ServiceKey;
 use crate::infrastructure::dir_fd::{self, CREATE_FILE, OPEN_DIR, is_trusted};
@@ -109,6 +111,9 @@ fn create_then_open(parent: &OwnedFd, name: &str, dev: u128) -> Result<(OwnedFd,
 pub struct UnixRoot {
     fd: OwnedFd,
     dev: u128,
+    /// L'identifiant de montage de la racine : un dossier d'un autre montage (`mount --bind` du même système de
+    /// fichiers compris) n'est pas « dans » le service.
+    mnt: Option<u64>,
 }
 
 fn check_key(key: &ServiceKey) -> Result<&str, FsError> {
@@ -150,7 +155,8 @@ pub(super) fn open_service_root(
         open_dir_on(&services, name, dev)?
     };
     check_trusted(&fd)?;
-    Ok(UnixRoot { fd, dev })
+    let mnt = erase::mnt_id_of(&fd);
+    Ok(UnixRoot { fd, dev, mnt })
 }
 
 /// `BR-DEL-007` : vide la racine du service PUIS la retire, sans sortir de `services/<clé>`. Continue après
@@ -209,6 +215,13 @@ impl UnixRoot {
         let mut current = self.fd.try_clone().map_err(|e| FsError::Io(e.kind()))?;
         for name in names {
             current = open_dir_on(&current, name, self.dev)?;
+            // Un `mount --bind` posé depuis le listage garde le même périphérique : seul l'identifiant de
+            // montage le trahit, comme à l'effacement (`Eraser`). Jamais traversé.
+            if let (Some(root), Some(here)) = (self.mnt, erase::mnt_id_of(&current))
+                && root != here
+            {
+                return Err(FsError::Blocked);
+            }
         }
         Ok(current)
     }
@@ -272,7 +285,10 @@ impl UnixRoot {
         outcome
     }
 
-    pub(super) fn read_file(&self, rel: &RelPath, max: u64) -> Result<Vec<u8>, FsError> {
+    /// Désigne puis ouvre en lecture un fichier ordinaire du service : jugé AVANT d'ouvrir (sur un périphérique,
+    /// c'est l'ouverture elle-même qui agit), jamais par un lien, sur le périphérique de la racine, et c'est
+    /// bien l'objet jugé qui est ouvert (même périphérique et même inode).
+    fn open_regular(&self, rel: &RelPath) -> Result<OwnedFd, FsError> {
         let (parent, leaf) = self.parent_of(rel)?;
         // Juger AVANT d'ouvrir : sur un périphérique, c'est l'ouverture elle-même qui agit.
         let handle = openat(&parent, leaf, DESIGNATE, Mode::empty()).map_err(fs_error)?;
@@ -290,6 +306,11 @@ impl UnixRoot {
         if (opened.st_dev, opened.st_ino) != (designated.st_dev, designated.st_ino) {
             return Err(FsError::Blocked);
         }
+        Ok(fd)
+    }
+
+    pub(super) fn read_file(&self, rel: &RelPath, max: u64) -> Result<Vec<u8>, FsError> {
+        let fd = self.open_regular(rel)?;
         let mut out = Vec::new();
         File::from(fd)
             .take(max.saturating_add(1))
@@ -299,6 +320,84 @@ impl UnixRoot {
             return Err(FsError::TooLarge);
         }
         Ok(out)
+    }
+
+    /// Ce que `lstat` dit de `rel` (la racine si `rel` est vide), sans suivre de lien.
+    pub(super) fn stat_rel(&self, rel: &RelPath) -> Result<EntryMeta, FsError> {
+        if rel.is_root() {
+            let stat = fstat(&self.fd).map_err(fs_error)?;
+            return Ok(meta_of(&stat, self.dev));
+        }
+        let (parent, leaf) = self.parent_of(rel)?;
+        let stat = statat(&parent, leaf, AtFlags::SYMLINK_NOFOLLOW).map_err(fs_error)?;
+        Ok(meta_of(&stat, self.dev))
+    }
+
+    /// Le contenu d'un dossier, trié par nom (HRT-97). Un nom qui n'est pas de l'UTF-8, ou pas un composant
+    /// sûr, est compté, jamais listé.
+    pub(super) fn list(&self, rel: &RelPath) -> Result<DirListing, FsError> {
+        let dir = self.walk(rel.components())?;
+        let reader = Dir::read_from(&dir).map_err(fs_error)?;
+        let mut listing = DirListing::default();
+        for entry in reader {
+            let entry = entry.map_err(fs_error)?;
+            let name = entry.file_name();
+            if name.to_bytes() == b"." || name.to_bytes() == b".." {
+                continue;
+            }
+            let Some(text) = name
+                .to_str()
+                .ok()
+                .filter(|text| RelPath::check_component(text).is_ok())
+            else {
+                listing.skipped_names = listing.skipped_names.saturating_add(1);
+                continue;
+            };
+            let stat = match statat(&dir, name, AtFlags::SYMLINK_NOFOLLOW) {
+                Ok(stat) => stat,
+                // Disparu entre la lecture et le relevé : rien à lister.
+                Err(Errno::NOENT) => continue,
+                Err(errno) => return Err(fs_error(errno)),
+            };
+            let mut meta = meta_of(&stat, self.dev);
+            // Un `mount --bind` du même système de fichiers a le même périphérique : seul l'identifiant de montage
+            // le trahit. Un dossier d'un autre montage n'est ni lu ni archivé.
+            if meta.kind == EntryKind::Dir
+                && let (Some(root), Some(child)) = (self.mnt, erase::mnt_id_at(&dir, name))
+                && root != child
+            {
+                meta.kind = EntryKind::Other;
+            }
+            listing.entries.push(ListedEntry {
+                name: text.to_owned(),
+                meta,
+            });
+        }
+        listing.entries.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(listing)
+    }
+
+    /// Ouvre un fichier ordinaire en lecture.
+    pub(super) fn open_for_read(&self, rel: &RelPath) -> Result<Box<dyn ReadFile>, FsError> {
+        let fd = self.open_regular(rel)?;
+        Ok(Box::new(UnixFile {
+            file: File::from(fd),
+            dev: self.dev,
+        }))
+    }
+
+    /// La cible d'un lien symbolique, sans la suivre.
+    pub(super) fn link_target(&self, rel: &RelPath) -> Result<String, FsError> {
+        let (parent, leaf) = self.parent_of(rel)?;
+        let target = match readlinkat(&parent, leaf, Vec::new()) {
+            Ok(target) => target,
+            // Pas un lien symbolique.
+            Err(Errno::INVAL) => return Err(FsError::NotRegular),
+            Err(errno) => return Err(fs_error(errno)),
+        };
+        target
+            .into_string()
+            .map_err(|_| FsError::Io(io::ErrorKind::InvalidData))
     }
 
     pub(super) fn measure_tree(&self, rel: &RelPath, budget: Duration) -> Result<Measure, FsError> {
@@ -358,6 +457,47 @@ impl UnixRoot {
                 .join()
         })
         .map_err(|_| FsError::Io(io::ErrorKind::Other))
+    }
+}
+
+/// Ce que `stat` dit d'un élément, traduit : un dossier d'un autre périphérique que la racine est un point de
+/// montage (`Other`, jamais descendu).
+fn meta_of(stat: &Stat, root_dev: u128) -> EntryMeta {
+    let kind = match file_type(stat) {
+        FileType::RegularFile => EntryKind::File,
+        FileType::Directory if dev_of(stat) == root_dev => EntryKind::Dir,
+        FileType::Symlink => EntryKind::Symlink,
+        _ => EntryKind::Other,
+    };
+    let nanos = i128::from(stat.st_mtime) * 1_000_000_000 + i128::from(stat.st_mtime_nsec);
+    let mode: u32 = stat.st_mode & 0o777;
+    EntryMeta {
+        kind,
+        size: u64::try_from(i128::from(stat.st_size)).unwrap_or(0),
+        mode,
+        uid: stat.st_uid,
+        gid: stat.st_gid,
+        mtime_ns: i64::try_from(nanos).unwrap_or(if nanos < 0 { i64::MIN } else { i64::MAX }),
+        nlink: u64::try_from(nlink_of(stat)).unwrap_or(u64::MAX),
+    }
+}
+
+/// Un fichier ordinaire ouvert en lecture sous la racine du service.
+struct UnixFile {
+    file: File,
+    dev: u128,
+}
+
+impl Read for UnixFile {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.file.read(buf)
+    }
+}
+
+impl ReadFile for UnixFile {
+    fn meta(&self) -> Result<EntryMeta, FsError> {
+        let stat = fstat(&self.file).map_err(fs_error)?;
+        Ok(meta_of(&stat, self.dev))
     }
 }
 

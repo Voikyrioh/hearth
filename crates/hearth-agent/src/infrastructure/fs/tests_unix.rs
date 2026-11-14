@@ -810,3 +810,123 @@ fn the_mount_id_of_an_ordinary_directory_is_readable() {
     let fd = std::os::fd::OwnedFd::from(dir);
     assert!(super::unix::erase::mnt_id_of(&fd).is_some());
 }
+
+// ---------------------------------------------------------------------------------------------
+// Lire pour sauvegarder (HRT-97) : lister, relever, ouvrir, lire un lien, sans jamais rien suivre
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn listing_reports_links_as_links_in_name_order_and_never_enters_them() {
+    use crate::application::ports::EntryKind;
+    let f = fixture();
+    std::fs::write(f.root_path.join("b.txt"), b"bb").unwrap();
+    std::fs::create_dir(f.root_path.join("a")).unwrap();
+    symlink(&f.outside, f.root_path.join("lien")).unwrap();
+    let listing = f.root.list(&RelPath::root()).unwrap();
+    let seen: Vec<(&str, EntryKind)> = listing
+        .entries
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.meta.kind))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            ("a", EntryKind::Dir),
+            ("b.txt", EntryKind::File),
+            ("lien", EntryKind::Symlink)
+        ]
+    );
+    assert_eq!(listing.entries[1].meta.size, 2);
+    // Lister À TRAVERS un lien est refusé : la cible n'est ni lue ni listée.
+    assert_eq!(f.root.list(&rel("lien")).err(), Some(FsError::Blocked));
+    assert_eq!(f.root.list(&rel("absent")).err(), Some(FsError::NotFound));
+    assert_outside_intact(&f.outside);
+}
+
+#[test]
+fn a_regular_file_opens_for_reading_with_its_own_fstat_and_a_link_never_does() {
+    use std::io::Read;
+    let f = fixture();
+    std::fs::write(f.root_path.join("a.txt"), b"hello").unwrap();
+    symlink(f.outside.join("precious"), f.root_path.join("lien")).unwrap();
+    let mut file = f.root.open_for_read(&rel("a.txt")).unwrap();
+    let before = file.meta().unwrap();
+    assert_eq!(before.size, 5);
+    let mut text = String::new();
+    file.read_to_string(&mut text).unwrap();
+    assert_eq!(text, "hello");
+    assert_eq!(file.meta().unwrap().mtime_ns, before.mtime_ns);
+    // Un lien n'est jamais ouvert, sa cible (hors de la racine) non plus.
+    assert_eq!(
+        f.root.open_for_read(&rel("lien")).err(),
+        Some(FsError::Blocked)
+    );
+    assert_eq!(
+        f.root.open_for_read(&rel("absent")).err(),
+        Some(FsError::NotFound)
+    );
+    assert_outside_intact(&f.outside);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_named_pipe_is_listed_as_other_and_never_opened_for_reading() {
+    use crate::application::ports::EntryKind;
+    use rustix::fs::{CWD, FileType, Mode, mknodat};
+    let f = fixture();
+    mknodat(
+        CWD,
+        f.root_path.join("pipe"),
+        FileType::Fifo,
+        Mode::RUSR | Mode::WUSR,
+        0,
+    )
+    .unwrap();
+    let listing = f.root.list(&RelPath::root()).unwrap();
+    assert_eq!(listing.entries[0].meta.kind, EntryKind::Other);
+    assert_eq!(
+        f.root.open_for_read(&rel("pipe")).err(),
+        Some(FsError::NotRegular)
+    );
+}
+
+#[test]
+fn a_link_target_is_read_without_being_followed_and_a_plain_file_is_not_a_link() {
+    let f = fixture();
+    std::fs::write(f.root_path.join("a.txt"), b"x").unwrap();
+    symlink("a.txt", f.root_path.join("rel")).unwrap();
+    symlink(&f.outside, f.root_path.join("out")).unwrap();
+    assert_eq!(f.root.link_target(&rel("rel")).unwrap(), "a.txt");
+    // Un lien vers l'extérieur se lit comme un texte : la cible n'est pas touchée.
+    assert_eq!(
+        f.root.link_target(&rel("out")).unwrap(),
+        f.outside.to_string_lossy()
+    );
+    assert_eq!(
+        f.root.link_target(&rel("a.txt")).err(),
+        Some(FsError::NotRegular)
+    );
+    assert_outside_intact(&f.outside);
+}
+
+#[test]
+fn stat_describes_the_root_a_file_and_a_link_without_following_it() {
+    use crate::application::ports::EntryKind;
+    let f = fixture();
+    std::fs::write(f.root_path.join("a.txt"), b"abc").unwrap();
+    symlink(&f.outside, f.root_path.join("lien")).unwrap();
+    assert_eq!(
+        f.root.stat_rel(&RelPath::root()).unwrap().kind,
+        EntryKind::Dir
+    );
+    let file = f.root.stat_rel(&rel("a.txt")).unwrap();
+    assert_eq!((file.kind, file.size, file.nlink), (EntryKind::File, 3, 1));
+    assert_eq!(
+        f.root.stat_rel(&rel("lien")).unwrap().kind,
+        EntryKind::Symlink
+    );
+    assert_eq!(
+        f.root.stat_rel(&rel("absent")).err(),
+        Some(FsError::NotFound)
+    );
+}
