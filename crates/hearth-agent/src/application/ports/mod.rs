@@ -9,6 +9,7 @@ mod adoption_tx;
 mod attack_mode_repo;
 mod audit_repo;
 mod audit_sink;
+mod backup_archive;
 mod backup_files;
 mod backup_repo;
 mod boot_info;
@@ -58,10 +59,14 @@ pub use adoption_tx::{AdoptionTx, AdoptionWrite, NewAdoption, ReleasedAdoption};
 pub use attack_mode_repo::{AttackModeRepo, AttackModeTx};
 pub use audit_repo::{AuditRepo, AuditTx};
 pub use audit_sink::{AuditFeed, AuditSink, AuditWriteError};
-pub use backup_files::{
-    BackupFiles, BackupFsError, BackupSink, DiskSpace, FileIdent, Removed as BackupRemoved,
+pub use backup_archive::{
+    ArchiveBuilder, ArchiveEnd, BackupArchive, FileDigest, VerifyError, VerifyReport,
 };
-pub use backup_repo::{BackupRepo, BackupRow, NewBackup, Published};
+pub use backup_files::{
+    BackupFiles, BackupFsError, BackupSink, DiskSpace, Expected, FileIdent, FileStamp,
+    Removed as BackupRemoved,
+};
+pub use backup_repo::{BackupRepo, BackupRow, NewBackup, Published, Publishing};
 pub use boot_info::BootInfo;
 pub use clock::Clock;
 pub use container_engine::{

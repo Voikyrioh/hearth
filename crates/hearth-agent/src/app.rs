@@ -1060,6 +1060,7 @@ pub async fn start_engined(
         service_repo.clone(),
         safe_fs.clone(),
         backup_files,
+        Arc::new(crate::infrastructure::backup_archive::TarGzArchive),
         Arc::new(SqliteBackupRepo::new(database.pool().clone())),
         host_paths.clone(),
         services.audit_sink.clone(),

@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use hearth_agent::application::ports::{
-    BackupFiles, BackupFsError, BackupRemoved, BackupSink, DiskSpace, FileIdent,
+    BackupFiles, BackupFsError, BackupRemoved, BackupSink, DiskSpace, Expected, FileIdent,
+    FileStamp,
 };
 use hearth_agent::domain::backups::ownership::Seen;
 
@@ -18,6 +19,8 @@ const DEV: u64 = 64_768;
 #[derive(Debug, Clone)]
 struct Node {
     ino: u64,
+    /// Une date de modification qui avance à chaque écriture (jamais deux fois la même).
+    mtime_ns: i64,
     bytes: Vec<u8>,
 }
 
@@ -40,6 +43,7 @@ struct State {
 pub struct FakeBackupFiles {
     state: Arc<Mutex<State>>,
     next_ino: Arc<AtomicU64>,
+    clock: Arc<AtomicU64>,
 }
 
 impl Default for FakeBackupFiles {
@@ -53,6 +57,7 @@ impl FakeBackupFiles {
         let fake = Self {
             state: Arc::new(Mutex::new(State::default())),
             next_ino: Arc::new(AtomicU64::new(1000)),
+            clock: Arc::new(AtomicU64::new(1_700_000_000_000_000_000)),
         };
         fake.set_space(DiskSpace {
             free: 500 * 1024 * 1024 * 1024,
@@ -67,6 +72,10 @@ impl FakeBackupFiles {
 
     fn ino(&self) -> u64 {
         self.next_ino.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn tick(&self) -> i64 {
+        i64::try_from(self.clock.fetch_add(1_000_000, Ordering::SeqCst)).expect("date")
     }
 
     pub fn set_space(&self, space: DiskSpace) {
@@ -95,14 +104,42 @@ impl FakeBackupFiles {
     /// Un fichier déposé à la main : un inode neuf, jamais dans le registre.
     pub fn plant(&self, dir: &str, name: &str, bytes: &[u8]) -> FileIdent {
         let ino = self.ino();
+        let mtime_ns = self.tick();
         self.lock().files.insert(
             (dir.to_owned(), name.to_owned()),
             Node {
                 ino,
+                mtime_ns,
                 bytes: bytes.to_vec(),
             },
         );
         (DEV, ino)
+    }
+
+    /// Le fichier est réécrit sur place : MÊME inode, autre contenu, autre date (le numéro d'inode réattribué à un
+    /// fichier recopié sous le même nom ne prouve pas que c'est celui de Hearth).
+    pub fn replace_keeping_inode(&self, dir: &str, name: &str, bytes: &[u8]) {
+        let mtime_ns = self.tick();
+        let mut state = self.lock();
+        let node = state
+            .files
+            .get_mut(&(dir.to_owned(), name.to_owned()))
+            .expect("fichier");
+        node.bytes = bytes.to_vec();
+        node.mtime_ns = mtime_ns;
+    }
+
+    /// L'identité complète d'un fichier.
+    pub fn stamp(&self, dir: &str, name: &str) -> Option<FileStamp> {
+        self.lock()
+            .files
+            .get(&(dir.to_owned(), name.to_owned()))
+            .map(|node| FileStamp {
+                dev: DEV,
+                ino: node.ino,
+                size: node.bytes.len() as u64,
+                mtime_ns: node.mtime_ns,
+            })
     }
 
     /// Le fichier est remplacé à la main : même nom, autre inode, autre contenu.
@@ -223,6 +260,7 @@ impl BackupFiles for FakeBackupFiles {
         component(service_dir)?;
         component(name)?;
         let ino = self.ino();
+        let mtime_ns = self.tick();
         let key = (service_dir.to_owned(), name.to_owned());
         let mut state = self.lock();
         if state.files.contains_key(&key) {
@@ -232,6 +270,7 @@ impl BackupFiles for FakeBackupFiles {
             key.clone(),
             Node {
                 ino,
+                mtime_ns,
                 bytes: Vec::new(),
             },
         );
@@ -252,7 +291,7 @@ impl BackupFiles for FakeBackupFiles {
         part: &str,
         name: &str,
         expect: FileIdent,
-    ) -> Result<(), BackupFsError> {
+    ) -> Result<FileStamp, BackupFsError> {
         component(service_dir)?;
         component(part)?;
         component(name)?;
@@ -272,9 +311,15 @@ impl BackupFiles for FakeBackupFiles {
             let middle = node.bytes.len() / 2;
             node.bytes[middle] ^= 0xff;
         }
+        let stamp = FileStamp {
+            dev: DEV,
+            ino: node.ino,
+            size: node.bytes.len() as u64,
+            mtime_ns: node.mtime_ns,
+        };
         state.files.insert(to, node);
         state.writes.push(format!("publish {name}"));
-        Ok(())
+        Ok(stamp)
     }
 
     fn write_new(
@@ -286,6 +331,7 @@ impl BackupFiles for FakeBackupFiles {
         component(service_dir)?;
         component(name)?;
         let ino = self.ino();
+        let mtime_ns = self.tick();
         let key = (service_dir.to_owned(), name.to_owned());
         let mut state = self.lock();
         if state.files.contains_key(&key) {
@@ -295,6 +341,7 @@ impl BackupFiles for FakeBackupFiles {
             key,
             Node {
                 ino,
+                mtime_ns,
                 bytes: bytes.to_vec(),
             },
         );
@@ -314,6 +361,8 @@ impl BackupFiles for FakeBackupFiles {
                 Some(node) => Seen::File {
                     dev: DEV,
                     ino: node.ino,
+                    size: node.bytes.len() as u64,
+                    mtime_ns: node.mtime_ns,
                 },
                 None => Seen::Absent,
             },
@@ -339,7 +388,7 @@ impl BackupFiles for FakeBackupFiles {
         &self,
         service_dir: &str,
         name: &str,
-        expect: FileIdent,
+        expect: Expected,
     ) -> Result<BackupRemoved, BackupFsError> {
         component(service_dir)?;
         component(name)?;
@@ -347,16 +396,20 @@ impl BackupFiles for FakeBackupFiles {
         let mut state = self.lock();
         match state.files.get(&key) {
             None => Ok(BackupRemoved::Gone),
-            Some(node) if (DEV, node.ino) != expect => Ok(BackupRemoved::NotOurs),
+            Some(node)
+                if (DEV, node.ino) != (expect.dev, expect.ino)
+                    || expect
+                        .size
+                        .is_some_and(|size| size != node.bytes.len() as u64)
+                    || expect.mtime_ns.is_some_and(|mtime| mtime != node.mtime_ns) =>
+            {
+                Ok(BackupRemoved::NotOurs)
+            }
             Some(_) => {
                 state.files.remove(&key);
                 state.writes.push(format!("remove {name}"));
                 Ok(BackupRemoved::Done)
             }
         }
-    }
-
-    fn remove_service_dir_if_empty(&self, _service_dir: &str) -> Result<(), BackupFsError> {
-        Ok(())
     }
 }

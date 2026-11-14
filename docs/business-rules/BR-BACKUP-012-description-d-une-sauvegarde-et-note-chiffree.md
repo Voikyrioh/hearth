@@ -14,7 +14,7 @@ maj: 2026-11-14
 La note : 80 caractères au plus, sans caractère de contrôle, scellée par ChaCha20-Poly1305 sous `services.key` (données associées : service, révision 0, champ `backup-note:<id>`), jamais en clair en base, jamais au manifeste (qui voyage avec l'archive téléchargée), jamais au journal d'activité. Une clé illisible refuse la note avant d'accepter l'opération ; la liste n'ouvre les notes que s'il y en a.
 
 ## Application (code)
-- `crates/hearth-agent/src/application/backups.rs::clean_note, ::Backups::seal_note`
+- `crates/hearth-agent/src/domain/backups/rules.rs::clean_note, crates/hearth-agent/src/application/backups.rs::Backups::seal_note`
 - `crates/hearth-agent/src/domain/sealed.rs::SecretField::BackupNote`
 - `crates/hearth-agent/migrations/0017_backups.sql (note_nonce, note_sealed)`
 

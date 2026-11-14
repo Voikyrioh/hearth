@@ -141,6 +141,10 @@ pub struct BackupView {
     /// Fichiers qui ont changé pendant la copie à chaud.
     #[serde(default)]
     pub changed_files: u32,
+    /// Éléments que la copie n'a pas archivés (tubes, sockets, autre système de fichiers, nom illisible, arborescence
+    /// trop profonde) : dits, jamais omis en silence.
+    #[serde(default)]
+    pub skipped: u32,
     /// La note du compte (80 caractères au plus) ; absente quand il n'y en a pas ou qu'elle ne s'ouvre plus.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,

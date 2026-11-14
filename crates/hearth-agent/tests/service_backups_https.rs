@@ -676,6 +676,13 @@ async fn the_archive_is_a_standard_tar_gz_with_a_manifest_beside_it_and_inside_i
         .unwrap();
     let manifest: Value = serde_json::from_slice(&side).unwrap();
     assert_eq!(manifest["format"], 1);
+    // Le tube n'est ni lu ni archivé, mais il est COMPTÉ : jamais omis en silence.
+    assert_eq!(manifest["skipped"], 1, "{manifest}");
+    assert_eq!(
+        b.list(service.key.as_str()).await.backups[0].skipped,
+        1,
+        "{manifest}"
+    );
     assert_eq!(manifest["backup_id"], accepted.backup_id);
     assert_eq!(manifest["service_name"], "web");
     assert_eq!(manifest["mode"], "hot");
@@ -1275,7 +1282,7 @@ async fn a_service_without_any_data_folder_has_nothing_to_save() {
 // ---------------------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn the_registry_drops_writing_lines_at_startup_and_keeps_published_ones() {
+async fn the_registry_lists_writing_lines_apart_and_keeps_published_ones() {
     use hearth_agent::application::ports::{BackupRepo, NewBackup, Published};
     use hearth_agent::domain::backups::BackupId;
     let env = env().await;
@@ -1302,10 +1309,12 @@ async fn the_registry_drops_writing_lines_at_startup_and_keeps_published_ones() 
             &done,
             &Published {
                 archive_bytes: 10,
+                archive_mtime_ns: 1_700_000_000_123_456_789,
                 data_bytes: 20,
                 files: 1,
                 flags: vec![BackupFlag::Hot],
                 changed_files: 0,
+                skipped: 3,
                 manifest_sha256: "ab".repeat(32),
                 archive_sha256: "cd".repeat(32),
             }
@@ -1315,10 +1324,113 @@ async fn the_registry_drops_writing_lines_at_startup_and_keeps_published_ones() 
     );
     // Une ligne en cours d'écriture n'est jamais listée.
     assert_eq!(repo.list(&key).await.unwrap().len(), 1);
-    assert_eq!(repo.drop_writing().await.unwrap(), 1);
-    assert!(repo.get(&partial).await.unwrap().is_none());
+    let writing = repo.writing().await.unwrap();
+    assert_eq!(writing.len(), 1);
+    assert_eq!(writing[0].id, partial);
+    assert!(!writing[0].ready);
+    assert!(repo.delete(&partial).await.unwrap());
     let kept = repo.get(&done).await.unwrap().expect("ligne publiée");
+    assert_eq!(
+        (kept.archive_mtime_ns, kept.skipped),
+        (1_700_000_000_123_456_789, 3)
+    );
     // Le périphérique et l'inode font l'aller-retour, même au-delà de i64.
     assert_eq!((kept.dev, kept.ino), (u64::MAX, 7));
     assert_eq!(kept.flags, [BackupFlag::Hot]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Un numéro d'inode réattribué ne prouve rien ; un agent coupé entre l'écriture et « prête » nettoie SES fichiers
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_file_rewritten_under_the_same_inode_is_no_longer_hearths_and_is_never_removed() {
+    let b = bench().await;
+    let service = b.deploy("web").await;
+    let (accepted, _) = b.made(service.key.as_str(), json!({ "mode": "hot" })).await;
+    let dir = Bench::dir(&service.key);
+    let archive = format!("{}.tar.gz", accepted.backup_id);
+    // Même nom, MÊME inode, autre contenu et autre date : ce que fait un numéro libéré puis réattribué.
+    b.files
+        .replace_keeping_inode(&dir, &archive, b"recopie sous le meme numero");
+    let view = b.list(service.key.as_str()).await;
+    assert_eq!(view.backups[0].integrity, BackupIntegrity::Corrupt);
+    let reply = b.delete(&accepted.backup_id).await;
+    assert_eq!(reply.status, 200, "{}", reply.text);
+    let deleted: BackupDeleted = serde_json::from_value(reply.body).unwrap();
+    assert!(!deleted.removed_files);
+    assert_eq!(
+        b.files.content(&dir, &archive),
+        Some(b"recopie sous le meme numero".to_vec())
+    );
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_agent_cut_between_writing_and_ready_removes_its_own_files_and_nothing_else_at_startup()
+{
+    use hearth_agent::application::ports::{BackupRepo, NewBackup, Publishing};
+    use hearth_agent::domain::backups::{BackupId, sha256_hex};
+    let b = bench().await;
+    let key = ServiceKey::parse("h_01J9ZY0G3Q8M2K6W4T7V5N1B9D").unwrap();
+    let dir = Bench::dir(&key);
+    let repo = hearth_agent::infrastructure::sqlite::SqliteBackupRepo::new(b.env.db.pool().clone());
+    let id = BackupId::parse("01J9ZY0G3Q8M2K6W4T7V5N1B9E").unwrap();
+    // Les fichiers que l'agent avait écrits avant la coupure : l'archive déjà publiée et son manifeste.
+    let archive = b"archive ecrite avant la coupure";
+    let manifest = b"{\"manifeste\":true}";
+    let ident = b.files.plant(&dir, &id.archive_name(), archive);
+    b.files.plant(&dir, &id.manifest_name(), manifest);
+    // Et des fichiers qui ne sont pas à lui, dont un sous le nom d'une autre sauvegarde.
+    b.files
+        .plant(&dir, "01J9ZY0G3Q8M2K6W4T7V5N1B9F.tar.gz", b"etranger");
+    b.files.plant(&dir, "notes.txt", b"a moi");
+    repo.insert_writing(&NewBackup {
+        id: id.clone(),
+        service_key: key.clone(),
+        service_name: "web".into(),
+        created_at: time::OffsetDateTime::UNIX_EPOCH,
+        created_by: "ada".into(),
+        dev: ident.0,
+        ino: ident.1,
+        mode: BackupMode::Hot,
+        image: "x:1".into(),
+        note: None,
+    })
+    .await
+    .unwrap();
+    // `note_publishing` est écrit AVANT les fichiers : c'est ce qui permet de les retrouver.
+    assert!(
+        repo.note_publishing(
+            &id,
+            &Publishing {
+                archive_bytes: archive.len() as u64,
+                manifest_sha256: sha256_hex(manifest),
+                archive_sha256: "cd".repeat(32),
+            }
+        )
+        .await
+        .unwrap()
+    );
+    b.agent.shutdown().await;
+    // Un autre agent démarre sur la même base et la même racine.
+    let mut parts = parts_supervised(
+        b.engine.clone(),
+        Arc::new(FakeSupervisor::new()),
+        fast_timings(),
+    );
+    parts.host_ports = Arc::new(FakeHostPorts::new());
+    parts.free_space = Arc::new(FakeFreeSpace::new());
+    parts.safe_fs = Some(b.safe_fs.clone());
+    parts.backups.files = Some(b.files.clone());
+    let second = https::start_engined(&b.env, parts).await;
+    assert!(repo.get(&id).await.unwrap().is_none(), "ligne retirée");
+    assert_eq!(b.files.content(&dir, &id.archive_name()), None);
+    assert_eq!(b.files.content(&dir, &id.manifest_name()), None);
+    assert_eq!(
+        b.files.content(&dir, "01J9ZY0G3Q8M2K6W4T7V5N1B9F.tar.gz"),
+        Some(b"etranger".to_vec())
+    );
+    assert_eq!(b.files.content(&dir, "notes.txt"), Some(b"a moi".to_vec()));
+    second.shutdown().await;
 }

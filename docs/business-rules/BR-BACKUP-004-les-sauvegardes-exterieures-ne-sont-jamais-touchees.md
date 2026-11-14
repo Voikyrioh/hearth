@@ -1,17 +1,17 @@
 ---
 id: BR-BACKUP-004
 domaine: BACKUP
-titre: Hearth ne lit, ne liste, ne renomme, ne supprime et ne change les droits que des fichiers inscrits à son registre avec leur inode et l'empreinte de leur manifeste, quel que soit leur nom
+titre: Hearth ne lit, ne liste, ne renomme, ne supprime et ne change les droits que des fichiers inscrits à son registre avec leur inode, leur taille, leur date de modification et l'empreinte de leur manifeste, quel que soit leur nom
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-sauvegardes-service.md (BR-BACKUP-004), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md (sections 6, 7 et 9.4), HRT-97
 maj: 2026-11-14
 ---
 
-# BR-BACKUP-004 : Hearth ne lit, ne liste, ne renomme, ne supprime et ne change les droits que des fichiers inscrits à son registre avec leur inode et l'empreinte de leur manifeste, quel que soit leur nom
+# BR-BACKUP-004 : Hearth ne lit, ne liste, ne renomme, ne supprime et ne change les droits que des fichiers inscrits à son registre avec leur inode, leur taille, leur date de modification et l'empreinte de leur manifeste, quel que soit leur nom
 
 ## Règle
-(a) Dans la racine des sauvegardes, la propriété est PROUVÉE : un fichier est à Hearth s'il est inscrit dans `backups` (périphérique, inode) ET que son manifeste voisin a l'empreinte de la ligne ; la racine n'est jamais listée ni parcourue (`BackupFiles` n'a ni `read_dir` ni recherche par nom) ; un fichier déposé à la main, même nommé comme une archive de Hearth, n'existe pas pour lui. (b) La racine ne chevauche aucun dossier de données : jugé sur les chemins canoniques ET les identités (périphérique, inode) à chaque démarrage et avant chaque opération ; sinon la fonction est refusée avec « La racine des sauvegardes chevauche un dossier de données. ». (c) Un élément ignoré n'est jamais lu. (e) Hearth ne supprime jamais un fichier dont l'inode n'est plus celui du registre (BR-BACKUP-013). Les points (d) et (f) (restauration, invariant de non-destruction) viennent avec la restauration.
+(a) Dans la racine des sauvegardes, la propriété est PROUVÉE : un fichier est à Hearth s'il est inscrit dans `backups` (périphérique, inode, taille et date de modification à la nanoseconde : un numéro d'inode libéré est vite réattribué à un fichier recopié sous le même nom) ET que son manifeste voisin a l'empreinte de la ligne ; la racine n'est jamais listée ni parcourue (`BackupFiles` n'a ni `read_dir` ni recherche par nom) ; un fichier déposé à la main, même nommé comme une archive de Hearth, n'existe pas pour lui. (b) La racine ne chevauche aucun dossier de données : jugé sur les chemins canoniques ET les identités (périphérique, inode, taille et date de modification à la nanoseconde : un numéro d'inode libéré est vite réattribué à un fichier recopié sous le même nom) à chaque démarrage et avant chaque opération ; sinon la fonction est refusée avec « La racine des sauvegardes chevauche un dossier de données. ». (c) Un élément ignoré n'est jamais lu. (e) Hearth ne supprime jamais un fichier dont l'inode n'est plus celui du registre (BR-BACKUP-013). Les points (d) et (f) (restauration, invariant de non-destruction) viennent avec la restauration.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/backups/ownership.rs::judge_archive, ::manifest_is_ours`

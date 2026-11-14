@@ -111,6 +111,9 @@ fn create_then_open(parent: &OwnedFd, name: &str, dev: u128) -> Result<(OwnedFd,
 pub struct UnixRoot {
     fd: OwnedFd,
     dev: u128,
+    /// L'identifiant de montage de la racine : un dossier d'un autre montage (`mount --bind` du même système de
+    /// fichiers compris) n'est pas « dans » le service.
+    mnt: Option<u64>,
 }
 
 fn check_key(key: &ServiceKey) -> Result<&str, FsError> {
@@ -152,7 +155,8 @@ pub(super) fn open_service_root(
         open_dir_on(&services, name, dev)?
     };
     check_trusted(&fd)?;
-    Ok(UnixRoot { fd, dev })
+    let mnt = erase::mnt_id_of(&fd);
+    Ok(UnixRoot { fd, dev, mnt })
 }
 
 /// `BR-DEL-007` : vide la racine du service PUIS la retire, sans sortir de `services/<clé>`. Continue après
@@ -348,9 +352,18 @@ impl UnixRoot {
                 Err(Errno::NOENT) => continue,
                 Err(errno) => return Err(fs_error(errno)),
             };
+            let mut meta = meta_of(&stat, self.dev);
+            // Un `mount --bind` du même système de fichiers a le même périphérique : seul l'identifiant de montage
+            // le trahit. Un dossier d'un autre montage n'est ni lu ni archivé.
+            if meta.kind == EntryKind::Dir
+                && let (Some(root), Some(child)) = (self.mnt, erase::mnt_id_at(&dir, name))
+                && root != child
+            {
+                meta.kind = EntryKind::Other;
+            }
             listing.entries.push(ListedEntry {
                 name: text.to_owned(),
-                meta: meta_of(&stat, self.dev),
+                meta,
             });
         }
         listing.entries.sort_by(|a, b| a.name.cmp(&b.name));

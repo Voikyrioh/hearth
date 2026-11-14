@@ -8,7 +8,9 @@ use sqlx::{Row, SqlitePool};
 use time::OffsetDateTime;
 
 use super::convert::{format_date, parse_date, storage};
-use crate::application::ports::{BackupRepo, BackupRow, NewBackup, Published, StoreError};
+use crate::application::ports::{
+    BackupRepo, BackupRow, NewBackup, Published, Publishing, StoreError,
+};
 use crate::domain::backups::BackupId;
 use crate::domain::sealed::{NONCE_LEN, SealedBlob};
 use crate::domain::services::key::ServiceKey;
@@ -105,6 +107,7 @@ fn row_of(row: &SqliteRow) -> Result<BackupRow, StoreError> {
     let integrity: String = row.try_get("integrity").map_err(storage(RESOURCE))?;
     let verified_at: Option<String> = row.try_get("verified_at").map_err(storage(RESOURCE))?;
     let changed: i64 = row.try_get("changed_files").map_err(storage(RESOURCE))?;
+    let skipped: i64 = row.try_get("skipped").map_err(storage(RESOURCE))?;
     Ok(BackupRow {
         id: BackupId::parse(&id).ok_or_else(|| unreadable("id"))?,
         service_key: ServiceKey::parse(&key).ok_or_else(|| unreadable("service_key"))?,
@@ -114,12 +117,14 @@ fn row_of(row: &SqliteRow) -> Result<BackupRow, StoreError> {
         created_by: row.try_get("created_by").map_err(storage(RESOURCE))?,
         dev: bits(row, "dev")?,
         ino: bits(row, "ino")?,
+        archive_mtime_ns: row.try_get("archive_mtime_ns").map_err(storage(RESOURCE))?,
         archive_bytes: unsigned(row, "archive_bytes")?,
         data_bytes: unsigned(row, "data_bytes")?,
         files: unsigned(row, "files")?,
         mode: mode_of(&mode)?,
         flags: serde_json::from_str(&flags).map_err(|_| unreadable("repères"))?,
         changed_files: u32::try_from(changed).map_err(|_| unreadable("changed_files"))?,
+        skipped: u32::try_from(skipped).map_err(|_| unreadable("skipped"))?,
         image: row.try_get("image").map_err(storage(RESOURCE))?,
         integrity: integrity_of(&integrity)?,
         verified_at: verified_at
@@ -138,9 +143,9 @@ fn row_of(row: &SqliteRow) -> Result<BackupRow, StoreError> {
 /// Les colonnes d'une ligne, en littéral (jamais une requête bâtie à l'exécution).
 macro_rules! columns {
     () => {
-        "id, service_key, service_name, state, created_at, created_by, dev, ino, archive_bytes, data_bytes, \
-         files, mode, flags_json, changed_files, image, integrity, verified_at, manifest_sha256, \
-         archive_sha256, note_nonce, note_sealed"
+        "id, service_key, service_name, state, created_at, created_by, dev, ino, archive_mtime_ns, \
+         archive_bytes, data_bytes, files, mode, flags_json, changed_files, skipped, image, integrity, \
+         verified_at, manifest_sha256, archive_sha256, note_nonce, note_sealed"
     };
 }
 
@@ -174,18 +179,40 @@ impl BackupRepo for SqliteBackupRepo {
         Ok(())
     }
 
+    async fn note_publishing(
+        &self,
+        id: &BackupId,
+        publishing: &Publishing,
+    ) -> Result<bool, StoreError> {
+        let result = sqlx::query(
+            "UPDATE backups
+             SET archive_bytes = ?, manifest_sha256 = ?, archive_sha256 = ?
+             WHERE id = ? AND state = 'writing'",
+        )
+        .bind(i64::try_from(publishing.archive_bytes).map_err(|_| unreadable("archive_bytes"))?)
+        .bind(&publishing.manifest_sha256)
+        .bind(&publishing.archive_sha256)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(result.rows_affected() > 0)
+    }
+
     async fn mark_ready(&self, id: &BackupId, published: &Published) -> Result<bool, StoreError> {
         let result = sqlx::query(
             "UPDATE backups
-             SET state = 'ready', archive_bytes = ?, data_bytes = ?, files = ?, flags_json = ?,
-                 changed_files = ?, manifest_sha256 = ?, archive_sha256 = ?
+             SET state = 'ready', archive_bytes = ?, archive_mtime_ns = ?, data_bytes = ?, files = ?,
+                 flags_json = ?, changed_files = ?, skipped = ?, manifest_sha256 = ?, archive_sha256 = ?
              WHERE id = ? AND state = 'writing'",
         )
         .bind(i64::try_from(published.archive_bytes).map_err(|_| unreadable("archive_bytes"))?)
+        .bind(published.archive_mtime_ns)
         .bind(i64::try_from(published.data_bytes).map_err(|_| unreadable("data_bytes"))?)
         .bind(i64::try_from(published.files).map_err(|_| unreadable("files"))?)
         .bind(flags_text(&published.flags)?)
         .bind(i64::from(published.changed_files))
+        .bind(i64::from(published.skipped))
         .bind(&published.manifest_sha256)
         .bind(&published.archive_sha256)
         .bind(id.as_str())
@@ -248,12 +275,18 @@ impl BackupRepo for SqliteBackupRepo {
         Ok(result.rows_affected() > 0)
     }
 
-    async fn drop_writing(&self) -> Result<u64, StoreError> {
-        let result = sqlx::query("DELETE FROM backups WHERE state = 'writing'")
-            .execute(&self.pool)
-            .await
-            .map_err(storage(RESOURCE))?;
-        Ok(result.rows_affected())
+    async fn writing(&self) -> Result<Vec<BackupRow>, StoreError> {
+        sqlx::query(concat!(
+            "SELECT ",
+            columns!(),
+            " FROM backups WHERE state = 'writing' ORDER BY created_at, id"
+        ))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(storage(RESOURCE))?
+        .iter()
+        .map(row_of)
+        .collect()
     }
 
     async fn settings(&self, key: &ServiceKey) -> Result<BackupSettings, StoreError> {

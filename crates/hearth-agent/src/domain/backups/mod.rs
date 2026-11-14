@@ -6,6 +6,7 @@
 //! - [`ownership`] : ce que Hearth reconnaît comme SON fichier (registre, inode, empreinte du manifeste) :
 //!   la règle absolue de BR-BACKUP-004 (a) et (e), BR-BACKUP-013.
 //! - [`overlap`] : la racine des sauvegardes ne chevauche aucun dossier de données (BR-BACKUP-004 (b)).
+//! - [`rules`] : les petites règles d'une demande (états sauvegardables, repères, note, éléments ignorés valables).
 //! - [`read`] : la lecture d'une archive comme hostile : chaque entrée doit avoir sa ligne du manifeste, les
 //!   totaux sont bornés par lui (ADR-0047 point 7).
 //!
@@ -17,9 +18,22 @@ pub mod manifest;
 pub mod overlap;
 pub mod ownership;
 pub mod read;
+pub mod rules;
 pub mod space;
 
 use std::fmt;
+
+use sha2::{Digest, Sha256};
+
+/// Des octets en hexadécimal minuscule.
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// L'empreinte SHA-256 hexadécimale d'octets en mémoire.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    hex(&Sha256::digest(bytes))
+}
 
 /// L'identifiant d'une sauvegarde : un ULID en majuscules (26 caractères). Il entre dans un nom de fichier :
 /// il est jugé, jamais pris tel quel d'une requête.

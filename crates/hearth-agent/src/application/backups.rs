@@ -35,25 +35,27 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use hearth_proto::api::backups::{
-    BIG_FILE_BYTES, BackupAccepted, BackupDeleted, BackupFlag, BackupIntegrity, BackupMode,
-    BackupPreview, BackupRequest, BackupSettings, BackupView, BackupsView, BigFile,
-    ESTIMATE_BUDGET_S, IgnoredItem, IgnoredView, IgnoredWhy, MAX_ITEMS, MAX_LISTED, NOTE_MAX_CHARS,
-    VerifyResult,
+    BIG_FILE_BYTES, BackupAccepted, BackupDeleted, BackupIntegrity, BackupMode, BackupPreview,
+    BackupRequest, BackupSettings, BackupView, BackupsView, BigFile, ESTIMATE_BUDGET_S,
+    IgnoredItem, IgnoredView, IgnoredWhy, MAX_LISTED, VerifyResult,
 };
 use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use tokio::sync::Mutex as AsyncMutex;
 
-use super::delete::{StepShown, account_of, cause_of};
+use super::delete::{StepShown, account_of};
 use super::ports::{
-    AuditSink, BackupFiles, BackupFsError, BackupRemoved, BackupRepo, BackupRow, BackupSink, Clock,
-    ContainerEngine, DiskSpace, EngineError, EntryKind, EntryMeta, FsError, HostPaths, IdGen,
-    NewBackup, Progress, Published, ReadFile, Resolved, SafeFs, ServiceContainers, ServiceIntents,
-    ServiceRoot, StopIntent,
+    ArchiveBuilder, ArchiveEnd, AuditSink, BackupArchive, BackupFiles, BackupFsError,
+    BackupRemoved, BackupRepo, BackupRow, BackupSink, Clock, ContainerEngine, DiskSpace,
+    EngineError, EntryKind, EntryMeta, Expected, FileStamp, FsError, HostPaths, IdGen, NewBackup,
+    Progress, Published, Publishing, ReadFile, Resolved, SafeFs, ServiceContainers, ServiceIntents,
+    ServiceRoot, VerifyError,
 };
 use super::service_lifecycle::reason_of;
 use super::service_ops::{AcceptRequest, AuditDraft, OpError, ServiceOps};
 use super::service_specs::ServiceSpecs;
+use super::service_stop::{StopContext, StopRequest, stop_running};
 use super::services::{Driver, ServicesRegistry};
 use crate::domain::audit::{
     Actor, AuditAction, BackupModeNote, BackupNote, ClientName, Outcome, Reason, Target,
@@ -65,27 +67,25 @@ use crate::domain::backups::manifest::{
 };
 use crate::domain::backups::overlap::{PathFacts, overlaps};
 use crate::domain::backups::ownership::{Ownership, Registered, judge_archive, manifest_is_ours};
+use crate::domain::backups::rules::{
+    ItemsError, NoteError, backable, clean_note, flags_of, is_running, validate_items,
+};
 use crate::domain::backups::space::{
     CHECK_EVERY_BYTES, MAX_COPY, SpaceVerdict, judge, too_low_during_copy,
 };
-use crate::domain::backups::{BackupId, archive_dir_name};
+use crate::domain::backups::{BackupId, archive_dir_name, sha256_hex};
 use crate::domain::files::{MAX_DEPTH, RelPath};
 use crate::domain::ops::CreatedObject;
 use crate::domain::ops::backup::{ModeVerdict, effective_mode, op_plan, step};
 use crate::domain::ops::{
-    Cause, Holder, ObjectKind, ObjectRoot, OpKind, OpStatus, Refusal, StopEvidence, UndoInfo,
-    WAIT_FLOOR, WAIT_MARGIN, stop_was_forced, wait_budget_with,
+    Cause, Holder, ObjectKind, ObjectRoot, OpKind, OpStatus, Refusal, UndoInfo, WAIT_FLOOR,
+    WAIT_MARGIN,
 };
 use crate::domain::sealed::{AnswerId, SealContext, SecretField};
 use crate::domain::services::delete::{ManagedFolder, split_mounts};
 use crate::domain::services::plan::image_reference;
 use crate::domain::services::spec::{SpecBody, SpecMountKind};
-use crate::domain::services::{
-    EngineState, KeyKind, RunState, ServiceKey, ServiceStateKind, TransitionKind,
-};
-use crate::infrastructure::backup_archive::{
-    ArchiveEnd, ArchiveWriter, VerifyError, sha256_hex, verify_archive,
-};
+use crate::domain::services::{EngineState, KeyKind, ServiceKey, ServiceStateKind, TransitionKind};
 
 /// Les durées d'une sauvegarde. Les tests les raccourcissent.
 #[derive(Debug, Clone, Copy)]
@@ -337,6 +337,8 @@ struct Control {
     files: AtomicU64,
     bytes: AtomicU64,
     changed: AtomicU32,
+    /// Les éléments que la copie n'archive pas (tubes, sockets, autre montage, nom illisible, trop profond...).
+    skipped: AtomicU32,
     deadline: Instant,
 }
 
@@ -399,6 +401,8 @@ enum CopyOutcome {
         end: ArchiveEnd,
         /// Les fichiers qui ont changé pendant la copie (ceux qui ont disparu en route compris).
         changed: u32,
+        /// Les éléments non archivés.
+        skipped: u32,
     },
     /// Arrêtée avant la fin : `STOP_*`.
     Stopped(u8),
@@ -408,6 +412,7 @@ enum CopyOutcome {
 struct CopyJob {
     fs: Arc<dyn SafeFs>,
     files: Arc<dyn BackupFiles>,
+    archive: Arc<dyn BackupArchive>,
     key: ServiceKey,
     folders: Vec<ManagedFolder>,
     rules: IgnoreRules,
@@ -421,7 +426,7 @@ struct CopyJob {
 
 struct Walk<'a> {
     root: &'a dyn ServiceRoot,
-    writer: ArchiveWriter,
+    writer: Box<dyn ArchiveBuilder>,
     control: &'a Control,
     files: &'a dyn BackupFiles,
     entries: Vec<Entry>,
@@ -463,6 +468,11 @@ fn entry_from(root: u32, path: &str, kind: EntryType, meta: &EntryMeta) -> Entry
 }
 
 impl Walk<'_> {
+    /// Des éléments que la copie n'archive pas : comptés, jamais omis en silence.
+    fn skip(&self, count: u32) {
+        self.control.skipped.fetch_add(count, Ordering::Relaxed);
+    }
+
     fn check(&self) -> Result<(), Halt> {
         if self.control.reason() != STOP_NONE {
             return Err(Halt::Stop);
@@ -510,9 +520,14 @@ impl Walk<'_> {
     ) -> Result<(), Halt> {
         let listing = match self.root.list_dir(rel) {
             Ok(listing) => listing,
-            Err(FsError::NotFound | FsError::Blocked | FsError::NotRegular) => return Ok(()),
+            Err(FsError::NotFound | FsError::Blocked | FsError::NotRegular) => {
+                // Un dossier devenu un lien ou disparu entre le listage de son parent et son ouverture.
+                self.skip(1);
+                return Ok(());
+            }
             Err(_) => return Err(Halt::Fail(Cause::StepFailed)),
         };
+        self.skip(listing.skipped_names);
         for entry in listing.entries {
             self.check()?;
             let path = within_path(within, &entry.name);
@@ -521,12 +536,14 @@ impl Walk<'_> {
                 continue;
             }
             let Some(child) = join(rel, &entry.name) else {
+                self.skip(1);
                 continue;
             };
             let tar = tar_path(dir_name, &path);
             match entry.meta.kind {
                 EntryKind::Dir => {
                     if depth >= MAX_DEPTH {
+                        self.skip(1);
                         continue;
                     }
                     self.writer
@@ -541,7 +558,10 @@ impl Walk<'_> {
                     let target = match self.root.read_link(&child) {
                         Ok(target) if !target.is_empty() => target,
                         // Disparu, remplacé ou illisible : pas archivé, jamais suivi.
-                        _ => continue,
+                        _ => {
+                            self.skip(1);
+                            continue;
+                        }
                     };
                     self.writer
                         .symlink(&tar, &entry.meta, &target)
@@ -550,8 +570,8 @@ impl Walk<'_> {
                     item.link_target = Some(target);
                     self.entries.push(item);
                 }
-                // Un tube, un socket, un périphérique, un autre système de fichiers : ni lu ni archivé.
-                EntryKind::Other => {}
+                // Un tube, un socket, un périphérique, un autre montage : ni lu ni archivé, mais compté.
+                EntryKind::Other => self.skip(1),
             }
         }
         Ok(())
@@ -568,6 +588,7 @@ impl Walk<'_> {
             }
             // Devenu un lien, un tube, un dossier entre le listage et l'ouverture : jamais lu.
             Err(FsError::Blocked | FsError::NotRegular | FsError::CrossesDevice) => {
+                self.skip(1);
                 return Ok(());
             }
             Err(_) => return Err(Halt::Fail(Cause::StepFailed)),
@@ -611,6 +632,7 @@ fn copy_blocking(job: CopyJob) -> CopyOutcome {
     let CopyJob {
         fs,
         files,
+        archive,
         key,
         folders,
         rules,
@@ -624,10 +646,9 @@ fn copy_blocking(job: CopyJob) -> CopyOutcome {
         Ok(root) => root,
         Err(_) => return CopyOutcome::Failed(Cause::StepFailed),
     };
-    let (writer, _written) = ArchiveWriter::new(sink);
     let mut walk = Walk {
         root: root.as_ref(),
-        writer,
+        writer: archive.builder(sink),
         control: &control,
         files: files.as_ref(),
         entries: Vec::new(),
@@ -670,6 +691,8 @@ fn copy_blocking(job: CopyJob) -> CopyOutcome {
         ..
     } = walk;
     let changed = control.changed.load(Ordering::Relaxed);
+    let skipped = control.skipped.load(Ordering::Relaxed);
+    base.skipped = skipped;
     base.flags = flags_of(hot, forced_stop, changed);
     base.totals = Manifest::recount(&entries);
     base.entries = entries;
@@ -682,24 +705,10 @@ fn copy_blocking(job: CopyJob) -> CopyOutcome {
             manifest: Box::new(base),
             end,
             changed,
+            skipped,
         },
         Err(error) => CopyOutcome::Failed(cause_of_io(&error)),
     }
-}
-
-/// Les repères d'une sauvegarde (`BR-BACKUP-007`, `BR-BACKUP-008`, `BR-BACKUP-012`).
-fn flags_of(hot: bool, forced_stop: bool, changed: u32) -> Vec<BackupFlag> {
-    let mut flags = Vec::new();
-    if hot {
-        flags.push(BackupFlag::Hot);
-    }
-    if forced_stop {
-        flags.push(BackupFlag::ForcedStop);
-    }
-    if (hot && changed > 0) || forced_stop {
-        flags.push(BackupFlag::MaybeInconsistent);
-    }
-    flags
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -769,6 +778,7 @@ pub struct Backups {
     intents: Arc<dyn ServiceIntents>,
     safe_fs: Arc<dyn SafeFs>,
     files: Arc<dyn BackupFiles>,
+    archive: Arc<dyn BackupArchive>,
     repo: Arc<dyn BackupRepo>,
     host_paths: Arc<dyn HostPaths>,
     sink: Arc<dyn AuditSink>,
@@ -776,6 +786,10 @@ pub struct Backups {
     ids: Arc<dyn IdGen>,
     context: BackupContext,
     stopping: Arc<AtomicBool>,
+    /// Une estimation à la fois, une relecture d'archive à la fois pour tout l'agent : le jeton part AVEC le fil
+    /// bloquant (il n'est rendu que quand le travail est fini, même si la demande a été abandonnée).
+    estimate_gate: Arc<AsyncMutex<()>>,
+    verify_gate: Arc<AsyncMutex<()>>,
     /// Les sauvegardes qu'une opération utilise (création, vérification) : une suppression est refusée tant
     /// qu'elles y sont (`BR-BACKUP-027`).
     in_use: Mutex<HashSet<String>>,
@@ -804,6 +818,7 @@ impl Backups {
         intents: Arc<dyn ServiceIntents>,
         safe_fs: Arc<dyn SafeFs>,
         files: Arc<dyn BackupFiles>,
+        archive: Arc<dyn BackupArchive>,
         repo: Arc<dyn BackupRepo>,
         host_paths: Arc<dyn HostPaths>,
         sink: Arc<dyn AuditSink>,
@@ -820,6 +835,7 @@ impl Backups {
             intents,
             safe_fs,
             files,
+            archive,
             repo,
             host_paths,
             sink,
@@ -827,6 +843,8 @@ impl Backups {
             ids,
             context,
             stopping: Arc::new(AtomicBool::new(false)),
+            estimate_gate: Arc::new(AsyncMutex::new(())),
+            verify_gate: Arc::new(AsyncMutex::new(())),
             in_use: Mutex::new(HashSet::new()),
         })
     }
@@ -837,16 +855,27 @@ impl Backups {
         self.stopping.store(true, Ordering::SeqCst);
     }
 
-    /// Au démarrage, après la reprise des opérations : les lignes `writing` du registre sont retirées (leurs
-    /// fichiers partiels l'ont été par le journal, après vérification de l'inode). La racine est jugée et le
-    /// résultat DIT : une racine qui chevauche un dossier de données refuse la fonction (`BR-BACKUP-004` (b)).
+    /// Au démarrage, après la reprise des opérations : chaque ligne `writing` du registre est une archive que l'agent
+    /// n'a pas fini d'écrire. Ses fichiers (la partie par inode, l'archive publiée par inode et taille, le manifeste
+    /// par empreinte : la ligne les connaît avant leur écriture) sont retirés, puis la ligne ; jamais rien d'autre.
+    /// La racine est jugée et le résultat DIT : une racine qui chevauche un dossier de données refuse la fonction
+    /// (`BR-BACKUP-004` (b)).
     pub async fn recover_at_startup(&self) {
-        match self.repo.drop_writing().await {
-            Ok(0) => {}
-            Ok(count) => tracing::warn!(
-                count,
-                "sauvegardes interrompues par l'arrêt de l'agent : lignes du registre retirées"
-            ),
+        match self.repo.writing().await {
+            Ok(rows) if rows.is_empty() => {}
+            Ok(rows) => {
+                let mut kept = 0_u64;
+                for row in &rows {
+                    if !self.purge(row).await {
+                        kept += 1;
+                    }
+                }
+                tracing::warn!(
+                    count = rows.len(),
+                    kept,
+                    "sauvegardes interrompues par l'arrêt de l'agent : fichiers de Hearth et lignes retirés"
+                );
+            }
             Err(error) => {
                 tracing::error!(%error, "registre des sauvegardes illisible au démarrage")
             }
@@ -1059,7 +1088,9 @@ impl Backups {
             self.context.timings.estimate_budget,
             self.context.timings.big_file_bytes,
         );
+        let gate = Arc::clone(&self.estimate_gate).lock_owned().await;
         let result = tokio::task::spawn_blocking(move || {
+            let _gate = gate;
             estimate_blocking(fs.as_ref(), &key, &folders, &rules, budget, big)
         })
         .await
@@ -1082,6 +1113,7 @@ impl Backups {
             mode: row.mode,
             flags: row.flags.clone(),
             changed_files: row.changed_files,
+            skipped: row.skipped,
             note,
             account: row.created_by.clone(),
             image: row.image.clone(),
@@ -1220,8 +1252,12 @@ impl Backups {
         if let Some(busy) = self.busy_of(key) {
             return Err(named(busy));
         }
-        let note = clean_note(request.note.as_deref()).map_err(named)?;
-        validate_items(&request.ignore_once).map_err(named)?;
+        let note = clean_note(request.note.as_deref())
+            .map_err(note_error)
+            .map_err(named)?;
+        validate_items(&request.ignore_once)
+            .map_err(items_error)
+            .map_err(named)?;
         let running = is_running(subject.state);
         if let Some(state) = subject.state
             && !backable(state)
@@ -1451,7 +1487,10 @@ impl Backups {
                     note: copied.note(job),
                 }
             }
-            Err(finish) => finish,
+            Err(Some(finish)) => finish,
+            // L'agent s'arrête pendant la relecture : l'opération reste en cours (interrompue au prochain
+            // démarrage), l'archive reste publiée, non vérifiée.
+            Err(None) => return None,
         };
         Some(self.finish_after(job, finish).await)
     }
@@ -1497,93 +1536,42 @@ impl Backups {
         }
     }
 
-    /// Arrête les conteneurs du service qui tournent : l'arrêt voulu est écrit AVANT l'ordre, le délai de grâce
-    /// est celui du service, une coupure forcée est dite (`BR-BACKUP-008`).
+    /// Arrête les conteneurs du service qui tournent (`application::service_stop`, le même code que la
+    /// suppression) : l'arrêt voulu est écrit AVANT l'ordre, le délai de grâce est celui du service, une coupure
+    /// forcée est dite (`BR-BACKUP-008`). Ce qui est arrêté est noté pour être relancé, même après un échec.
     async fn stop_service(&self, job: &Job) -> Result<(), Finish> {
-        let mut running = Vec::new();
-        for id in &job.containers {
-            match self.engine.inspect(id).await {
-                Ok(Some(observation))
-                    if matches!(
-                        observation.run_state,
-                        RunState::Running | RunState::Restarting | RunState::Paused
-                    ) =>
-                {
-                    running.push(id.clone());
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    journal(self.ops.failed(&job.id, step::STOP).await, "failed");
-                    return Err(Finish::failed(cause_of(error)));
-                }
-            }
-        }
-        if running.is_empty() {
-            return Ok(());
-        }
-        let intent = StopIntent {
-            key: job.key.clone(),
-            container_id: running.first().cloned().unwrap_or_default(),
-            account: account_of(&job.actor),
-            at: self.clock.now(),
-        };
-        if let Err(error) = self.intents.save(&intent).await {
-            tracing::error!(%error, "arrêt voulu non écrit : l'ordre d'arrêt n'est pas donné");
-            journal(self.ops.failed(&job.id, step::STOP).await, "failed");
-            return Err(Finish::failed(Cause::StepFailed));
-        }
-        self.registry.note_stop_requested(&job.key, intent.at);
-        self.registry
-            .begin_transition(&job.key, TransitionKind::Stopping);
-        let _shown = StepShown {
+        let context = StopContext {
             registry: &self.registry,
-            key: job.key.clone(),
+            ops: &self.ops,
+            engine: self.engine.as_ref(),
+            intents: self.intents.as_ref(),
+            clock: self.clock.as_ref(),
         };
-        let grace = Duration::from_secs(u64::from(job.grace_s));
-        let wait = wait_budget_with(
-            job.grace_s,
-            self.context.timings.stop_margin,
-            self.context.timings.stop_floor,
-        );
-        for id in &running {
-            let started = Instant::now();
-            let ordered = match tokio::time::timeout(wait, self.engine.stop(id, grace)).await {
-                Ok(result) => result,
-                Err(_) => Err(EngineError::Timeout),
-            };
-            match ordered {
-                Ok(()) | Err(EngineError::NotFound) => {
-                    job.stopped
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(id.clone());
-                    let evidence = match self.engine.inspect(id).await {
-                        Ok(Some(observation)) => StopEvidence::ExitCode {
-                            code: observation.exit_code,
-                            waited: started.elapsed(),
-                        },
-                        _ => StopEvidence::Took(started.elapsed()),
-                    };
-                    if stop_was_forced(evidence, job.grace_s) {
-                        job.forced_stop.store(true, Ordering::SeqCst);
-                        journal(self.ops.mark_forced(&job.id).await, "forced");
-                    }
-                }
-                Err(error) => {
-                    journal(self.ops.failed(&job.id, step::STOP).await, "failed");
-                    // Un refus net : rien n'a été arrêté. Un résultat inconnu garde l'arrêt voulu : il a peut-être eu lieu.
-                    if matches!(error, EngineError::Refused | EngineError::Denied) {
-                        self.forget_stop(&job.key).await;
-                    }
-                    // Ce qui a déjà été arrêté est relancé par `finish_after`.
-                    return Err(Finish::failed(cause_of(error)));
-                }
-            }
+        let request = StopRequest {
+            key: &job.key,
+            operation: &job.id,
+            step: step::STOP,
+            containers: &job.containers,
+            grace_s: job.grace_s,
+            account: account_of(&job.actor),
+            margin: self.context.timings.stop_margin,
+            floor: self.context.timings.stop_floor,
+        };
+        let (stopped, forced, failure) = match stop_running(&context, &request).await {
+            Ok(done) => (done.containers, done.forced, None),
+            Err(failure) => (failure.stopped, failure.forced, Some(failure.cause)),
+        };
+        job.stopped
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend(stopped);
+        if forced {
+            job.forced_stop.store(true, Ordering::SeqCst);
         }
-        for id in &running {
-            self.registry.reread(id).await;
+        match failure {
+            None => Ok(()),
+            Some(cause) => Err(Finish::failed(cause)),
         }
-        Ok(())
     }
 
     async fn forget_stop(&self, key: &ServiceKey) {
@@ -1690,6 +1678,7 @@ impl Backups {
             files: AtomicU64::new(0),
             bytes: AtomicU64::new(0),
             changed: AtomicU32::new(0),
+            skipped: AtomicU32::new(0),
             deadline: Instant::now() + self.context.timings.max_copy,
         });
         let base = Manifest {
@@ -1706,11 +1695,13 @@ impl Backups {
             ignored: Vec::new(),
             entries: Vec::new(),
             totals: crate::domain::backups::manifest::Totals::default(),
+            skipped: 0,
             archive: None,
         };
         let copy = CopyJob {
             fs: Arc::clone(&self.safe_fs),
             files: Arc::clone(&self.files),
+            archive: Arc::clone(&self.archive),
             key: job.key.clone(),
             folders: job.folders.clone(),
             rules: job.rules.clone(),
@@ -1741,11 +1732,15 @@ impl Backups {
                 manifest,
                 end,
                 changed,
-            } => self.publish(job, ident, *manifest, end, changed).await,
+                skipped,
+            } => {
+                self.publish(job, ident, *manifest, end, (changed, skipped))
+                    .await
+            }
             CopyOutcome::Stopped(STOP_SHUTDOWN) => CopyEnd::Halted,
             CopyOutcome::Stopped(reason) => {
                 journal(self.ops.failed(&job.id, step::COPY).await, "failed");
-                self.discard(job, ident).await;
+                self.purge_job(job, ident).await;
                 CopyEnd::Over(Err(match reason {
                     STOP_CANCEL => Finish::cancelled(),
                     STOP_DISK => Finish::failed(Cause::DiskAlmostFull),
@@ -1754,21 +1749,26 @@ impl Backups {
             }
             CopyOutcome::Failed(cause) => {
                 journal(self.ops.failed(&job.id, step::COPY).await, "failed");
-                self.discard(job, ident).await;
+                self.purge_job(job, ident).await;
                 CopyEnd::Over(Err(Finish::failed(cause)))
             }
         }
     }
 
     /// Le manifeste voisin, l'archive sous son nom définitif, la ligne `ready` (`BR-BACKUP-012`, `BR-BACKUP-014`).
+    ///
+    /// **Avant d'écrire un octet**, la ligne `writing` apprend la taille de l'archive et les empreintes : un agent
+    /// qui s'arrête entre l'écriture et `ready` laisse des fichiers que le démarrage sait retrouver (et eux seuls).
+    /// `counts` : fichiers changés pendant la copie, éléments non archivés.
     async fn publish(
         &self,
         job: &Job,
         ident: (u64, u64),
         mut manifest: Manifest,
         end: ArchiveEnd,
-        changed: u32,
+        counts: (u32, u32),
     ) -> CopyEnd {
+        let (changed, skipped) = counts;
         manifest.archive = Some(ArchiveFacts {
             name: job.backup.archive_name(),
             bytes: end.bytes,
@@ -1776,14 +1776,33 @@ impl Backups {
         });
         let Ok(json) = serde_json::to_vec(&manifest) else {
             journal(self.ops.failed(&job.id, step::COPY).await, "failed");
-            self.discard(job, ident).await;
+            self.purge_job(job, ident).await;
             return CopyEnd::Over(Err(Finish::failed(Cause::StepFailed)));
         };
         let manifest_sha = sha256_hex(&json);
-        let service_dir = job.key.to_string();
+        let noted = self
+            .repo
+            .note_publishing(
+                &job.backup,
+                &Publishing {
+                    archive_bytes: end.bytes,
+                    manifest_sha256: manifest_sha.clone(),
+                    archive_sha256: end.sha256.clone(),
+                },
+            )
+            .await;
+        if !matches!(noted, Ok(true)) {
+            tracing::error!(
+                ?noted,
+                "sauvegarde non annoncée au registre avant sa publication"
+            );
+            journal(self.ops.failed(&job.id, step::COPY).await, "failed");
+            self.purge_job(job, ident).await;
+            return CopyEnd::Over(Err(Finish::failed(Cause::StepFailed)));
+        }
         let files = Arc::clone(&self.files);
         let (dir, side, part, archive) = (
-            service_dir.clone(),
+            job.key.to_string(),
             job.backup.manifest_name(),
             job.backup.part_name(),
             job.backup.archive_name(),
@@ -1793,24 +1812,28 @@ impl Backups {
             files.publish(&dir, &part, &archive, ident)
         })
         .await;
-        match published {
-            Ok(Ok(())) => {}
+        let stamp = match published {
+            Ok(Ok(stamp)) if stamp.size == end.bytes => stamp,
             other => {
                 tracing::warn!(?other, "archive de sauvegarde non publiée");
                 journal(self.ops.failed(&job.id, step::COPY).await, "failed");
-                self.discard(job, ident).await;
-                // Le manifeste voisin écrit seul : c'est le nôtre (créé par cette opération), retiré avec le reste.
-                self.remove_own_manifest(job, &manifest_sha).await;
+                if let Ok(Ok(stamp)) = other {
+                    // Publiée mais d'une autre taille que ce qui a été écrit : retirée par son identité complète.
+                    self.remove_stamped(job, stamp).await;
+                }
+                self.purge_job(job, ident).await;
                 return CopyEnd::Over(Err(Finish::failed(Cause::StepFailed)));
             }
-        }
+        };
         let row = Published {
             archive_bytes: end.bytes,
+            archive_mtime_ns: stamp.mtime_ns,
             data_bytes: manifest.totals.bytes,
             files: manifest.totals.files,
             flags: manifest.flags.clone(),
             changed_files: changed,
-            manifest_sha256: manifest_sha.clone(),
+            skipped,
+            manifest_sha256: manifest_sha,
             archive_sha256: end.sha256,
         };
         match self.repo.mark_ready(&job.backup, &row).await {
@@ -1818,8 +1841,8 @@ impl Backups {
             other => {
                 tracing::error!(?other, "sauvegarde publiée mais pas prête au registre");
                 journal(self.ops.failed(&job.id, step::COPY).await, "failed");
-                // L'archive publiée n'est plus « en cours d'écriture » : elle est retirée avec son inode.
-                self.remove_published(job, ident, &manifest_sha).await;
+                // La ligne n'est pas `ready` : elle porte encore ce qu'il faut pour retirer SES fichiers.
+                self.purge_job(job, ident).await;
                 return CopyEnd::Over(Err(Finish::failed(Cause::StepFailed)));
             }
         }
@@ -1828,54 +1851,69 @@ impl Backups {
             mode: job.mode,
             files: manifest.totals.files,
             bytes: manifest.totals.bytes,
-            changed: row.changed_files,
+            changed,
+            skipped,
             forced_stop: job.forced_stop.load(Ordering::SeqCst),
         }))
     }
 
-    /// Retire SA partie écrite et sa ligne : l'archive en cours, jamais autre chose (`BR-BACKUP-009`).
-    async fn discard(&self, job: &Job, ident: (u64, u64)) {
-        self.discard_part(job, ident).await;
-        if let Err(error) = self.repo.delete(&job.backup).await {
-            tracing::warn!(%error, "ligne de sauvegarde interrompue non retirée");
-        }
+    /// Retire une archive publiée dont on connaît l'identité complète.
+    async fn remove_stamped(&self, job: &Job, stamp: FileStamp) {
+        let files = Arc::clone(&self.files);
+        let (dir, name) = (job.key.to_string(), job.backup.archive_name());
+        let _ =
+            tokio::task::spawn_blocking(move || files.remove(&dir, &name, Expected::stamp(stamp)))
+                .await;
     }
 
+    /// Retire une partie écrite que la ligne du registre ne connaît pas (encore).
     async fn discard_part(&self, job: &Job, ident: (u64, u64)) {
         let files = Arc::clone(&self.files);
         let (dir, name) = (job.key.to_string(), job.backup.part_name());
-        let _ = tokio::task::spawn_blocking(move || files.remove(&dir, &name, ident)).await;
+        let _ =
+            tokio::task::spawn_blocking(move || files.remove(&dir, &name, Expected::inode(ident)))
+                .await;
     }
 
-    async fn remove_own_manifest(&self, job: &Job, sha: &str) {
-        let files = Arc::clone(&self.files);
-        let (dir, name, sha) = (
-            job.key.to_string(),
-            job.backup.manifest_name(),
-            sha.to_owned(),
-        );
-        let _ = tokio::task::spawn_blocking(move || {
-            remove_manifest_if_ours(files.as_ref(), &dir, &name, &sha)
-        })
-        .await;
-    }
-
-    /// Retire une archive publiée et son manifeste (les nôtres), puis sa ligne.
-    async fn remove_published(&self, job: &Job, ident: (u64, u64), manifest_sha: &str) {
-        let files = Arc::clone(&self.files);
-        let (dir, name) = (job.key.to_string(), job.backup.archive_name());
-        let _ = tokio::task::spawn_blocking(move || files.remove(&dir, &name, ident)).await;
-        self.remove_own_manifest(job, manifest_sha).await;
-        if let Err(error) = self.repo.delete(&job.backup).await {
-            tracing::warn!(%error, "ligne de sauvegarde non retirée");
+    /// Retire SES fichiers et SA ligne : par la ligne du registre quand elle existe, sinon la seule partie écrite.
+    async fn purge_job(&self, job: &Job, ident: (u64, u64)) {
+        match self.repo.get(&job.backup).await {
+            Ok(Some(row)) => {
+                self.purge(&row).await;
+            }
+            _ => self.discard_part(job, ident).await,
         }
     }
 
-    /// La vérification qui suit la création (`BR-BACKUP-013`) : un échec est supprimé par Hearth, c'est son fichier.
-    async fn verify_new(&self, job: &Job) -> Result<(), Finish> {
+    /// Retire les fichiers de Hearth d'une ligne du registre, puis la ligne : la partie écrite (par inode), l'archive
+    /// (par inode et taille, et la date quand la ligne est `ready`), le manifeste voisin (par empreinte). Jamais
+    /// autre chose (`BR-BACKUP-004`). `false` : un fichier n'a pas pu être retiré, la ligne reste pour un
+    /// prochain passage.
+    async fn purge(&self, row: &BackupRow) -> bool {
+        let files = Arc::clone(&self.files);
+        let owned = row.clone();
+        let clean = tokio::task::spawn_blocking(move || purge_files(files.as_ref(), &owned))
+            .await
+            .unwrap_or(false);
+        if !clean {
+            tracing::warn!(
+                "fichiers d'une sauvegarde non retirés : la ligne du registre est gardée"
+            );
+            return false;
+        }
+        if let Err(error) = self.repo.delete(&row.id).await {
+            tracing::warn!(%error, "ligne de sauvegarde non retirée");
+            return false;
+        }
+        true
+    }
+
+    /// La vérification qui suit la création (`BR-BACKUP-013`) : un échec constaté est supprimé par Hearth, c'est son
+    /// fichier. `Err(None)` : l'agent s'arrête, rien n'est conclu.
+    async fn verify_new(&self, job: &Job) -> Result<(), Option<Finish>> {
         let Ok(Some(row)) = self.repo.get(&job.backup).await else {
             journal(self.ops.failed(&job.id, step::VERIFY).await, "failed");
-            return Err(Finish::failed(Cause::StepFailed));
+            return Err(Some(Finish::failed(Cause::StepFailed)));
         };
         let stop = {
             let stopping = Arc::clone(&self.stopping);
@@ -1895,14 +1933,15 @@ impl Backups {
             }
             Ok(Checked::Failed | Checked::Missing) => {
                 journal(self.ops.failed(&job.id, step::VERIFY).await, "failed");
-                self.remove_published(job, (row.dev, row.ino), &row.manifest_sha256)
-                    .await;
-                Err(Finish::failed(Cause::BackupCorrupt))
+                self.purge(&row).await;
+                Err(Some(Finish::failed(Cause::BackupCorrupt)))
             }
+            Ok(Checked::Stopped) => Err(None),
             Err(()) => {
-                // La lecture a échoué sans rien dire de l'archive : elle reste, non vérifiée.
+                // La lecture a échoué sans rien dire de l'archive (le disque, pas le contenu) : elle reste,
+                // non vérifiée.
                 journal(self.ops.failed(&job.id, step::VERIFY).await, "failed");
-                Err(Finish::failed(Cause::StepFailed))
+                Err(Some(Finish::failed(Cause::StepFailed)))
             }
         }
     }
@@ -1939,8 +1978,7 @@ impl Backups {
     async fn cancel_published(&self, job: &Job) {
         match self.repo.get(&job.backup).await {
             Ok(Some(row)) => {
-                self.remove_published(job, (row.dev, row.ino), &row.manifest_sha256)
-                    .await;
+                self.purge(&row).await;
             }
             Ok(None) => {}
             Err(error) => tracing::warn!(%error, "sauvegarde annulée tard : ligne illisible"),
@@ -2040,8 +2078,16 @@ impl Backups {
         if !stopped.is_empty() {
             let _ = self.start_service(job, &stopped).await;
         }
-        if let Err(error) = self.repo.delete(&job.backup).await.map(|_| ()) {
-            tracing::warn!(%error, "ligne de sauvegarde non retirée après une panique");
+        // Une archive pas encore prête est retirée avec sa ligne ; une sauvegarde déjà prête et publiée reste (elle
+        // est complète, seule sa vérification n'a pas eu lieu).
+        match self.repo.get(&job.backup).await {
+            Ok(Some(row)) if !row.ready => {
+                self.purge(&row).await;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(%error, "ligne de sauvegarde illisible après une panique");
+            }
         }
         let draft = ClientName::parse(&job.name).map(|service| AuditDraft {
             actor: job.actor.clone(),
@@ -2117,6 +2163,7 @@ impl Backups {
                 verified_at: None,
                 files_checked: 0,
             }),
+            Checked::Stopped => Err(internal("agent en cours d'arrêt")),
         }
     }
 
@@ -2135,9 +2182,15 @@ impl Backups {
         stop: impl Fn() -> bool + Send + Sync + 'static,
     ) -> Result<Checked, ()> {
         let files = Arc::clone(&self.files);
+        let archive = Arc::clone(&self.archive);
         let row = row.clone();
-        let result =
-            tokio::task::spawn_blocking(move || check_blocking(files.as_ref(), &row, &stop)).await;
+        // Une relecture à la fois : le jeton part avec le fil bloquant, rendu quand le travail est fini.
+        let gate = Arc::clone(&self.verify_gate).lock_owned().await;
+        let result = tokio::task::spawn_blocking(move || {
+            let _gate = gate;
+            check_blocking(files.as_ref(), archive.as_ref(), &row, &stop)
+        })
+        .await;
         match result {
             Ok(checked) => checked,
             Err(_) => Err(()),
@@ -2167,9 +2220,9 @@ impl Backups {
                 row.id.archive_name(),
                 row.id.manifest_name(),
             );
-            let (ident, sha) = ((row.dev, row.ino), row.manifest_sha256.clone());
+            let (expected, sha) = (expected_of(&row), row.manifest_sha256.clone());
             let outcome = tokio::task::spawn_blocking(move || {
-                let outcome = files.remove(&dir, &archive, ident)?;
+                let outcome = files.remove(&dir, &archive, expected)?;
                 // Le manifeste voisin ne part que s'il a l'empreinte du registre.
                 if matches!(outcome, BackupRemoved::Done | BackupRemoved::Gone) {
                     remove_manifest_if_ours(files.as_ref(), &dir, &manifest, &sha);
@@ -2188,9 +2241,6 @@ impl Backups {
             }
         }
         self.repo.delete(id).await.map_err(internal)?;
-        let files = Arc::clone(&self.files);
-        let dir = row.service_key.to_string();
-        let _ = tokio::task::spawn_blocking(move || files.remove_service_dir_if_empty(&dir)).await;
         if let Some(service) = ClientName::parse(&row.service_name) {
             self.sink
                 .record(
@@ -2226,8 +2276,12 @@ impl Backups {
     ) -> Result<BackupSettings, BackupFailed> {
         let subject = self.subject(key).await?;
         let named = |error| BackupFailed::named(error, &subject.name);
-        validate_items(&settings.ignored).map_err(named)?;
-        validate_items(&settings.included).map_err(named)?;
+        validate_items(&settings.ignored)
+            .map_err(items_error)
+            .map_err(named)?;
+        validate_items(&settings.included)
+            .map_err(items_error)
+            .map_err(named)?;
         self.repo
             .save_settings(key, &settings, &account_of(&actor), self.clock.now())
             .await
@@ -2258,6 +2312,7 @@ struct Copied {
     files: u64,
     bytes: u64,
     changed: u32,
+    skipped: u32,
     forced_stop: bool,
 }
 
@@ -2274,6 +2329,7 @@ impl Copied {
             bytes: self.bytes,
             forced_stop: self.forced_stop,
             changed: self.changed,
+            skipped: self.skipped,
         }
     }
 }
@@ -2293,11 +2349,14 @@ enum Checked {
     Failed,
     /// Le fichier n'existe plus.
     Missing,
+    /// L'agent s'arrête : rien n'est conclu.
+    Stopped,
 }
 
 /// La relecture complète d'une archive du registre, sur un fil bloquant.
 fn check_blocking(
     files: &dyn BackupFiles,
+    archive: &dyn BackupArchive,
     row: &BackupRow,
     stop: &dyn Fn() -> bool,
 ) -> Result<Checked, ()> {
@@ -2309,17 +2368,22 @@ fn check_blocking(
         Ownership::Replaced => return Ok(Checked::Failed),
         Ownership::Ours => {}
     }
-    // Le manifeste voisin n'est cru que s'il a l'empreinte du registre.
-    let Ok((mut reader, _)) = files.open(&dir, &row.id.manifest_name()) else {
-        return Ok(Checked::Failed);
+    // Le manifeste voisin n'est cru que s'il a l'empreinte du registre. Un manifeste absent ou qui n'est plus un
+    // fichier ordinaire n'est pas celui de Hearth ; une erreur du disque ne dit rien de l'archive.
+    let mut reader = match files.open(&dir, &row.id.manifest_name()) {
+        Ok((reader, _)) => reader,
+        Err(BackupFsError::NotFound | BackupFsError::Unsafe) => return Ok(Checked::Failed),
+        Err(_) => return Err(()),
     };
     let mut bytes = Vec::new();
     if (&mut reader)
         .take(MAX_MANIFEST_BYTES + 1)
         .read_to_end(&mut bytes)
         .is_err()
-        || u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_MANIFEST_BYTES
     {
+        return Err(());
+    }
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_MANIFEST_BYTES {
         return Ok(Checked::Failed);
     }
     if !manifest_is_ours(&registered, Some(&sha256_hex(&bytes))) {
@@ -2338,17 +2402,18 @@ fn check_blocking(
     {
         return Ok(Checked::Failed);
     }
-    let (archive, ident) = files.open(&dir, &row.id.archive_name()).map_err(|_| ())?;
+    let (reader, ident) = files.open(&dir, &row.id.archive_name()).map_err(|_| ())?;
     // Le fichier ouvert est celui du registre (revérifié sur le descripteur).
     if ident != (row.dev, row.ino) {
         return Ok(Checked::Failed);
     }
-    match verify_archive(archive, &manifest, &facts.sha256, stop) {
+    match archive.verify(reader, &manifest, &facts.sha256, stop) {
         Ok(report) => Ok(Checked::Verified {
             files: report.files_checked,
         }),
         Err(VerifyError::Corrupt) => Ok(Checked::Failed),
-        Err(VerifyError::Io(_) | VerifyError::Stopped) => Err(()),
+        Err(VerifyError::Stopped) => Ok(Checked::Stopped),
+        Err(VerifyError::Io(_)) => Err(()),
     }
 }
 
@@ -2366,7 +2431,41 @@ fn remove_manifest_if_ours(files: &dyn BackupFiles, dir: &str, name: &str, sha: 
         return;
     }
     if sha256_hex(&bytes) == sha {
-        let _ = files.remove(dir, name, ident);
+        let _ = files.remove(dir, name, Expected::inode(ident));
+    }
+}
+
+/// Retire les fichiers de Hearth d'une ligne : voir [`Backups::purge`]. `true` : plus rien de Hearth ne reste.
+fn purge_files(files: &dyn BackupFiles, row: &BackupRow) -> bool {
+    let dir = row.service_key.to_string();
+    let mut clean = true;
+    let mut judge = |result: Result<BackupRemoved, BackupFsError>| {
+        // `NotOurs` : ce n'est plus notre fichier, il n'est pas touché et ne nous regarde plus.
+        if result.is_err() {
+            clean = false;
+        }
+    };
+    judge(files.remove(
+        &dir,
+        &row.id.part_name(),
+        Expected::inode((row.dev, row.ino)),
+    ));
+    judge(files.remove(&dir, &row.id.archive_name(), expected_of(row)));
+    if !row.manifest_sha256.is_empty() {
+        // Le manifeste voisin ne part que s'il a l'empreinte de la ligne.
+        remove_manifest_if_ours(files, &dir, &row.id.manifest_name(), &row.manifest_sha256);
+    }
+    clean
+}
+
+/// Ce que la ligne sait de son archive : l'inode toujours, la taille dès qu'elle est annoncée, la date une fois
+/// publiée.
+fn expected_of(row: &BackupRow) -> Expected {
+    Expected {
+        dev: row.dev,
+        ino: row.ino,
+        size: (row.archive_bytes > 0).then_some(row.archive_bytes),
+        mtime_ns: row.ready.then_some(row.archive_mtime_ns),
     }
 }
 
@@ -2374,7 +2473,29 @@ fn registered_of(row: &BackupRow) -> Registered {
     Registered {
         dev: row.dev,
         ino: row.ino,
+        size: row.archive_bytes,
+        mtime_ns: row.archive_mtime_ns,
         manifest_sha256: row.manifest_sha256.clone(),
+    }
+}
+
+fn note_error(error: NoteError) -> BackupError {
+    BackupError::Invalid {
+        field: "note",
+        reason: match error {
+            NoteError::TooLong => "too_long",
+            NoteError::Invalid => "invalid",
+        },
+    }
+}
+
+fn items_error(error: ItemsError) -> BackupError {
+    BackupError::Invalid {
+        field: "items",
+        reason: match error {
+            ItemsError::TooMany => "too_many",
+            ItemsError::Invalid => "invalid",
+        },
     }
 }
 
@@ -2405,68 +2526,6 @@ fn rfc3339(at: OffsetDateTime) -> String {
     at.format(&Rfc3339).unwrap_or_default()
 }
 
-fn is_running(state: Option<ServiceStateKind>) -> bool {
-    matches!(
-        state,
-        Some(ServiceStateKind::Running | ServiceStateKind::RestartLoop)
-    )
-}
-
-/// Les états d'un service que l'on sauvegarde : en marche, arrêté, en erreur, ou qui redémarre en boucle. Un
-/// déploiement en cours, un arrêt ou un démarrage en cours, une pause, un état inconnu : non.
-fn backable(state: ServiceStateKind) -> bool {
-    matches!(
-        state,
-        ServiceStateKind::Running
-            | ServiceStateKind::Stopped
-            | ServiceStateKind::Error
-            | ServiceStateKind::RestartLoop
-    )
-}
-
-/// La note : 80 caractères au plus, sans caractère de contrôle, rognée ; vide = pas de note.
-fn clean_note(note: Option<&str>) -> Result<Option<String>, BackupError> {
-    let Some(note) = note.map(str::trim).filter(|note| !note.is_empty()) else {
-        return Ok(None);
-    };
-    if note.chars().count() > NOTE_MAX_CHARS {
-        return Err(BackupError::Invalid {
-            field: "note",
-            reason: "too_long",
-        });
-    }
-    if note.chars().any(char::is_control) {
-        return Err(BackupError::Invalid {
-            field: "note",
-            reason: "invalid",
-        });
-    }
-    Ok(Some(note.to_owned()))
-}
-
-/// Une liste d'éléments ignorés : bornée, chaque chemin relatif et sûr.
-fn validate_items(items: &[IgnoredItem]) -> Result<(), BackupError> {
-    if items.len() > MAX_ITEMS {
-        return Err(BackupError::Invalid {
-            field: "items",
-            reason: "too_many",
-        });
-    }
-    for item in items {
-        let root_ok = !item.root.is_empty()
-            && item.root.len() <= 4096
-            && !item.root.chars().any(char::is_control);
-        let path_ok = item.path.is_empty() || RelPath::parse(&item.path).is_ok();
-        if !root_ok || !path_ok {
-            return Err(BackupError::Invalid {
-                field: "items",
-                reason: "invalid",
-            });
-        }
-    }
-    Ok(())
-}
-
 fn cause_of_fs(error: BackupFsError) -> Cause {
     match error {
         BackupFsError::Io(io::ErrorKind::StorageFull | io::ErrorKind::QuotaExceeded) => {
@@ -2485,76 +2544,6 @@ fn journal<T>(result: Result<T, OpError>, what: &'static str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_note_is_trimmed_bounded_and_free_of_control_characters() {
-        assert_eq!(clean_note(None).unwrap(), None);
-        assert_eq!(clean_note(Some("   ")).unwrap(), None);
-        assert_eq!(
-            clean_note(Some("  Avant mise à jour 1.4 "))
-                .unwrap()
-                .as_deref(),
-            Some("Avant mise à jour 1.4")
-        );
-        assert!(clean_note(Some(&"x".repeat(81))).is_err());
-        assert!(clean_note(Some(&"x".repeat(80))).is_ok());
-        assert!(clean_note(Some("a\nb")).is_err());
-    }
-
-    #[test]
-    fn the_ignored_lists_are_bounded_and_their_paths_stay_relative() {
-        let item = |root: &str, path: &str| IgnoredItem {
-            root: root.into(),
-            path: path.into(),
-        };
-        assert!(validate_items(&[item("/data", ""), item("/data", "logs/old")]).is_ok());
-        for bad in [
-            item("", "a"),
-            item("/data", "../etc"),
-            item("/data", "/abs"),
-            item("/data", "a//b"),
-            item("/da\nta", "a"),
-        ] {
-            assert!(validate_items(&[bad]).is_err());
-        }
-        let many = vec![item("/data", "a"); MAX_ITEMS + 1];
-        assert!(validate_items(&many).is_err());
-    }
-
-    #[test]
-    fn only_running_stopped_failed_and_looping_services_are_backed_up() {
-        for state in [
-            ServiceStateKind::Running,
-            ServiceStateKind::Stopped,
-            ServiceStateKind::Error,
-            ServiceStateKind::RestartLoop,
-        ] {
-            assert!(backable(state), "{state:?}");
-        }
-        for state in [
-            ServiceStateKind::Deploying,
-            ServiceStateKind::Stopping,
-            ServiceStateKind::Starting,
-            ServiceStateKind::Paused,
-            ServiceStateKind::Unknown,
-        ] {
-            assert!(!backable(state), "{state:?}");
-        }
-    }
-
-    #[test]
-    fn a_hot_copy_with_a_changed_file_may_be_inconsistent_and_a_forced_stop_always_is() {
-        assert_eq!(flags_of(true, false, 0), [BackupFlag::Hot]);
-        assert_eq!(
-            flags_of(true, false, 2),
-            [BackupFlag::Hot, BackupFlag::MaybeInconsistent]
-        );
-        assert_eq!(
-            flags_of(false, true, 0),
-            [BackupFlag::ForcedStop, BackupFlag::MaybeInconsistent]
-        );
-        assert!(flags_of(false, false, 5).is_empty());
-    }
 
     #[test]
     fn the_note_field_is_lower_case_and_bound_to_the_backup() {

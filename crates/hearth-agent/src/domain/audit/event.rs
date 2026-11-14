@@ -311,6 +311,8 @@ pub enum BackupNote {
         bytes: u64,
         forced_stop: bool,
         changed: u32,
+        /// Éléments non archivés (tubes, sockets, autre système de fichiers...).
+        skipped: u32,
     },
     /// Une sauvegarde supprimée : sa taille. `registry_only` : seule la ligne du registre est partie, le fichier
     /// n'était plus celui que Hearth avait écrit (BR-BACKUP-013).
@@ -614,6 +616,7 @@ impl Target {
                         bytes,
                         forced_stop,
                         changed,
+                        skipped,
                     } => {
                         text.push_str(&format!(
                             ", sauvegarde créée ({}, {files} fichier{}, {})",
@@ -632,6 +635,13 @@ impl Target {
                             ));
                         } else if matches!(mode, BackupModeNote::Hot) {
                             text.push_str(", aucun changement détecté pendant la copie");
+                        }
+                        if *skipped > 0 {
+                            text.push_str(&format!(
+                                ", {skipped} élément{} non archivé{}",
+                                if *skipped > 1 { "s" } else { "" },
+                                if *skipped > 1 { "s" } else { "" }
+                            ));
                         }
                     }
                     BackupNote::Deleted {

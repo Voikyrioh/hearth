@@ -228,6 +228,7 @@ fn state_over_rig(
         ),
         rig.safe_fs.clone(),
         rig.backup_files.clone(),
+        Arc::new(hearth_agent::infrastructure::backup_archive::TarGzArchive),
         Arc::new(hearth_agent::infrastructure::sqlite::SqliteBackupRepo::new(
             env.db.pool().clone(),
         )),

@@ -42,28 +42,26 @@ use tokio::time::Instant;
 use super::game_phase::GamePhases;
 use super::ports::{
     Clock, ContainerEngine, EngineError, Erased, FsError, HostPaths, Measure, Resolved, SafeFs,
-    ServiceContainers, ServiceIntents, StopIntent,
+    ServiceContainers, ServiceIntents,
 };
 use super::service_lifecycle::reason_of;
 use super::service_ops::{AcceptRequest, AuditDraft, OpError, ServiceOps};
 use super::service_specs::ServiceSpecs;
+use super::service_stop::{StopContext, StopRequest, stop_running};
 use super::services::{Driver, LifecycleTarget, ServicesRegistry};
 use crate::application::ports::Progress;
 use crate::domain::audit::{Actor, ClientName, DeleteNote, ErasedData, Outcome, Reason, Target};
 use crate::domain::files::RelPath;
 use crate::domain::ops::delete::{op_plan, step};
 use crate::domain::ops::{
-    Cause, Holder, OpKind, OpStatus, Refusal, StopEvidence, UndoInfo, WAIT_FLOOR, WAIT_MARGIN,
-    stop_was_forced, wait_budget_with,
+    Cause, Holder, OpKind, OpStatus, Refusal, UndoInfo, WAIT_FLOOR, WAIT_MARGIN,
 };
 use crate::domain::services::delete::{
     Fate, FileId, FolderUse, ManagedFolder, MountSplit, OwnFolder, fate_of, split_mounts,
 };
 use crate::domain::services::plan::image_reference;
 use crate::domain::services::spec::{SpecBody, fold_name};
-use crate::domain::services::{
-    EngineState, KeyKind, RunState, ServiceKey, ServiceStateKind, TransitionKind,
-};
+use crate::domain::services::{EngineState, KeyKind, ServiceKey, ServiceStateKind};
 
 /// Les durées d'une suppression. Les tests les raccourcissent.
 #[derive(Debug, Clone, Copy)]
@@ -758,86 +756,33 @@ impl ServiceDeletion {
     /// Arrête les conteneurs du service qui tournent : l'arrêt voulu est écrit AVANT l'ordre (`BR-LIFE-010`), le
     /// délai de grâce est celui du service, une coupure forcée est dite (`BR-DEL-013`).
     async fn stop(&self, job: &Job, note: &mut DeleteNote) -> Result<(), Finish> {
-        let mut running = Vec::new();
-        for id in &job.containers {
-            match self.engine.inspect(id).await {
-                Ok(Some(observation)) => {
-                    if matches!(
-                        observation.run_state,
-                        RunState::Running | RunState::Restarting | RunState::Paused
-                    ) {
-                        running.push(id.clone());
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    journal(self.ops.failed(&job.id, step::STOP).await, "failed");
-                    return Err(Finish::failed(cause_of(error), *note));
-                }
-            }
-        }
-        if running.is_empty() {
-            return Ok(());
-        }
-        let intent = StopIntent {
-            key: job.key.clone(),
-            container_id: running.first().cloned().unwrap_or_default(),
-            account: account_of(&job.actor),
-            at: self.clock.now(),
-        };
-        if let Err(error) = self.intents.save(&intent).await {
-            tracing::error!(%error, "arrêt voulu non écrit : l'ordre d'arrêt n'est pas donné");
-            journal(self.ops.failed(&job.id, step::STOP).await, "failed");
-            return Err(Finish::failed(Cause::StepFailed, *note));
-        }
-        self.registry.note_stop_requested(&job.key, intent.at);
-        self.registry
-            .begin_transition(&job.key, TransitionKind::Stopping);
-        let _shown = StepShown {
+        let context = StopContext {
             registry: &self.registry,
-            key: job.key.clone(),
+            ops: &self.ops,
+            engine: self.engine.as_ref(),
+            intents: self.intents.as_ref(),
+            clock: self.clock.as_ref(),
         };
-        let grace = Duration::from_secs(u64::from(job.grace_s));
-        let wait = wait_budget_with(
-            job.grace_s,
-            self.context.timings.stop_margin,
-            self.context.timings.stop_floor,
-        );
-        for id in &running {
-            let started = Instant::now();
-            let ordered = match tokio::time::timeout(wait, self.engine.stop(id, grace)).await {
-                Ok(result) => result,
-                Err(_) => Err(EngineError::Timeout),
-            };
-            match ordered {
-                Ok(()) | Err(EngineError::NotFound) => {
-                    let evidence = match self.engine.inspect(id).await {
-                        Ok(Some(observation)) => StopEvidence::ExitCode {
-                            code: observation.exit_code,
-                            waited: started.elapsed(),
-                        },
-                        _ => StopEvidence::Took(started.elapsed()),
-                    };
-                    if stop_was_forced(evidence, job.grace_s) {
-                        note.forced_stop = true;
-                        journal(self.ops.mark_forced(&job.id).await, "forced");
-                    }
-                }
-                Err(error) => {
-                    journal(self.ops.failed(&job.id, step::STOP).await, "failed");
-                    // Un refus net : rien n'a été arrêté, l'arrêt voulu n'a pas lieu d'être. Un résultat inconnu le
-                    // garde : l'arrêt a peut-être eu lieu.
-                    if matches!(error, EngineError::Refused | EngineError::Denied) {
-                        self.forget_stop(&job.key).await;
-                    }
-                    return Err(Finish::failed(cause_of(error), *note));
-                }
+        let request = StopRequest {
+            key: &job.key,
+            operation: &job.id,
+            step: step::STOP,
+            containers: &job.containers,
+            grace_s: job.grace_s,
+            account: account_of(&job.actor),
+            margin: self.context.timings.stop_margin,
+            floor: self.context.timings.stop_floor,
+        };
+        match stop_running(&context, &request).await {
+            Ok(stopped) => {
+                note.forced_stop |= stopped.forced;
+                Ok(())
+            }
+            Err(failure) => {
+                note.forced_stop |= failure.forced;
+                Err(Finish::failed(failure.cause, *note))
             }
         }
-        for id in &running {
-            self.registry.reread(id).await;
-        }
-        Ok(())
     }
 
     /// Supprime les conteneurs du service, sans toucher à un volume ni forcer (`remove_keeping_volumes`). Un

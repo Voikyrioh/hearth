@@ -137,6 +137,10 @@ pub struct Manifest {
     pub ignored: Vec<ManifestIgnored>,
     pub entries: Vec<Entry>,
     pub totals: Totals,
+    /// Éléments que la copie n'a pas archivés : tubes, sockets, autres systèmes de fichiers, noms illisibles,
+    /// arborescence trop profonde, liens illisibles. Dits, jamais omis en silence.
+    #[serde(default)]
+    pub skipped: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archive: Option<ArchiveFacts>,
 }
@@ -288,6 +292,7 @@ mod tests {
             ignored: vec![],
             totals: Manifest::recount(&entries),
             entries,
+            skipped: 0,
             archive: None,
         }
     }

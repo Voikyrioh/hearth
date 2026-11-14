@@ -25,12 +25,17 @@ pub struct BackupRow {
     pub created_by: String,
     pub dev: u64,
     pub ino: u64,
+    /// La date de modification de l'archive publiée (nanosecondes) : avec l'inode et la taille (`archive_bytes`),
+    /// ce qui prouve que le fichier est encore celui que Hearth a écrit. `0` tant que la ligne n'est pas `ready`.
+    pub archive_mtime_ns: i64,
     pub archive_bytes: u64,
     pub data_bytes: u64,
     pub files: u64,
     pub mode: BackupMode,
     pub flags: Vec<BackupFlag>,
     pub changed_files: u32,
+    /// Éléments que la copie n'a pas archivés.
+    pub skipped: u32,
     pub image: String,
     pub integrity: BackupIntegrity,
     pub verified_at: Option<OffsetDateTime>,
@@ -58,10 +63,22 @@ pub struct NewBackup {
 #[derive(Debug, Clone)]
 pub struct Published {
     pub archive_bytes: u64,
+    /// La date de modification de l'archive publiée, relevée sur le fichier.
+    pub archive_mtime_ns: i64,
     pub data_bytes: u64,
     pub files: u64,
     pub flags: Vec<BackupFlag>,
     pub changed_files: u32,
+    pub skipped: u32,
+    pub manifest_sha256: String,
+    pub archive_sha256: String,
+}
+
+/// Ce que l'on sait des fichiers d'une ligne AVANT de les écrire : de quoi les retrouver (et eux seuls) si
+/// l'agent s'arrête entre l'écriture et la publication.
+#[derive(Debug, Clone)]
+pub struct Publishing {
+    pub archive_bytes: u64,
     pub manifest_sha256: String,
     pub archive_sha256: String,
 }
@@ -69,6 +86,15 @@ pub struct Published {
 #[async_trait]
 pub trait BackupRepo: Send + Sync {
     async fn insert_writing(&self, new: &NewBackup) -> Result<(), StoreError>;
+
+    /// Avant d'écrire le manifeste et de publier l'archive : la ligne `writing` apprend la taille de l'archive et les
+    /// empreintes. Un agent qui s'arrête ensuite sait retirer SES fichiers (l'archive par inode et taille, le
+    /// manifeste par empreinte). `false` : la ligne n'existe plus ou n'est pas `writing`.
+    async fn note_publishing(
+        &self,
+        id: &BackupId,
+        publishing: &Publishing,
+    ) -> Result<bool, StoreError>;
 
     /// `writing` devient `ready` (intégrité non vérifiée). `false` : la ligne n'existe plus ou n'est pas `writing`.
     async fn mark_ready(&self, id: &BackupId, published: &Published) -> Result<bool, StoreError>;
@@ -89,9 +115,8 @@ pub trait BackupRepo: Send + Sync {
     /// Retire une ligne. `true` : elle existait.
     async fn delete(&self, id: &BackupId) -> Result<bool, StoreError>;
 
-    /// Au démarrage : retire les lignes `writing` (leurs fichiers partiels sont retirés par le journal des
-    /// opérations, jamais par ici). Rend combien.
-    async fn drop_writing(&self) -> Result<u64, StoreError>;
+    /// Les lignes `writing` : des archives que l'agent n'a pas fini d'écrire (démarrage après un arrêt).
+    async fn writing(&self) -> Result<Vec<BackupRow>, StoreError>;
 
     /// Les éléments ignorés d'un service (vides si le service n'a pas de ligne).
     async fn settings(&self, key: &ServiceKey) -> Result<BackupSettings, StoreError>;

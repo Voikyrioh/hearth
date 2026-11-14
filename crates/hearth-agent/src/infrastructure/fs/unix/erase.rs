@@ -63,6 +63,12 @@ pub(crate) fn mnt_id_of(fd: &OwnedFd) -> Option<u64> {
     (stat.stx_mask & StatxFlags::MNT_ID.bits() != 0).then_some(stat.stx_mnt_id)
 }
 
+/// L'identifiant de montage de ce que `name` désigne dans `dir` (sans suivre un lien, sans l'ouvrir), ou `None`.
+pub(crate) fn mnt_id_at(dir: &OwnedFd, name: &CStr) -> Option<u64> {
+    let stat = statx(dir, name, AtFlags::SYMLINK_NOFOLLOW, StatxFlags::MNT_ID).ok()?;
+    (stat.stx_mask & StatxFlags::MNT_ID.bits() != 0).then_some(stat.stx_mnt_id)
+}
+
 impl<'p> Eraser<'p> {
     pub(super) fn new(
         dev: u128,

@@ -41,6 +41,50 @@ pub struct DiskSpace {
     pub total: u64,
 }
 
+/// L'identité complète d'un fichier publié : de quoi reconnaître qu'il est encore CELUI que Hearth a écrit (un
+/// numéro d'inode libéré peut être réattribué ; la taille et la date de modification, à la nanoseconde, ne
+/// coïncident pas par hasard).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileStamp {
+    pub dev: u64,
+    pub ino: u64,
+    pub size: u64,
+    pub mtime_ns: i64,
+}
+
+/// Ce que `remove` exige du fichier avant de le retirer. La taille et la date ne sont connues que d'une archive
+/// publiée ; une partie en cours d'écriture ou un manifeste n'a que son inode (le manifeste a, en plus, son
+/// empreinte, vérifiée par l'appelant).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Expected {
+    pub dev: u64,
+    pub ino: u64,
+    pub size: Option<u64>,
+    pub mtime_ns: Option<i64>,
+}
+
+impl Expected {
+    /// L'inode seulement.
+    pub const fn inode(ident: FileIdent) -> Self {
+        Self {
+            dev: ident.0,
+            ino: ident.1,
+            size: None,
+            mtime_ns: None,
+        }
+    }
+
+    /// Le fichier publié tel que Hearth l'a vu.
+    pub const fn stamp(stamp: FileStamp) -> Self {
+        Self {
+            dev: stamp.dev,
+            ino: stamp.ino,
+            size: Some(stamp.size),
+            mtime_ns: Some(stamp.mtime_ns),
+        }
+    }
+}
+
 /// Ce que `remove` a fait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Removed {
@@ -73,15 +117,16 @@ pub trait BackupFiles: Send + Sync {
         name: &str,
     ) -> Result<(Box<dyn BackupSink>, FileIdent), BackupFsError>;
 
-    /// Rend `part` définitif sous `name` (renommage dans le même dossier, qui ne remplace jamais un fichier
-    /// existant), après avoir revérifié que `part` est toujours le fichier `expect`.
+    /// Rend `part` définitif sous `name` (renommage dans le même dossier qui ne remplace JAMAIS un fichier
+    /// existant, atomiquement : `RENAME_NOREPLACE`), après avoir revérifié que `part` est toujours le fichier
+    /// `expect`. Rend l'identité complète du fichier publié.
     fn publish(
         &self,
         service_dir: &str,
         part: &str,
         name: &str,
         expect: FileIdent,
-    ) -> Result<(), BackupFsError>;
+    ) -> Result<FileStamp, BackupFsError>;
 
     /// Écrit un petit fichier neuf d'un coup (le manifeste voisin) : création exclusive, `fsync`.
     fn write_new(
@@ -102,13 +147,12 @@ pub trait BackupFiles: Send + Sync {
     ) -> Result<(Box<dyn Read + Send>, FileIdent), BackupFsError>;
 
     /// Retire le fichier SI c'est celui de l'identité donnée (revérifiée sur le fichier ouvert, juste avant).
+    /// Le dossier du service reste : un dossier vide ne gêne personne, et en retirer un serait une course avec la
+    /// création d'une sauvegarde.
     fn remove(
         &self,
         service_dir: &str,
         name: &str,
-        expect: FileIdent,
+        expect: Expected,
     ) -> Result<Removed, BackupFsError>;
-
-    /// Retire un sous-dossier de service quand il est vide : jamais un contenu. Sans effet s'il reste quelque chose.
-    fn remove_service_dir_if_empty(&self, service_dir: &str) -> Result<(), BackupFsError>;
 }

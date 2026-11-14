@@ -10,7 +10,10 @@
 //! - une création est EXCLUSIVE (jamais par-dessus un fichier, jamais par un lien) ; une ouverture ne suit jamais
 //!   un lien ni ne bloque sur un tube ; une suppression revérifie l'inode juste avant (`Removed::NotOurs`
 //!   sinon : rien n'est touché) ;
-//! - rien n'est renommé ni supprimé qui ne soit celui du registre.
+//! - rien n'est renommé ni supprimé qui ne soit celui du registre : l'archive publiée se reconnaît à son inode,
+//!   sa taille ET sa date de modification (un numéro d'inode libéré est vite réattribué) ;
+//! - la publication est un renommage qui ne remplace JAMAIS (`RENAME_NOREPLACE`, atomique) : un fichier posé à la
+//!   main sous le nom définitif entre-temps n'est pas écrasé.
 //!
 //! Sans Unix (poste de développement Windows), il n'y a pas d'inode : tout geste répond `Unsupported`, comme
 //! `SafeFs`. Le code d'inode et de droits est Linux ; il compile partout, il ne s'exécute pas sous Windows.
@@ -19,7 +22,8 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::application::ports::{
-    BackupFiles, BackupFsError, BackupRemoved, BackupSink, DiskSpace, FileIdent,
+    BackupFiles, BackupFsError, BackupRemoved, BackupSink, DiskSpace, Expected, FileIdent,
+    FileStamp,
 };
 use crate::domain::backups::ownership::Seen;
 use crate::domain::files::RelPath;
@@ -56,6 +60,39 @@ mod sys {
 
     pub fn ident(meta: &fs::Metadata) -> FileIdent {
         (meta.dev(), meta.ino())
+    }
+
+    /// L'identité complète : inode, taille, date de modification à la nanoseconde.
+    pub fn stamp(meta: &fs::Metadata) -> FileStamp {
+        FileStamp {
+            dev: meta.dev(),
+            ino: meta.ino(),
+            size: meta.len(),
+            mtime_ns: meta
+                .mtime()
+                .saturating_mul(1_000_000_000)
+                .saturating_add(meta.mtime_nsec()),
+        }
+    }
+
+    /// Renomme sans jamais remplacer : `renameat2(RENAME_NOREPLACE)`. Un système de fichiers ou un noyau qui ne le
+    /// connaît pas (`EINVAL`, `ENOSYS`) : lien dur vers le nom définitif (qui refuse d'exister déjà), puis retrait
+    /// de l'ancien nom.
+    pub fn rename_noreplace(from: &Path, to: &Path) -> Result<(), BackupFsError> {
+        use rustix::fs::{CWD, RenameFlags, renameat_with};
+        use rustix::io::Errno;
+        match renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE) {
+            Ok(()) => Ok(()),
+            Err(Errno::EXIST) => Err(BackupFsError::Exists),
+            Err(Errno::INVAL | Errno::NOSYS) => match fs::hard_link(from, to) {
+                Ok(()) => fs::remove_file(from).map_err(|e| io_error(&e)),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    Err(BackupFsError::Exists)
+                }
+                Err(error) => Err(io_error(&error)),
+            },
+            Err(error) => Err(io_error(&io::Error::from(error))),
+        }
     }
 
     /// Un dossier de confiance : un vrai dossier, à l'utilisateur effectif de l'agent, que ni le groupe ni les
@@ -135,6 +172,19 @@ mod sys {
 
     pub fn ident(_meta: &fs::Metadata) -> FileIdent {
         (0, 0)
+    }
+
+    pub fn stamp(_meta: &fs::Metadata) -> FileStamp {
+        FileStamp {
+            dev: 0,
+            ino: 0,
+            size: 0,
+            mtime_ns: 0,
+        }
+    }
+
+    pub fn rename_noreplace(_from: &Path, _to: &Path) -> Result<(), BackupFsError> {
+        Err(BackupFsError::Unsupported)
     }
 
     pub fn trusted_dir(_path: &Path) -> Result<(), BackupFsError> {
@@ -244,20 +294,19 @@ impl BackupFiles for StdBackupFiles {
         part: &str,
         name: &str,
         expect: FileIdent,
-    ) -> Result<(), BackupFsError> {
+    ) -> Result<FileStamp, BackupFsError> {
         let dir = self.service_dir(service_dir, false)?;
         let (from, to) = (dir.join(component(part)?), dir.join(component(name)?));
         let file = sys::open_regular(&from)?;
-        if sys::ident(&file.metadata().map_err(|e| io_error(&e))?) != expect {
+        let meta = file.metadata().map_err(|e| io_error(&e))?;
+        if sys::ident(&meta) != expect {
             return Err(BackupFsError::Unsafe);
         }
         drop(file);
-        // Jamais par-dessus un fichier : le nom définitif doit être libre.
-        if std::fs::symlink_metadata(&to).is_ok() {
-            return Err(BackupFsError::Exists);
-        }
-        std::fs::rename(&from, &to).map_err(|e| io_error(&e))?;
-        sync_dir(&dir)
+        // Jamais par-dessus un fichier, même posé à l'instant : le noyau refuse de remplacer.
+        sys::rename_noreplace(&from, &to)?;
+        sync_dir(&dir)?;
+        Ok(sys::stamp(&meta))
     }
 
     fn write_new(
@@ -283,8 +332,13 @@ impl BackupFiles for StdBackupFiles {
         };
         match std::fs::symlink_metadata(dir.join(component(name)?)) {
             Ok(meta) if meta.is_file() => {
-                let (dev, ino) = sys::ident(&meta);
-                Ok(Seen::File { dev, ino })
+                let stamp = sys::stamp(&meta);
+                Ok(Seen::File {
+                    dev: stamp.dev,
+                    ino: stamp.ino,
+                    size: stamp.size,
+                    mtime_ns: stamp.mtime_ns,
+                })
             }
             Ok(_) => Ok(Seen::NotRegular),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Seen::Absent),
@@ -307,7 +361,7 @@ impl BackupFiles for StdBackupFiles {
         &self,
         service_dir: &str,
         name: &str,
-        expect: FileIdent,
+        expect: Expected,
     ) -> Result<BackupRemoved, BackupFsError> {
         let dir = match self.service_dir(service_dir, false) {
             Ok(dir) => dir,
@@ -330,7 +384,11 @@ impl BackupFiles for StdBackupFiles {
             Err(BackupFsError::Unsafe) => return Ok(BackupRemoved::NotOurs),
             Err(error) => return Err(error),
         };
-        if sys::ident(&file.metadata().map_err(|e| io_error(&e))?) != expect {
+        let found = sys::stamp(&file.metadata().map_err(|e| io_error(&e))?);
+        if (found.dev, found.ino) != (expect.dev, expect.ino)
+            || expect.size.is_some_and(|size| size != found.size)
+            || expect.mtime_ns.is_some_and(|mtime| mtime != found.mtime_ns)
+        {
             return Ok(BackupRemoved::NotOurs);
         }
         drop(file);
@@ -342,17 +400,6 @@ impl BackupFiles for StdBackupFiles {
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(BackupRemoved::Gone),
             Err(error) => Err(io_error(&error)),
         }
-    }
-
-    fn remove_service_dir_if_empty(&self, service_dir: &str) -> Result<(), BackupFsError> {
-        let dir = match self.service_dir(service_dir, false) {
-            Ok(dir) => dir,
-            Err(BackupFsError::NotFound) => return Ok(()),
-            Err(error) => return Err(error),
-        };
-        // `remove_dir` refuse un dossier qui n'est pas vide : jamais un contenu.
-        let _ = std::fs::remove_dir(&dir);
-        Ok(())
     }
 }
 
@@ -403,16 +450,21 @@ mod tests {
         let files = files(&dir);
         let (mut sink, ident) = files.create("h_A", "x.tar.gz.part").expect("créé");
         write(&mut sink, b"archive");
-        files
+        let stamp = files
             .publish("h_A", "x.tar.gz.part", "x.tar.gz", ident)
             .expect("publié");
-        assert_eq!(
-            files.seen("h_A", "x.tar.gz").expect("vu"),
-            Seen::File {
-                dev: ident.0,
-                ino: ident.1
-            }
-        );
+        let Seen::File {
+            dev,
+            ino,
+            size,
+            mtime_ns,
+        } = files.seen("h_A", "x.tar.gz").expect("vu")
+        else {
+            panic!("un fichier est attendu");
+        };
+        assert_eq!((dev, ino, size), (ident.0, ident.1, 7));
+        assert_eq!((stamp.dev, stamp.ino, stamp.size), (dev, ino, size));
+        assert_eq!(stamp.mtime_ns, mtime_ns);
         assert_eq!(
             files.seen("h_A", "x.tar.gz.part").expect("vu"),
             Seen::Absent
@@ -423,11 +475,15 @@ mod tests {
         reader.read_to_string(&mut text).expect("lu");
         assert_eq!(text, "archive");
         assert_eq!(
-            files.remove("h_A", "x.tar.gz", ident).expect("retiré"),
+            files
+                .remove("h_A", "x.tar.gz", Expected::stamp(stamp))
+                .expect("retiré"),
             BackupRemoved::Done
         );
         assert_eq!(
-            files.remove("h_A", "x.tar.gz", ident).expect("retiré"),
+            files
+                .remove("h_A", "x.tar.gz", Expected::stamp(stamp))
+                .expect("retiré"),
             BackupRemoved::Gone
         );
     }
@@ -442,10 +498,47 @@ mod tests {
         std::fs::remove_file(&path).expect("retiré à la main");
         std::fs::write(&path, b"foreign").expect("remplacé à la main");
         assert_eq!(
-            files.remove("h_A", "x.tar.gz", ident).expect("jugé"),
+            files
+                .remove("h_A", "x.tar.gz", Expected::inode(ident))
+                .expect("jugé"),
             BackupRemoved::NotOurs
         );
         assert_eq!(std::fs::read(&path).expect("lu"), b"foreign");
+    }
+
+    #[test]
+    fn a_file_with_the_same_inode_but_another_size_or_date_is_never_removed() {
+        let dir = private_tempdir();
+        let files = files(&dir);
+        let (mut sink, ident) = files.create("h_A", "x.part").expect("créé");
+        write(&mut sink, b"archive");
+        let stamp = files.publish("h_A", "x.part", "x", ident).expect("publié");
+        let path = dir.path().join("backups/h_A/x");
+        // Le même fichier (même inode) réécrit à la main : plus celui que Hearth a écrit.
+        std::fs::write(&path, b"rewritten by hand, longer").expect("réécrit");
+        assert_eq!(
+            files
+                .remove("h_A", "x", Expected::stamp(stamp))
+                .expect("jugé"),
+            BackupRemoved::NotOurs
+        );
+        assert!(path.exists());
+        // La date seule diffère : même refus.
+        let file = std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .expect("ouvert");
+        file.set_len(stamp.size).expect("taille remise");
+        file.set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(42))
+            .expect("date changée");
+        drop(file);
+        assert_eq!(
+            files
+                .remove("h_A", "x", Expected::stamp(stamp))
+                .expect("jugé"),
+            BackupRemoved::NotOurs
+        );
+        assert!(path.exists());
     }
 
     #[test]
@@ -461,7 +554,9 @@ mod tests {
         for name in ["link.tar.gz", "folder.tar.gz"] {
             assert_eq!(files.seen("h_A", name).expect("vu"), Seen::NotRegular);
             assert_eq!(
-                files.remove("h_A", name, ident).expect("jugé"),
+                files
+                    .remove("h_A", name, Expected::inode(ident))
+                    .expect("jugé"),
                 BackupRemoved::NotOurs
             );
             assert!(files.open("h_A", name).is_err());
@@ -528,18 +623,6 @@ mod tests {
             assert!(files.create("h_A", bad).is_err(), "{bad}");
             assert!(files.create(bad, "x").is_err(), "{bad}");
         }
-    }
-
-    #[test]
-    fn an_empty_service_folder_goes_but_one_with_a_file_stays() {
-        let dir = private_tempdir();
-        let files = files(&dir);
-        let (mut sink, _) = files.create("h_A", "x").expect("créé");
-        write(&mut sink, b"1");
-        files
-            .remove_service_dir_if_empty("h_A")
-            .expect("sans effet");
-        assert!(dir.path().join("backups/h_A/x").exists());
     }
 
     #[test]

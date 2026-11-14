@@ -222,6 +222,7 @@ mod tests {
                 bytes: 5,
             },
             entries,
+            skipped: 0,
             archive: None,
         }
     }

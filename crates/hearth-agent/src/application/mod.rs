@@ -28,6 +28,7 @@ pub mod service_logs;
 pub mod service_op_access;
 pub mod service_ops;
 pub mod service_specs;
+pub mod service_stop;
 pub mod services;
 pub mod services_right;
 pub mod sessions;

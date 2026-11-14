@@ -5,12 +5,15 @@
 -- manifeste voisin a l'empreinte de la ligne (`manifest_sha256`), quel que soit le nom du fichier. Un fichier de la
 -- racine des sauvegardes qui n'est dans aucune ligne n'existe pas pour Hearth.
 --
--- Une ligne `writing` est une archive en cours d'écriture (`<id>.tar.gz.part`) ; au démarrage, les lignes `writing`
--- sont retirées (le fichier partiel l'est par le journal des opérations, après vérification de l'inode). Une ligne
+-- Une ligne `writing` est une archive en cours d'écriture (`<id>.tar.gz.part`) ; au démarrage, Hearth retire SES
+-- fichiers (la partie par inode, l'archive publiée par inode et taille, le manifeste par empreinte : la ligne les
+-- connaît avant leur écriture, `note_publishing`) puis la ligne. Une ligne
 -- `ready` dont l'archive a disparu est « disparue » (listée, retirée du registre par le compte).
 --
 -- La note du compte est SCELLÉE (ChaCha20-Poly1305, clé `services.key`, données associées = service, révision 0,
 -- champ `backup-note:<id>`) : elle n'est ni en clair ici, ni au manifeste, ni au journal d'activité (BR-BACKUP-012).
+-- L'archive publiée se reconnaît à son inode, sa taille (`archive_bytes`) ET sa date de modification
+-- (`archive_mtime_ns`, nanosecondes Unix) : un numéro d'inode libéré est vite réattribué.
 -- Les dates suivent la convention de 0001 (texte UTC à largeur fixe). Le périphérique et l'inode sont des entiers 64
 -- bits non signés rangés dans un entier signé (même suite de bits).
 
@@ -27,12 +30,15 @@ CREATE TABLE backups (
     dev             INTEGER NOT NULL,
     ino             INTEGER NOT NULL,
     archive_bytes   INTEGER NOT NULL DEFAULT 0 CHECK (archive_bytes >= 0),
+    archive_mtime_ns INTEGER NOT NULL DEFAULT 0,
     data_bytes      INTEGER NOT NULL DEFAULT 0 CHECK (data_bytes >= 0),
     files           INTEGER NOT NULL DEFAULT 0 CHECK (files >= 0),
     mode            TEXT NOT NULL CHECK (mode IN ('stopped', 'hot', 'stop_copy_start')),
     -- Liste JSON de repères (`["hot","maybe_inconsistent"]`), jamais un texte libre.
     flags_json      TEXT NOT NULL DEFAULT '[]',
     changed_files   INTEGER NOT NULL DEFAULT 0 CHECK (changed_files >= 0),
+    -- Éléments que la copie n'a pas archivés (tubes, sockets, autre système de fichiers...).
+    skipped         INTEGER NOT NULL DEFAULT 0 CHECK (skipped >= 0),
     image           TEXT NOT NULL DEFAULT '',
     integrity       TEXT NOT NULL DEFAULT 'unchecked' CHECK (integrity IN ('unchecked', 'verified', 'corrupt')),
     verified_at     TEXT,

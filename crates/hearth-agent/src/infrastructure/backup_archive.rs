@@ -23,18 +23,13 @@ use flate2::write::GzEncoder;
 use sha2::{Digest, Sha256};
 use tar::{Builder, EntryType as TarType, Header};
 
-use crate::application::ports::{BackupSink, EntryKind, EntryMeta};
+use crate::application::ports::{
+    ArchiveBuilder, ArchiveEnd, BackupArchive, BackupSink, EntryKind, EntryMeta, FileDigest,
+    VerifyError, VerifyReport,
+};
+use crate::domain::backups::hex;
 use crate::domain::backups::manifest::{IN_ARCHIVE_NAME, MAX_MANIFEST_BYTES, Manifest};
 use crate::domain::backups::read::{Accepted, ArchiveIndex, Refusal, TarKind};
-
-pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-/// L'empreinte hexadécimale d'octets en mémoire.
-pub fn sha256_hex(bytes: &[u8]) -> String {
-    hex(&Sha256::digest(bytes))
-}
 
 // ---------------------------------------------------------------------------------------------
 // Écrire
@@ -59,21 +54,6 @@ impl Write for Counted {
     fn flush(&mut self) -> io::Result<()> {
         self.sink.flush()
     }
-}
-
-/// Ce qu'un fichier archivé a donné.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileDigest {
-    pub sha256: String,
-    /// Le fichier s'est arrêté avant sa taille annoncée (il a rétréci) : complété de zéros.
-    pub short: bool,
-}
-
-/// Le fichier de fin d'écriture.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArchiveEnd {
-    pub bytes: u64,
-    pub sha256: String,
 }
 
 /// Lit exactement `size` octets de `inner`, les hache, et complète de zéros si `inner` s'arrête avant.
@@ -111,7 +91,7 @@ impl<R: Read + ?Sized> Read for Exact<'_, R> {
     }
 }
 
-pub struct ArchiveWriter {
+struct ArchiveWriter {
     builder: Builder<GzEncoder<Counted>>,
 }
 
@@ -130,7 +110,7 @@ fn header_for(meta: &EntryMeta, kind: TarType, size: u64) -> Header {
 impl ArchiveWriter {
     /// `sink` : le fichier partiel. Rend aussi le compteur d'octets compressés écrits (lu par l'appelant pour
     /// surveiller l'espace).
-    pub fn new(sink: Box<dyn BackupSink>) -> (Self, Arc<AtomicU64>) {
+    fn new(sink: Box<dyn BackupSink>) -> (Self, Arc<AtomicU64>) {
         let written = Arc::new(AtomicU64::new(0));
         let counted = Counted {
             sink,
@@ -147,19 +127,19 @@ impl ArchiveWriter {
     }
 
     /// Un dossier.
-    pub fn dir(&mut self, tar_path: &str, meta: &EntryMeta) -> io::Result<()> {
+    fn dir(&mut self, tar_path: &str, meta: &EntryMeta) -> io::Result<()> {
         let mut header = header_for(meta, TarType::Directory, 0);
         self.builder.append_data(&mut header, tar_path, io::empty())
     }
 
     /// Un lien symbolique, jamais suivi.
-    pub fn symlink(&mut self, tar_path: &str, meta: &EntryMeta, target: &str) -> io::Result<()> {
+    fn symlink(&mut self, tar_path: &str, meta: &EntryMeta, target: &str) -> io::Result<()> {
         let mut header = header_for(meta, TarType::Symlink, 0);
         self.builder.append_link(&mut header, tar_path, target)
     }
 
     /// Un fichier : exactement `meta.size` octets, lus en flux, hachés au passage.
-    pub fn file(
+    fn file(
         &mut self,
         tar_path: &str,
         meta: &EntryMeta,
@@ -181,7 +161,7 @@ impl ArchiveWriter {
     }
 
     /// Ajoute le manifeste en dernière entrée, ferme l'archive et rend le fichier durable.
-    pub fn finish(mut self, manifest_json: &[u8]) -> io::Result<ArchiveEnd> {
+    fn finish_archive(mut self, manifest_json: &[u8]) -> io::Result<ArchiveEnd> {
         let meta = EntryMeta {
             kind: EntryKind::File,
             size: u64::try_from(manifest_json.len()).unwrap_or(u64::MAX),
@@ -205,41 +185,63 @@ impl ArchiveWriter {
     }
 }
 
+/// Le format de production : tar GNU compressé en gzip niveau 1.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TarGzArchive;
+
+impl ArchiveBuilder for ArchiveWriter {
+    fn dir(&mut self, tar_path: &str, meta: &EntryMeta) -> io::Result<()> {
+        ArchiveWriter::dir(self, tar_path, meta)
+    }
+
+    fn symlink(&mut self, tar_path: &str, meta: &EntryMeta, target: &str) -> io::Result<()> {
+        ArchiveWriter::symlink(self, tar_path, meta, target)
+    }
+
+    fn file(
+        &mut self,
+        tar_path: &str,
+        meta: &EntryMeta,
+        source: &mut dyn Read,
+    ) -> io::Result<FileDigest> {
+        ArchiveWriter::file(self, tar_path, meta, source)
+    }
+
+    fn finish(self: Box<Self>, manifest_json: &[u8]) -> io::Result<ArchiveEnd> {
+        (*self).finish_archive(manifest_json)
+    }
+}
+
+impl BackupArchive for TarGzArchive {
+    fn builder(&self, sink: Box<dyn BackupSink>) -> Box<dyn ArchiveBuilder> {
+        let (writer, _written) = ArchiveWriter::new(sink);
+        Box::new(writer)
+    }
+
+    fn verify(
+        &self,
+        archive: Box<dyn Read + Send>,
+        manifest: &Manifest,
+        archive_sha256: &str,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<VerifyReport, VerifyError> {
+        verify_archive(archive, manifest, archive_sha256, stop)
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Relire
 // ---------------------------------------------------------------------------------------------
 
-/// Pourquoi une vérification n'a pas conclu « vérifiée ».
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-pub enum VerifyError {
-    /// L'archive n'est pas ce que le manifeste dit : format, entrée, taille, empreinte (« Corrompue »).
-    #[error("archive corrupt")]
-    Corrupt,
-    /// La lecture a échoué pour une autre raison (disque) : rien n'est conclu sur l'archive.
-    #[error("read error: {0:?}")]
-    Io(io::ErrorKind),
-    /// La vérification a été interrompue (arrêt de l'agent).
-    #[error("stopped")]
-    Stopped,
-}
-
-/// Une erreur de lecture : c'est l'ARCHIVE qui est en cause (gzip, en-tête tar, fin prématurée : `tar` rend ses
-/// refus en `Other`), sauf quand c'est le disque ou les droits qui refusent de la lire.
+/// Une erreur de lecture : c'est l'ARCHIVE qui est en cause (gzip, en-tête tar, fin prématurée : `tar` et `flate2`
+/// rendent leurs refus en `InvalidData`, `InvalidInput`, `UnexpectedEof` ou `Other`, sans code du système), sauf
+/// quand le SYSTÈME refuse de la lire (erreur d'entrée-sortie, droits, disque : un code d'erreur du système).
 fn corrupt_or_io(error: &io::Error) -> VerifyError {
-    match error.kind() {
-        io::ErrorKind::PermissionDenied
-        | io::ErrorKind::NotFound
-        | io::ErrorKind::TimedOut
-        | io::ErrorKind::OutOfMemory
-        | io::ErrorKind::Interrupted => VerifyError::Io(error.kind()),
-        _ => VerifyError::Corrupt,
+    if error.raw_os_error().is_some() {
+        VerifyError::Io(error.kind())
+    } else {
+        VerifyError::Corrupt
     }
-}
-
-/// Ce que la lecture a établi.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VerifyReport {
-    pub files_checked: u64,
 }
 
 struct Shared {
@@ -288,7 +290,7 @@ fn kind_of(kind: TarType) -> TarKind {
 /// bon type, de la bonne taille, du bon SHA-256 ; aucune entrée de plus ; le manifeste de l'archive est celui
 /// d'à côté ; l'empreinte de l'archive entière est `archive_sha256`. `stop` : demande d'arrêt, relue entre deux
 /// entrées.
-pub fn verify_archive(
+fn verify_archive(
     reader: Box<dyn Read + Send>,
     manifest: &Manifest,
     archive_sha256: &str,
@@ -388,6 +390,7 @@ mod tests {
     use crate::domain::backups::manifest::{
         ArchiveFacts, Entry, EntryType, FORMAT, ManifestRoot, tar_path,
     };
+    use crate::domain::backups::sha256_hex;
     use hearth_proto::api::backups::BackupMode;
     use std::io::Cursor;
     use std::sync::Mutex;
@@ -500,10 +503,11 @@ mod tests {
             ignored: vec![],
             totals: Manifest::recount(&entries),
             entries,
+            skipped: 0,
             archive: None,
         };
         let json = serde_json::to_vec(&manifest).expect("json");
-        let end = writer.finish(&json).expect("finish");
+        let end = writer.finish_archive(&json).expect("finish");
         assert_eq!(end.bytes, written.load(Ordering::Relaxed));
         let bytes = sink.0.lock().expect("verrou").clone();
         assert_eq!(end.bytes, bytes.len() as u64);
@@ -661,5 +665,32 @@ mod tests {
             .expect("file");
         assert!(!digest.short);
         assert_eq!(digest.sha256, sha256_hex(b"abc"));
+    }
+
+    #[test]
+    fn a_system_error_is_never_a_corrupt_archive_but_a_format_error_is() {
+        // Le système refuse de lire (code d'erreur d'entrée-sortie ou de droits) : rien n'est conclu sur l'archive.
+        assert!(matches!(
+            corrupt_or_io(&io::Error::from_raw_os_error(5)),
+            VerifyError::Io(_)
+        ));
+        assert!(matches!(
+            corrupt_or_io(&io::Error::from_raw_os_error(13)),
+            VerifyError::Io(_)
+        ));
+        // gzip, tar : leurs refus n'ont pas de code du système, c'est l'archive qui est en cause.
+        for kind in [
+            io::ErrorKind::InvalidData,
+            io::ErrorKind::InvalidInput,
+            io::ErrorKind::UnexpectedEof,
+            io::ErrorKind::Other,
+            io::ErrorKind::TimedOut,
+        ] {
+            assert_eq!(
+                corrupt_or_io(&io::Error::new(kind, "refus du format")),
+                VerifyError::Corrupt,
+                "{kind:?}"
+            );
+        }
     }
 }

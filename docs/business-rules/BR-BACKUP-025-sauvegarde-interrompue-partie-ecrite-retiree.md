@@ -11,7 +11,7 @@ maj: 2026-10-13
 # BR-BACKUP-025 — Une sauvegarde interrompue est déclarée telle ; sa partie écrite est retirée au redémarrage, rien n'est relancé
 
 ## Règle
-L'archive en cours d'écriture est un objet créé par l'opération (`ObjectKind::PartialArchive`), nommé au journal avec son numéro d'inode. Au démarrage, tant que son étape n'est pas `done`, elle est retirée APRÈS vérification de l'inode (un fichier de même nom mais d'un autre inode n'est pas touché ; sans plate-forme à inodes, rien n'est retiré). Rien d'autre n'est retiré ni relancé. Une restauration interrompue est « à vérifier » (BR-EDIT-031).
+L'archive en cours d'écriture est un objet créé par l'opération (`ObjectKind::PartialArchive`), nommé au journal avec son numéro d'inode. Au démarrage, tant que son étape n'est pas `done`, elle est retirée APRÈS vérification de l'inode (un fichier de même nom mais d'un autre inode n'est pas touché ; sans plate-forme à inodes, rien n'est retiré). Rien d'autre n'est retiré ni relancé. La ligne `writing` du registre apprend, AVANT l'écriture, la taille de l'archive et l'empreinte du manifeste (`note_publishing`) : au démarrage, pour chaque ligne `writing`, Hearth retire SES fichiers (la partie par inode, l'archive publiée par inode et taille, le manifeste par empreinte) puis la ligne ; un agent coupé entre l'écriture et « prête » ne laisse donc ni fichier ni ligne orpheline. Un fichier qui n'a plus la bonne identité n'est pas touché. Une restauration interrompue est « à vérifier » (BR-EDIT-031).
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/ops/recover.rs::recover (nettoyage)`
