@@ -5,7 +5,7 @@ titre: Ce qui n'a pas pu être effacé est compté et dit ; la suppression reste
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-supprimer-service.md (BR-DEL-016), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md §5 et §9, HRT-85
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-DEL-016 : Ce qui n'a pas pu être effacé est compté et dit ; la suppression reste « Réussi », rien n'est rejoué
@@ -16,10 +16,12 @@ Si l'effacement de certains éléments échoue (droits refusés, système de fic
 ## Application (code)
 - `crates/hearth-agent/src/application/delete.rs::ServiceDeletion::erase`
 - `crates/hearth-agent/src/application/ports/safe_fs.rs::Erased`
+- `apps/desktop/src/services/delete.ts::endOf` (`partial`) et `apps/desktop/src/components/organisms/DeleteProgressDialog.vue` (la liste des dossiers concernés, jamais rejouée)
 
 ## Vérification
 - `crates/hearth-agent/tests/service_delete_https.rs::data_that_refuses_to_go_is_counted_and_the_deletion_still_succeeds`
 - `crates/hearth-agent/src/infrastructure/fs/tests_unix.rs::what_refuses_to_go_is_counted_and_the_rest_is_erased`
+- `apps/desktop/src/pages/ServicesDelete.test.ts` (des données qui n'ont pas pu être effacées)
 
 ## Cas limites
 - Les chemins des éléments restés (« liste ce qui reste ») viennent avec la fenêtre (HRT-86) : l'opération ne porte aujourd'hui que la cause et le décompte au journal.
@@ -30,3 +32,4 @@ Si l'effacement de certains éléments échoue (droits refusés, système de fic
 
 ## Historique
 - 2026-10-24 : création (HRT-85, côté agent).
+- 2026-11-14 : côté client (HRT-86).

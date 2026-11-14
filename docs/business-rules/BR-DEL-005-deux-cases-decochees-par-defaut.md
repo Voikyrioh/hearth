@@ -5,7 +5,7 @@ titre: Données et sauvegardes ne partent que sur deux cases explicites, décoch
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-supprimer-service.md (BR-DEL-005), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md §5 et §9, HRT-85
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-DEL-005 : Données et sauvegardes ne partent que sur deux cases explicites, décochées par défaut
@@ -17,10 +17,14 @@ La demande de suppression porte deux cases, `erase_data` et `erase_backups`, dé
 - `crates/hearth-proto/src/api/service_delete.rs::DeleteRequest`
 - `crates/hearth-agent/src/domain/ops/delete.rs::op_plan`
 - `crates/hearth-agent/src/application/delete.rs::ServiceDeletion::delete`
+- `apps/desktop/src/components/organisms/DeleteServiceDialog.vue` (deux cases décochées à chaque ouverture)
+- `apps/desktop/src/services/delete.ts::{offersDataBox, offersBackupsBox, requestOf}`
 
 ## Vérification
 - `crates/hearth-agent/tests/service_delete_https.rs::{a_deletion_without_a_box_removes_the_service_and_keeps_every_byte_of_data, the_backups_box_is_refused_not_ignored_until_the_agent_makes_backups}`
 - `crates/hearth-agent/src/domain/ops/delete.rs::tests::without_the_data_box_nothing_in_the_plan_can_erase`
+- `apps/desktop/src/pages/ServicesDelete.test.ts` (cases décochées, aucune saisie)
+- `apps/desktop/src/services/delete.test.ts`
 
 ## Cas limites
 - La case « sauvegardes » du client n'est proposée que s'il y a des sauvegardes (`DeletePreview::backups`, toujours 0 aujourd'hui).
@@ -31,3 +35,4 @@ La demande de suppression porte deux cases, `erase_data` et `erase_backups`, dé
 
 ## Historique
 - 2026-10-24 : création (HRT-85, côté agent).
+- 2026-11-14 : côté client (HRT-86).

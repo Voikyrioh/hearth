@@ -5,7 +5,7 @@ titre: Si l'arrêt ou la suppression du conteneur échoue, le service n'est pas 
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-supprimer-service.md (BR-DEL-015), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md §5 et §9, HRT-85
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-DEL-015 : Si l'arrêt ou la suppression du conteneur échoue, le service n'est pas supprimé et rien n'est touché
@@ -15,9 +15,11 @@ Si l'arrêt échoue ou si le moteur refuse de supprimer le conteneur, l'opérati
 
 ## Application (code)
 - `crates/hearth-agent/src/application/delete.rs::ServiceDeletion::{stop, remove_containers}`
+- `apps/desktop/src/services/delete.ts::{endOf, failureCauseText}` (« Le service {nom} n'a pas été supprimé. » et la cause, par son code)
 
 ## Vérification
 - `crates/hearth-agent/tests/service_delete_https.rs::{an_engine_that_refuses_the_removal_leaves_the_service_whole_and_a_retry_succeeds, an_engine_that_does_not_answer_makes_the_result_unknown_and_touches_nothing_else}`
+- `apps/desktop/src/pages/ServicesDelete.test.ts` (échec avant le point de non-retour)
 
 ## Cas limites
 - Aucun.
@@ -27,3 +29,4 @@ Si l'arrêt échoue ou si le moteur refuse de supprimer le conteneur, l'opérati
 
 ## Historique
 - 2026-10-24 : création (HRT-85, côté agent).
+- 2026-11-14 : côté client (HRT-86).

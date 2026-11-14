@@ -5,7 +5,7 @@ titre: Supprimer un service efface sa description et ses valeurs scellées
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-modifier-un-service.md (BR-DEL-004), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md (sections 0, 0 bis et 6), HRT-83
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-DEL-004 — Supprimer un service efface sa description et ses valeurs scellées
@@ -17,11 +17,14 @@ maj: 2026-10-24
 - `crates/hearth-agent/src/application/service_specs.rs::ServiceSpecs::{forget, discard_before}`
 - `crates/hearth-agent/src/infrastructure/sqlite/specs_repo.rs::SqliteSpecRepo::{forget, discard_before}`
 - `crates/hearth-agent/src/application/delete.rs::ServiceDeletion::{remove_containers, forget}`
+- `apps/desktop/src/services/delete.ts::effectText` et `fr.serviceDelete.effect` (« Sa configuration (variables, ports, commande) sera effacée avec lui. », jamais « Hearth ne la garde pas »)
 
 ## Vérification
 - `crates/hearth-agent/tests/service_spec_secrets.rs::forgetting_a_service_erases_its_sealed_values`
 - `crates/hearth-agent/tests/service_spec_secrets.rs::a_description_is_numbered_and_the_previous_revision_stays_readable`
 - `crates/hearth-agent/tests/service_delete_https.rs::{a_deletion_without_a_box_removes_the_service_and_keeps_every_byte_of_data, deleting_a_service_forgets_what_the_description_dragged_along, deleting_a_game_server_makes_the_agent_forget_its_phases}`
+- `apps/desktop/src/services/deleteCopy.test.ts`
+- `apps/desktop/src/pages/ServicesDelete.test.ts` (la fenêtre dit l'effet)
 
 ## Cas limites
 - La copie d'export sans secret (`.hearth/service.json`) n'existe pas encore : le message « Les données de {nom} sont conservées dans {chemin} » est celui du client (HRT-86), qui connaît le chemin par la fenêtre.
@@ -33,3 +36,4 @@ maj: 2026-10-24
 ## Historique
 - 2026-10-13 — création (HRT-83, ADR-0044 et ADR-0045 : socle des services créés par Hearth, côté agent).
 - 2026-10-24 — la suppression d'un service existe (HRT-85).
+- 2026-11-14 : côté client (HRT-86).

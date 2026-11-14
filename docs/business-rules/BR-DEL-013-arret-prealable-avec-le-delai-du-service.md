@@ -5,7 +5,7 @@ titre: Un service qui tourne est arrêté d'abord, avec son délai de grâce, ja
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-supprimer-service.md (BR-DEL-013), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md §5 et §9, HRT-85
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-DEL-013 : Un service qui tourne est arrêté d'abord, avec son délai de grâce, jamais coupé en silence
@@ -15,10 +15,13 @@ Avant d'être supprimé, un service « En marche » ou « Redémarre en boucle �
 
 ## Application (code)
 - `crates/hearth-agent/src/application/delete.rs::ServiceDeletion::stop`
+- `apps/desktop/src/services/delete.ts::runningText` (« Le service est en marche : il sera arrêté d'abord. » avec le délai réel du service)
+- `apps/desktop/src/components/organisms/DeleteProgressDialog.vue` (l'issue « coupé de force »)
 
 ## Vérification
 - `crates/hearth-agent/tests/service_delete_https.rs::a_running_service_is_stopped_with_its_grace_before_the_container_goes`
 - `crates/hearth-agent/tests/support/engine_contract.rs::deploys` (la suppression sans force refuse un conteneur qui tourne)
+- `apps/desktop/src/pages/ServicesDelete.test.ts` (délai réel, arrêt forcé)
 
 ## Cas limites
 - Hearth ne pilote que le moteur pour un service créé par Hearth : jamais d'unité systemd ici.
@@ -30,3 +33,4 @@ Avant d'être supprimé, un service « En marche » ou « Redémarre en boucle �
 
 ## Historique
 - 2026-10-24 : création (HRT-85, côté agent).
+- 2026-11-14 : côté client (HRT-86).

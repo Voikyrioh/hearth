@@ -5,7 +5,7 @@ titre: Supprimer est un acte d'administration jamais couvert par l'élévation, 
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-supprimer-service.md (BR-DEL-012), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md §5 et §9, HRT-85
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-DEL-012 : Supprimer est un acte d'administration jamais couvert par l'élévation, même sans case cochée
@@ -17,10 +17,14 @@ maj: 2026-10-24
 - `crates/hearth-proto/src/admin_act.rs::{ActKind::ServiceDelete, ROUTES}`
 - `crates/hearth-agent/src/entrypoint/http/reauth.rs::Parsed::Delete`
 - `crates/hearth-link/src/domain/act.rs::build`
+- `apps/desktop/src/components/organisms/DeleteServiceDialog.vue` (`AdminActDialog`, acte `service_delete`)
+- `apps/desktop/src-tauri/src/reauth/service.rs::act_of` (`ServiceDelete` : le mot de passe à chaque fois)
 
 ## Vérification
 - `crates/hearth-agent/tests/admin_reauth.rs` (matrice des actes)
 - `crates/hearth-link/src/domain/act.rs::tests::deleting_a_service_signs_its_key_and_the_two_boxes_and_never_the_retyped_name`
+- `apps/desktop/src/pages/ServicesDelete.test.ts` (le mot de passe est demandé sous l'élévation)
+- `apps/desktop/src-tauri/src/reauth/service.rs` (test de la table)
 
 ## Cas limites
 - Une case qui n'est pas un booléen rend le corps illisible des deux côtés : jamais un acte signé avec une case décochée par défaut.
@@ -31,3 +35,4 @@ maj: 2026-10-24
 
 ## Historique
 - 2026-10-24 : création (HRT-85, côté agent).
+- 2026-11-14 : côté client (HRT-86).
