@@ -662,7 +662,14 @@ fn applying_edits_to_the_game_file_keeps_every_unknown_line_through_every_gestur
 
 #[test]
 fn a_sequence_that_was_not_tried_is_never_executed_it_asks_for_a_decision() {
-    let terraria = terraria();
+    // La fiche embarquée de Terraria a été essayée (HRT-114) : la copie « non essayée » est faite en remettant le mot.
+    let text = include_str!("../../../catalog/terraria/fiche.toml")
+        .replace("status = \"tested\"", "status = \"untested\"");
+    let terraria = load_texts(
+        &text,
+        include_str!("../../../catalog/terraria/settings.toml"),
+    )
+    .expect("valide");
     assert_eq!(
         stop_plan(&terraria),
         StopPlan::NeedsDecision {

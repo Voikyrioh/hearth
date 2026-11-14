@@ -1373,8 +1373,8 @@ fn contains(haystack: &[u8], needle: &str) -> bool {
 
 fn terraria() -> Fiche {
     let text = TERRARIA_FICHE.replacen(
-        "game_updates = \"never\"",
-        &format!("digest = \"{IMAGE_DIGEST}\"\ngame_updates = \"never\""),
+        "digest = \"sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677\"",
+        &format!("digest = \"{IMAGE_DIGEST}\""),
         1,
     );
     load(

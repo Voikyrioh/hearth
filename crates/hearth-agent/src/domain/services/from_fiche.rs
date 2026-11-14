@@ -577,8 +577,13 @@ mod tests {
 
     #[test]
     fn an_unmeasured_minimum_never_blocks() {
-        // Terraria : tout `unmeasured`.
-        let fiche = terraria();
+        // Une fiche dont tout est `unmeasured` (Terraria a sa mémoire et son disque mesurés au repos, HRT-114).
+        let fiche = rich_with(
+            "[resources]
+cpu = { evidence = \"unmeasured\" }
+memory = { evidence = \"unmeasured\" }
+disk = { evidence = \"unmeasured\" }",
+        );
         assert_eq!(fit(&fiche, machine(0, 0), 0), Fit::Ok);
         let warnings = fit_warnings(&fiche, machine(0, 0), 0);
         assert!(warnings.contains(&FitWarning::UnmeasuredMinimum { lack: Lack::Cpu }));

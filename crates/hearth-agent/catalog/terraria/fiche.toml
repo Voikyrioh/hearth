@@ -6,7 +6,7 @@
 
 format = 2
 id = "terraria"
-version = 3
+version = 4
 family = "terraria"
 name = "Terraria"
 summary = "Le serveur officiel de Terraria, sans mod."
@@ -16,7 +16,7 @@ platform = "linux"
 [image]
 repository = "ryshe/terraria"
 tag = "vanilla-1.4.5.8"                   # celle d'une installation de référence
-# digest : NON VÉRIFIÉ, à relever par le job fiche-golden ; obligatoire pour « published »
+digest = "sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677"   # relevée par le banc d'essai réel (HRT-114, job fiche-live, 14/11/2026)
 game_updates = "never"                    # la version du jeu est celle de l'étiquette (T41)
 
 [owner]
@@ -75,8 +75,8 @@ ready_timeout_s = 1800                    # durée de génération d'un grand mo
 world_generation = true
 
 [ready]
-log_contains = "Server started"           # lu dans le commentaire de terraria.nix, jamais observé ici
-status = "untested"
+log_contains = "Server started"           # vu sur la vraie image par le banc d'essai (HRT-114, 14/11/2026)
+status = "tested"
 
 [stop]
 grace_s = 10                              # l'image ignore le signal (T2) : attendre plus longtemps n'enregistre rien
@@ -84,7 +84,7 @@ signal = "image_default"
 world_saved = "by_sequence"
 
 [stop.sequence]
-status = "untested"                       # point B6 : le serveur lit-il son entrée sans terminal ? Non vérifié
+status = "tested"                         # point B6 levé (HRT-114, 14/11/2026) : sans terminal, « save » puis « exit » sont lus, le jeu sort de lui-même (code 0), le service reste arrêté
 
 [[stop.sequence.step]]
 kind = "stdin_line"
@@ -101,7 +101,7 @@ line = "exit"                             # « arrête le serveur et enregistre 
 quits = true
 
 [save]
-status = "untested"
+status = "tested"                         # HRT-114 : « save » réécrit le fichier du monde (relevé du banc d'essai)
 
 [[save.step]]
 kind = "stdin_line"
@@ -114,8 +114,8 @@ seconds = 15
 
 [resources]
 cpu = { evidence = "unmeasured" }
-memory = { evidence = "unmeasured" }
-disk = { evidence = "unmeasured" }        # image d'environ 50 Mo d'après une installation de référence, monde non mesuré
+memory = { min_bytes = 591187148, evidence = "measured_idle" }   # HRT-114 : mémoire au repos, 60 s après « Server started » (un plancher, pas une recommandation)
+disk = { install_bytes = 53014364, evidence = "measured_idle" }   # HRT-114 : image (50 068 911 octets) + dossiers gérés après un premier démarrage, petit monde
 
 [worlds]
 folder = "world"
