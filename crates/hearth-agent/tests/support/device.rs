@@ -343,6 +343,31 @@ pub fn act_of<'a>(
             data: body["erase_data"].as_bool().unwrap_or_default(),
             backups: body["erase_backups"].as_bool().unwrap_or_default(),
         },
+        // Sauvegarder (HRT-97) : la clé du chemin, le mode et le nombre d'éléments ignorés pour cette fois, jamais la
+        // note ni un chemin.
+        ("POST", ["services", key, "backups"]) => AdminAct::BackupCreate {
+            target: hearth_proto::admin_act::decode_segment(key)
+                .unwrap_or_else(|| (*key).to_owned())
+                .into(),
+            mode: text("mode"),
+            ignored: u32::try_from(body["ignore_once"].as_array().map_or(0, Vec::len))
+                .expect("éléments ignorés"),
+        },
+        // Supprimer une sauvegarde : l'identifiant du chemin.
+        ("DELETE", ["backups", id]) => AdminAct::BackupDelete { target: id },
+        // Régler les éléments ignorés : la clé du chemin, le nombre et l'empreinte de la liste (jamais un chemin).
+        ("PUT", ["services", key, "backup-settings"]) => {
+            let settings: hearth_proto::api::backups::BackupSettings =
+                serde_json::from_value(body.clone()).expect("corps des éléments ignorés");
+            let (count, digest) = settings.act_digest();
+            AdminAct::BackupSettings {
+                target: hearth_proto::admin_act::decode_segment(key)
+                    .unwrap_or_else(|| (*key).to_owned())
+                    .into(),
+                count,
+                digest,
+            }
+        }
         // Annuler et décider une opération de service (HRT-144) : l'identifiant du chemin, le choix du corps.
         ("DELETE", ["operations", "services", id]) => AdminAct::OperationCancel { target: id },
         ("POST", ["operations", "services", id, "decision"]) => AdminAct::OperationDecide {
