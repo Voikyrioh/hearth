@@ -378,7 +378,7 @@ export function stepsOf(
   operation: ServiceOperation | null,
   plan: { stop: boolean; erase: boolean },
 ): ProgressStep[] {
-  // Le plan vient de l'aperçu, qui peut être périmé (le service a démarré, ou s'est arrêté, entre la lecture et la
+  // Le plan vient de l'aperçu, qui peut être périmé (le service a démarré entre la lecture et la
   // confirmation) : les étapes que l'agent a réellement ouvertes l'emportent (revue de Stephen, round 1).
   const opened = new Set<DeleteStage | undefined>([
     ...(operation?.steps ?? []).map((line) => STAGE_OF[line.step]),
