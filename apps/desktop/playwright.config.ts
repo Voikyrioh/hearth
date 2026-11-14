@@ -54,6 +54,7 @@ export default defineConfig({
         "hrt84-operations.spec.ts",
         "hrt65-lifecycle.spec.ts",
         "hrt69-deploy.spec.ts",
+        "hrt86-delete.spec.ts",
         "hrt102-catalogue.spec.ts",
         "hrt109-reglages.spec.ts",
         "ux-2026-10-24.spec.ts",
