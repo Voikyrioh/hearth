@@ -9,6 +9,8 @@ mod adoption_tx;
 mod attack_mode_repo;
 mod audit_repo;
 mod audit_sink;
+mod backup_files;
+mod backup_repo;
 mod boot_info;
 mod clock;
 mod container_engine;
@@ -56,6 +58,10 @@ pub use adoption_tx::{AdoptionTx, AdoptionWrite, NewAdoption, ReleasedAdoption};
 pub use attack_mode_repo::{AttackModeRepo, AttackModeTx};
 pub use audit_repo::{AuditRepo, AuditTx};
 pub use audit_sink::{AuditFeed, AuditSink, AuditWriteError};
+pub use backup_files::{
+    BackupFiles, BackupFsError, BackupSink, DiskSpace, FileIdent, Removed as BackupRemoved,
+};
+pub use backup_repo::{BackupRepo, BackupRow, NewBackup, Published};
 pub use boot_info::BootInfo;
 pub use clock::Clock;
 pub use container_engine::{
@@ -87,7 +93,10 @@ pub use op_journal::{
 pub use operation_repo::{OperationRepo, OperationTx};
 pub use password_hasher::{HashError, PasswordHasher};
 pub use proof::{ChallengeCrypto, CryptoError, ProofVerifier};
-pub use safe_fs::{Erased, FsError, Measure, Ownership, Perms, SafeFs, ServiceRoot};
+pub use safe_fs::{
+    DirListing, EntryKind, EntryMeta, Erased, FsError, ListedEntry, Measure, Ownership, Perms,
+    ReadFile, SafeFs, ServiceRoot,
+};
 pub use secret_random::{RandomError, SecretRandom};
 pub use secret_sealer::{
     KeyCheckRepo, KeyRead, KeyStoreError, SealError, SealerFactory, SecretSealer, ServicesKeyStore,

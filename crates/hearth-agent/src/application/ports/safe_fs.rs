@@ -112,6 +112,52 @@ pub struct Erased {
     pub stopped: bool,
 }
 
+/// Ce qu'un élément d'une racine de service est (jamais suivi : un lien est un lien).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryKind {
+    File,
+    Dir,
+    Symlink,
+    /// Tube, socket, périphérique, ou dossier d'un autre système de fichiers (un point de montage) : jamais lu,
+    /// jamais archivé, compté.
+    Other,
+}
+
+/// Ce que `lstat` dit d'un élément (HRT-97) : de quoi décrire une entrée de sauvegarde.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EntryMeta {
+    pub kind: EntryKind,
+    pub size: u64,
+    /// Les bits de droits (`0o7777` coupés à `0o777` : jamais setuid, setgid ni sticky à l'archivage).
+    pub mode: u32,
+    pub uid: u32,
+    pub gid: u32,
+    /// Date de modification, en nanosecondes depuis l'époque Unix.
+    pub mtime_ns: i64,
+    pub nlink: u64,
+}
+
+/// Un nom et ce qu'il désigne.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedEntry {
+    pub name: String,
+    pub meta: EntryMeta,
+}
+
+/// Le contenu d'un dossier, trié par nom. `skipped_names` : des noms qui ne sont pas de l'UTF-8 (ou pas un
+/// composant sûr), ni listés ni archivés, comptés.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DirListing {
+    pub entries: Vec<ListedEntry>,
+    pub skipped_names: u32,
+}
+
+/// Un fichier ordinaire ouvert en lecture : ses octets, et ce que `fstat` en dit sur le MÊME descripteur (avant
+/// et après la lecture, pour voir qu'il a changé pendant la copie à chaud).
+pub trait ReadFile: std::io::Read + Send {
+    fn meta(&self) -> Result<EntryMeta, FsError>;
+}
+
 /// Accès aux racines de service.
 pub trait SafeFs: Send + Sync {
     /// Ouvre `<données>/services/<clé>/` ; le dossier doit exister.
@@ -169,4 +215,19 @@ pub trait ServiceRoot: Send + Sync {
         rel: &RelPath,
         progress: &mut (dyn FnMut(u64) -> bool + Send),
     ) -> Result<Erased, FsError>;
+
+    /// Liste un dossier (la racine si `rel` est vide), sans rien suivre ni franchir (HRT-97) : un lien est
+    /// listé comme lien, un dossier d'un autre système de fichiers comme `Other`. Les noms qui ne sont pas de
+    /// l'UTF-8 sont comptés. `NotFound` si le dossier n'existe pas, `Blocked` si un composant est un lien.
+    fn list_dir(&self, rel: &RelPath) -> Result<DirListing, FsError>;
+
+    /// `lstat` d'un élément (la racine elle-même si `rel` est vide), sans suivre de lien.
+    fn stat(&self, rel: &RelPath) -> Result<EntryMeta, FsError>;
+
+    /// Ouvre un fichier ordinaire en lecture : jugé AVANT l'ouverture (un tube ou un périphérique ne s'ouvre
+    /// jamais), jamais par un lien, sur le périphérique de la racine. `NotRegular` pour tout autre élément.
+    fn open_read(&self, rel: &RelPath) -> Result<Box<dyn ReadFile>, FsError>;
+
+    /// La cible d'un lien symbolique, sans la suivre. `NotRegular` si l'élément n'est pas un lien.
+    fn read_link(&self, rel: &RelPath) -> Result<String, FsError>;
 }

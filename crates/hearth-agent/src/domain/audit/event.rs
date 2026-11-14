@@ -265,6 +265,13 @@ pub enum Target {
         service: ClientName,
         note: DeleteNote,
     },
+    /// Un acte sur les sauvegardes d'un service (HRT-97, BR-BACKUP-032) : le nom du service et ce que l'acte a fait
+    /// (des NOMBRES et des repères). **Jamais** un chemin, un nom de fichier ni la note du compte : le type n'a pas de
+    /// champ pour eux.
+    ServiceBackup {
+        service: ClientName,
+        note: BackupNote,
+    },
     /// Une fiche visée par une demande refusée avant de connaître le service (fiche inconnue, empreinte
     /// changée, contrat non accepté...) : son identifiant, nettoyé et borné.
     Fiche(ClientName),
@@ -273,6 +280,54 @@ pub enum Target {
         dir: ClientName,
         invariant: ClientName,
     },
+}
+
+/// Comment une sauvegarde a été faite, pour le journal (liste fermée, BR-BACKUP-006).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackupModeNote {
+    Stopped,
+    Hot,
+    StopCopyStart,
+}
+
+impl BackupModeNote {
+    fn text(self) -> &'static str {
+        match self {
+            Self::Stopped => "service arrêté",
+            Self::Hot => "à chaud",
+            Self::StopCopyStart => "avec arrêt",
+        }
+    }
+}
+
+/// Ce qu'un acte sur les sauvegardes a fait (BR-BACKUP-032) : des nombres et des repères, jamais un chemin ni la note.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackupNote {
+    /// Une sauvegarde créée : le mode, le nombre de fichiers et la taille des données, l'arrêt forcé, et le nombre
+    /// de fichiers qui ont changé pendant la copie (`0` : aucune incohérence détectée).
+    Created {
+        mode: BackupModeNote,
+        files: u64,
+        bytes: u64,
+        forced_stop: bool,
+        changed: u32,
+    },
+    /// Une sauvegarde supprimée : sa taille. `registry_only` : seule la ligne du registre est partie, le fichier
+    /// n'était plus celui que Hearth avait écrit (BR-BACKUP-013).
+    Deleted { bytes: u64, registry_only: bool },
+    /// Les éléments ignorés ont changé : combien d'éléments ignorés, combien de retraits (jamais les chemins).
+    Settings { ignored: u32, included: u32 },
+    /// Rien à dire (un refus, un échec avant tout geste).
+    Nothing,
+}
+
+fn size_text(bytes: u64) -> String {
+    let mebibytes = bytes / (1024 * 1024);
+    if mebibytes == 0 {
+        "moins de 1 Mio".to_owned()
+    } else {
+        format!("{mebibytes} Mio")
+    }
 }
 
 /// Ce que la suppression d'un service a fait de plus que le retirer (BR-DEL-029) : des nombres seulement.
@@ -550,6 +605,57 @@ impl Target {
                 }
                 Some(text)
             }
+            Self::ServiceBackup { service, note } => {
+                let mut text = format!("service {}", service.as_str());
+                match note {
+                    BackupNote::Created {
+                        mode,
+                        files,
+                        bytes,
+                        forced_stop,
+                        changed,
+                    } => {
+                        text.push_str(&format!(
+                            ", sauvegarde créée ({}, {files} fichier{}, {})",
+                            mode.text(),
+                            if *files > 1 { "s" } else { "" },
+                            size_text(*bytes)
+                        ));
+                        if *forced_stop {
+                            text.push_str(", arrêt forcé");
+                        }
+                        if *changed > 0 {
+                            text.push_str(&format!(
+                                ", {changed} fichier{} changé{} pendant la copie : peut être incohérente",
+                                if *changed > 1 { "s" } else { "" },
+                                if *changed > 1 { "s" } else { "" }
+                            ));
+                        } else if matches!(mode, BackupModeNote::Hot) {
+                            text.push_str(", aucun changement détecté pendant la copie");
+                        }
+                    }
+                    BackupNote::Deleted {
+                        bytes,
+                        registry_only,
+                    } => {
+                        text.push_str(&format!(", sauvegarde supprimée ({})", size_text(*bytes)));
+                        if *registry_only {
+                            text.push_str(
+                                ", ligne du registre seulement : le fichier n'est pas touché",
+                            );
+                        }
+                    }
+                    BackupNote::Settings { ignored, included } => {
+                        text.push_str(&format!(
+                            ", éléments ignorés par les sauvegardes modifiés ({ignored} ignoré{}, {included} retiré{} des ignorés par défaut)",
+                            if *ignored > 1 { "s" } else { "" },
+                            if *included > 1 { "s" } else { "" }
+                        ));
+                    }
+                    BackupNote::Nothing => {}
+                }
+                Some(text)
+            }
             Self::Fiche(fiche) => Some(format!("fiche {}", fiche.as_str())),
             Self::FicheRefused { dir, invariant } => {
                 Some(format!("fiche {} ({})", dir.as_str(), invariant.as_str()))
@@ -722,6 +828,14 @@ pub enum Reason {
     FicheRefused,
     /// Supprimer (HRT-85, BR-DEL-002) : Hearth ne supprime jamais un service créé hors de Hearth, même adopté.
     ServiceAdopted,
+    /// Sauvegarder (HRT-97, BR-BACKUP-032) : pas assez d'espace sur le disque des sauvegardes.
+    NoSpace,
+    /// Sauvegarder : le disque s'est presque rempli pendant la copie.
+    DiskAlmostFull,
+    /// Sauvegarder : la vérification de la sauvegarde a échoué.
+    BackupCorrupt,
+    /// Sauvegarder avec arrêt : le service arrêté pour la copie ne redémarre pas.
+    NotRestarted,
 }
 
 impl Reason {
@@ -806,6 +920,10 @@ impl Reason {
             Self::AgreementRequired => "contrat non accepté".to_owned(),
             Self::FicheRefused => "fiche refusée".to_owned(),
             Self::ServiceAdopted => "service adopté".to_owned(),
+            Self::NoSpace => "espace insuffisant".to_owned(),
+            Self::DiskAlmostFull => "disque presque plein pendant la copie".to_owned(),
+            Self::BackupCorrupt => "sauvegarde corrompue".to_owned(),
+            Self::NotRestarted => "service ne redémarre pas".to_owned(),
         }
     }
 }

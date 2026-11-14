@@ -18,6 +18,7 @@
 //!   verrous du serveur (`names`, `heavy_io`).
 
 pub mod access;
+pub mod backup;
 pub mod decision;
 pub mod delete;
 pub mod flush;
