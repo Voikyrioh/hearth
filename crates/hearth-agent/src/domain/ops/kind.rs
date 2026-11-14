@@ -371,10 +371,18 @@ pub enum Cause {
     NameTaken,
     /// Supprimer (HRT-85, BR-DEL-016) : le service est supprimé, mais des données n'ont pas pu être effacées.
     DataNotErased,
+    /// Sauvegarder (HRT-97, BR-BACKUP-009) : pas assez d'espace sur le disque des sauvegardes.
+    NoSpace,
+    /// Sauvegarder (BR-BACKUP-009) : le disque s'est presque rempli pendant la copie.
+    DiskAlmostFull,
+    /// Sauvegarder (BR-BACKUP-013) : la vérification a échoué, la sauvegarde est supprimée.
+    BackupCorrupt,
+    /// Sauvegarder avec arrêt (BR-BACKUP-008) : le service arrêté pour la copie ne redémarre pas.
+    NotRestarted,
 }
 
 impl Cause {
-    pub const ALL: [Cause; 28] = [
+    pub const ALL: [Cause; 32] = [
         Self::NotExecuted,
         Self::RunsWithPrevious,
         Self::RunsWithNew,
@@ -403,6 +411,10 @@ impl Cause {
         Self::DiskFull,
         Self::NameTaken,
         Self::DataNotErased,
+        Self::NoSpace,
+        Self::DiskAlmostFull,
+        Self::BackupCorrupt,
+        Self::NotRestarted,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -435,6 +447,10 @@ impl Cause {
             Self::DiskFull => "disk_full",
             Self::NameTaken => "name_taken",
             Self::DataNotErased => "data_not_erased",
+            Self::NoSpace => "no_space",
+            Self::DiskAlmostFull => "disk_almost_full",
+            Self::BackupCorrupt => "backup_corrupt",
+            Self::NotRestarted => "not_restarted",
         }
     }
 
@@ -472,6 +488,10 @@ impl Cause {
             Self::DiskFull => OperationCause::DiskFull,
             Self::NameTaken => OperationCause::NameTaken,
             Self::DataNotErased => OperationCause::DataNotErased,
+            Self::NoSpace => OperationCause::NoSpace,
+            Self::DiskAlmostFull => OperationCause::DiskAlmostFull,
+            Self::BackupCorrupt => OperationCause::BackupCorrupt,
+            Self::NotRestarted => OperationCause::NotRestarted,
         }
     }
 }

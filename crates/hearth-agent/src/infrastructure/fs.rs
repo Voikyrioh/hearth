@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[cfg(unix)]
-use crate::application::ports::{Erased, Measure, Perms};
+use crate::application::ports::{DirListing, EntryMeta, Erased, Measure, Perms, ReadFile};
 use crate::application::ports::{FsError, SafeFs, ServiceRoot};
 #[cfg(unix)]
 use crate::domain::files::RelPath;
@@ -124,5 +124,21 @@ impl ServiceRoot for unix::UnixRoot {
         progress: &mut (dyn FnMut(u64) -> bool + Send),
     ) -> Result<Erased, FsError> {
         self.erase(rel, progress, true)
+    }
+
+    fn list_dir(&self, rel: &RelPath) -> Result<DirListing, FsError> {
+        self.list(rel)
+    }
+
+    fn stat(&self, rel: &RelPath) -> Result<EntryMeta, FsError> {
+        self.stat_rel(rel)
+    }
+
+    fn open_read(&self, rel: &RelPath) -> Result<Box<dyn ReadFile>, FsError> {
+        self.open_for_read(rel)
+    }
+
+    fn read_link(&self, rel: &RelPath) -> Result<String, FsError> {
+        self.link_target(rel)
     }
 }

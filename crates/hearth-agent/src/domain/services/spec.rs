@@ -431,7 +431,9 @@ impl SpecSecrets {
                     ));
                 }
                 // Le manifeste est vérifié à part, avant : il n'est jamais une donnée de la description.
-                SecretField::Manifest => return Err(SecretsDecodeError),
+                SecretField::Manifest | SecretField::BackupNote(_) => {
+                    return Err(SecretsDecodeError);
+                }
                 SecretField::Command => {
                     if command.is_some() {
                         return Err(SecretsDecodeError);
