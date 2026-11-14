@@ -1862,6 +1862,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             // `404 FICHE_UNKNOWN` ; rien n'est écrit au journal.
             "/catalog/{id}" => "/catalog/terraria".to_owned(),
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),
+            // La liste des sauvegardes d'un service (HRT-97) : une lecture, aucune entrée de journal.
+            "/services/{key}/backups" => format!("/services/{}/backups", backup_key.as_str()),
             // Lire une opération de service (HRT-144) : une lecture, aucune entrée de journal.
             "/operations/services/{id}" => "/operations/services/INCONNUE".to_owned(),
             // Un POST qui ne modifie rien : il relance la détection du moteur (HRT-61, lecture seule).
