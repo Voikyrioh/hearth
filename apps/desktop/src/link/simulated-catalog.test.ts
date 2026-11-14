@@ -65,7 +65,7 @@ describe("lire le catalogue", () => {
     const detail = await detailOf(sim, "terraria");
     expect(detail.card).toMatchObject({
       name: "Terraria",
-      version: 3,
+      version: 4,
       status: "preview",
       installable: true,
     });
@@ -84,7 +84,8 @@ describe("lire le catalogue", () => {
       "difficulty",
     ]);
     expect(detail.questions.length).toBeLessThanOrEqual(8);
-    // Toutes les ressources sont « non mesurées » : aucun nombre à côté.
+    // Toutes les ressources sont « non mesurées » : aucun nombre à côté (le pont simulé ne reprend ni l'empreinte
+    // ni les mesures au repos de la vraie fiche : suivi).
     for (const need of [detail.resources.cpu, detail.resources.memory]) {
       expect(need.evidence).toEqual({ kind: "unmeasured" });
     }

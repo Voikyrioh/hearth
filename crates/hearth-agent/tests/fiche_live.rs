@@ -8,8 +8,9 @@
 //! sans coupure forcée, service qui reste arrêté, monde conservé, redémarrage sur le même monde, mesures au repos.
 //!
 //! Le résultat est consigné dans `evidence.toml` (dossier `HEARTH_FICHE_LIVE_OUT`, défaut `target/fiche-live`) : c'est
-//! lui qui décide du passage des éléments `untested` de la fiche à `tested`. L'essai de l'entrée est CONSIGNÉ, pas
-//! jugé : un jeu qui ne lit pas son entrée sans terminal est un résultat (la séquence reste `untested`), pas un échec.
+//! lui qui décide du passage des éléments `untested` de la fiche à `tested`. Tant qu'un élément est `untested` dans la
+//! fiche livrée, son essai est CONSIGNÉ, pas jugé ; une fois promu à `tested`, le banc l'EXIGE et le job échoue s'il ne
+//! tient plus.
 //!
 //! Hors CI, rien ne tourne : `HEARTH_TEST_FICHE_LIVE=1` et un vrai moteur sont exigés (aucun serveur de jeu sur un
 //! poste de développement). Job : `.github/workflows/fiche-live.yml`.
@@ -478,7 +479,7 @@ async fn the_terraria_fiche_starts_takes_a_setting_stops_by_its_orders_and_keeps
     evidence.raw("save_order_wrote_world", mtime_moved);
     evidence.raw(
         "stop_clean",
-        quit_by_order && stop_took < Duration::from_secs(90),
+        quit_by_order && stop_took < Duration::from_secs(u64::from(grace_s)),
     );
     assert!(!running, "le conteneur doit être arrêté");
 
