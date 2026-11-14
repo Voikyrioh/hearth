@@ -837,6 +837,48 @@ async fn the_password_is_revealed_to_the_right_only_from_the_description_and_jou
     assert!(all.iter().all(|(row,)| !row.contains(SENTINEL)));
 }
 
+// ---------------------------------------------------------------------------------------------
+// Ce que le détail d'un serveur de jeu montre (HRT-104, BR-JEU-017 à BR-JEU-021, BR-JEU-027)
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn the_game_view_tells_the_fiche_the_stop_the_real_ports_and_a_password_yes_never_its_value()
+{
+    let b = bench().await;
+    let server = b.install().await;
+    let bob = b.agent.actor(&b.env, "bob", Role::Admin).await;
+    // Tout compte authentifié le lit, droit « gérer les services » ou non : c'est la même fiche pour tous.
+    for who in [&b.ada, &b.dan, &bob] {
+        let reply = b
+            .agent
+            .request("GET", &format!("/services/{}/game", server.key.as_str()))
+            .token(&who.token)
+            .send()
+            .await;
+        assert_eq!(reply.status, 200, "{}", reply.text);
+        assert_eq!(reply.body["fiche"], "terraria");
+        assert_eq!(reply.body["name"], "Terraria");
+        assert_eq!(reply.body["has_password"], true);
+        assert_eq!(reply.body["stop"]["world_saved"], "by_sequence");
+        assert_eq!(reply.body["stop"]["sequence_tested"], true);
+        let ports = reply.body["ports"].as_array().expect("ports");
+        assert!(!ports.is_empty(), "{}", reply.text);
+        assert_eq!(ports[0]["protocol"], "tcp");
+        assert_eq!(ports[0]["role"], "game");
+        assert_eq!(ports[0]["changed"], false);
+        assert!(!reply.text.contains(SENTINEL));
+    }
+    // Un service inconnu, ou adopté (sans description), ressemble à un service inconnu (BR-JEU-001).
+    let unknown = b
+        .agent
+        .request("GET", "/services/h_01J9ZY0G3Q8M2K6W4T7V5N1B9D/game")
+        .token(&b.ada.token)
+        .send()
+        .await;
+    assert_eq!(unknown.status, 404);
+    assert_eq!(unknown.body["error"]["code"], "NOT_A_GAME_SERVICE");
+}
+
 #[tokio::test]
 async fn a_server_installed_with_a_closed_input_gets_a_decision_never_an_order_sent_to_nowhere() {
     // Un Terraria installé avant que la fiche ouvre l'entrée : l'adaptateur refuse l'ordre, la suite demande une

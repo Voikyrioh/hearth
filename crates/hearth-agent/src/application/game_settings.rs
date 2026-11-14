@@ -29,13 +29,14 @@ use hearth_proto::api::game_settings::{
     SaveSettingsRequest, SaveSettingsResponse, SettingEffect, SettingValue, SettingsView,
     ValueState,
 };
+use hearth_proto::api::game_view::{GamePort, GameView};
 use ring::digest;
 use thiserror::Error;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use zeroize::Zeroizing;
 
-use super::catalog::CatalogService;
+use super::catalog::{CatalogService, port_role_name, stop_view};
 use super::fiche_install::reason_code;
 use super::ports::{
     Clock, FsError, GameSettingsRepo, NewSettings, Ownership, Perms, SafeFs, SettingsStoreError,
@@ -46,7 +47,7 @@ use super::service_specs::{ServiceSpecs, SpecServiceError};
 use crate::domain::audit::{Actor, AuditAction, ClientName, Outcome, Target};
 use crate::domain::catalog::formats::{ConfigFormat, MAX_FILE_BYTES, format_for};
 use crate::domain::catalog::loading::model::{Fiche, Setting, ValueSpec, hex};
-use crate::domain::catalog::loading::schema::fiche::{Channel, ChannelKind};
+use crate::domain::catalog::loading::schema::fiche::{Channel, ChannelKind, Protocol};
 use crate::domain::catalog::loading::schema::settings::ChangeWhen;
 use crate::domain::catalog::loading::schema::settings::SecretKind;
 use crate::domain::catalog::settings_io::{
@@ -66,6 +67,7 @@ use crate::domain::services::from_fiche::{
     generated_secret_id, produced_file_perms, state_of_answers,
 };
 use crate::domain::services::key::ServiceKey;
+use crate::domain::services::spec::SpecProtocol;
 use crate::domain::services::spec::{SecretsAccess, SpecBody};
 
 /// Le scellé d'un secret de réglage n'est pas numéroté comme la description (dont les révisions commencent à 1) :
@@ -1187,6 +1189,72 @@ impl GameSettings {
                 )
                 .await;
         }
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // Ce que le détail d'un serveur de jeu montre (HRT-104, BR-JEU-017 à BR-JEU-021, BR-JEU-027)
+    // -------------------------------------------------------------------------------------------------
+
+    /// La vue d'un service de jeu : sa fiche, la façon dont son monde est enregistré à l'arrêt, ses ports publiés et
+    /// s'il a un mot de passe. Aucune valeur secrète n'est lue ni descellée (`has_password` vient de l'état des
+    /// réglages). Un service sans fiche (adopté, ordinaire) ou dont la fiche n'est plus connue de cette
+    /// construction : `NotAGameService` (BR-JEU-001).
+    pub async fn game_view(&self, key: &ServiceKey) -> Result<GameView, SettingsError> {
+        let loaded = self.load(key).await?;
+        let fiche = loaded.fiche;
+        let ports = loaded
+            .body
+            .ports
+            .iter()
+            .map(|port| {
+                let declared = fiche.file.port.iter().find(|candidate| {
+                    candidate.container == port.container_port
+                        && match port.protocol {
+                            SpecProtocol::Tcp => candidate.protocol == Protocol::Tcp,
+                            SpecProtocol::Udp => candidate.protocol == Protocol::Udp,
+                            SpecProtocol::Sctp => false,
+                        }
+                });
+                GamePort {
+                    host_port: port.host_port,
+                    protocol: match port.protocol {
+                        SpecProtocol::Tcp => "tcp",
+                        SpecProtocol::Udp => "udp",
+                        SpecProtocol::Sctp => "sctp",
+                    }
+                    .to_owned(),
+                    role: declared
+                        .map(|declared| port_role_name(declared.role).to_owned())
+                        .unwrap_or_default(),
+                    changed: declared
+                        .and_then(|declared| declared.default_host)
+                        .is_some_and(|default| default != port.host_port),
+                }
+            })
+            .collect();
+        let has_password = fiche.settings.iter().any(|setting| {
+            setting.imposed.is_none()
+                && matches!(
+                    setting.spec,
+                    ValueSpec::Secret {
+                        kind: SecretKind::GamePassword,
+                        ..
+                    }
+                )
+                && matches!(loaded.state.slot(&setting.id), Some(Slot::Secret))
+        });
+        Ok(GameView {
+            fiche: fiche.id().to_owned(),
+            name: fiche.file.name.clone(),
+            fiche_version: loaded
+                .body
+                .fiche
+                .as_ref()
+                .map_or(0, |origin| origin.version),
+            stop: stop_view(fiche),
+            ports,
+            has_password,
+        })
     }
 
     // -------------------------------------------------------------------------------------------------
