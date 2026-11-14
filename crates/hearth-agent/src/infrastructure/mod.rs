@@ -4,6 +4,8 @@
 pub mod archive_fs;
 pub mod argon2;
 pub mod audit_feed;
+pub mod backup_archive;
+pub mod backup_files;
 pub mod clock;
 pub mod config;
 pub mod created_objects;
