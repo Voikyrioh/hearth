@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-game-view"
+description = "Enables the read_game_view command without any pre-configured scope."
+commands.allow = ["read_game_view"]
+
+[[permission]]
+identifier = "deny-read-game-view"
+description = "Denies the read_game_view command without any pre-configured scope."
+commands.deny = ["read_game_view"]
