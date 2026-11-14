@@ -24,6 +24,8 @@ use super::game_settings;
 use super::game_settings_dto::{
     AnalyzeOutcomeDto, SaveOutcome, SaveSettingsRequestDto, SettingsReadDto,
 };
+use super::game_view;
+use super::game_view_dto::{GameReadDto, GameSecretDto};
 use super::lifecycle::{self, GestureDto, LifecycleOutcome};
 use super::service;
 use crate::link::LinkRuntime;
@@ -319,4 +321,32 @@ pub async fn save_game_settings(
     let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
     let admin_password = admin_password.map(Secret::new);
     game_settings::save(link.manager(), &id, &key, settings, admin_password.as_ref()).await
+}
+
+/// Ce que le détail d'un serveur de jeu montre (`GET /services/{key}/game`) : la fiche, la façon d'arrêter, les ports
+/// publiés, le mot de passe oui ou non. Une lecture ouverte à tout compte. Un service qui n'est pas un serveur de jeu
+/// créé depuis une fiche se lit `Absent`, jamais comme une panne.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_game_view(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+) -> Result<GameReadDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    game_view::read(link.manager(), &id, &key).await
+}
+
+/// Le mot de passe du serveur de jeu (`GET /services/{key}/game-secret`, `BR-JEU-025`) : une lecture réservée au droit
+/// « gérer les services », consignée au journal sans la valeur. La valeur est rendue à l'appelant et à lui seul : la
+/// coquille ne la garde pas, ne la trace pas, ne la met pas dans un événement. Hors « Connecté » : `NotConnected`.
+#[tauri::command]
+#[specta::specta]
+pub async fn reveal_game_password(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+) -> Result<GameSecretDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    game_view::reveal(link.manager(), &id, &key).await
 }

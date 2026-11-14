@@ -85,6 +85,8 @@
     "allow-read-game-settings",
     "allow-analyze-game-settings",
     "allow-save-game-settings",
+    "allow-read-game-view",
+    "allow-reveal-game-password",
     "core:event:allow-listen",
     "core:event:allow-unlisten"
   ]

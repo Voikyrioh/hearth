@@ -130,6 +130,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             service_ops::commands::read_game_settings,
             service_ops::commands::analyze_game_settings,
             service_ops::commands::save_game_settings,
+            service_ops::commands::read_game_view,
+            service_ops::commands::reveal_game_password,
         ])
         .typ::<link_dto::ServersEvent>()
         .typ::<link_dto::OperationEventDto>()
