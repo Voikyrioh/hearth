@@ -550,7 +550,10 @@ mod tests {
         assert!(first.world_generation && first.ready_timeout_s > 0);
         let stop = terraria.stop.as_ref().unwrap();
         assert_eq!(stop.world_saved, WorldSavedView::BySequence);
-        assert!(!stop.sequence_tested, "la suite n'a pas été essayée");
+        assert!(
+            stop.sequence_tested,
+            "la suite a été essayée sur la vraie image (HRT-114)"
+        );
         // Chaque port dit comment il se relie au port du serveur et pour quelles variantes il existe.
         assert!(
             terraria

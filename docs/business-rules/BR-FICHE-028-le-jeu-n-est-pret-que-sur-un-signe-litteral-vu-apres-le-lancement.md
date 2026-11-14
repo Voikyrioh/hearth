@@ -5,7 +5,7 @@ titre: Le jeu est « prêt » seulement sur un signe littéral, essayé sur la v
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-installer-serveur-de-jeu.md (BR-FICHE-028), HRT-101
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-FICHE-028
@@ -28,4 +28,5 @@ Quatre phases : « Premier démarrage », « Démarrage », « Prêt », « Hear
 - BR-FICHE-056, BR-JEU-038
 
 ## Historique
+- 2026-11-14 — le signe « Server started » de Terraria est observé sur la vraie image par le banc d'essai (HRT-114) : il est `tested`.
 - 2026-10-24 — création (HRT-101).

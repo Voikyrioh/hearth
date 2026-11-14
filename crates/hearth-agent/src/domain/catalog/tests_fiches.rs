@@ -1422,7 +1422,7 @@ fn coherence_proposed_values_and_arguments_are_valid_for_their_type() {
 // ---- La fiche Terraria embarquée ------------------------------------------------------------------------------------------------
 
 #[test]
-fn the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_digest() {
+fn the_embedded_terraria_fiche_is_a_preview_tried_on_the_real_image_with_a_pinned_image() {
     let (fiches, refused) = load_all();
     assert!(refused.is_empty(), "{refused:?}");
     let terraria = fiches
@@ -1434,9 +1434,10 @@ fn the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_d
         Status::Preview,
         "elle reste en preview"
     );
-    assert!(
-        terraria.file.image.digest.is_none(),
-        "l'empreinte de l'image n'est pas vérifiée : aucune n'est inventée"
+    assert_eq!(
+        terraria.file.image.digest.as_deref(),
+        Some("sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677"),
+        "l'empreinte est celle relevée par le banc d'essai réel (HRT-114)"
     );
     assert_eq!(EMBEDDED.len(), fiches.len());
     // Embarquée, mais jamais proposée : `offered_with(false)` ne rend que les fiches `published`.
@@ -1471,38 +1472,32 @@ fn the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_d
         super::loading::model::fiche_digest(embedded.fiche_toml, &altered),
         embedded.digest
     );
-    // La séquence d'arrêt, l'enregistrement et le signe « prêt » ne sont pas essayés.
+    // La séquence d'arrêt, l'enregistrement et le signe « prêt » ont été essayés sur la vraie image (HRT-114).
     use super::loading::schema::fiche::Proof;
     assert_eq!(
         terraria.file.stop.sequence.as_ref().map(|s| s.status),
-        Some(Proof::Untested)
+        Some(Proof::Tested)
     );
     assert_eq!(
         terraria.file.save.as_ref().map(|s| s.status),
-        Some(Proof::Untested)
+        Some(Proof::Tested)
     );
     assert_eq!(
         terraria.file.ready.as_ref().map(|r| r.status),
-        Some(Proof::Untested)
+        Some(Proof::Tested)
     );
     assert_eq!(
         ready_sign(terraria),
-        None,
-        "un signe untested n'est pas cru"
+        Some("Server started"),
+        "le signe essayé sur la vraie image est cru"
     );
-    // Ressources : aucune n'est mesurée, aucun nombre n'est écrit.
+    // Ressources : seuls la mémoire et le disque au repos sont mesurés (banc d'essai, HRT-114) ; ni la mémoire
+    // recommandée ni le processeur n'ont de chiffre : la fiche reste preview (BR-RES-038).
     let r = &terraria.file.resources;
-    assert!(
-        r.cpu.evidence.is_unmeasured()
-            && r.memory.evidence.is_unmeasured()
-            && r.disk.evidence.is_unmeasured()
-    );
-    assert!(
-        r.memory.min_bytes.is_none()
-            && r.memory.recommended_bytes.is_none()
-            && r.cpu.min_millis.is_none()
-            && r.disk.install_bytes.is_none()
-    );
+    assert!(r.cpu.evidence.is_unmeasured());
+    assert_eq!(r.memory.min_bytes, Some(591_187_148));
+    assert_eq!(r.disk.install_bytes, Some(53_014_364));
+    assert!(r.memory.recommended_bytes.is_none() && r.cpu.min_millis.is_none());
 }
 
 #[test]
@@ -1553,8 +1548,8 @@ fn the_terraria_catalog_speaks_to_the_user_in_vous_and_every_text_stays_within_i
             .all(|n| n.channel == "args" || n.key == "banlist")
     );
     assert_eq!(
-        terraria.file.version, 3,
-        "version 3 : l'aide ne redit plus les bornes ni le jeu de caractères (ADR-0050)"
+        terraria.file.version, 4,
+        "version 4 : suites essayées sur la vraie image, empreinte et mesures au repos (HRT-114) ; version 3 : l'aide ne redit plus les bornes ni le jeu de caractères (ADR-0050)"
     );
     // Un entier dit ses bornes quand l'inventaire les donne ; un réglage à valeurs fermées dit chacune.
     let max_players = terraria.setting("max_players").expect("max_players");

@@ -1,0 +1,63 @@
+name: Banc d'essai des fiches
+
+# Essai REEL d'une fiche de serveur de jeu sur sa vraie image avec le vrai moteur du runner (HRT-114, ADR-0053,
+# conception technique 12.3). Premiere fiche essayee : Terraria (demarrage, signe « pret », port, reglage pris en
+# compte, ordres `save` et `exit` par l'entree du conteneur, arret sans coupure forcee, service qui reste arrete,
+# monde conserve au redemarrage, mesures au repos).
+#
+# Declenchement A LA MAIN SEULEMENT (Actions, « Run workflow ») : ni push, ni pull request, ni chemins (decision de
+# Voiky du 2026-11-14, quota de minutes GitHub Actions). A lancer avant de changer le statut d'un element de fiche,
+# apres toute modification de la fiche Terraria ou du banc, et avant une release qui embarque une fiche essayee :
+#   gh workflow run "Banc d'essai des fiches" --ref <branche>     (ou l'onglet Actions)
+# La veille nocturne (`fiche-drift`) est la seconde moitie de HRT-114, livree avec HRT-115.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: fiche-live-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fiche-live-terraria:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      HEARTH_TEST_FICHE_LIVE: "1"
+      HEARTH_FICHE_LIVE_OUT: ${{ github.workspace }}/target/fiche-live
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Moteur du runner (version)
+        run: docker version
+      # Un seul test, ignore hors de ce job : il tire l'image de la fiche, la cree par le chemin de l'agent, la
+      # demarre, l'arrete par la suite de la fiche, la redemarre, puis consigne `evidence.toml`.
+      - name: Essai reel de la fiche Terraria
+        run: cargo test -p hearth-agent --test fiche_live -- --ignored --test-threads=1 --nocapture
+      - name: Releve de l'essai
+        if: always()
+        run: |
+          if [ -f target/fiche-live/evidence.toml ]; then
+            cat target/fiche-live/evidence.toml
+            { echo '### Essai reel de la fiche Terraria'; echo '```toml'; cat target/fiche-live/evidence.toml; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "aucun releve : l'essai n'a pas atteint son premier constat"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: hearth-fiche-live-evidence
+          path: target/fiche-live/evidence.toml
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Conteneurs laisses par l'essai
+        if: always()
+        run: |
+          left="$(docker ps -aq --filter name=hearth-fiche-live-)"
+          if [ -n "$left" ]; then docker ps -a --filter name=hearth-fiche-live-; docker rm -f $left; exit 1; fi

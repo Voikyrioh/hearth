@@ -22,7 +22,7 @@ Une fiche n'a pas de signature propre. Une fiche que le chargeur refuse fait ÉC
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/loading/model.rs::tests::the_digest_of_a_fiche_covers_both_files_with_their_lengths`
-- `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_digest`
+- `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::the_embedded_terraria_fiche_is_a_preview_tried_on_the_real_image_with_a_pinned_image`
 - `xtask/src/catalog_check.rs::tests::a_missing_lock_and_a_fiche_the_loader_refuses_are_reported_by_name`
 - `apps/desktop/src/pages/Catalogue.test.ts`
 

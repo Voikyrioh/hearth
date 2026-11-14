@@ -43,12 +43,12 @@ const SENTINEL: &str = "Sentinelle-pw-77QaZ";
 fn terraria(sequence: &str, change: impl FnOnce(String) -> String) -> Fiche {
     let text = TERRARIA_FICHE
         .replacen(
-            "game_updates = \"never\"",
-            &format!("digest = \"{IMAGE_DIGEST}\"\ngame_updates = \"never\""),
+            "digest = \"sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677\"",
+            &format!("digest = \"{IMAGE_DIGEST}\""),
             1,
         )
         .replacen(
-            "[stop.sequence]\nstatus = \"untested\"",
+            "[stop.sequence]\nstatus = \"tested\"",
             &format!("[stop.sequence]\nstatus = \"{sequence}\""),
             1,
         );
@@ -969,8 +969,8 @@ async fn a_fiche_without_a_game_password_answers_200_without_one() {
         1,
     );
     let text = TERRARIA_FICHE.replacen(
-        "game_updates = \"never\"",
-        &format!("digest = \"{IMAGE_DIGEST}\"\ngame_updates = \"never\""),
+        "digest = \"sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677\"",
+        &format!("digest = \"{IMAGE_DIGEST}\""),
         1,
     );
     let fiche = load(Origin::Embedded, text.as_bytes(), settings.as_bytes()).expect("valide");

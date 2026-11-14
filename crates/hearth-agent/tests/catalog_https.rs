@@ -92,9 +92,10 @@ async fn a_published_agent_lists_no_preview_fiche_and_a_trial_agent_lists_terrar
     assert_eq!(detail.digest.len(), 64);
     assert!(detail.digest.bytes().all(|b| b.is_ascii_hexdigit()));
     assert_eq!(detail.image.repository, "ryshe/terraria");
-    // Ressources : aucune preuve, aucun chiffre inventé.
-    assert_eq!(detail.resources.memory.evidence, EvidenceView::Unmeasured);
-    assert_eq!(detail.resources.memory.min_bytes, None);
+    // Ressources : la mémoire au repos relevée par le banc d'essai réel (HRT-114), pas de recommandation inventée.
+    assert_eq!(detail.resources.memory.evidence, EvidenceView::MeasuredIdle);
+    assert_eq!(detail.resources.memory.min_bytes, Some(591_187_148));
+    assert_eq!(detail.resources.memory.recommended_bytes, None);
     // Ce que la fiche impose : un port de jeu, des dossiers gérés (jamais un chemin du serveur).
     assert!(
         detail

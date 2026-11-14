@@ -86,7 +86,7 @@ const RCON: &str = "Abcdefghijklmnopqrstuvwxyz012345";
 // ---- Terraria ------------------------------------------------------------------------------------------------------------------
 
 #[test]
-fn terraria_with_the_proposed_values_writes_only_what_is_known_and_sends_no_order() {
+fn terraria_with_the_proposed_values_writes_only_what_is_known_and_pins_the_tried_image() {
     let fiche = terraria();
     let inputs = Inputs::new();
     let draft = translate(&fiche, &inputs.request(None, false)).expect("valide");
@@ -96,7 +96,11 @@ fn terraria_with_the_proposed_values_writes_only_what_is_known_and_sends_no_orde
         (draft.image_repository.as_str(), draft.image_tag.as_str()),
         ("ryshe/terraria", "vanilla-1.4.5.8")
     );
-    assert_eq!(draft.image_digest, None, "aucune empreinte n'est inventée");
+    assert_eq!(
+        draft.image_digest.as_deref(),
+        Some("sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677"),
+        "l'empreinte relevée par le banc d'essai réel (HRT-114)"
+    );
     assert_eq!(draft.ports.len(), 1);
     assert_eq!(
         (draft.ports[0].container, draft.ports[0].host),
@@ -119,11 +123,11 @@ fn terraria_with_the_proposed_values_writes_only_what_is_known_and_sends_no_orde
     );
     assert!(
         draft.stdin_open,
-        "la fiche déclare des ordres : l'entrée est ouverte même si la suite n'est pas essayée (rien n'est envoyé)"
+        "la fiche déclare des ordres : l'entrée est ouverte"
     );
     assert!(
-        !draft.stop.sends_orders(),
-        "une suite non essayée n'envoie rien"
+        draft.stop.sends_orders(),
+        "la suite d'arrêt a été essayée sur la vraie image (HRT-114) : ses ordres sont envoyés"
     );
     assert!(draft.sealed.is_empty());
 }

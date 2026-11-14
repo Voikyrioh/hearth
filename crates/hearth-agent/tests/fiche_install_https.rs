@@ -56,8 +56,8 @@ fn rich() -> Fiche {
 /// Terraria, l'empreinte de l'image épinglée en plus.
 fn pinned_terraria() -> Fiche {
     let text = TERRARIA_FICHE.replacen(
-        "game_updates = \"never\"",
-        &format!("digest = \"{IMAGE_DIGEST}\"\ngame_updates = \"never\""),
+        "digest = \"sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677\"",
+        &format!("digest = \"{IMAGE_DIGEST}\""),
         1,
     );
     load(
@@ -288,7 +288,7 @@ async fn a_fiche_install_creates_a_service_with_the_fiche_digest_the_pinned_imag
     .unwrap();
     assert_eq!(
         row,
-        ("terraria".to_owned(), 3, b.fiche.digest_hex()),
+        ("terraria".to_owned(), 4, b.fiche.digest_hex()),
         "la description du service"
     );
     // Le journal : une installation depuis une fiche, avec la fiche, et aucune valeur (BR-FICHE-032).
@@ -298,7 +298,7 @@ async fn a_fiche_install_creates_a_service_with_the_fiche_digest_the_pinned_imag
     assert_eq!(journal[0].3.as_deref(), Some("ada"));
     let target = journal[0].1.clone().unwrap();
     assert!(
-        target.contains("fiche terraria (version 3)") && target.contains("mon-terraria"),
+        target.contains("fiche terraria (version 4)") && target.contains("mon-terraria"),
         "{target}"
     );
     b.agent.shutdown().await;
@@ -487,8 +487,27 @@ async fn a_machine_below_a_measured_minimum_is_refused() {
 
 #[tokio::test]
 async fn an_unmeasured_minimum_never_blocks_the_install() {
-    // Terraria : tout est « non mesuré », même sur une toute petite machine.
-    let b = bench(pinned_terraria(), true).await;
+    // Une fiche dont tout est « non mesuré » (Terraria a sa mémoire au repos mesurée, HRT-114), même sur une toute petite machine.
+    let text = TERRARIA_FICHE
+        .replace(
+            "digest = \"sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677\"",
+            &format!("digest = \"{IMAGE_DIGEST}\""),
+        )
+        .replace(
+            "memory = { min_bytes = 591187148, evidence = \"measured_idle\" }",
+            "memory = { evidence = \"unmeasured\" }",
+        )
+        .replace(
+            "disk = { install_bytes = 53014364, evidence = \"measured_idle\" }",
+            "disk = { evidence = \"unmeasured\" }",
+        );
+    let fiche = load(
+        Origin::Embedded,
+        text.as_bytes(),
+        TERRARIA_SETTINGS.as_bytes(),
+    )
+    .expect("valide");
+    let b = bench(fiche, true).await;
     b.engine.set_info(Some(EngineInfo {
         cpus: 1,
         memory_bytes: 512 * 1024 * 1024,
