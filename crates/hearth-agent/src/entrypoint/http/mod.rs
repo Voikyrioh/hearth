@@ -472,6 +472,8 @@ pub static ENDPOINTS: &[Endpoint] = &[
         access: Access::Services,
         version_checked: true,
         tracked: false,
+        // Une consultation réservée au droit de gérer les services : seul un refus faute de droit est consigné,
+        // sous l'action de la sauvegarde (le cas d'usage n'écrit rien en vérifiant).
         audit: Some(AuditAction::ServiceBackupCreate),
         route: || post(backups::verify),
     },

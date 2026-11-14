@@ -345,14 +345,19 @@ pub fn act_of<'a>(
         },
         // Sauvegarder (HRT-97) : la clé du chemin, le mode et le nombre d'éléments ignorés pour cette fois, jamais la
         // note ni un chemin.
-        ("POST", ["services", key, "backups"]) => AdminAct::BackupCreate {
-            target: hearth_proto::admin_act::decode_segment(key)
-                .unwrap_or_else(|| (*key).to_owned())
-                .into(),
-            mode: text("mode"),
-            ignored: u32::try_from(body["ignore_once"].as_array().map_or(0, Vec::len))
-                .expect("éléments ignorés"),
-        },
+        ("POST", ["services", key, "backups"]) => {
+            let items: Vec<hearth_proto::api::backups::IgnoredItem> =
+                serde_json::from_value(body["ignore_once"].clone()).unwrap_or_default();
+            let (count, digest) = hearth_proto::api::backups::ignore_once_digest(&items);
+            AdminAct::BackupCreate {
+                target: hearth_proto::admin_act::decode_segment(key)
+                    .unwrap_or_else(|| (*key).to_owned())
+                    .into(),
+                mode: text("mode"),
+                count,
+                digest,
+            }
+        }
         // Supprimer une sauvegarde : l'identifiant du chemin.
         ("DELETE", ["backups", id]) => AdminAct::BackupDelete { target: id },
         // Régler les éléments ignorés : la clé du chemin, le nombre et l'empreinte de la liste (jamais un chemin).

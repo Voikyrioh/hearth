@@ -16,7 +16,7 @@ La fenêtre de création : une consultation du droit, rien n'est écrit ni journ
 
 ## `POST /api/v1/services/{key}/backups` (acte `BackupCreate` `0x19`)
 
-Acte d'administration confirmé, couvert par l'élévation. Cible signée : la clé du service. Paramètres signés : le mode et le nombre d'éléments de `ignore_once` ; ni la note ni un chemin.
+Acte d'administration confirmé, couvert par l'élévation. Cible signée : la clé du service. Paramètres signés : le mode, le nombre d'éléments de `ignore_once` et l'empreinte de leur liste (`BackupRequest::act_digest`) ; ni la note ni un chemin.
 
 - **Corps** (`BackupRequest`, avec `reauth` à côté) : `mode` (`hot` ou `stop_copy_start` pour un service en marche ; pour un service qui n'est pas en marche le mode effectif est toujours `stopped`), `note` (80 caractères au plus, facultative), `ignore_once[]` (`{ root, path }`, pour cette sauvegarde seulement).
 - **Réponse `202`** (`BackupAccepted`) : `{ operation_id, backup_id }`. L'issue se lit dans l'opération ([opérations de service](./service-ops.md), `kind: backup`) : étapes `stop`, `copy`, `verify`, `start` (selon le mode), progression `items_done`, `bytes_done`, `bytes_total`, annulable jusqu'à la fin.

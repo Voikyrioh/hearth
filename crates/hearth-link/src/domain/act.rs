@@ -230,16 +230,20 @@ fn build<'a>(
         },
         // Sauvegarder (HRT-97) : la clé du service, lue du chemin, est la cible signée ; le mode et le nombre
         // d'éléments ignorés pour cette fois se lisent du corps. Jamais la note, jamais un chemin.
-        ActKind::BackupCreate => AdminAct::BackupCreate {
-            target: id,
-            mode: text(body, "mode")?,
-            ignored: u32::try_from(
-                body.and_then(|body| body.get("ignore_once"))
-                    .and_then(Value::as_array)
-                    .map_or(0, Vec::len),
-            )
-            .map_err(|_| Unreadable)?,
-        },
+        ActKind::BackupCreate => {
+            let items: Vec<hearth_proto::api::backups::IgnoredItem> =
+                match body.and_then(|body| body.get("ignore_once")) {
+                    Some(list) => serde_json::from_value(list.clone()).map_err(|_| Unreadable)?,
+                    None => Vec::new(),
+                };
+            let (count, digest) = hearth_proto::api::backups::ignore_once_digest(&items);
+            AdminAct::BackupCreate {
+                target: id,
+                mode: text(body, "mode")?,
+                count,
+                digest,
+            }
+        }
         // Supprimer une sauvegarde : l'identifiant, lu du chemin ; aucun paramètre.
         ActKind::BackupDelete => AdminAct::BackupDelete { target: id_ref()? },
         // Régler les éléments ignorés : la clé du service est la cible ; le nombre d'éléments et l'empreinte de
@@ -629,10 +633,23 @@ mod tests {
         };
         assert_eq!(create.kind(), ActKind::BackupCreate);
         assert_eq!(create.target(), key);
+        let request: hearth_proto::api::backups::BackupRequest =
+            serde_json::from_value(body.clone()).unwrap();
+        let (count, digest) = request.act_digest();
+        assert_eq!(count, 2);
         assert_eq!(
             create.params(),
-            vec![b"stop_copy_start".to_vec(), b"2".to_vec()]
+            vec![b"stop_copy_start".to_vec(), b"2".to_vec(), digest.to_vec()]
         );
+        // Un autre élément ignoré change la preuve, à nombre égal.
+        let other = json!({
+            "mode": "stop_copy_start",
+            "ignore_once": [{ "root": "/data", "path": "a" }, { "root": "/data", "path": "c" }]
+        });
+        let Ok(Route::Act(changed)) = classify("POST", &create_path, Some(&other)) else {
+            panic!("acte attendu");
+        };
+        assert_ne!(changed.params(), create.params());
         // Supprimer : l'identifiant du chemin, aucun paramètre.
         let Ok(Route::Act(delete)) =
             classify("DELETE", "/backups/01J9ZY0G3Q8M2K6W4T7V5N1B9D", None)

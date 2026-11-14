@@ -16,6 +16,7 @@ maj: 2026-11-14
 ## Application (code)
 - `crates/hearth-agent/src/domain/ops/backup.rs::effective_mode`
 - `crates/hearth-agent/src/application/backups.rs::Backups::create`
+- `crates/hearth-agent/src/domain/backups/rules.rs::is_running, ::backable`
 
 ## Vérification
 - `crates/hearth-agent/tests/service_backups_https.rs::a_running_service_needs_an_explicit_mode_and_is_never_stopped_without_it`

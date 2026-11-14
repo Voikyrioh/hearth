@@ -79,14 +79,14 @@ fn backup_error(error: BackupError) -> ApiError {
         )),
         BackupError::HeavyBusy { service } => ApiError(ErrorBody::with_details(
             ErrorCode::HeavyIoBusy,
-            "Une sauvegarde ou une restauration est déjà en cours sur ce serveur. Attends sa fin.",
+            "Une sauvegarde ou une restauration est déjà en cours sur ce serveur. Attendez sa fin.",
             serde_json::json!({ "service": service }),
         )),
         BackupError::NotBackable(state) => ApiError(ErrorBody::with_details(
             ErrorCode::ServiceNotDrivable,
             match state {
                 ServiceStateKind::Deploying => {
-                    "Un déploiement est en cours pour ce service. Attends sa fin."
+                    "Un déploiement est en cours pour ce service. Attendez sa fin."
                 }
                 ServiceStateKind::Paused | ServiceStateKind::Unknown => {
                     "Hearth ne sauvegarde pas ce service dans son état actuel."
@@ -138,7 +138,7 @@ fn backup_error(error: BackupError) -> ApiError {
         }
         BackupError::InUse => ApiError::new(
             ErrorCode::BackupInUse,
-            "Cette sauvegarde est en cours d'utilisation. Attends la fin de l'opération.",
+            "Cette sauvegarde est en cours d'utilisation. Attendez la fin de l'opération.",
         ),
         BackupError::KeyUnavailable => ApiError::invalid_because(
             "note",

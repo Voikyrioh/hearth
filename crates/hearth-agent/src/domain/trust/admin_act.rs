@@ -185,7 +185,8 @@ mod tests {
                 AdminAct::BackupCreate {
                     target: "c_a".into(),
                     mode: "stopped",
-                    ignored: 0,
+                    count: 0,
+                    digest: [0; 32],
                 },
                 true,
             ),

@@ -77,8 +77,7 @@ pub fn judge_archive(registered: &Registered, seen: &Seen) -> Ownership {
 }
 
 /// Le manifeste voisin est-il celui que Hearth a écrit ? `seen_sha256` : l'empreinte du fichier lu, `None` s'il est
-/// absent ou illisible. Comparaison à temps constant sur des empreintes publiques : la simple égalité suffit
-/// (ce n'est pas un secret).
+/// absent ou illisible. Des empreintes publiques : la simple égalité suffit (ce n'est pas un secret).
 pub fn manifest_is_ours(registered: &Registered, seen_sha256: Option<&str>) -> bool {
     seen_sha256.is_some_and(|sha| sha.eq_ignore_ascii_case(&registered.manifest_sha256))
 }

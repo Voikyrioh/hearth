@@ -47,7 +47,9 @@ use super::ports::{
 use super::service_lifecycle::reason_of;
 use super::service_ops::{AcceptRequest, AuditDraft, OpError, ServiceOps};
 use super::service_specs::ServiceSpecs;
-use super::service_stop::{StopContext, StopRequest, stop_running};
+use super::service_stop::{
+    StopContext, StopRequest, account_of, cause_of, forget_stop, stop_running,
+};
 use super::services::{Driver, LifecycleTarget, ServicesRegistry};
 use crate::application::ports::Progress;
 use crate::domain::audit::{Actor, ClientName, DeleteNote, ErasedData, Outcome, Reason, Target};
@@ -839,10 +841,7 @@ impl ServiceDeletion {
     }
 
     async fn forget_stop(&self, key: &ServiceKey) {
-        if let Err(error) = self.intents.clear(key).await {
-            tracing::warn!(%error, "arrêt voulu non effacé");
-        }
-        self.registry.forget_stop_requested(key);
+        forget_stop(self.intents.as_ref(), &self.registry, key).await;
     }
 
     /// Efface les dossiers gérés un par un (`BR-DEL-006` à `BR-DEL-008`). Rend le nombre d'éléments qui n'ont pas
@@ -1127,36 +1126,6 @@ fn deletable(state: ServiceStateKind) -> bool {
             | ServiceStateKind::Error
             | ServiceStateKind::RestartLoop
     )
-}
-
-/// La cause d'une erreur du moteur, dans la liste fermée (`BR-DEL-029`). Jamais un texte du moteur.
-pub(crate) fn cause_of(error: EngineError) -> Cause {
-    match error {
-        EngineError::Unreachable | EngineError::Denied => Cause::EngineUnavailable,
-        EngineError::Timeout => Cause::Timeout,
-        EngineError::NotFound => Cause::ServiceNotFound,
-        _ => Cause::EngineRefused,
-    }
-}
-
-/// L'étape annoncée tant que l'arrêt dure, retirée quoi qu'il arrive.
-pub(crate) struct StepShown<'a> {
-    pub(crate) registry: &'a ServicesRegistry,
-    pub(crate) key: ServiceKey,
-}
-
-impl Drop for StepShown<'_> {
-    fn drop(&mut self) {
-        self.registry.end_transition(&self.key);
-    }
-}
-
-pub(crate) fn account_of(actor: &Actor) -> String {
-    actor
-        .account
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_default()
 }
 
 /// Une écriture du journal des opérations qui échoue ne fait pas échouer la suppression : l'ordre est donné, ou ne

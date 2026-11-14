@@ -44,7 +44,6 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::delete::{StepShown, account_of};
 use super::ports::{
     ArchiveBuilder, ArchiveEnd, AuditSink, BackupArchive, BackupFiles, BackupFsError,
     BackupRemoved, BackupRepo, BackupRow, BackupSink, Clock, ContainerEngine, DiskSpace,
@@ -55,7 +54,9 @@ use super::ports::{
 use super::service_lifecycle::reason_of;
 use super::service_ops::{AcceptRequest, AuditDraft, OpError, ServiceOps};
 use super::service_specs::ServiceSpecs;
-use super::service_stop::{StopContext, StopRequest, stop_running};
+use super::service_stop::{
+    StepShown, StopContext, StopRequest, account_of, forget_stop, stop_running,
+};
 use super::services::{Driver, ServicesRegistry};
 use crate::domain::audit::{
     Actor, AuditAction, BackupModeNote, BackupNote, ClientName, Outcome, Reason, Target,
@@ -340,6 +341,15 @@ struct Control {
     /// Les éléments que la copie n'archive pas (tubes, sockets, autre montage, nom illisible, trop profond...).
     skipped: AtomicU32,
     deadline: Instant,
+}
+
+/// Demande l'arrêt de la copie quand la tâche qui la suit disparaît, quelle que soit la façon dont elle sort.
+struct HaltOnDrop(Arc<Control>);
+
+impl Drop for HaltOnDrop {
+    fn drop(&mut self) {
+        self.0.ask(STOP_SHUTDOWN);
+    }
 }
 
 impl Control {
@@ -1484,7 +1494,7 @@ impl Backups {
                 Finish {
                     status: OpStatus::Succeeded,
                     cause: None,
-                    note: copied.note(job),
+                    note: copied.note(),
                 }
             }
             Err(Some(finish)) => finish,
@@ -1575,10 +1585,7 @@ impl Backups {
     }
 
     async fn forget_stop(&self, key: &ServiceKey) {
-        if let Err(error) = self.intents.clear(key).await {
-            tracing::warn!(%error, "arrêt voulu non effacé");
-        }
-        self.registry.forget_stop_requested(key);
+        forget_stop(self.intents.as_ref(), &self.registry, key).await;
     }
 
     /// Relance ce que cette opération a arrêté. `Err` : un conteneur n'est pas reparti.
@@ -1711,6 +1718,9 @@ impl Backups {
             forced_stop: job.forced_stop.load(Ordering::SeqCst),
             hot: job.mode == BackupMode::Hot,
         };
+        // Si cette tâche s'arrête (panique, abandon), le fil de copie reçoit l'ordre de s'arrêter : il n'écrit pas
+        // jusqu'à six heures dans une partie que plus personne ne suit.
+        let _halt = HaltOnDrop(Arc::clone(&control));
         let mut work = tokio::task::spawn_blocking(move || copy_blocking(copy));
         let outcome = loop {
             tokio::select! {
@@ -2317,7 +2327,7 @@ struct Copied {
 }
 
 impl Copied {
-    fn note(&self, _job: &Job) -> BackupNote {
+    fn note(&self) -> BackupNote {
         BackupNote::Created {
             mode: match self.mode {
                 BackupMode::Hot => BackupModeNote::Hot,

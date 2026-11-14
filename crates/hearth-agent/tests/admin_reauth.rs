@@ -184,11 +184,17 @@ impl Spec {
                 data: *erase_data,
                 backups: *erase_backups,
             },
-            Self::BackupCreate { key, body } => AdminAct::BackupCreate {
-                target: key.as_str().into(),
-                mode: body["mode"].as_str().unwrap_or_default(),
-                ignored: u32::try_from(body["ignore_once"].as_array().map_or(0, Vec::len)).unwrap(),
-            },
+            Self::BackupCreate { key, body } => {
+                let items: Vec<hearth_proto::api::backups::IgnoredItem> =
+                    serde_json::from_value(body["ignore_once"].clone()).unwrap_or_default();
+                let (count, digest) = hearth_proto::api::backups::ignore_once_digest(&items);
+                AdminAct::BackupCreate {
+                    target: key.as_str().into(),
+                    mode: body["mode"].as_str().unwrap_or_default(),
+                    count,
+                    digest,
+                }
+            }
             Self::BackupDelete { id } => AdminAct::BackupDelete { target: id },
             Self::BackupSettings { key, body } => {
                 let settings: hearth_proto::api::backups::BackupSettings =

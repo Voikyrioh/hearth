@@ -215,6 +215,13 @@ impl UnixRoot {
         let mut current = self.fd.try_clone().map_err(|e| FsError::Io(e.kind()))?;
         for name in names {
             current = open_dir_on(&current, name, self.dev)?;
+            // Un `mount --bind` posé depuis le listage garde le même périphérique : seul l'identifiant de
+            // montage le trahit, comme à l'effacement (`Eraser`). Jamais traversé.
+            if let (Some(root), Some(here)) = (self.mnt, erase::mnt_id_of(&current))
+                && root != here
+            {
+                return Err(FsError::Blocked);
+            }
         }
         Ok(current)
     }

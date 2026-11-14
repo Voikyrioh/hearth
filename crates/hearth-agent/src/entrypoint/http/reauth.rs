@@ -261,11 +261,15 @@ impl Parsed {
                 data: request.erase_data,
                 backups: request.erase_backups,
             },
-            (Self::BackupCreate(request), _) => AdminAct::BackupCreate {
-                target: id.into(),
-                mode: request.mode.as_str(),
-                ignored: u32::try_from(request.ignore_once.len()).unwrap_or(u32::MAX),
-            },
+            (Self::BackupCreate(request), _) => {
+                let (count, digest) = request.act_digest();
+                AdminAct::BackupCreate {
+                    target: id.into(),
+                    mode: request.mode.as_str(),
+                    count,
+                    digest,
+                }
+            }
             (Self::BackupSettings(settings), _) => {
                 let (count, digest) = settings.act_digest();
                 AdminAct::BackupSettings {

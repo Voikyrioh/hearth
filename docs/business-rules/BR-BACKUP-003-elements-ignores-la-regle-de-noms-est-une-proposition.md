@@ -16,6 +16,7 @@ Par défaut, tout élément dont le nom, sans tenir compte de la casse, contient
 ## Application (code)
 - `crates/hearth-agent/src/domain/backups/ignore.rs::IgnoreRules, ::name_looks_like_backups`
 - `crates/hearth-agent/src/application/backups.rs::Backups::set_settings`
+- `crates/hearth-agent/src/domain/backups/rules.rs::validate_items`
 - `crates/hearth-agent/migrations/0017_backups.sql (backup_settings)`
 
 ## Vérification

@@ -17,10 +17,10 @@ use std::time::Duration;
 
 use tokio::time::Instant;
 
-use super::delete::{StepShown, cause_of};
 use super::ports::{Clock, ContainerEngine, EngineError, ServiceIntents, StopIntent};
 use super::service_ops::{OpError, ServiceOps};
 use super::services::ServicesRegistry;
+use crate::domain::audit::Actor;
 use crate::domain::ops::{Cause, StopEvidence, stop_was_forced, wait_budget_with};
 use crate::domain::services::{RunState, ServiceKey, TransitionKind};
 
@@ -71,11 +71,46 @@ fn journal<T>(result: Result<T, OpError>, what: &'static str) {
     }
 }
 
-async fn forget_stop(ctx: &StopContext<'_>, key: &ServiceKey) {
-    if let Err(error) = ctx.intents.clear(key).await {
+/// Efface l'arrêt voulu : l'ordre n'a pas été donné, ou le service est revenu à l'état d'avant.
+pub(crate) async fn forget_stop(
+    intents: &dyn ServiceIntents,
+    registry: &ServicesRegistry,
+    key: &ServiceKey,
+) {
+    if let Err(error) = intents.clear(key).await {
         tracing::warn!(%error, "arrêt voulu non effacé");
     }
-    ctx.registry.forget_stop_requested(key);
+    registry.forget_stop_requested(key);
+}
+
+/// La cause d'une erreur du moteur, dans la liste fermée (`BR-DEL-029`). Jamais un texte du moteur.
+pub(crate) fn cause_of(error: EngineError) -> Cause {
+    match error {
+        EngineError::Unreachable | EngineError::Denied => Cause::EngineUnavailable,
+        EngineError::Timeout => Cause::Timeout,
+        EngineError::NotFound => Cause::ServiceNotFound,
+        _ => Cause::EngineRefused,
+    }
+}
+
+/// L'étape annoncée tant que l'arrêt dure, retirée quoi qu'il arrive.
+pub(crate) struct StepShown<'a> {
+    pub(crate) registry: &'a ServicesRegistry,
+    pub(crate) key: ServiceKey,
+}
+
+impl Drop for StepShown<'_> {
+    fn drop(&mut self) {
+        self.registry.end_transition(&self.key);
+    }
+}
+
+pub(crate) fn account_of(actor: &Actor) -> String {
+    actor
+        .account
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_default()
 }
 
 /// Arrête les conteneurs du service qui tournent. Rien à arrêter : `Ok` vide.
@@ -165,7 +200,7 @@ pub(crate) async fn stop_running(
                 // Un refus net : rien n'a été arrêté, l'arrêt voulu n'a pas lieu d'être. Un résultat inconnu le
                 // garde : l'arrêt a peut-être eu lieu.
                 if matches!(error, EngineError::Refused | EngineError::Denied) {
-                    forget_stop(ctx, request.key).await;
+                    forget_stop(ctx.intents, ctx.registry, request.key).await;
                 }
                 return Err(fail(cause_of(error), done.containers, done.forced));
             }

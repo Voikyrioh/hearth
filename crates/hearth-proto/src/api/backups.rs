@@ -206,6 +206,24 @@ impl BackupSettings {
     }
 }
 
+impl BackupRequest {
+    /// Le nombre d'éléments ignorés pour cette fois et l'empreinte de leur liste : ce que la preuve de clé de
+    /// `BackupCreate` signe (jamais un chemin). Même construction que `BackupSettings::act_digest`, lue par
+    /// l'agent et par la liaison cliente.
+    pub fn act_digest(&self) -> (u32, [u8; FINGERPRINT_LEN]) {
+        ignore_once_digest(&self.ignore_once)
+    }
+}
+
+/// Le nombre et l'empreinte d'une liste d'éléments ignorés pour cette fois (jamais un chemin).
+pub fn ignore_once_digest(items: &[IgnoredItem]) -> (u32, [u8; FINGERPRINT_LEN]) {
+    let texts: Vec<String> = items
+        .iter()
+        .map(|item| format!("i\u{0}{}\u{0}{}", item.root, item.path))
+        .collect();
+    crate::admin_act::sorted_digest(texts.iter().map(String::as_str))
+}
+
 /// Corps de `POST /services/{key}/backups`. Le membre `reauth` voyage à côté.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackupRequest {

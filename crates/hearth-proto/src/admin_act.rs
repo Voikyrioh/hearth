@@ -249,12 +249,13 @@ pub enum AdminAct<'a> {
         data: bool,
         backups: bool,
     },
-    /// Sauvegarder le service `target` : le mode (code de la liste fermée du lot) et le nombre d'éléments
-    /// ignorés pour cette fois.
+    /// Sauvegarder le service `target` : le mode (code de la liste fermée du lot), le nombre d'éléments ignorés
+    /// pour cette fois et l'empreinte de leur liste (jamais un chemin), voir `BackupRequest::act_digest`.
     BackupCreate {
         target: Cow<'a, str>,
         mode: &'a str,
-        ignored: u32,
+        count: u32,
+        digest: [u8; FINGERPRINT_LEN],
     },
     /// Supprimer la sauvegarde `target` (son identifiant).
     BackupDelete { target: &'a str },
@@ -457,8 +458,17 @@ impl AdminAct<'_> {
                 flag(*command),
             ],
             Self::ServiceDelete { data, backups, .. } => vec![flag(*data), flag(*backups)],
-            Self::BackupCreate { mode, ignored, .. } => {
-                vec![mode.as_bytes().to_vec(), ignored.to_string().into_bytes()]
+            Self::BackupCreate {
+                mode,
+                count,
+                digest,
+                ..
+            } => {
+                vec![
+                    mode.as_bytes().to_vec(),
+                    count.to_string().into_bytes(),
+                    digest.to_vec(),
+                ]
             }
             Self::BackupSettings { count, digest, .. } => {
                 vec![count.to_string().into_bytes(), digest.to_vec()]
@@ -1129,9 +1139,13 @@ mod tests {
         let backup = AdminAct::BackupCreate {
             target: key.into(),
             mode: "stopped",
-            ignored: 2,
+            count: 2,
+            digest: [7; FINGERPRINT_LEN],
         };
-        assert_eq!(backup.params(), vec![b"stopped".to_vec(), b"2".to_vec()]);
+        assert_eq!(
+            backup.params(),
+            vec![b"stopped".to_vec(), b"2".to_vec(), vec![7; FINGERPRINT_LEN]]
+        );
         assert!(covered_by_elevation(&backup));
         let backup_settings = AdminAct::BackupSettings {
             target: key.into(),
@@ -1342,7 +1356,8 @@ mod tests {
             ActKind::BackupCreate => AdminAct::BackupCreate {
                 target: target.into(),
                 mode: "stopped",
-                ignored: 0,
+                count: 0,
+                digest: [0; FINGERPRINT_LEN],
             },
             ActKind::BackupDelete => AdminAct::BackupDelete { target: "01BK" },
             ActKind::BackupSettings => AdminAct::BackupSettings {
