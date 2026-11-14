@@ -16,10 +16,10 @@ use hearth_proto::api::game_settings::{
     AnalyzeRequest, ImportView, SaveSettingsRequest, SettingsView,
 };
 use hearth_proto::error::{ErrorBody, ErrorCode};
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::audit::rejection_at;
+use super::parse;
 use super::services::key_segment;
 use super::{ActionOutcome, ActionRequest, LinkManager};
 use crate::domain::secret::Secret;
@@ -42,11 +42,6 @@ pub enum Analysis {
 /// Le chemin des réglages d'un service, ou `None` si `key` n'a pas la forme d'une clé de service.
 pub fn settings_path(key: &str) -> Option<String> {
     is_service_key(key).then(|| format!("/services/{}/settings", key_segment(key)))
-}
-
-/// Lit une réponse typée. L'erreur de lecture ne recopie JAMAIS celle de `serde` : elle citerait la valeur fautive.
-fn parse<T: DeserializeOwned>(body: serde_json::Value, what: &str) -> Result<T, LinkError> {
-    serde_json::from_value(body).map_err(|_| LinkError::Protocol(format!("{what} illisible")))
 }
 
 impl LinkManager {

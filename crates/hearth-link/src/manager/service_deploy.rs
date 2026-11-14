@@ -14,8 +14,8 @@
 //! Annuler l'opération d'un déploiement est `cancel_operation` (HRT-144), un autre acte.
 
 use hearth_proto::api::deploy::{DeployCheck, DeployCheckRequest, DeploySpec, EngineCapacity};
-use serde::de::DeserializeOwned;
 
+use super::parse;
 use super::{ActionOutcome, ActionRequest, LinkManager};
 use crate::domain::secret::Secret;
 use crate::domain::server::ServerId;
@@ -25,11 +25,6 @@ use crate::ports::transport::Method;
 const DEPLOYMENTS_PATH: &str = "/deployments";
 const CHECK_PATH: &str = "/deployments/check";
 const CAPACITY_PATH: &str = "/engine/capacity";
-
-/// Lit une réponse typée. L'erreur de lecture ne recopie JAMAIS celle de `serde` : elle citerait la valeur fautive.
-fn parse<T: DeserializeOwned>(body: serde_json::Value, what: &str) -> Result<T, LinkError> {
-    serde_json::from_value(body).map_err(|_| LinkError::Protocol(format!("{what} illisible")))
-}
 
 impl LinkManager {
     /// Déploie une image (`POST /deployments`, acte `ServiceDeploy`). `password` : le mot de passe de

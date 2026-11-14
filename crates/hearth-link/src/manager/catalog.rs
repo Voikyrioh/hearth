@@ -4,9 +4,9 @@
 //! (`deploy_service`, membre `source`).
 
 use hearth_proto::api::catalog::{CatalogView, FicheDetail};
-use serde::de::DeserializeOwned;
 
 use super::LinkManager;
+use super::parse;
 use crate::domain::server::ServerId;
 use crate::error::LinkError;
 
@@ -29,10 +29,6 @@ pub fn is_stable_id(id: &str) -> bool {
 /// Le chemin du détail d'une fiche, ou `None` si l'identifiant n'en est pas un.
 pub fn fiche_path(id: &str) -> Option<String> {
     is_stable_id(id).then(|| format!("{CATALOG_PATH}/{id}"))
-}
-
-fn parse<T: DeserializeOwned>(body: serde_json::Value, what: &str) -> Result<T, LinkError> {
-    serde_json::from_value(body).map_err(|_| LinkError::Protocol(format!("{what} illisible")))
 }
 
 impl LinkManager {

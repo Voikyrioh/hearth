@@ -48,6 +48,16 @@ pub use audit::AuditExportFile;
 pub use catalog::is_stable_id;
 pub use events::EventStream;
 use events::Fanout;
+
+/// Lit une réponse typée, pour TOUS les modules de lecture. L'erreur de lecture ne recopie JAMAIS celle de `serde` : une
+/// erreur de type cite la valeur fautive (le nom d'un conteneur, une valeur de réglage, un mot de passe).
+fn parse<T: serde::de::DeserializeOwned>(
+    body: serde_json::Value,
+    what: &str,
+) -> Result<T, crate::error::LinkError> {
+    serde_json::from_value(body)
+        .map_err(|_| crate::error::LinkError::Protocol(format!("{what} illisible")))
+}
 pub use game_settings::{Analysis, settings_path};
 pub use reauth::ReauthState;
 pub use rights::ServiceRightsRead;

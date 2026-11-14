@@ -1,7 +1,7 @@
 import { safeText } from "@/audit/text";
 import type { ProgressStep } from "@/components/molecules/ProgressSteps.vue";
 import { type MessageKey, t } from "@/i18n";
-import type { FicheStop, GamePort, GameView, ServiceOperation } from "@/link";
+import type { FicheStop, GamePort, GameView, ServiceInfo, ServiceOperation } from "@/link";
 
 /**
  * Le quotidien d'un serveur de jeu (HRT-104, `BR-JEU-004`, `010`, `012`, `017` à `021`, `027`) : des fonctions pures, sans
@@ -29,6 +29,15 @@ export function stopWay(stop: FicheStop): StopWay {
 /** Le nom du jeu pour une phrase : texte du serveur rendu inoffensif. */
 export function gameName(view: Pick<GameView, "name">): string {
   return safeText(view.name);
+}
+
+/**
+ * Ce service peut être un serveur de jeu : créé par Hearth, ni adopté, ni en cours de déploiement (BR-JEU-001). La liste
+ * ne dit pas qu'il vient d'une fiche : c'est la lecture de l'agent qui tranche. Un seul prédicat pour les cartes et pour
+ * la fenêtre d'arrêt.
+ */
+export function mayBeGame(service: Pick<ServiceInfo, "origin" | "adopted" | "state">): boolean {
+  return service.origin === "hearth" && service.adopted === null && service.state !== "deploying";
 }
 
 /** Un nombre de secondes écrit (« 120 secondes »), la même formule que le délai d'arrêt du détail. */
@@ -228,8 +237,12 @@ export function isStopOperation(operation: Pick<ServiceOperation, "kind">): bool
  * enregistré.
  */
 export function decisionReason(operation: ServiceOperation): "cannot-ask" | "not-confirmed" {
-  return operation.steps.some((line) => line.step === "save_world") ||
-    operation.step === "save_world"
-    ? "not-confirmed"
-    : "cannot-ask";
+  return hasSaveStep(operation) ? "not-confirmed" : "cannot-ask";
+}
+
+/** La suite d'un jeu a ouvert son étape « Sauvegarde du monde » (le plan d'un arrêt ordinaire n'en a pas). */
+export function hasSaveStep(operation: ServiceOperation): boolean {
+  return (
+    operation.step === "save_world" || operation.steps.some((line) => line.step === "save_world")
+  );
 }

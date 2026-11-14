@@ -35,9 +35,7 @@ const chosen = ref<string | null>(null);
 
 const operation = computed(() => props.tracked?.operation ?? null);
 /** L'arrêt d'un serveur de jeu qui attend un choix (BR-JEU-006) : le seul cas de décision d'un arrêt ou d'un redémarrage. */
-const game = computed(
-  () => operation.value !== null && isStopOperation(operation.value) && props.tracked !== null,
-);
+const game = computed(() => operation.value !== null && isStopOperation(operation.value));
 const restart = computed(() => operation.value?.kind === "restart");
 const offered = computed(() => operation.value?.decision?.choices ?? []);
 /** Pour un arrêt de jeu, « Annuler » d'abord (le choix sûr) ; sinon l'ordre de l'agent. */

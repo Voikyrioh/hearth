@@ -23,7 +23,7 @@ use super::spec::{
     SpecMountKind, SpecPort, SpecProtocol, SpecRestart, SpecSecrets, SpecSettings,
 };
 use crate::domain::catalog::loading::model::Fiche;
-use crate::domain::catalog::loading::schema::fiche::{Evidence, PlainEvidence, Protocol};
+use crate::domain::catalog::loading::schema::fiche::{Evidence, PlainEvidence, PortRole, Protocol};
 use crate::domain::catalog::loading::schema::settings::ChangeWhen;
 use crate::domain::catalog::settings_state::{SettingsState, Slot};
 use crate::domain::catalog::translate::{DeploymentValidator, ServiceSpecDraft};
@@ -810,4 +810,43 @@ disk = { evidence = \"unmeasured\" }",
         );
         assert!(file.content.expose().contains("maxplayers=8"));
     }
+}
+
+/// Un port publié d'un service de jeu, rapproché de ce que la fiche en dit (BR-JEU-017, BR-JEU-019).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GamePortFact {
+    pub host_port: u16,
+    pub protocol: SpecProtocol,
+    /// Le rôle que la fiche donne à ce port ; `None` : la fiche ne reconnaît plus ce port.
+    pub role: Option<PortRole>,
+    /// Le numéro du serveur diffère de celui que propose la fiche : le rappel « mettez à jour votre box » (BR-JEU-019).
+    pub changed: bool,
+}
+
+/// Les ports publiés d'un service, rapprochés de ceux de la fiche par numéro de service et protocole. Un protocole que
+/// la fiche ne sait pas dire (`sctp`) n'est rapproché de rien.
+pub fn game_ports(fiche: &Fiche, ports: &[SpecPort]) -> Vec<GamePortFact> {
+    ports
+        .iter()
+        .map(|port| {
+            let wanted = match port.protocol {
+                SpecProtocol::Tcp => Some(Protocol::Tcp),
+                SpecProtocol::Udp => Some(Protocol::Udp),
+                SpecProtocol::Sctp => None,
+            };
+            let declared = wanted.and_then(|protocol| {
+                fiche.file.port.iter().find(|candidate| {
+                    candidate.container == port.container_port && candidate.protocol == protocol
+                })
+            });
+            GamePortFact {
+                host_port: port.host_port,
+                protocol: port.protocol,
+                role: declared.map(|declared| declared.role),
+                changed: declared
+                    .and_then(|declared| declared.default_host)
+                    .is_some_and(|default| default != port.host_port),
+            }
+        })
+        .collect()
 }

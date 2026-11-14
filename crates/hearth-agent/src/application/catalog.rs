@@ -143,7 +143,7 @@ fn evidence(evidence: &Evidence) -> EvidenceView {
 }
 
 /// Le nom du protocole d'un port de fiche, tel que le client le lit.
-pub(crate) fn protocol_name(protocol: Protocol) -> &'static str {
+fn protocol_name(protocol: Protocol) -> &'static str {
     match protocol {
         Protocol::Tcp => "tcp",
         Protocol::Udp => "udp",
@@ -183,8 +183,6 @@ pub(crate) fn stop_view(fiche: &Fiche) -> StopView {
 
 fn detail_of(fiche: &Fiche) -> FicheDetail {
     let file = &fiche.file;
-    let protocol = protocol_name;
-    let port_role = port_role_name;
     let publish = |p: Publish| match p {
         Publish::Always => "always",
         Publish::Optional => "optional",
@@ -225,8 +223,8 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
             .map(|p| PortView {
                 id: p.id.clone(),
                 container: p.container,
-                protocol: protocol(p.protocol).to_owned(),
-                role: port_role(p.role).to_owned(),
+                protocol: protocol_name(p.protocol).to_owned(),
+                role: port_role_name(p.role).to_owned(),
                 publish: publish(p.publish).to_owned(),
                 default_host: p.default_host,
                 mapping: match p.mapping {

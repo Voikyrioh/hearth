@@ -20,9 +20,9 @@ export class SimulatedGames {
   readonly reveals: { serverId: string; key: string }[] = [];
   /** Les lectures de la vue reçues. */
   readonly reads: { serverId: string; key: string }[] = [];
-  /** `true` : la prochaine lecture de la vue échoue (agent qui ne répond pas). */
+  /** `true` : TOUTES les lectures de la vue échouent tant qu'il n'est pas remis à `false` (agent qui ne répond pas). */
   failRead = false;
-  /** `true` : la prochaine révélation échoue. */
+  /** `true` : TOUTES les révélations échouent tant qu'il n'est pas remis à `false`. */
   failReveal = false;
 
   private id(serverId: string, key: string): string {
@@ -72,7 +72,9 @@ export class SimulatedGames {
         fiche: detail.card.id,
         name: detail.card.name,
         ficheVersion: detail.card.version,
-        stop: { ...detail.stop } as GameView["stop"],
+        stop: {
+          ...(detail.stop ?? { graceSeconds: 10, worldSaved: "unknown", sequenceTested: false }),
+        },
         ports,
       },
       password,

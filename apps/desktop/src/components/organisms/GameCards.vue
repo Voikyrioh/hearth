@@ -6,7 +6,7 @@ import GamePortsCard from "@/components/molecules/GamePortsCard.vue";
 import GameStopCard from "@/components/molecules/GameStopCard.vue";
 import { useGameView } from "@/composables/useGameView";
 import type { ServiceInfo } from "@/link";
-import { addressOf } from "@/services/game";
+import { addressOf, mayBeGame } from "@/services/game";
 import type { RightsGate } from "@/services/rights";
 import { useServersStore } from "@/stores/servers";
 
@@ -33,13 +33,7 @@ const emit = defineEmits<{ retryRights: [] }>();
 
 const servers = useServersStore();
 const candidate = computed(
-  () =>
-    props.supported &&
-    props.connected &&
-    !props.gone &&
-    props.service.origin === "hearth" &&
-    props.service.adopted === null &&
-    props.service.state !== "deploying",
+  () => props.supported && props.connected && !props.gone && mayBeGame(props.service),
 );
 const game = useGameView(
   () => props.serverId,

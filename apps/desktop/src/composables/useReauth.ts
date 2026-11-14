@@ -17,6 +17,8 @@ import { useCountdown } from "./useCountdown";
 export interface ActReport {
   kind: "done" | "refused" | "unknown" | "failed" | "right_lost";
   refusal?: { kind: string; retry_after_s?: number };
+  /** L'opération que l'agent vient d'accepter (pilotage d'un service) : un arrêt de jeu la suit (HRT-104). */
+  actionId?: string;
 }
 
 /**

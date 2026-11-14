@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import Callout from "@/components/molecules/Callout.vue";
@@ -16,12 +17,12 @@ import { portRows, portsChanged, portsListText } from "@/services/game";
 const props = defineProps<{ ports: readonly GamePort[] }>();
 
 const copier = useCopyText(() => t("game.ports.listCopied"));
-const rows = () => portRows(props.ports);
+const rows = computed(() => portRows(props.ports));
 </script>
 
 <template>
   <DashCard :title="t('game.ports.title')" data-game-ports>
-    <template v-if="rows().length > 0" #aside>
+    <template v-if="rows.length > 0" #aside>
       <HButton
         variant="secondary"
         size="sm"
@@ -33,7 +34,7 @@ const rows = () => portRows(props.ports);
       </HButton>
     </template>
 
-    <table v-if="rows().length > 0" class="ports" :aria-label="t('game.ports.table')" data-game-ports-table>
+    <table v-if="rows.length > 0" class="ports" :aria-label="t('game.ports.table')" data-game-ports-table>
       <thead>
         <tr>
           <th scope="col">{{ t("game.ports.colPort") }}</th>
@@ -42,7 +43,7 @@ const rows = () => portRows(props.ports);
         </tr>
       </thead>
       <tbody>
-        <tr v-for="row in rows()" :key="row.key" data-game-port-row>
+        <tr v-for="row in rows" :key="row.key" data-game-port-row>
           <td class="ports__num">{{ row.port }}</td>
           <td>{{ row.protocol }}</td>
           <td>{{ row.role }}</td>
@@ -54,7 +55,7 @@ const rows = () => portRows(props.ports);
     <Callout v-if="copier.state.value === 'failed'" tone="warn" inline data-game-ports-failed>
       {{ t("game.ports.listFailed") }}
     </Callout>
-    <template v-if="rows().length > 0">
+    <template v-if="rows.length > 0">
       <p class="ports__note" data-game-ports-open>{{ t("game.ports.open") }}</p>
       <p class="ports__note" data-game-ports-unverified>
         <HIcon name="info" size="sm" />

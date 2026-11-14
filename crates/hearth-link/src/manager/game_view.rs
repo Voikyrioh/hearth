@@ -8,9 +8,9 @@
 use hearth_proto::admin_act::is_service_key;
 use hearth_proto::api::game_secret::GameSecret;
 use hearth_proto::api::game_view::GameView;
-use serde::de::DeserializeOwned;
 
 use super::LinkManager;
+use super::parse;
 use super::services::key_segment;
 use crate::domain::server::ServerId;
 use crate::error::{InputField, LinkError};
@@ -23,11 +23,6 @@ pub fn game_view_path(key: &str) -> Option<String> {
 /// Le chemin du mot de passe d'un service de jeu, ou `None` si `key` n'a pas la forme d'une clé de service.
 pub fn game_secret_path(key: &str) -> Option<String> {
     is_service_key(key).then(|| format!("/services/{}/game-secret", key_segment(key)))
-}
-
-/// Lit une réponse typée. L'erreur de lecture ne recopie JAMAIS celle de `serde` : elle citerait la valeur fautive.
-fn parse<T: DeserializeOwned>(body: serde_json::Value, what: &str) -> Result<T, LinkError> {
-    serde_json::from_value(body).map_err(|_| LinkError::Protocol(format!("{what} illisible")))
 }
 
 impl LinkManager {

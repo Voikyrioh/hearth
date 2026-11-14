@@ -881,6 +881,7 @@ export class SimulatedLinkBridge implements LinkBridge {
     if (!this.accounts.ownRights(server).granted) {
       throw this.fail({ kind: "missing_services_right" });
     }
+    // Le vrai agent répond 404 `NOT_A_GAME_SERVICE` : la coquille rend une erreur non typée, l'interface dit « Impossible de lire ».
     if (!this.games.has(serverId, key)) throw this.fail({ kind: "unreachable" });
     if (this.games.failReveal) throw this.fail({ kind: "unreachable" });
     return this.games.reveal(serverId, key);

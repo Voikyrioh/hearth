@@ -55,8 +55,8 @@ const engineReason = computed(() => {
   return props.engineReady ? null : t("game.password.engineNotReady");
 });
 const rightsReason = computed(() => ["denied", "old-agent", "failed"].includes(props.gate.kind));
-/** Le droit n'est pas encore lu ou pas accordé : la carte est celle d'un compte sans le droit. */
-const reserved = computed(() => rightsReason.value && props.gate.kind === "denied");
+/** Le droit est refusé : la carte est celle d'un compte sans le droit. */
+const reserved = computed(() => props.gate.kind === "denied");
 const describedBy = computed(() => {
   if (rightsReason.value) return props.reasonId;
   if (engineReason.value) return noticeId;

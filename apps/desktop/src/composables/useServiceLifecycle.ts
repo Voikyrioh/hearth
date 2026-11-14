@@ -11,6 +11,7 @@ import {
   type ServiceInfo,
   type ServiceOperation,
 } from "@/link";
+import { isStopOperation, mayBeGame } from "@/services/game";
 import { alreadyText, type Gesture, refusalText } from "@/services/lifecycle";
 import { useGameSettingsPendingStore } from "@/stores/gameSettingsPending";
 import { useToastsStore } from "@/stores/toasts";
@@ -132,8 +133,8 @@ export function useServiceLifecycle(
       sequenceOpen.value = true;
       return;
     }
-    const id = actions.lastActionId.value;
-    if (report.kind !== "done" || id === null) return;
+    const id = report.actionId;
+    if (report.kind !== "done" || id === undefined) return;
     sequence.value = { ...made, opId: id, unknown: false };
     follow.begin(id);
     sequenceOpen.value = true;
@@ -144,7 +145,7 @@ export function useServiceLifecycle(
    * fenêtre la suit de nouveau. Sans effet pour un service qui n'est pas un serveur de jeu, ou si la séquence est déjà là.
    */
   async function resumeSequence(service: ServiceInfo, operation: ServiceOperation): Promise<void> {
-    if (operation.kind === "start" || sequenceOpen.value) return;
+    if (!isStopOperation(operation) || sequenceOpen.value) return;
     if (sequence.value?.opId === operation.id) {
       sequenceOpen.value = true;
       follow.begin(operation.id);
@@ -176,7 +177,8 @@ export function useServiceLifecycle(
    * jamais refusé, BR-LIFE-008).
    */
   async function readGame(service: ServiceInfo): Promise<GameView | null> {
-    if (service.origin !== "hearth" || service.adopted !== null) return null;
+    // Seul un service créé par Hearth peut être un serveur de jeu : les autres n'attendent aucune lecture.
+    if (!mayBeGame(service)) return null;
     try {
       const read = await getLinkBridge().readGameView(serverId(), service.key);
       return read.kind === "found" ? read.view : null;

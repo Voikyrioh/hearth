@@ -8,7 +8,7 @@ import type {
   OperationStatus,
   ServiceOperation,
 } from "@/link";
-import { worldSaved } from "@/services/game";
+import { hasSaveStep, worldSaved } from "@/services/game";
 
 /**
  * Les textes des opérations de service (HRT-84) : des fonctions pures, sans E/S. Aucun texte ne vient de l'agent :
@@ -152,13 +152,6 @@ export function outcomeText(operation: ServiceOperation, name: string): string |
 export type OutcomeTone = "success" | "error" | "warn" | "info";
 
 const LIFECYCLE_KINDS: readonly OperationKind[] = ["start", "stop", "restart"];
-
-/** La suite d'un jeu a ouvert son étape « Sauvegarde du monde » (le plan d'un arrêt ordinaire n'en a pas). */
-function hasSaveStep(operation: ServiceOperation): boolean {
-  return (
-    operation.step === "save_world" || operation.steps.some((line) => line.step === "save_world")
-  );
-}
 
 /**
  * L'issue d'une opération de pilotage (démarrer, arrêter, redémarrer), dite par sa CAUSE (HRT-65, BR-LIFE-004, 005,

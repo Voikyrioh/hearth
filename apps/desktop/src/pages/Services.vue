@@ -236,9 +236,7 @@ function seeOperation(tracked: TrackedOperation) {
   openDetail(tracked.operation.key);
   // Un arrêt ou un redémarrage de serveur de jeu : « Voir » rouvre la séquence, avec son étape et son décompte.
   const service = listServices.value.find((item) => item.key === tracked.operation.key);
-  if (service && (tracked.operation.kind === "stop" || tracked.operation.kind === "restart")) {
-    void lifecycle.resumeSequence(service, tracked.operation);
-  }
+  if (service) void lifecycle.resumeSequence(service, tracked.operation);
 }
 /**
  * La fenêtre de décision, ouverte sur l'opération qui attend. On retient son identifiant et on relit le magasin :

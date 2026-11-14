@@ -10,7 +10,7 @@ import type { GameSequence } from "@/composables/useServiceLifecycle";
 import { t } from "@/i18n";
 import type { ServiceOperation } from "@/link";
 import { outcomeOf } from "@/serviceOps/messages";
-import { gameName, sequenceSteps, stopWay, worldSaved } from "@/services/game";
+import { gameName, secondsText, sequenceSteps, stopWay, worldSaved } from "@/services/game";
 
 // La séquence d'un arrêt ou d'un redémarrage de serveur de jeu (HRT-104, BR-JEU-003, 005, 008, 011, 012) : la fenêtre de
 // confirmation devient cette vue de suivi (`FormDialog`, qui tient `showModal`, le piège à focus et le retour du focus).
@@ -73,9 +73,7 @@ const line = computed(() => {
   if (step.value === "start") return t("game.sequence.starting");
   return null;
 });
-function secondsLabel(seconds: number): string {
-  return t(seconds === 1 ? "serviceDetail.graceOne" : "serviceDetail.grace", { n: seconds });
-}
+const secondsLabel = secondsText;
 
 const steps = computed(() =>
   sequenceSteps(

@@ -47,7 +47,7 @@ use super::service_specs::{ServiceSpecs, SpecServiceError};
 use crate::domain::audit::{Actor, AuditAction, ClientName, Outcome, Target};
 use crate::domain::catalog::formats::{ConfigFormat, MAX_FILE_BYTES, format_for};
 use crate::domain::catalog::loading::model::{Fiche, Setting, ValueSpec, hex};
-use crate::domain::catalog::loading::schema::fiche::{Channel, ChannelKind, Protocol};
+use crate::domain::catalog::loading::schema::fiche::{Channel, ChannelKind};
 use crate::domain::catalog::loading::schema::settings::ChangeWhen;
 use crate::domain::catalog::loading::schema::settings::SecretKind;
 use crate::domain::catalog::settings_io::{
@@ -63,6 +63,7 @@ use crate::domain::files::RelPath;
 use crate::domain::sealed::{AnswerId, SealContext, SecretField};
 use crate::domain::secret::Secret;
 use crate::domain::services::deploy::{flatten_target, normalize_target};
+use crate::domain::services::from_fiche::game_ports;
 use crate::domain::services::from_fiche::{
     generated_secret_id, produced_file_perms, state_of_answers,
 };
@@ -1202,34 +1203,21 @@ impl GameSettings {
     pub async fn game_view(&self, key: &ServiceKey) -> Result<GameView, SettingsError> {
         let loaded = self.load(key).await?;
         let fiche = loaded.fiche;
-        let ports = loaded
-            .body
-            .ports
-            .iter()
-            .map(|port| {
-                let declared = fiche.file.port.iter().find(|candidate| {
-                    candidate.container == port.container_port
-                        && match port.protocol {
-                            SpecProtocol::Tcp => candidate.protocol == Protocol::Tcp,
-                            SpecProtocol::Udp => candidate.protocol == Protocol::Udp,
-                            SpecProtocol::Sctp => false,
-                        }
-                });
-                GamePort {
-                    host_port: port.host_port,
-                    protocol: match port.protocol {
-                        SpecProtocol::Tcp => "tcp",
-                        SpecProtocol::Udp => "udp",
-                        SpecProtocol::Sctp => "sctp",
-                    }
-                    .to_owned(),
-                    role: declared
-                        .map(|declared| port_role_name(declared.role).to_owned())
-                        .unwrap_or_default(),
-                    changed: declared
-                        .and_then(|declared| declared.default_host)
-                        .is_some_and(|default| default != port.host_port),
+        let ports = game_ports(fiche, &loaded.body.ports)
+            .into_iter()
+            .map(|fact| GamePort {
+                host_port: fact.host_port,
+                protocol: match fact.protocol {
+                    SpecProtocol::Tcp => "tcp",
+                    SpecProtocol::Udp => "udp",
+                    SpecProtocol::Sctp => "sctp",
                 }
+                .to_owned(),
+                role: fact
+                    .role
+                    .map(|role| port_role_name(role).to_owned())
+                    .unwrap_or_default(),
+                changed: fact.changed,
             })
             .collect();
         let has_password = fiche.settings.iter().any(|setting| {
