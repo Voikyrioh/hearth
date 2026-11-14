@@ -5,30 +5,13 @@ name: Banc d'essai des fiches
 # compte, ordres `save` et `exit` par l'entree du conteneur, arret sans coupure forcee, service qui reste arrete,
 # monde conserve au redemarrage, mesures au repos).
 #
-# Declencheurs CIBLES (pas a chaque push) : une fiche, le banc, le code qui installe ou arrete une fiche, ce
-# fichier. Lancement a la main possible. La veille nocturne (`fiche-drift`) est la seconde moitie de HRT-114,
-# livree avec HRT-115.
+# Declenchement A LA MAIN SEULEMENT (Actions, « Run workflow ») : ni push, ni pull request, ni chemins (decision de
+# Voiky du 2026-11-14, quota de minutes GitHub Actions). A lancer avant de changer le statut d'un element de fiche,
+# apres toute modification de la fiche Terraria ou du banc, et avant une release qui embarque une fiche essayee :
+#   gh workflow run "Banc d'essai des fiches" --ref <branche>     (ou l'onglet Actions)
+# La veille nocturne (`fiche-drift`) est la seconde moitie de HRT-114, livree avec HRT-115.
 
 on:
-  pull_request:
-    paths:
-      - "crates/hearth-agent/catalog/**"
-      - "crates/hearth-agent/tests/fiche_live.rs"
-      - "crates/hearth-agent/src/domain/catalog/**"
-      - "crates/hearth-agent/src/domain/services/from_fiche.rs"
-      - "crates/hearth-agent/src/domain/services/plan.rs"
-      - "crates/hearth-agent/src/domain/services/deploy.rs"
-      - "Cargo.lock"
-      - "crates/hearth-agent/src/application/game_stop.rs"
-      - "crates/hearth-agent/src/application/fiche_install.rs"
-      - "crates/hearth-agent/src/infrastructure/engine/**"
-      - ".github/workflows/fiche-live.yml"
-  push:
-    branches: [main]
-    paths:
-      - "crates/hearth-agent/catalog/**"
-      - "crates/hearth-agent/tests/fiche_live.rs"
-      - ".github/workflows/fiche-live.yml"
   workflow_dispatch:
 
 concurrency:
