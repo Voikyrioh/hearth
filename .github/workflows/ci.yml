@@ -12,8 +12,8 @@ on:
         default: "600"
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # Une PR annule son exécution précédente ; la branche principale va jusqu'au bout (couverture complète de chaque push).
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  # Une PR annule son exécution précédente ; hors PR, un groupe par exécution : chaque push sur `main` va jusqu'au bout.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -44,7 +44,7 @@ jobs:
           echo "$files"
           # Périmètre client Windows : coquille et interface, bibliothèques partagées avec l'agent (proto) ou
           # propres au client (link), outils de construction, verrou et chaîne d'outils, ce workflow et ses actions.
-          if echo "$files" | grep -Eq '^(apps/desktop/|crates/hearth-link/|crates/hearth-proto/|xtask/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|clippy\.toml$|\.cargo/|\.github/workflows/ci\.yml$|\.github/actions/)'; then
+          if grep -Eq '^(apps/desktop/|crates/hearth-link/|crates/hearth-proto/|crates/hearth-agent/tests/support/|xtask/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$|clippy\.toml$|\.cargo/|\.github/workflows/ci\.yml$|\.github/actions/)' <<<"$files"; then
             echo "windows=true" >> "$GITHUB_OUTPUT"
           else
             echo "windows=false" >> "$GITHUB_OUTPUT"; echo "Rien du périmètre Windows : jobs Windows ignorés"

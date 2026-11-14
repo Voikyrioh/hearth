@@ -104,7 +104,7 @@ Tout accès aux fichiers du dossier d'un service passe par le port `SafeFs` (`ap
 
 ## CI : jobs Windows conditionnels (ADR-0058)
 
-`.github/workflows/ci.yml` : le job `changes` calcule `windows=true|false` (PR : fichiers touchés ; push `main` et `workflow_dispatch` : toujours `true`). Les jobs `desktop` et `rust (windows-latest)` sont des contrôles REQUIS : hors périmètre client Windows (`apps/desktop/`, `crates/hearth-link/`, `crates/hearth-proto/`, `xtask/`, `Cargo.*`, chaîne d'outils, ce workflow) ils tournent sur Linux avec toutes leurs étapes ignorées et rapportent un succès (jamais de `if:` de job : la PR resterait « Expected »). Toute nouvelle étape de ces deux jobs porte `if: env.RUN == 'true'`. Une PR annule son exécution précédente, `main` jamais.
+`.github/workflows/ci.yml` : le job `changes` calcule `windows=true|false` (PR : fichiers touchés ; push `main` et `workflow_dispatch` : toujours `true`). Les jobs `desktop` et `rust (windows-latest)` sont des contrôles REQUIS : hors périmètre client Windows (`apps/desktop/`, `crates/hearth-link/`, `crates/hearth-proto/`, `crates/hearth-agent/tests/support/`, `xtask/`, `Cargo.*`, chaîne d'outils, ce workflow) ils tournent sur Linux avec toutes leurs étapes ignorées et rapportent un succès (jamais de `if:` de job : la PR resterait « Expected »). Toute nouvelle étape de ces deux jobs porte `if: env.RUN == 'true'`. Une PR annule son exécution précédente ; chaque push `main` a sa propre exécution, jamais annulée ni remplacée. Les tests de liaison de `hearth-desktop` contre le vrai agent ne tournent sous Windows que dans ce périmètre ou sur `main`.
 
 ## Comptes en ligne de commande
 
