@@ -20,7 +20,7 @@ Hearth ne lit aucune fiche depuis Internet, un fichier du PC, un dossier du serv
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::format_closed_a_missing_field_a_wrong_version_and_broken_files_are_refused (origine distante refusée)`
-- `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_digest`
+- `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::the_embedded_terraria_fiche_is_a_preview_tried_on_the_real_image_with_a_pinned_image`
 
 ## Cas limites
 - Aucune fiche de serveur privé de MMO, ni embarquée ni distante : règle de publication (ADR-0053), pas du chargeur.

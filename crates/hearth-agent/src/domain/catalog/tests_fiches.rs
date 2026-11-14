@@ -1422,8 +1422,7 @@ fn coherence_proposed_values_and_arguments_are_valid_for_their_type() {
 // ---- La fiche Terraria embarquée ------------------------------------------------------------------------------------------------
 
 #[test]
-fn the_embedded_terraria_fiche_is_a_preview_tried_on_the_real_image_with_a_pinned_digest_and_a_stable_digest()
- {
+fn the_embedded_terraria_fiche_is_a_preview_tried_on_the_real_image_with_a_pinned_image() {
     let (fiches, refused) = load_all();
     assert!(refused.is_empty(), "{refused:?}");
     let terraria = fiches

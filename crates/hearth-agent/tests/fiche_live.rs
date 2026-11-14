@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use hearth_agent::application::ports::{ContainerEngine, LogQuery};
+use hearth_agent::domain::catalog::loading::schema::fiche::Proof;
 use hearth_agent::domain::catalog::stop_plan::{PlannedStep, StopPlan, ready_sign, stop_plan};
 use hearth_agent::domain::catalog::translate::{Request, translate};
 use hearth_agent::domain::catalog::{Fiche, Origin, load};
@@ -180,9 +181,12 @@ fn memory_bytes(stats: &str) -> Option<u64> {
     let number: f64 = number.trim().parse().ok()?;
     let factor = match unit.trim() {
         "B" => 1.0,
-        "KiB" | "kB" => 1024.0,
-        "MiB" | "MB" => 1024.0 * 1024.0,
-        "GiB" | "GB" => 1024.0 * 1024.0 * 1024.0,
+        "KiB" => 1024.0,
+        "kB" => 1000.0,
+        "MiB" => 1024.0 * 1024.0,
+        "MB" => 1_000_000.0,
+        "GiB" => 1024.0 * 1024.0 * 1024.0,
+        "GB" => 1_000_000_000.0,
         _ => return None,
     };
     Some((number * factor) as u64)
@@ -211,9 +215,10 @@ fn remove_leftovers() {
 }
 
 /// Le relevé consigné dans `evidence.toml`.
-#[derive(Default)]
 struct Evidence {
     lines: Vec<(String, String)>,
+    /// Dossier du relevé : réécrit à chaque constat, pour qu'un échec en cours de route ne le perde pas.
+    out: PathBuf,
 }
 
 impl Evidence {
@@ -225,6 +230,8 @@ impl Evidence {
         };
         eprintln!("evidence {key} = {rendered}");
         self.lines.push((key.to_owned(), rendered));
+        let out = self.out.clone();
+        self.write(&out);
     }
 
     fn text(&mut self, key: &str, value: impl std::fmt::Display) {
@@ -261,7 +268,10 @@ async fn the_terraria_fiche_starts_takes_a_setting_stops_by_its_orders_and_keeps
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).unwrap();
     remove_leftovers();
-    let mut evidence = Evidence::default();
+    let mut evidence = Evidence {
+        lines: Vec::new(),
+        out: out.clone(),
+    };
     evidence.text("fiche", fiche.id());
     evidence.raw("fiche_version", fiche.file.version);
 
@@ -277,7 +287,15 @@ async fn the_terraria_fiche_starts_takes_a_setting_stops_by_its_orders_and_keeps
     ])
     .unwrap_or_default();
     evidence.text("image", &reference);
-    evidence.text("image_digest", digest);
+    evidence.text("image_digest", &digest);
+    // L'étiquette doit encore désigner l'empreinte épinglée par la fiche : sinon le constat est clair, pas un
+    // « No such image » à la création.
+    if let Some(pinned) = fiche.file.image.digest.as_deref() {
+        assert!(
+            digest.ends_with(pinned),
+            "l'étiquette ne pointe plus sur l'empreinte épinglée : {digest} contre {pinned}"
+        );
+    }
     let image_bytes: u64 = docker(&["image", "inspect", "-f", "{{.Size}}", &reference])
         .parse()
         .unwrap_or(0);
@@ -412,6 +430,7 @@ async fn the_terraria_fiche_starts_takes_a_setting_stops_by_its_orders_and_keeps
     let mut stdin_accepted = true;
     let mut quit_at = None;
     let mut orders = 0;
+    let mut after_save = None;
     for step in &steps {
         match step {
             PlannedStep::StdinLine { line, quits } => {
@@ -426,13 +445,17 @@ async fn the_terraria_fiche_starts_takes_a_setting_stops_by_its_orders_and_keeps
             }
             PlannedStep::Wait { seconds } => {
                 tokio::time::sleep(Duration::from_secs(u64::from(*seconds))).await;
+                // Le relevé qui juge `save` est pris AVANT l'ordre de sortie (qui enregistre aussi).
+                if quit_at.is_none() {
+                    after_save = Some(worlds(&world_dir));
+                }
             }
             PlannedStep::WaitLog { .. } => {
                 panic!("la fiche n'attend aucun signe dans ses journaux")
             }
         }
     }
-    let after_save = worlds(&world_dir);
+    let after_save = after_save.unwrap_or_default();
     // Aussitôt après l'ordre de sortie : l'arrêt demandé au moteur (le service reste arrêté).
     let stop_started = quit_at.unwrap_or_else(Instant::now);
     engine
@@ -490,7 +513,34 @@ async fn the_terraria_fiche_starts_takes_a_setting_stops_by_its_orders_and_keeps
     let _ = Command::new("sudo").args(["rm", "-rf"]).arg(&work).status();
     evidence.write(&out);
 
-    // Ce que l'essai exige toujours (indépendant de l'entrée sans terminal, qui est consignée, pas jugée).
+    // Une fois promus dans la fiche livrée, ces constats sont EXIGÉS : si l'image ne lit plus son entrée, le job
+    // échoue au lieu de laisser la fiche affirmer ce qui n'est plus vrai.
+    let shipped =
+        load(Origin::Embedded, FICHE.as_bytes(), SETTINGS.as_bytes()).expect("fiche livrée");
+    if shipped
+        .file
+        .stop
+        .sequence
+        .as_ref()
+        .is_some_and(|s| s.status == Proof::Tested)
+    {
+        assert!(
+            quit_by_order,
+            "la fiche livrée dit la suite d'arrêt essayée : le jeu doit sortir sur `exit` sans terminal"
+        );
+    }
+    if shipped
+        .file
+        .save
+        .as_ref()
+        .is_some_and(|s| s.status == Proof::Tested)
+    {
+        assert!(
+            mtime_moved,
+            "la fiche livrée dit `save` essayé : le monde doit être réécrit avant `exit`"
+        );
+    }
+    // Ce que l'essai exige toujours (l'entrée sans terminal est CONSIGNÉE tant que la fiche ne l'affirme pas).
     assert!(port_open, "le port publié doit répondre");
     assert!(still_stopped, "le service arrêté doit rester arrêté");
     assert!(

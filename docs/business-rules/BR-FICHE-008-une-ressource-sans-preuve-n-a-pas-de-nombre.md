@@ -11,7 +11,7 @@ maj: 2026-10-17
 # BR-FICHE-008 — Une ressource sans preuve n'a pas de nombre : « non mesurée » refuse un chiffre écrit à côté
 
 ## Règle
-Une fiche déclare le processeur, la mémoire et l'espace disque qu'elle demande, chacun avec sa preuve (`measured`, `measured_idle`, `publisher` avec son adresse en `https`, ou `unmeasured`). Une ressource `unmeasured` ne porte AUCUN nombre : le format refuse un chiffre écrit à côté (`RessourceNonMesureeAvecNombre`). La fiche Terraria déclare ses trois ressources `unmeasured`, sans nombre.
+Une fiche déclare le processeur, la mémoire et l'espace disque qu'elle demande, chacun avec sa preuve (`measured`, `measured_idle`, `publisher` avec son adresse en `https`, ou `unmeasured`). Une ressource `unmeasured` ne porte AUCUN nombre : le format refuse un chiffre écrit à côté (`RessourceNonMesureeAvecNombre`). La fiche Terraria déclare son processeur `unmeasured`, sans nombre ; sa mémoire minimale et son espace installé sont `measured_idle` (banc d'essai réel, HRT-114).
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/catalog/loading/invariants.rs::check_resources`
@@ -22,11 +22,11 @@ Une fiche déclare le processeur, la mémoire et l'espace disque qu'elle demande
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::coherence_the_settings_of_a_fiche_agree_with_each_other (ressources non mesurées avec un nombre)`
-- `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_digest`
+- `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::the_embedded_terraria_fiche_is_a_preview_tried_on_the_real_image_with_a_pinned_image`
 - `apps/desktop/src/fiche/fiche.test.ts`
 
 ## Cas limites
-- La règle « le Catalogue ne montre une fiche que si sa mémoire minimale et son disque ont une preuve » est la règle de PUBLICATION (ADR-0053, HRT-114) : une fiche `unmeasured` reste `preview`. Toute fiche est embarquée dans le binaire, `preview` comprise (la publication n'est pas bloquée par une fiche en cours de preuve) ; une fiche `preview` n'est jamais PROPOSÉE : `domain::catalog::embedded::keep_offered`, la seule porte du catalogue vers l'application, ne garde que les fiches `published` (sauf construction d'essai, HRT-101) (test `the_embedded_terraria_fiche_is_a_preview_with_an_untested_stop_and_a_stable_digest`). `cargo xtask catalog-check` tourne dans la CI à chaque PR ; son option `--release` (refuser toute fiche `preview`) n'est branchée sur aucune publication aujourd'hui.
+- La règle « le Catalogue ne montre une fiche que si sa mémoire minimale et son disque ont une preuve » est la règle de PUBLICATION (ADR-0053, HRT-114) : une fiche `unmeasured` reste `preview`. Toute fiche est embarquée dans le binaire, `preview` comprise (la publication n'est pas bloquée par une fiche en cours de preuve) ; une fiche `preview` n'est jamais PROPOSÉE : `domain::catalog::embedded::keep_offered`, la seule porte du catalogue vers l'application, ne garde que les fiches `published` (sauf construction d'essai, HRT-101) (test `the_embedded_terraria_fiche_is_a_preview_tried_on_the_real_image_with_a_pinned_image`). `cargo xtask catalog-check` tourne dans la CI à chaque PR ; son option `--release` (refuser toute fiche `preview`) n'est branchée sur aucune publication aujourd'hui.
 - Une valeur sans preuve n'a aucun nombre à l'écran : la cellule dit « Non vérifié ». Quand AUCUN chiffre de la fiche n'a de preuve, le client ne montre pas de tableau d'absences : une phrase (« Hearth ne connaît pas les besoins de ce jeu en processeur, en mémoire ni en espace disque. », `fiche/fit.ts::noFigureAtAll`) et la carte « Espace disque » disparaît.
 
 ## Règles liées

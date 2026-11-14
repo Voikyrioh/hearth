@@ -17,6 +17,8 @@ on:
       - "crates/hearth-agent/src/domain/catalog/**"
       - "crates/hearth-agent/src/domain/services/from_fiche.rs"
       - "crates/hearth-agent/src/domain/services/plan.rs"
+      - "crates/hearth-agent/src/domain/services/deploy.rs"
+      - "Cargo.lock"
       - "crates/hearth-agent/src/application/game_stop.rs"
       - "crates/hearth-agent/src/application/fiche_install.rs"
       - "crates/hearth-agent/src/infrastructure/engine/**"

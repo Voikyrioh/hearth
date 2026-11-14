@@ -24,9 +24,10 @@ Une fiche (ADR-0050) est écrite d'après un inventaire de documentation et d'un
 7. **Déclencheurs ciblés** : le job ne tourne que sur les chemins qui peuvent changer son résultat (fiches, banc, chargeur et traduction, arrêt d'une fiche, adaptateur du moteur, le fichier du flux) et à la main ; jamais à chaque push.
 
 ## Résultat du premier essai (14/11/2026, `ryshe/terraria:vanilla-1.4.5.8`)
-Point B6 levé : Terraria lit son entrée sans terminal. `save` réécrit le monde ; `exit` fait sortir le jeu de lui-même (code 0, moins d'une seconde) ; le service reste arrêté ; le monde survit au redémarrage. Signe « Server started » vu 21 s après le lancement (petit monde). Mémoire au repos 564 Mio, espace installé 50,5 Mo (image) ; empreinte `sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677`.
+Point B6 levé : Terraria lit son entrée sans terminal. `save` réécrit le monde ; `exit` fait sortir le jeu de lui-même (code 0, moins d'une seconde) ; le service reste arrêté ; le monde survit au redémarrage. Signe « Server started » vu 21 s après le lancement (petit monde). Mémoire au repos 564 Mio, espace installé 53 014 364 octets (image 50 068 911 + dossiers gérés après un premier démarrage) ; empreinte `sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677`.
 
 ## Limites
 - Un petit monde et aucun joueur : ni charge, ni grand monde, ni reprise d'un monde modifié par un joueur (cela reste à la forge).
-- Le fichier du monde est relu par sa taille et sa date, pas par un client de jeu.
+- Le fichier du monde est relu par sa taille et sa date, pas par un client de jeu. L'effet de `save` est jugé sur un relevé pris AVANT `exit` (qui enregistre aussi).
+- Une fois un statut promu dans la fiche livrée, l'essai l'EXIGE : si l'image ne lit plus son entrée, le job échoue.
 - Pas de registre d'empreintes ni de veille nocturne contre l'étiquette la plus récente (HRT-115), pas de relevé `golden` ni de `probe.toml` déclaratif : l'essai est écrit en Rust pour la seule fiche Terraria ; il se généralisera avec la deuxième fiche.

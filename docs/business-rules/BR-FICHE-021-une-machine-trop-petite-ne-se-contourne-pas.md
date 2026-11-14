@@ -27,7 +27,7 @@ Quand le nombre de processeurs logiques du serveur ou sa mémoire totale est sou
 - `apps/desktop/src/pages/InstallFromFiche.test.ts`
 
 ## Cas limites
-- Terraria est `unmeasured` partout : jamais bloquée tant que HRT-149 n'a pas mesuré sa mémoire.
+- Terraria a une mémoire minimale mesurée au repos (591 187 148 octets, banc d'essai réel HRT-114) : une machine en dessous est refusée ; son processeur reste `unmeasured` et ne bloque jamais.
 
 ## Règles liées
 - BR-FICHE-008, BR-FICHE-023, BR-RES-038
