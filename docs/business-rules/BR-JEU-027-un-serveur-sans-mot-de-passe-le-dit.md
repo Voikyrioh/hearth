@@ -17,6 +17,7 @@ Une seule règle de la spec (BR-JEU-027), deux faces. **À l'installation (clien
 - `apps/desktop/src/components/molecules/QuestionField.vue` (HRT-102)
 - `crates/hearth-agent/src/application/game_settings.rs::GameSettings::reveal_game_password`
 - `crates/hearth-proto/src/api/game_secret.rs::GameSecret`
+- `apps/desktop/src/components/molecules/GamePasswordCard.vue` (HRT-104 : la phrase de la carte)
 
 ## Vérification
 - `apps/desktop/src/pages/InstallFromFiche.test.ts::avertit d'un mot de passe laissé vide sans bloquer` (HRT-102)
@@ -33,3 +34,4 @@ Une seule règle de la spec (BR-JEU-027), deux faces. **À l'installation (clien
 ## Historique
 - 2026-10-24 — fiche unique : celle de HRT-102 (avertissement à l'installation) est fusionnée ici, la spec n'ayant qu'un BR-JEU-027.
 - 2026-10-24 — création (HRT-103, côté agent).
+- 2026-11-14 : la phrase de la carte est écrite par le client (HRT-104).

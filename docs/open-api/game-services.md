@@ -1,6 +1,6 @@
 # Un serveur de jeu au quotidien (HRT-103)
 
-Capacité `game-services` annoncée par [`GET /hello`](./hello.md). Deux choses, côté agent : l'arrêt d'un serveur de jeu qui enregistre son monde (aucune route de plus : les trois actes `start`, `stop` et `restart` de [services](./services.md) changent de déroulé pour un service créé depuis une fiche), et la révélation du mot de passe du serveur. Règles : `BR-JEU-001`, `002`, `003`, `005` à `009`, `011`, `016`, `025` à `027`, `032`, `034`, `038`, `042`, décision ADR-0052.
+Capacité `game-services` annoncée par [`GET /hello`](./hello.md). Trois choses, côté agent : l'arrêt d'un serveur de jeu qui enregistre son monde (aucune route de plus : les trois actes `start`, `stop` et `restart` de [services](./services.md) changent de déroulé pour un service créé depuis une fiche), la révélation du mot de passe du serveur, et ce que le détail d'un serveur de jeu montre (HRT-104). Règles : `BR-JEU-001`, `002`, `003`, `005` à `009`, `011`, `016`, `025` à `027`, `032`, `034`, `038`, `042`, décision ADR-0052.
 
 ## Arrêter ou redémarrer un serveur de jeu
 
@@ -28,3 +28,12 @@ Le mot de passe du serveur de jeu, pour les comptes qui ont le droit « gérer l
 - **Erreurs** : `403` sans le droit (refus consigné, `service.game.password.reveal`) ; `404 SERVICE_NOT_FOUND` pour un service inconnu, adopté ou sans fiche ; `503 BUSY` si la révélation n'a pas pu être consignée (aucune valeur n'est rendue) ; `500` si les secrets des services sont illisibles.
 - **Journal d'activité** : `service.game.password.reveal` (« Mot de passe de serveur de jeu révélé »), cible « service {nom} », écrite AVANT de rendre la valeur, jamais la valeur (BR-JEU-026).
 - **Code** : `entrypoint/http/game_settings.rs::game_secret`, `application/game_settings.rs::GameSettings::reveal_game_password`. Type : `hearth_proto::api::game_secret::GameSecret`.
+
+## `GET /api/v1/services/{key}/game` (HRT-104)
+
+Ce que le détail d'un serveur de jeu montre au quotidien : sa fiche, la façon dont son monde est enregistré à l'arrêt, ses ports publiés, et SI le serveur a un mot de passe. Une consultation ouverte à tout compte authentifié (un service créé par Hearth se lit de tous, `BR-ADOPT-016`), sans effet ni journal, sans aucun secret. Règles : `BR-JEU-017` à `BR-JEU-021`, `BR-JEU-027`.
+
+- **Réponse `200`** (`GameView`) : `fiche` (identifiant), `name` (le nom du jeu, tel que la fiche l'écrit), `fiche_version`, `stop` (`StopView` : `grace_s`, `world_saved`, `sequence_tested`, lu dans la fiche de CETTE construction par le même code que `GET /catalog/{id}`), `ports` (`host_port` : le numéro à ouvrir sur la box, `protocol` : `tcp`, `udp` ou `sctp`, `role` : `game`, `query`, `voice`, `web_admin`, `remote_console`, `other` ou vide si la fiche ne reconnaît plus ce port, `changed` : le numéro diffère de celui que propose la fiche, `BR-JEU-019`), `has_password` (jamais la valeur : celle-ci se lit par `/game-secret`).
+- **Erreurs** : `404 NOT_A_GAME_SERVICE` pour un service qui n'est pas né d'une fiche connue de cette construction (adopté, déployé à la main, inconnu) ; `404 SERVICE_NOT_FOUND` pour une clé mal formée.
+- **Code** : `entrypoint/http/game_settings.rs::game_view`, `application/game_settings.rs::GameSettings::game_view`. Type : `hearth_proto::api::game_view::GameView`. Tolérance : tout champ ajouté plus tard est facultatif.
+- **Adresse publique** : la vue n'en porte pas (aucun champ à l'installation, aucun réglage, aucune route ; elle reste à livrer).
