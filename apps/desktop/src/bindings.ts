@@ -913,7 +913,9 @@ export type DeployProtocolDto = "tcp" | "udp";
 /**  Pourquoi l'agent a refusé le déploiement, avant tout geste (rien n'est créé). Des CODES, jamais un texte. */
 export type DeployRefusal = { kind: "wrong_password" } | { kind: "password_required" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "busy" } | { kind: "engine_unavailable"; engine: EngineStateDto | null } | 
 /**  Une valeur du formulaire n'est pas valable : le champ et la raison (code stable de l'agent). */
-{ kind: "invalid"; field: DeployFieldDto; reason: string } | { kind: "setting_refused" } | { kind: "limits_required" } | { kind: "name_taken"; holder: string | null } | { kind: "name_being_deleted" } | { kind: "port_in_use"; port: number; protocol: DeployProtocolDto; status: PortStatusDto; holder: string | null; suggested: number | null } | { kind: "deploy_limit" } | { kind: "no_space"; freeBytes: number | null } | 
+{ kind: "invalid"; field: DeployFieldDto; reason: string } | { kind: "setting_refused" } | { kind: "limits_required" } | 
+/**  Le nom est pris ; `holder` : le conteneur non adopté qui le porte, par son nom (BR-ADOPT-022, HRT-214). */
+{ kind: "name_taken"; holder: string | null } | { kind: "name_being_deleted" } | { kind: "port_in_use"; port: number; protocol: DeployProtocolDto; status: PortStatusDto; holder: string | null; suggested: number | null } | { kind: "deploy_limit" } | { kind: "no_space"; freeBytes: number | null } | 
 /**  Installer depuis une fiche (HRT-102) : la fiche n'est pas proposée par cet agent. */
 { kind: "fiche_unknown" } | 
 /**  La fiche n'est plus celle que le client a lue (version ou empreinte). */
@@ -1733,7 +1735,10 @@ export type PasswordNeedDto = "no" | "unless_elevated" | "yes";
 
 export type PasswordRuleDto = "required" | "min_length" | "digit" | "lowercase" | "uppercase" | "contains_username";
 
-/**  Le constat sur un port du serveur. `holder` : texte du serveur, jamais le nom d'un conteneur non adopté. */
+/**
+ *  Le constat sur un port du serveur. `holder` : le service, le programme, ou le conteneur non adopté (son nom,
+ *  à défaut son image : BR-ADOPT-022, HRT-214), selon `status`.
+ */
 export type PortCheckDto = {
 	hostPort: number,
 	protocol: DeployProtocolDto,
