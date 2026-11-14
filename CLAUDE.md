@@ -102,6 +102,10 @@ Un seul module lit une archive `.zip`, `.tar` ou `.tar.gz` venue d'ailleurs : `c
 
 Tout accès aux fichiers du dossier d'un service passe par le port `SafeFs` (`application/ports/safe_fs.rs`, adaptateur `infrastructure/fs/`, `RelPath` dans `domain/files/`, ADR-0046, règles `BR-DEPLOY-010`, `BR-FILES-003`, `BR-FILES-004`, `BR-DEL-007`, `BR-DEL-009`) : racine `<données>/services/<clé>/` ouverte une fois, chaque composant ouvert par `openat(O_DIRECTORY | O_NOFOLLOW)` depuis le descripteur du précédent, aucun lien suivi, aucun montage franchi, écriture atomique, retrait par descripteurs. Aucun `std::fs` sur un chemin composé sous cette racine. Les pièges (liens vers l'extérieur, tubes, courses) ne se jouent que sous Linux : `infrastructure/fs/tests_unix.rs` et `tests/safe_fs.rs` (suite de contrat contre le faux `FakeSafeFs` et le vrai). Vérification Linux depuis Windows : WSL, copie isolée des seuls fichiers du module (même méthode que pour l'archive).
 
+## CI : jobs Windows conditionnels (ADR-0058)
+
+`.github/workflows/ci.yml` : le job `changes` calcule `windows=true|false` (PR : fichiers touchés ; push `main` et `workflow_dispatch` : toujours `true`). Les jobs `desktop` et `rust (windows-latest)` sont des contrôles REQUIS : hors périmètre client Windows (`apps/desktop/`, `crates/hearth-link/`, `crates/hearth-proto/`, `xtask/`, `Cargo.*`, chaîne d'outils, ce workflow) ils tournent sur Linux avec toutes leurs étapes ignorées et rapportent un succès (jamais de `if:` de job : la PR resterait « Expected »). Toute nouvelle étape de ces deux jobs porte `if: env.RUN == 'true'`. Une PR annule son exécution précédente, `main` jamais.
+
 ## Comptes en ligne de commande
 
 `hearth-agent account add|list|passwd|role|remove|revoke` (voir `docs/runbooks/recuperer-acces-administrateur.md`). Le mot de passe n'est jamais un argument : saisie sans écho, ou `HEARTH_ACCOUNT_PASSWORD`.
