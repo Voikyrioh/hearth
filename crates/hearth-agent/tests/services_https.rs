@@ -2177,6 +2177,43 @@ async fn nothing_of_a_container_that_is_not_adopted_leaves_the_agent_by_any_rout
     for port in [HIDDEN_PORT, HIDDEN_CONTAINER_PORT] {
         assert!(!contains_number(&witness, port), "port {port}");
     }
+    // Le CONFLIT d'un déploiement (HRT-214, BR-ADOPT-022) est l'autre endroit où le nom d'un conteneur non
+    // adopté sort, et seulement pour le droit « gérer les services » : sans lui, 403 avant toute lecture.
+    let conflict = json!({
+        "name": HIDDEN_NAME,
+        "image": "busybox",
+        "tag": "1.36",
+        "ports": [{ "host_port": 47813, "container_port": 80 }],
+        "mounts": []
+    });
+    for (who, token) in [("lucas", &readonly), ("bob", &bob)] {
+        for (route, label) in [("/deployments/check", "check"), ("/deployments", "deploy")] {
+            let reply = agent
+                .request("POST", route)
+                .token(token)
+                .json(&conflict)
+                .send()
+                .await;
+            assert_eq!(reply.status, 403, "{who} {label} : {}", reply.text);
+            seen.push((format!("POST {route} conflit ({who})"), reply.text));
+        }
+    }
+    // Avec le droit, le nom (jamais variable, valeur, commande ni port d'écoute du conteneur) sort : témoin.
+    let checked = agent
+        .request("POST", "/deployments/check")
+        .token(&admin)
+        .json(&conflict)
+        .send()
+        .await;
+    assert_eq!(checked.status, 200, "{}", checked.text);
+    let checked_text = checked.text.to_lowercase();
+    assert!(
+        checked_text.contains(HIDDEN_NAME),
+        "le conflit doit nommer le conteneur (témoin) : {checked_text}"
+    );
+    for never in [HIDDEN_VARIABLE, HIDDEN_VALUE, HIDDEN_COMMAND, HIDDEN_UNIT] {
+        assert!(!checked_text.contains(never), "{never} dans le conflit");
+    }
     // Elle en adopte UN, choisi dans cette liste ; les autres restent cachés.
     let chosen = candidates.body["containers"]
         .as_array()

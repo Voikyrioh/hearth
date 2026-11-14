@@ -1,17 +1,17 @@
 ---
 id: BR-DEPLOY-008
 domaine: DEPLOY
-titre: Un port tenu par un conteneur en marche ou un programme du serveur bloque le lancement ; un port réservé par un service arrêté avertit et se coche ; un conteneur hors Hearth n'est jamais nommé
+titre: Un port tenu par un conteneur en marche ou un programme du serveur bloque le lancement ; un port réservé par un service arrêté avertit et se coche ; un conteneur hors Hearth est nommé par son nom, à défaut son image
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-deployer-image.md (BR-DEPLOY-008), HRT-68
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
-# BR-DEPLOY-008 — Un port tenu par un conteneur en marche ou un programme du serveur bloque le lancement ; un port réservé par un service arrêté avertit et se coche ; un conteneur hors Hearth n'est jamais nommé
+# BR-DEPLOY-008 — Un port tenu par un conteneur en marche ou un programme du serveur bloque le lancement ; un port réservé par un service arrêté avertit et se coche ; un conteneur hors Hearth est nommé par son nom, à défaut son image
 
 ## Règle
-Le formulaire vérifie le port à la saisie (`POST /deployments/check`) et l'agent le revérifie au lancement (`409 PORT_IN_USE`, `details.port`, `details.status`, `details.holder`, `details.suggested`). Un conteneur non adopté répond « Ce port est tenu par un conteneur créé hors de Hearth. » sans son nom (BR-ADOPT-022). Un programme du serveur est nommé quand l'agent le voit (`/proc/net`, nom cherché pour le seul port en conflit) ; un écouteur `docker-proxy` appartient à son conteneur.
+Le formulaire vérifie le port à la saisie (`POST /deployments/check`) et l'agent le revérifie au lancement (`409 PORT_IN_USE`, `details.port`, `details.status`, `details.holder`, `details.suggested`). Un conteneur non adopté répond « Ce port est tenu par « {nom} », un conteneur créé hors de Hearth. » : son nom, à défaut son image, jamais autre chose ; sans nom connu (écouteur `docker-proxy`), « Ce port est tenu par un conteneur créé hors de Hearth. » (BR-ADOPT-022, HRT-214). Un programme du serveur est nommé quand l'agent le voit (`/proc/net`, nom cherché pour le seul port en conflit) ; un écouteur `docker-proxy` appartient à son conteneur.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/ports.rs::verdict`
@@ -36,3 +36,4 @@ BR-ADOPT-022, BR-DEPLOY-009, BR-DEPLOY-019
 ## Historique
 - 2026-10-17 — création (HRT-68, déployer une image, côté agent).
 - 2026-10-24 — côté client (HRT-69, déployer une image).
+- 2026-11-14 — un conteneur hors Hearth en marche est nommé par son nom, à défaut son image (HRT-214, amende BR-ADOPT-022).

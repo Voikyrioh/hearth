@@ -240,7 +240,8 @@ impl From<PortStatus> for PortStatusDto {
     }
 }
 
-/// Le constat sur un port du serveur. `holder` : texte du serveur, jamais le nom d'un conteneur non adopté.
+/// Le constat sur un port du serveur. `holder` : le service, le programme, ou le conteneur non adopté (son nom,
+/// à défaut son image : BR-ADOPT-022, HRT-214), selon `status`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PortCheckDto {
@@ -331,6 +332,8 @@ impl DeployFieldDto {
 #[serde(rename_all = "camelCase")]
 pub struct DeployCheckDto {
     pub name: NameStatusDto,
+    /// Le nom (à défaut l'image) du conteneur non adopté qui porte ce nom (BR-ADOPT-022, HRT-214).
+    pub name_holder: Option<String>,
     /// Les champs invalides, dans la liste fermée ; un nom inconnu est écarté.
     pub invalid_fields: Vec<String>,
     pub ports: Vec<PortCheckDto>,
@@ -343,6 +346,7 @@ impl From<&DeployCheck> for DeployCheckDto {
         // Destructuré sans `..`. Les dossiers (`mounts`) n'existent pas côté interface avant HRT-70.
         let DeployCheck {
             name,
+            name_holder,
             invalid_fields,
             ports,
             mounts: _,
@@ -351,6 +355,7 @@ impl From<&DeployCheck> for DeployCheckDto {
         } = check;
         Self {
             name: (*name).into(),
+            name_holder: name_holder.clone(),
             invalid_fields: invalid_fields
                 .iter()
                 .filter_map(|field| DeployFieldDto::parse(field))
@@ -422,7 +427,10 @@ pub enum DeployRefusal {
     },
     SettingRefused,
     LimitsRequired,
-    NameTaken,
+    /// Le nom est pris ; `holder` : le conteneur non adopté qui le porte, par son nom (BR-ADOPT-022, HRT-214).
+    NameTaken {
+        holder: Option<String>,
+    },
     NameBeingDeleted,
     PortInUse {
         port: u16,

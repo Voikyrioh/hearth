@@ -353,16 +353,28 @@ describe("les constats du serveur sur un port (BR-DEPLOY-008, 009)", () => {
     expect(portVerdict(undefined).error).toBeNull();
   });
 
-  it("un service en marche, un conteneur hors Hearth (jamais nommé), un programme et l'agent bloquent et proposent un port libre", () => {
+  it("un service en marche, un conteneur hors Hearth (nommé), un programme et l'agent bloquent et proposent un port libre", () => {
     expect(
       portVerdict(port({ status: "held_by_service", holder: "web", suggested: 81 })),
     ).toMatchObject({
       error: "Ce port est pris par le service « web »",
       suggested: 81,
     });
-    const hidden = portVerdict(port({ status: "held_by_unmanaged", holder: "conteneur-secret" }));
-    expect(hidden.error).toBe("Ce port est tenu par un conteneur créé hors de Hearth.");
-    expect(JSON.stringify(hidden)).not.toContain("conteneur-secret");
+    // HRT-214 : le conteneur non adopté est nommé (son nom, à défaut son image), et le texte reste inoffensif.
+    expect(portVerdict(port({ status: "held_by_unmanaged", holder: "vieux-nginx" })).error).toBe(
+      "Ce port est tenu par « vieux-nginx », un conteneur créé hors de Hearth.",
+    );
+    expect(
+      portVerdict(port({ status: "held_by_unmanaged", holder: "registre:5000/app:2" })).error,
+    ).toBe("Ce port est tenu par « registre:5000/app:2 », un conteneur créé hors de Hearth.");
+    // Un caractère de contrôle est retiré avant d'entrer dans la phrase.
+    expect(
+      portVerdict(port({ status: "held_by_unmanaged", holder: "a[31mb" })).error,
+    ).not.toContain("");
+    // L'agent ne le connaît pas (écouteur d'un conteneur que le moteur ne liste pas) : la phrase générale.
+    expect(portVerdict(port({ status: "held_by_unmanaged", holder: null })).error).toBe(
+      "Ce port est tenu par un conteneur créé hors de Hearth.",
+    );
     expect(portVerdict(port({ status: "held_by_program", holder: "sshd" })).error).toBe(
       "Ce port est occupé sur le serveur par « sshd »",
     );
@@ -391,7 +403,7 @@ describe("les constats du serveur sur un port (BR-DEPLOY-008, 009)", () => {
 
 describe("les refus de l'agent (BR-DEPLOY-030, 032, 035)", () => {
   it("un refus qui vise un champ y ramène ; les autres se disent dans la fenêtre", () => {
-    expect(isFieldRefusal({ kind: "name_taken" })).toBe(true);
+    expect(isFieldRefusal({ kind: "name_taken", holder: null })).toBe(true);
     expect(isFieldRefusal({ kind: "invalid", field: "image", reason: "bad_format" })).toBe(true);
     expect(isFieldRefusal({ kind: "deploy_limit" })).toBe(false);
     expect(isFieldRefusal({ kind: "no_space", freeBytes: 1 })).toBe(false);
@@ -409,19 +421,36 @@ describe("les refus de l'agent (BR-DEPLOY-030, 032, 035)", () => {
     expect(refusalField({ kind: "limits_required" })).toBe("resources");
   });
 
-  it("dit le port pris au dernier moment sans nommer un conteneur hors Hearth", () => {
+  it("dit le port pris au dernier moment en nommant le conteneur hors Hearth, sinon sans le nommer", () => {
     expect(
       refusalText({
         kind: "port_in_use",
         port: 8080,
         protocol: "tcp",
         status: "held_by_unmanaged",
-        holder: "secret",
+        holder: "vieux-nginx",
+        suggested: 8081,
+      }),
+    ).toBe(
+      "Le port 8080 vient d'être pris par « vieux-nginx », un conteneur créé hors de Hearth. Rien n'a été créé.",
+    );
+    expect(
+      refusalText({
+        kind: "port_in_use",
+        port: 8080,
+        protocol: "tcp",
+        status: "held_by_unmanaged",
+        holder: null,
         suggested: 8081,
       }),
     ).toBe(
       "Le port 8080 vient d'être pris par un conteneur créé hors de Hearth. Rien n'a été créé.",
     );
+    // Un nom pris : le conteneur hors Hearth qui le porte est nommé, un service publié non (sa ligne est dans la liste).
+    expect(refusalText({ kind: "name_taken", holder: "Cache" })).toBe(
+      "Ce nom est tenu par « Cache », un conteneur créé hors de Hearth. Choisissez un autre nom.",
+    );
+    expect(refusalText({ kind: "name_taken", holder: null })).toBe("Ce nom est déjà pris");
     expect(refusalText({ kind: "deploy_limit" })).toBe(
       "Deux déploiements sont déjà en cours sur ce serveur. Attendez la fin de l'un d'eux.",
     );

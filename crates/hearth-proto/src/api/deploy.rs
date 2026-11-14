@@ -297,7 +297,8 @@ pub enum NameStatus {
     Ok,
     /// Le nom ne respecte pas BR-DEPLOY-003.
     Invalid,
-    /// Pris par un service, un conteneur ou un déploiement (sans dire lequel, BR-ADOPT-022).
+    /// Pris par un service, un conteneur ou un déploiement (`name_holder` nomme le conteneur non adopté,
+    /// BR-ADOPT-022).
     Taken,
     /// Les données d'un service supprimé s'effacent encore (BR-DEL-019).
     BeingDeleted,
@@ -312,7 +313,8 @@ pub enum PortStatus {
     Free,
     /// Tenu par un service de Hearth ou adopté en marche (nommé dans `holder`).
     HeldByService,
-    /// Tenu par un conteneur hors Hearth, jamais nommé (BR-ADOPT-022).
+    /// Tenu par un conteneur hors Hearth non adopté : nommé dans `holder` (son nom, à défaut son image),
+    /// absent si l'agent ne le connaît pas (BR-ADOPT-022, HRT-214).
     HeldByUnmanaged,
     /// Réservé par un service arrêté : avertit, ne bloque pas (BR-DEPLOY-008).
     ReservedByStopped,
@@ -374,6 +376,10 @@ pub struct DiskCheck {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeployCheck {
     pub name: NameStatus,
+    /// Le nom (à défaut l'image) du conteneur créé hors de Hearth et non adopté qui porte ce nom, quand `name`
+    /// est `taken` pour cette raison (`BR-ADOPT-022`, HRT-214). Jamais une variable ni une commande.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_holder: Option<String>,
     /// Les champs de texte invalides (`name`, `image`, `tag`, `ports`, `mounts`), par code stable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub invalid_fields: Vec<String>,

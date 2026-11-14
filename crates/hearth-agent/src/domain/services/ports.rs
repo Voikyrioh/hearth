@@ -4,7 +4,7 @@
 //! Les ports des conteneurs viennent du moteur (arrêtés compris) ; les programmes du serveur viennent des
 //! sockets en écoute (`/proc/net`), leur nom n'étant cherché que pour un port en conflit. Un écouteur
 //! `docker-proxy` est celui d'un conteneur : il est compté avec le conteneur, jamais comme un programme.
-//! Un conteneur que Hearth ne gère pas n'est jamais nommé (BR-ADOPT-022).
+//! Un conteneur que Hearth ne gère pas est nommé par son nom, à défaut son image (BR-ADOPT-022, HRT-214).
 
 use std::collections::HashSet;
 
@@ -31,8 +31,9 @@ pub struct Listener {
 pub enum Claimant {
     /// Un service publié (créé par Hearth ou adopté) : son nom est déjà dans la liste.
     Service(String),
-    /// Un conteneur hors Hearth non adopté : jamais nommé.
-    Unmanaged,
+    /// Un conteneur hors Hearth non adopté : son nom, à défaut son image (`visibility::conflict_label`,
+    /// HRT-214), jamais rien d'autre. `None` : l'agent ne le connaît pas (un écouteur `docker-proxy`).
+    Unmanaged(Option<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,7 +114,10 @@ fn verdict_with(
                     status: PortStatus::HeldByService,
                     holder: Some(name),
                 },
-                Claimant::Unmanaged => Verdict::bare(PortStatus::HeldByUnmanaged),
+                Claimant::Unmanaged(label) => Verdict {
+                    status: PortStatus::HeldByUnmanaged,
+                    holder: label,
+                },
             };
         }
         Some(Claim {
@@ -128,7 +132,9 @@ fn verdict_with(
                 status: PortStatus::ReservedByStopped,
                 holder: match claimant {
                     Claimant::Service(name) => Some(name),
-                    Claimant::Unmanaged => None,
+                    // Un conteneur arrêté hors Hearth n'est pas nommé : `ReservedByStopped` dit « un service
+                    // arrêté » au client, qui ne verrait pas la différence (HRT-214, décision conservatrice).
+                    Claimant::Unmanaged(_) => None,
                 },
             };
         }
@@ -141,7 +147,7 @@ fn verdict_with(
 }
 
 /// Un programme écoute ce port. S'il s'appelle `docker-proxy`, c'est un conteneur que le moteur ne liste pas (ou
-/// plus) : jamais un programme du serveur, et jamais nommé (BR-DEPLOY-008, BR-ADOPT-022).
+/// plus) : jamais un programme du serveur, et inconnu de l'agent donc sans nom (BR-DEPLOY-008, BR-ADOPT-022).
 fn held_by_program(
     world: &dyn PortWorld,
     port: u16,
@@ -250,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn a_running_service_is_named_and_an_unmanaged_container_never_is() {
+    fn a_running_service_and_a_running_unmanaged_container_are_both_named() {
         let mut world = world();
         world.claims.insert(
             (8080, Tcp),
@@ -262,7 +268,7 @@ mod tests {
         world.claims.insert(
             (9090, Tcp),
             Claim {
-                claimant: Claimant::Unmanaged,
+                claimant: Claimant::Unmanaged(Some("vieux-nginx".into())),
                 running: true,
             },
         );
@@ -273,8 +279,8 @@ mod tests {
         );
         let hidden = verdict(&world, 9090, Tcp, false);
         assert_eq!(
-            (hidden.status, hidden.holder.clone()),
-            (PortStatus::HeldByUnmanaged, None)
+            (hidden.status, hidden.holder.as_deref()),
+            (PortStatus::HeldByUnmanaged, Some("vieux-nginx"))
         );
         assert!(named.blocks() && hidden.blocks());
     }
@@ -292,7 +298,7 @@ mod tests {
         world.claims.insert(
             (8081, Tcp),
             Claim {
-                claimant: Claimant::Unmanaged,
+                claimant: Claimant::Unmanaged(Some("arrete".into())),
                 running: false,
             },
         );
@@ -300,6 +306,7 @@ mod tests {
         assert_eq!(reserved.status, PortStatus::ReservedByStopped);
         assert_eq!(reserved.holder.as_deref(), Some("old"));
         assert!(!reserved.blocks());
+        // Un conteneur arrêté hors Hearth n'est pas nommé : le client lirait « service arrêté ».
         assert_eq!(verdict(&world, 8081, Tcp, false).holder, None);
     }
 
@@ -368,7 +375,7 @@ mod tests {
             world.claims.insert(
                 (port, Tcp),
                 Claim {
-                    claimant: Claimant::Unmanaged,
+                    claimant: Claimant::Unmanaged(None),
                     running: true,
                 },
             );
@@ -382,7 +389,7 @@ mod tests {
         world.claims.insert(
             (65_535, Tcp),
             Claim {
-                claimant: Claimant::Unmanaged,
+                claimant: Claimant::Unmanaged(None),
                 running: true,
             },
         );
@@ -402,7 +409,7 @@ mod tests {
         world.claims.insert(
             (8080, Tcp),
             Claim {
-                claimant: Claimant::Unmanaged,
+                claimant: Claimant::Unmanaged(None),
                 running: true,
             },
         );

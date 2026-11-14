@@ -9,7 +9,7 @@ import EnvVarRows from "@/components/organisms/EnvVarRows.vue";
 import PortMappingRows from "@/components/organisms/PortMappingRows.vue";
 import ResourceSliders from "@/components/organisms/ResourceSliders.vue";
 import type { DeployFormState } from "@/composables/useDeployForm";
-import { commandText, imageText, nameText, tagText } from "@/deploy/messages";
+import { commandText, imageText, nameTakenText, nameText, tagText } from "@/deploy/messages";
 import { splitImage } from "@/deploy/rules";
 import { t } from "@/i18n";
 import type { DeployField } from "@/link";
@@ -42,9 +42,9 @@ const draft = computed(() => props.form.draft.value);
 const nameError = computed(() => {
   const issue = props.form.issues.value.name;
   if (issue) return props.form.shown("name") ? nameText(issue) : undefined;
-  // Le constat du serveur est immédiat (BR-DEPLOY-004) : il ne dit jamais qui tient le nom (BR-ADOPT-022).
+  // Le constat du serveur est immédiat (BR-DEPLOY-004) ; il nomme le conteneur hors Hearth qui tient le nom (BR-ADOPT-022).
   const status = props.form.check.value?.name;
-  if (status === "taken") return t("deploy.nameTaken");
+  if (status === "taken") return nameTakenText(props.form.check.value?.nameHolder ?? null);
   if (status === "being_deleted") return t("deploy.nameBeingDeleted");
   return undefined;
 });

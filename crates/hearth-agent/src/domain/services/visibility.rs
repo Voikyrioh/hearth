@@ -54,16 +54,41 @@ pub fn visibility_of<'a>(
     }
 }
 
-/// Qui tient un port du serveur ou un nom (`BR-ADOPT-022`) : ce que le formulaire de déploiement et un
-/// démarrage refusé peuvent dire. Un conteneur non adopté n'a AUCUNE charge utile : ni son nom, ni son
-/// image, ni son état ne peuvent sortir par ce type, il ne les porte pas.
+/// Qui tient un port du serveur ou un nom (`BR-ADOPT-022`). Un conteneur non adopté n'a AUCUNE charge
+/// utile : ni son nom, ni son image, ni son état ne sortent par ce type, il ne les porte pas.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Holder {
     /// Un service publié (créé par Hearth ou adopté) : son nom est déjà dans la liste.
     Service(String),
-    /// Un conteneur créé hors de Hearth et non adopté : « Port tenu par un conteneur créé hors de
-    /// Hearth », sans le nommer.
+    /// Un conteneur créé hors de Hearth et non adopté. Le type ne porte rien : le nom (ou l'image) qu'un
+    /// CONFLIT dit vient de [`conflict_label`], demandé à part (`ServicesRegistry::port_claim`,
+    /// `ServicesRegistry::name_claim`), jamais par ce type que la suppression lit aussi (`BR-ADOPT-002`).
     Unmanaged,
+}
+
+/// Combien de caractères au plus du nom ou de l'image d'un conteneur non adopté sortent dans un conflit.
+const CONFLICT_LABEL_MAX: usize = 64;
+
+/// Ce que l'on dit d'un conteneur non adopté qui tient un port ou un nom (`BR-ADOPT-022`, HRT-214) : son
+/// nom, à défaut le nom de son image (avec sa version), à défaut l'identifiant court de l'image. Un texte
+/// court, nettoyé des caractères de contrôle. **Jamais** une variable, une commande, un dossier ni un état :
+/// la fonction ne reçoit que le nom et l'image.
+pub fn conflict_label(name: &str, image: &super::image::ImageName) -> String {
+    let named = super::limits::bounded(name.trim(), CONFLICT_LABEL_MAX);
+    if !named.is_empty() {
+        return named;
+    }
+    let reference = image
+        .reference
+        .as_deref()
+        .map(|reference| match &image.tag {
+            Some(tag) => format!("{reference}:{tag}"),
+            None => reference.to_owned(),
+        });
+    super::limits::bounded(
+        reference.as_deref().unwrap_or(image.short_id.as_str()),
+        CONFLICT_LABEL_MAX,
+    )
 }
 
 /// `BR-ADOPT-015`, `BR-ADOPT-016` : pour un service adopté, la commande de lancement et les noms de
@@ -166,6 +191,33 @@ mod tests {
             Holder::Service("web".to_owned()),
             Holder::Service("web".to_owned())
         );
+    }
+
+    #[test]
+    fn a_conflict_names_the_container_or_else_its_image() {
+        use crate::domain::services::image::image_name;
+        let id = "sha256:0123456789abcdef0123456789abcdef";
+        // Avec un nom : le nom, jamais l'image.
+        assert_eq!(
+            conflict_label("vieux-nginx", &image_name("nginx:1.27", id)),
+            "vieux-nginx"
+        );
+        // Sans nom : l'image et sa version.
+        assert_eq!(
+            conflict_label("  ", &image_name("registry:5000/ns/app:2", id)),
+            "registry:5000/ns/app:2"
+        );
+        // Sans nom ni image nommée : l'identifiant court de l'image.
+        assert_eq!(conflict_label("", &image_name("", id)), "0123456789ab");
+    }
+
+    #[test]
+    fn a_conflict_label_is_short_and_free_of_control_characters() {
+        use crate::domain::services::image::image_name;
+        let long = format!("a\u{1b}[31m{}", "b".repeat(200));
+        let label = conflict_label(&long, &image_name("x", "sha256:0"));
+        assert!(label.chars().count() <= 64);
+        assert!(!label.contains('\u{1b}'));
     }
 
     #[test]

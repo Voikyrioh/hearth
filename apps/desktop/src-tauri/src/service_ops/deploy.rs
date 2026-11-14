@@ -195,7 +195,12 @@ pub fn interpret_deploy(status: u16, body: &Value) -> Result<DeployOutcome, Link
         }),
         ErrorCode::PlanSettingRefused => refused(DeployRefusal::SettingRefused),
         ErrorCode::LimitsRequired => refused(DeployRefusal::LimitsRequired),
-        ErrorCode::NameTaken => refused(DeployRefusal::NameTaken),
+        ErrorCode::NameTaken => refused(DeployRefusal::NameTaken {
+            holder: details
+                .get("holder")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        }),
         ErrorCode::NameBeingDeleted => refused(DeployRefusal::NameBeingDeleted),
         ErrorCode::PortInUse => match number::<u16>(details, "port") {
             Some(port) => refused(DeployRefusal::PortInUse {
@@ -507,7 +512,17 @@ mod tests {
         );
         assert_eq!(
             read(409, error("NAME_TAKEN", json!(null))),
-            DeployRefusal::NameTaken
+            DeployRefusal::NameTaken { holder: None }
+        );
+        // HRT-214 : le conteneur non adopté qui porte le nom traverse, rien d'autre.
+        assert_eq!(
+            read(
+                409,
+                error("NAME_TAKEN", json!({ "holder": "cache", "image": "x" }))
+            ),
+            DeployRefusal::NameTaken {
+                holder: Some("cache".into())
+            }
         );
         assert_eq!(
             read(409, error("NAME_BEING_DELETED", json!(null))),
