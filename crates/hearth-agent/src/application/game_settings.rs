@@ -1459,7 +1459,15 @@ impl GameSettings {
                     }
                 }
             }
-            Some(SecretsAccess::Unreadable(_) | SecretsAccess::Tampered) | None => {
+            Some(SecretsAccess::Unreadable(_) | SecretsAccess::Tampered) => {
+                return Err(SettingsError::SecretsUnreadable);
+            }
+            None => {
+                // Une erreur de branchement, pas une clé qui ne sert plus : `load_plain` ne descelle rien.
+                tracing::error!(
+                    operation = "spec_secrets",
+                    "chargé sans secrets (load_plain)"
+                );
                 return Err(SettingsError::SecretsUnreadable);
             }
         }
