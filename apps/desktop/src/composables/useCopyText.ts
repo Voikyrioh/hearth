@@ -6,10 +6,10 @@ const COPIED_MS = 2000;
 /**
  * Copier un texte dans le presse-papiers (HRT-104 : l'adresse à donner aux joueurs, la liste des ports à ouvrir). Un
  * texte copié n'est jamais un secret ici. Le succès dure 2 secondes sur le bouton et se dit aussi par une notification
- * annoncée ; l'échec ne bloque rien, l'appelant dit de copier à la main. Le minuteur s'arrête avec le composant.
+ * annoncée quand un message est donné ; l'échec ne bloque rien, l'appelant dit de copier à la main. Le minuteur s'arrête avec le composant.
  */
-export function useCopyText(copiedMessage: () => string) {
-  const toasts = useToastsStore();
+export function useCopyText(copiedMessage?: () => string) {
+  const toasts = copiedMessage ? useToastsStore() : null;
   const state = ref<"idle" | "copied" | "failed">("idle");
   let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -19,7 +19,7 @@ export function useCopyText(copiedMessage: () => string) {
       if (!navigator.clipboard) throw new Error("presse-papiers indisponible");
       await navigator.clipboard.writeText(text);
       state.value = "copied";
-      toasts.push({ kind: "success", message: copiedMessage() });
+      if (toasts && copiedMessage) toasts.push({ kind: "success", message: copiedMessage() });
       timer = setTimeout(() => {
         state.value = "idle";
       }, COPIED_MS);

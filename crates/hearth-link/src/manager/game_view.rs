@@ -10,7 +10,7 @@ use hearth_proto::api::game_secret::GameSecret;
 use hearth_proto::api::game_view::GameView;
 
 use super::LinkManager;
-use super::parse;
+use super::parse::parse;
 use super::services::key_segment;
 use crate::domain::server::ServerId;
 use crate::error::{InputField, LinkError};

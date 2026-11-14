@@ -13,6 +13,23 @@ export type GameViewState =
   | { kind: "failed" };
 
 /**
+ * UNE lecture de la vue d'un serveur de jeu : celle des cartes du détail et celle de la fenêtre d'arrêt décident de
+ * la même façon quoi faire d'un échec (jamais une exception, jamais « pas un jeu » pour une lecture qui échoue).
+ */
+export async function readGameOnce(
+  serverId: string,
+  key: string,
+): Promise<Exclude<GameViewState, { kind: "idle" } | { kind: "loading" }>> {
+  try {
+    const read = await getLinkBridge().readGameView(serverId, key);
+    return read.kind === "found" ? { kind: "found", view: read.view } : { kind: "absent" };
+  } catch (error) {
+    if (!failureOf(error)) logUiError(error, "gameView:read");
+    return { kind: "failed" };
+  }
+}
+
+/**
  * La vue d'UN serveur de jeu (HRT-104, `BR-JEU-017` à `BR-JEU-021`) : lue quand le détail s'ouvre sur un service créé
  * par Hearth, relue quand ce qui peut la changer change (`refreshOn` : l'état du service, une opération qui se termine).
  * Le service suivi est repéré par sa CLÉ ; une réponse tardive d'un autre service est jetée. Une consultation ouverte à
@@ -39,15 +56,9 @@ export function useGameView(
     }
     // Une relecture garde la vue montrée jusqu'à la réponse : les cartes ne clignotent pas.
     if (state.value.kind !== "found") state.value = { kind: "loading" };
-    try {
-      const read = await getLinkBridge().readGameView(serverId(), target);
-      if (mine !== ticket) return;
-      state.value = read.kind === "found" ? { kind: "found", view: read.view } : { kind: "absent" };
-    } catch (error) {
-      if (mine !== ticket) return;
-      state.value = { kind: "failed" };
-      if (!failureOf(error)) logUiError(error, "gameView:read");
-    }
+    const read = await readGameOnce(serverId(), target);
+    if (mine !== ticket) return;
+    state.value = read;
   }
 
   watch(

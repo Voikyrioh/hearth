@@ -182,11 +182,9 @@ const STAGE_KEYS: Record<SequenceStage, MessageKey> = {
   start: "game.sequence.start",
 };
 
-const STAGE_OF: Record<string, SequenceStage | undefined> = {
-  save_world: "save_world",
-  stop: "stop",
-  start: "start",
-};
+const STAGES: ReadonlySet<string> = new Set(Object.keys(STAGE_KEYS));
+const stageOf = (step: string): SequenceStage | undefined =>
+  STAGES.has(step) ? (step as SequenceStage) : undefined;
 
 /** Les étapes du plan : « Sauvegarde du monde » seulement si la suite l'a (ou si l'agent l'a ouverte), « Démarrage » pour un redémarrage. */
 export function stagesOf(
@@ -194,8 +192,8 @@ export function stagesOf(
   plan: { save: boolean; restart: boolean },
 ): SequenceStage[] {
   const opened = new Set<SequenceStage | undefined>([
-    ...(operation?.steps ?? []).map((line) => STAGE_OF[line.step]),
-    operation?.step ? STAGE_OF[operation.step] : undefined,
+    ...(operation?.steps ?? []).map((line) => stageOf(line.step)),
+    operation?.step ? stageOf(operation.step) : undefined,
   ]);
   return [
     ...(plan.save || opened.has("save_world") ? (["save_world"] as const) : []),
@@ -211,7 +209,7 @@ export function sequenceSteps(
   bar: { stage: SequenceStage; text: string | null } | null,
 ): ProgressStep[] {
   const stages = stagesOf(operation, plan);
-  const current = operation?.step ? STAGE_OF[operation.step] : undefined;
+  const current = operation?.step ? stageOf(operation.step) : undefined;
   const index = Math.max(0, current ? stages.indexOf(current) : 0);
   return stages.map((stage, position): ProgressStep => {
     const state = position < index ? "done" : position === index ? "now" : "later";

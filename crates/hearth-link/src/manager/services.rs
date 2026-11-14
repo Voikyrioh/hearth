@@ -15,7 +15,7 @@ use hearth_proto::api::services::{
 };
 use serde::de::DeserializeOwned;
 
-use super::parse;
+use super::parse::parse;
 use super::{ActionOutcome, ActionRequest, LinkManager};
 use crate::domain::pending_ops::OperationId;
 use crate::domain::secret::Secret;

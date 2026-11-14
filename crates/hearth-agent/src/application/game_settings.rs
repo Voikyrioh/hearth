@@ -231,6 +231,21 @@ enum FileRead {
     Unsafe,
 }
 
+/// Le réglage qui porte le mot de passe du serveur de jeu : un seul, de genre `game_password` et non imposé par la fiche
+/// (BR-JEU-039, BR-JEU-040). La vue et la révélation s'accordent sur lui.
+fn game_password_setting(fiche: &Fiche) -> Option<&Setting> {
+    fiche.settings.iter().find(|setting| {
+        setting.imposed.is_none()
+            && matches!(
+                setting.spec,
+                ValueSpec::Secret {
+                    kind: SecretKind::GamePassword,
+                    ..
+                }
+            )
+    })
+}
+
 /// Tout ce qu'il faut savoir d'un service pour lire ou enregistrer ses réglages.
 struct Loaded<'a> {
     key: ServiceKey,
@@ -243,8 +258,9 @@ struct Loaded<'a> {
     state: SettingsState,
     fingerprint: Option<String>,
     stored: Option<crate::application::ports::StoredSettings>,
-    /// Les secrets de la description, descellés UNE fois par chargement.
-    access: SecretsAccess,
+    /// Les secrets de la description, descellés UNE fois par chargement ; `None` : chargé pour une lecture qui n'en
+    /// a pas besoin (`load_plain`), rien n'a été descellé.
+    access: Option<SecretsAccess>,
 }
 
 /// Le fichier d'un canal tel qu'il est lu.
@@ -458,7 +474,24 @@ impl GameSettings {
         let Some((revision, access)) = self.specs.read(key, None).await? else {
             return Err(SettingsError::NotAGameService);
         };
-        let body = revision.body;
+        self.loaded(key, revision.body, Some(access)).await
+    }
+
+    /// Comme `load`, sans desceller le moindre secret : pour une lecture ouverte à tout compte (`game_view`), qui ne
+    /// montre aucune valeur secrète (`ServiceSpecs::body`).
+    async fn load_plain(&self, key: &ServiceKey) -> Result<Loaded<'_>, SettingsError> {
+        let Some(body) = self.specs.body(key).await? else {
+            return Err(SettingsError::NotAGameService);
+        };
+        self.loaded(key, body, None).await
+    }
+
+    async fn loaded(
+        &self,
+        key: &ServiceKey,
+        body: SpecBody,
+        access: Option<SecretsAccess>,
+    ) -> Result<Loaded<'_>, SettingsError> {
         let Some(spec_fiche) = &body.fiche else {
             return Err(SettingsError::NotAGameService);
         };
@@ -1201,7 +1234,7 @@ impl GameSettings {
     /// réglages). Un service sans fiche (adopté, ordinaire) ou dont la fiche n'est plus connue de cette
     /// construction : `NotAGameService` (BR-JEU-001).
     pub async fn game_view(&self, key: &ServiceKey) -> Result<GameView, SettingsError> {
-        let loaded = self.load(key).await?;
+        let loaded = self.load_plain(key).await?;
         let fiche = loaded.fiche;
         let ports = game_ports(fiche, &loaded.body.ports)
             .into_iter()
@@ -1220,17 +1253,8 @@ impl GameSettings {
                 changed: fact.changed,
             })
             .collect();
-        let has_password = fiche.settings.iter().any(|setting| {
-            setting.imposed.is_none()
-                && matches!(
-                    setting.spec,
-                    ValueSpec::Secret {
-                        kind: SecretKind::GamePassword,
-                        ..
-                    }
-                )
-                && matches!(loaded.state.slot(&setting.id), Some(Slot::Secret))
-        });
+        let has_password = game_password_setting(fiche)
+            .is_some_and(|setting| matches!(loaded.state.slot(&setting.id), Some(Slot::Secret)));
         Ok(GameView {
             fiche: fiche.id().to_owned(),
             name: fiche.file.name.clone(),
@@ -1263,16 +1287,7 @@ impl GameSettings {
         let loaded = self.load(key).await?;
         // Une fiche sans réglage `game_password` n'a pas de mot de passe de jeu : 200 sans `password` (BR-JEU-027),
         // pas un service inconnu.
-        let setting = loaded.fiche.settings.iter().find(|setting| {
-            setting.imposed.is_none()
-                && matches!(
-                    setting.spec,
-                    ValueSpec::Secret {
-                        kind: SecretKind::GamePassword,
-                        ..
-                    }
-                )
-        });
+        let setting = game_password_setting(loaded.fiche);
         let value = if let Some(setting) = setting
             && matches!(loaded.state.slot(&setting.id), Some(Slot::Secret))
         {
@@ -1431,7 +1446,7 @@ impl GameSettings {
         let mut settings: BTreeMap<String, Secret> = BTreeMap::new();
         let mut generated: BTreeMap<String, Secret> = BTreeMap::new();
         match &loaded.access {
-            SecretsAccess::Opened(secrets) => {
+            Some(SecretsAccess::Opened(secrets)) => {
                 for entry in &secrets.answers {
                     let value = Secret::new(entry.value.expose().to_owned());
                     match generated_secret_id(entry.id.as_str()) {
@@ -1444,7 +1459,7 @@ impl GameSettings {
                     }
                 }
             }
-            SecretsAccess::Unreadable(_) | SecretsAccess::Tampered => {
+            Some(SecretsAccess::Unreadable(_) | SecretsAccess::Tampered) | None => {
                 return Err(SettingsError::SecretsUnreadable);
             }
         }

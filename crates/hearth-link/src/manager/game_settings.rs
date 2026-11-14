@@ -19,7 +19,7 @@ use hearth_proto::error::{ErrorBody, ErrorCode};
 use serde_json::Value;
 
 use super::audit::rejection_at;
-use super::parse;
+use super::parse::parse;
 use super::services::key_segment;
 use super::{ActionOutcome, ActionRequest, LinkManager};
 use crate::domain::secret::Secret;

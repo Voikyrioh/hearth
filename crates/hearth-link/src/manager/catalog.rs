@@ -6,7 +6,7 @@
 use hearth_proto::api::catalog::{CatalogView, FicheDetail};
 
 use super::LinkManager;
-use super::parse;
+use super::parse::parse;
 use crate::domain::server::ServerId;
 use crate::error::LinkError;
 

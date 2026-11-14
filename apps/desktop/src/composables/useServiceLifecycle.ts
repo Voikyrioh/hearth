@@ -1,16 +1,10 @@
 import { computed, ref } from "vue";
+import { readGameOnce } from "@/composables/useGameView";
 import { useLifecycleActions } from "@/composables/useLifecycleActions";
 import { useOperationFollow } from "@/composables/useOperationFollow";
 import { type ActReport, useReauth } from "@/composables/useReauth";
-import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
-import {
-  failureOf,
-  type GameView,
-  getLinkBridge,
-  type ServiceInfo,
-  type ServiceOperation,
-} from "@/link";
+import type { GameView, ServiceInfo, ServiceOperation } from "@/link";
 import { isStopOperation, mayBeGame } from "@/services/game";
 import { alreadyText, type Gesture, refusalText } from "@/services/lifecycle";
 import { useGameSettingsPendingStore } from "@/stores/gameSettingsPending";
@@ -179,13 +173,8 @@ export function useServiceLifecycle(
   async function readGame(service: ServiceInfo): Promise<GameView | null> {
     // Seul un service créé par Hearth peut être un serveur de jeu : les autres n'attendent aucune lecture.
     if (!mayBeGame(service)) return null;
-    try {
-      const read = await getLinkBridge().readGameView(serverId(), service.key);
-      return read.kind === "found" ? read.view : null;
-    } catch (error) {
-      if (!failureOf(error)) logUiError(error, "gameView:read");
-      return null;
-    }
+    const read = await readGameOnce(serverId(), service.key);
+    return read.kind === "found" ? read.view : null;
   }
 
   /**

@@ -15,7 +15,7 @@
 
 use hearth_proto::api::deploy::{DeployCheck, DeployCheckRequest, DeploySpec, EngineCapacity};
 
-use super::parse;
+use super::parse::parse;
 use super::{ActionOutcome, ActionRequest, LinkManager};
 use crate::domain::secret::Secret;
 use crate::domain::server::ServerId;
