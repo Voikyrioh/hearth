@@ -11,13 +11,13 @@ maj: 2026-11-14
 # BR-ADOPT-022 — Un port ou un nom tenu par un conteneur non adopté est dit en nommant le conteneur, ou son image
 
 ## Règle
-Un port du serveur ou un nom de service tenu par un conteneur non adopté est dit en nommant le conteneur, à défaut son image, pour que l'administrateur sache où regarder : « Ce port est tenu par « {nom} », un conteneur créé hors de Hearth. » ; « Ce nom est tenu par « {nom} », un conteneur créé hors de Hearth. Choisissez un autre nom. » (la phrase dit quoi faire ensuite, constat Nora 1). Le texte nommé est le nom du conteneur ; sans nom, l'image (référence et version), à défaut son identifiant court ; borné à 64 caractères, sans caractères de contrôle (`conflict_label`). **Jamais** une variable, une commande, un dossier ni un état : la fonction ne reçoit que le nom et l'image. Sans nom connu (écouteur `docker-proxy` que le moteur ne liste pas), le message dit seulement « créé hors de Hearth ». Un conteneur arrêté hors Hearth n'est pas nommé (il ne bloque pas) : le client lirait « service arrêté ».
+Un port du serveur ou un nom de service tenu par un conteneur non adopté est dit en nommant le conteneur, à défaut son image, pour que l'administrateur sache où regarder : « Ce port est tenu par « {nom} », un conteneur créé hors de Hearth. » ; « Ce nom est tenu par « {nom} », un conteneur créé hors de Hearth. Choisissez un autre nom. » (la phrase dit quoi faire ensuite, constat Nora 1). Le texte nommé est le nom du conteneur ; sans nom, l'image (référence et version), à défaut son identifiant court ; borné à 64 caractères, sans caractères de contrôle (`conflict_label`). **Jamais** une variable, une commande, un dossier ni un état : la fonction ne reçoit que le nom et l'image. Sans nom connu (écouteur `docker-proxy` que le moteur ne liste pas), le message dit seulement « créé hors de Hearth ». Pour un port, un conteneur arrêté hors Hearth n'est pas nommé (il ne bloque pas) : le client lirait « service arrêté ». Pour un nom, arrêté ou non, il bloque et il est nommé.
 
 Le registre répond à « qui tient ce port » et « qui porte ce nom » par `Holder` : `Service(nom)` pour un service publié (déjà dans la liste), `Unmanaged` sans charge utile (la suppression le lit aussi, BR-ADOPT-002). Le nom ou l'image d'un conflit vient de `conflict_label`, demandé à part. Un conteneur arrêté tient encore son port et son nom.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/visibility.rs::{Holder, conflict_label}`
-- `crates/hearth-agent/src/application/services.rs::ServicesRegistry::{port_holder, name_holder, unmanaged_name_label}`
+- `crates/hearth-agent/src/application/services.rs::ServicesRegistry::{port_holder, name_claim}`
 
 ## Vérification
 - `crates/hearth-agent/src/application/services.rs::tests::a_port_or_a_name_held_by_a_container_that_is_not_adopted_names_the_container`

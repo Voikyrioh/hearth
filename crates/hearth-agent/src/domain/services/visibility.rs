@@ -62,7 +62,7 @@ pub enum Holder {
     Service(String),
     /// Un conteneur créé hors de Hearth et non adopté. Le type ne porte rien : le nom (ou l'image) qu'un
     /// CONFLIT dit vient de [`conflict_label`], demandé à part (`ServicesRegistry::port_claim`,
-    /// `unmanaged_name_label`), jamais par ce type que la suppression lit aussi (`BR-ADOPT-002`).
+    /// `ServicesRegistry::name_claim`), jamais par ce type que la suppression lit aussi (`BR-ADOPT-002`).
     Unmanaged,
 }
 

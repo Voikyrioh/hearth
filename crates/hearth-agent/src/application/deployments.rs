@@ -529,8 +529,8 @@ impl Deployments {
                 None,
             ));
         }
-        if self.registry.name_holder(name).is_some() {
-            return Ok((NameStatus::Taken, self.registry.unmanaged_name_label(name)));
+        if let Some((_, label)) = self.registry.name_claim(name) {
+            return Ok((NameStatus::Taken, label));
         }
         match self.specs_holds(&folded).await {
             Ok(true) => Ok((NameStatus::Taken, None)),

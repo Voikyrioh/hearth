@@ -54,6 +54,7 @@ use crate::domain::audit::{Actor, AdoptionCause, AuditAction, ClientName, Outcom
 use crate::domain::services::delete::FolderUse;
 use crate::domain::services::image::ImageName;
 use crate::domain::services::logs::{LogContainer, LogOrigin, LogTarget};
+use crate::domain::services::spec::fold_name;
 use crate::domain::services::{
     Adoption, Announced, Debounce, Derived, EngineProbe, EngineState, Holder, KeyKind, MountType,
     Observation, PortProtocol, ProbeOutcome, RunState, ServiceKey, ServiceStateKind, StartWindow,
@@ -1862,30 +1863,22 @@ impl ServicesRegistry {
         totals
     }
 
-    /// Qui porte ce nom de service, sans tenir compte de la casse (`BR-ADOPT-022` : « Ce nom est déjà
-    /// pris », sans autre indication quand c'est un conteneur non adopté).
-    pub fn name_holder(&self, name: &str) -> Option<Holder> {
-        let inner = self.lock();
-        inner
-            .containers
-            .values()
-            .find(|observation| observation.name.to_lowercase() == name.to_lowercase())
-            .map(|observation| Self::holder_of(&inner, observation))
-    }
-
-    /// Le nom, à défaut l'image, du conteneur NON ADOPTÉ qui porte ce nom (`BR-ADOPT-022`, HRT-214) : ce que
-    /// le contrôle d'un déploiement et le refus d'un nom pris disent à un compte qui gère les services. `None`
-    /// pour un service publié (son nom est dans la liste) ou si personne ne porte ce nom.
-    pub fn unmanaged_name_label(&self, name: &str) -> Option<String> {
+    /// Qui porte ce nom de service, sans tenir compte de la casse (`BR-ADOPT-022`), en un seul passage : le
+    /// porteur, et pour un conteneur non adopté son libellé (nom, à défaut image, HRT-214) que `Holder` ne porte
+    /// pas (la suppression le lit aussi, BR-ADOPT-002). `None` pour un service publié (son nom est dans la liste).
+    pub fn name_claim(&self, name: &str) -> Option<(Holder, Option<String>)> {
+        let folded = fold_name(name);
         let inner = self.lock();
         let observation = inner
             .containers
             .values()
-            .find(|observation| observation.name.to_lowercase() == name.to_lowercase())?;
-        match Self::holder_of(&inner, observation) {
+            .find(|observation| fold_name(&observation.name) == folded)?;
+        let holder = Self::holder_of(&inner, observation);
+        let label = match holder {
             Holder::Unmanaged => Some(conflict_label(&observation.name, &observation.image)),
             Holder::Service(_) => None,
-        }
+        };
+        Some((holder, label))
     }
 
     fn holder_of(inner: &Inner, observation: &Observation) -> Holder {
@@ -4844,20 +4837,14 @@ mod tests {
         assert_eq!(held, Some(Holder::Unmanaged));
         assert!(!format!("{held:?}").contains("sentinel"));
         assert_eq!(
-            registry.unmanaged_name_label("SENTINEL-hidden").as_deref(),
-            Some("sentinel-hidden"),
-            "le conteneur est nommé, avec la casse du moteur"
+            registry.name_claim("SENTINEL-hidden"),
+            Some((Holder::Unmanaged, Some("sentinel-hidden".to_owned()))),
+            "le nom est pris, sans la casse, et le conteneur est nommé avec la casse du moteur"
         );
         assert_eq!(
-            registry.unmanaged_name_label("web"),
-            None,
+            registry.name_claim("web"),
+            Some((Holder::Service("web".to_owned()), None)),
             "un service publié"
-        );
-        assert_eq!(registry.unmanaged_name_label("libre"), None);
-        assert_eq!(
-            registry.name_holder("SENTINEL-hidden"),
-            Some(Holder::Unmanaged),
-            "le nom est pris, sans la casse"
         );
         // Le service adopté, lui, est nommé : il est dans la liste.
         assert_eq!(
@@ -4866,7 +4853,7 @@ mod tests {
         );
         assert_eq!(registry.port_holder(9090, PortProtocol::Udp), None);
         assert_eq!(registry.port_holder(7070, PortProtocol::Tcp), None);
-        assert_eq!(registry.name_holder("libre"), None);
+        assert_eq!(registry.name_claim("libre"), None);
     }
 
     // -----------------------------------------------------------------------------------------

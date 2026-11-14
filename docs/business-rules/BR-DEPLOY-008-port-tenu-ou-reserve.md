@@ -5,7 +5,7 @@ titre: Un port tenu par un conteneur en marche ou un programme du serveur bloque
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-deployer-image.md (BR-DEPLOY-008), HRT-68
-maj: 2026-10-24
+maj: 2026-11-14
 ---
 
 # BR-DEPLOY-008 — Un port tenu par un conteneur en marche ou un programme du serveur bloque le lancement ; un port réservé par un service arrêté avertit et se coche ; un conteneur hors Hearth est nommé par son nom, à défaut son image
@@ -36,3 +36,4 @@ BR-ADOPT-022, BR-DEPLOY-009, BR-DEPLOY-019
 ## Historique
 - 2026-10-17 — création (HRT-68, déployer une image, côté agent).
 - 2026-10-24 — côté client (HRT-69, déployer une image).
+- 2026-11-14 — un conteneur hors Hearth en marche est nommé par son nom, à défaut son image (HRT-214, amende BR-ADOPT-022).

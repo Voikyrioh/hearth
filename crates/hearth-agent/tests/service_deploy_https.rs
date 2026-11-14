@@ -618,6 +618,11 @@ async fn a_name_taken_by_an_unmanaged_container_names_it_and_never_what_it_holds
     for secret in ["SENTINEL_ENV_NAME_91", "SENTINEL-CMD-62", "busybox"] {
         assert!(!refused.text.contains(secret), "{}", refused.text);
     }
+    // Le journal d'activité garde le refus, jamais le conteneur ni ce qu'il porte.
+    let journal = format!("{:?}", b.journal().await).to_lowercase();
+    for kept_out in ["sentinel_env_name_91", "sentinel-cmd-62", "busybox"] {
+        assert!(!journal.contains(kept_out), "{kept_out} dans {journal}");
+    }
     // Un service créé par Hearth, puis le même nom redemandé : son nom est dans la liste, rien à dire.
     let accepted = b.accepted(spec("web")).await;
     b.finished(&accepted.operation_id).await;
