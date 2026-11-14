@@ -1185,7 +1185,7 @@ fn deletable(state: ServiceStateKind) -> bool {
 }
 
 /// La cause d'une erreur du moteur, dans la liste fermée (`BR-DEL-029`). Jamais un texte du moteur.
-fn cause_of(error: EngineError) -> Cause {
+pub(crate) fn cause_of(error: EngineError) -> Cause {
     match error {
         EngineError::Unreachable | EngineError::Denied => Cause::EngineUnavailable,
         EngineError::Timeout => Cause::Timeout,
@@ -1195,9 +1195,9 @@ fn cause_of(error: EngineError) -> Cause {
 }
 
 /// L'étape annoncée tant que l'arrêt dure, retirée quoi qu'il arrive.
-struct StepShown<'a> {
-    registry: &'a ServicesRegistry,
-    key: ServiceKey,
+pub(crate) struct StepShown<'a> {
+    pub(crate) registry: &'a ServicesRegistry,
+    pub(crate) key: ServiceKey,
 }
 
 impl Drop for StepShown<'_> {
@@ -1206,7 +1206,7 @@ impl Drop for StepShown<'_> {
     }
 }
 
-fn account_of(actor: &Actor) -> String {
+pub(crate) fn account_of(actor: &Actor) -> String {
     actor
         .account
         .as_ref()

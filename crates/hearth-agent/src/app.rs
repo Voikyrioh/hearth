@@ -18,6 +18,7 @@ pub use update::{Updating, run_supervisor, update_service};
 use crate::application::accounts::AccountService;
 use crate::application::attack_mode::AttackModeService;
 use crate::application::audit::{AuditRecorder, AuditService, AuditTrail};
+use crate::application::backups::{BackupContext, BackupTimings, Backups};
 use crate::application::catalog::CatalogService;
 use crate::application::delete::{DeleteContext, DeleteTimings, ServiceDeletion};
 use crate::application::deployments::{DeployContext, DeployTimings, Deployments, FolderGuard};
@@ -31,8 +32,8 @@ use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::ports::{
-    AuditFeed, AuditSink, BootInfo, ChallengeCrypto, Clock, ContainerEngine, CryptoError,
-    FingerprintSecretError, FingerprintSecretStore, FreeSpace, GpuProbe, HashError,
+    AuditFeed, AuditSink, BackupFiles, BootInfo, ChallengeCrypto, Clock, ContainerEngine,
+    CryptoError, FingerprintSecretError, FingerprintSecretStore, FreeSpace, GpuProbe, HashError,
     HostEnvironment, HostPorts, IdGen, IdentityError, IdentityStore, InstallHost, MonotonicClock,
     PasswordHasher, PublicIdentity, RequestFingerprinter, SafeFs, SecretRandom, SecurityFeed,
     ServiceObserver, ServiceSupervisor, Store, StoreError, SystemProbe, TokenGen,
@@ -64,6 +65,7 @@ use crate::entrypoint::terminal::TerminalPasswords;
 use crate::entrypoint::ws::{StreamContext, StreamSettings};
 use crate::infrastructure::argon2::Argon2Hasher;
 use crate::infrastructure::audit_feed::BroadcastAuditFeed;
+use crate::infrastructure::backup_files::StdBackupFiles;
 use crate::infrastructure::clock::{SystemClock, SystemMonotonic};
 use crate::infrastructure::config::{self, AgentConfig, CliOverrides, ConfigError};
 use crate::infrastructure::created_objects::FsCreatedObjects;
@@ -86,9 +88,9 @@ use crate::infrastructure::security_feed::BroadcastSecurityFeed;
 use crate::infrastructure::services_key::FileServicesKeyStore;
 use crate::infrastructure::sqlite::{
     Database, DatabaseError, ServiceDatabase, SqliteAccountRepo, SqliteAttackModeRepo,
-    SqliteAuditRepo, SqliteDeviceRepo, SqliteGameSettingsRepo, SqliteKnownAddressRepo,
-    SqliteLoginAttemptRepo, SqliteOpJournal, SqliteOperationRepo, SqliteServiceRepo,
-    SqliteSessionRepo, SqliteSpecRepo, SqliteStore,
+    SqliteAuditRepo, SqliteBackupRepo, SqliteDeviceRepo, SqliteGameSettingsRepo,
+    SqliteKnownAddressRepo, SqliteLoginAttemptRepo, SqliteOpJournal, SqliteOperationRepo,
+    SqliteServiceRepo, SqliteSessionRepo, SqliteSpecRepo, SqliteStore,
 };
 use crate::infrastructure::supervisor::{NoSupervisor, ProcSystemd};
 use crate::infrastructure::system::gpu;
@@ -220,6 +222,25 @@ pub struct EngineParts {
     pub host_paths: Option<Arc<dyn crate::application::ports::HostPaths>>,
     /// Les fiches de serveurs de jeu proposées et le hasard des secrets qu'elles font tirer (HRT-101).
     pub catalog: CatalogParts,
+    /// Les sauvegardes des services (HRT-97) : leurs délais et, pour les tests, un faux de la racine des sauvegardes.
+    pub backups: BackupParts,
+}
+
+/// Ce qu'il faut aux sauvegardes (HRT-97, ADR-0047) : les délais, et la racine des sauvegardes.
+pub struct BackupParts {
+    pub timings: BackupTimings,
+    /// La racine des sauvegardes. `None` : la vraie (`[backups] root`, par défaut `/var/lib/hearth-backups`) ; les
+    /// tests y posent un faux en mémoire.
+    pub files: Option<Arc<dyn BackupFiles>>,
+}
+
+impl BackupParts {
+    pub fn production() -> Self {
+        Self {
+            timings: BackupTimings::production(),
+            files: None,
+        }
+    }
 }
 
 /// Ce qu'il faut au catalogue des fiches et à l'installation depuis une fiche (HRT-101, ADR-0050) : la porte de
@@ -271,6 +292,7 @@ impl EngineParts {
             safe_fs: None,
             host_paths: None,
             catalog: CatalogParts::production(),
+            backups: BackupParts::production(),
         }
     }
 }
@@ -405,12 +427,14 @@ pub async fn service_foundations(
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
 ) -> Result<ServiceFoundations, AppError> {
+    let backups_root = data_dir.join(BACKUPS_DIR);
     // Un journal d'activité propre au socle : personne n'en suit la diffusion dans ces assemblages.
     let store: Arc<dyn Store> = Arc::new(SqliteStore::new(database.pool().clone()));
     let feed: Arc<dyn AuditFeed> = Arc::new(BroadcastAuditFeed::new());
     let (_, trail) = audit_trail(&store, clock.clone(), feed);
     service_foundations_observed(
         data_dir,
+        &backups_root,
         database,
         clock,
         ids,
@@ -422,9 +446,10 @@ pub async fn service_foundations(
 }
 
 /// Où l'agent range, sous son dossier de données, ce que les opérations créent pour elles-mêmes et qu'une
-/// reprise ou une annulation retire (`FsCreatedObjects`). Valeurs par défaut du plan d'intégration des
-/// serveurs de jeu (sauvegardes et dossier d'attente) : les lots qui écrivent ces objets (HRT-97, HRT-70) les
-/// rendront configurables. Une racine qui n'existe pas encore ne retire rien (« déjà parti »).
+/// reprise ou une annulation retire (`FsCreatedObjects`). Le dossier d'attente est une valeur par défaut du plan
+/// d'intégration des serveurs de jeu (HRT-70 le rendra configurable) ; la racine des sauvegardes est celle de
+/// la configuration (HRT-97, `BR-BACKUP-005`), ce défaut ne sert qu'aux assemblages sans configuration (tests). Une
+/// racine qui n'existe pas encore ne retire rien (« déjà parti »).
 const BACKUPS_DIR: &str = "backups";
 const STAGING_DIR: &str = "staging";
 
@@ -436,8 +461,10 @@ const STAGING_DIR: &str = "staging";
 /// - Une clé absente, fausse ou inutilisable n'arrête PAS l'agent : les services qui tournent continuent,
 ///   les secrets des services sont dits illisibles, rien n'est supprimé ni régénéré.
 /// - Rien d'une opération interrompue n'est repris, rejoué ni défait.
+#[allow(clippy::too_many_arguments)]
 pub async fn service_foundations_observed(
     data_dir: &std::path::Path,
+    backups_root: &std::path::Path,
     database: &Database,
     clock: Arc<dyn Clock>,
     ids: Arc<dyn IdGen>,
@@ -472,7 +499,7 @@ pub async fn service_foundations_observed(
         // Les racines des objets qu'une opération crée pour elle-même, revérifiés par leur inode avant d'être
         // retirés (jamais un chemin absolu venu de la base).
         Arc::new(FsCreatedObjects::new([
-            (ObjectRoot::Backups, data_dir.join(BACKUPS_DIR)),
+            (ObjectRoot::Backups, backups_root.to_path_buf()),
             (ObjectRoot::Staging, data_dir.join(STAGING_DIR)),
         ])),
         // Une clôture ou un constat écrit son entrée du journal d'activité dans sa transaction.
@@ -843,8 +870,10 @@ pub async fn start_engined(
             .with_containers(service_repo.clone()),
         ),
     );
+    let backups_root = config.services.backups_root(&config.data_dir);
     let foundations = service_foundations_observed(
         &config.data_dir,
+        &backups_root,
         database.database(),
         adapters.clock.clone(),
         adapters.ids.clone(),
@@ -1007,14 +1036,43 @@ pub async fn start_engined(
         service_repo.clone(),
         service_repo.clone(),
         safe_fs.clone(),
-        host_paths,
+        host_paths.clone(),
         phases.clone(),
         adapters.clock.clone(),
         DeleteContext {
-            services_root: deletion_root,
+            services_root: deletion_root.clone(),
             timings: engine.delete,
         },
     );
+    // Les sauvegardes d'un service (HRT-97) : le registre en base, la racine des sauvegardes sur le disque. Les lignes
+    // `writing` d'un arrêt précédent partent (leurs fichiers partiels ont été retirés par le journal), et la racine
+    // est jugée : si elle chevauche un dossier de données, la fonction est refusée et le démarrage le dit.
+    let backup_files: Arc<dyn BackupFiles> = engine
+        .backups
+        .files
+        .unwrap_or_else(|| Arc::new(StdBackupFiles::new(backups_root.clone())));
+    let backups = Backups::new(
+        registry.clone(),
+        foundations.ops.clone(),
+        foundations.specs.clone(),
+        container_engine.clone(),
+        service_repo.clone(),
+        service_repo.clone(),
+        safe_fs.clone(),
+        backup_files,
+        Arc::new(SqliteBackupRepo::new(database.pool().clone())),
+        host_paths.clone(),
+        services.audit_sink.clone(),
+        adapters.clock.clone(),
+        adapters.ids.clone(),
+        BackupContext {
+            services_root: deletion_root.clone(),
+            backups_root: backups_root.to_string_lossy().into_owned(),
+            agent_version: crate::build_info::VERSION.to_owned(),
+            timings: engine.backups.timings,
+        },
+    );
+    backups.recover_at_startup().await;
     let deployments = Deployments::new(
         registry.clone(),
         foundations.ops.clone(),
@@ -1061,6 +1119,7 @@ pub async fn start_engined(
         services.trail.clone(),
     ));
     let deletion_for_shutdown = service_deletion.clone();
+    let backups_for_shutdown = backups.clone();
     let router = http::router(AppState {
         hello: Arc::new(hello),
         accounts: services.accounts,
@@ -1078,6 +1137,7 @@ pub async fn start_engined(
         service_lifecycle,
         deployments,
         service_deletion,
+        backups,
         catalog,
         game_settings,
         stream,
@@ -1088,6 +1148,7 @@ pub async fn start_engined(
     let server = http::spawn(listener, tls, router)?.on_shutdown(move || {
         closing.begin_shutdown();
         deletion_for_shutdown.begin_shutdown();
+        backups_for_shutdown.begin_shutdown();
     });
     // Le résultat d'une mise à jour que personne n'a encore annoncé (le nouvel agent après un
     // échange, l'ancien après un retour en arrière) part au journal et au flux.
