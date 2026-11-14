@@ -29,6 +29,8 @@ pub struct ServiceRightsDto {
     pub granted: bool,
     /// L'agent annonce `game-settings` (HRT-109) : seul cas où l'onglet « Réglages » peut exister.
     pub game_settings: bool,
+    /// L'agent annonce `service-delete` (HRT-85) : seul cas où la carte « Suppression » peut exister (HRT-86).
+    pub service_delete: bool,
     pub account: String,
 }
 
@@ -38,6 +40,7 @@ impl From<hearth_link::ServiceRightsRead> for ServiceRightsDto {
             known: read.agent_knows,
             granted: read.granted,
             game_settings: read.game_settings,
+            service_delete: read.service_delete,
             account: read.account,
         }
     }

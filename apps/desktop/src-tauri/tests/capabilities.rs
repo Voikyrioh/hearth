@@ -378,6 +378,14 @@ const EXPECTED: &[(&str, &str)] = &[
         "serviceRestart",
         "serverId: string, key: string, adminPassword: string | null",
     ),
+    // HRT-86 : la consultation de la fenêtre de suppression (une lecture) et la suppression (un acte jamais couvert par
+    // l'élévation). La clé est un identifiant que la coquille valide (`is_service_key`) ; le nom retapé n'est jamais
+    // écrit tel quel (l'agent le compare à celui qu'il connaît).
+    ("deletePreview", "serverId: string, key: string"),
+    (
+        "deleteService",
+        "serverId: string, key: string, deletion: DeleteRequestDto, adminPassword: string | null",
+    ),
     (
         "deployCheck",
         "serverId: string, input: DeployCheckInputDto",
@@ -438,6 +446,7 @@ const ADMIN_COMMANDS: &[(&str, &str)] = &[
     ("serviceStop", "adminPassword"),
     ("serviceRestart", "adminPassword"),
     ("deployService", "adminPassword"),
+    ("deleteService", "adminPassword"),
     ("installFiche", "adminPassword"),
     ("saveGameSettings", "adminPassword"),
     ("cancelServiceOperation", "adminPassword"),
@@ -498,6 +507,7 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "openEngineDocs",
     "listServiceOperations",
     "ackServiceOperations",
+    "deletePreview",
     "deployCheck",
     "readEngineCapacity",
     "readCatalog",

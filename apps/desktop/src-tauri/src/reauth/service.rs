@@ -90,6 +90,12 @@ fn act_of(kind: AdminActKindDto, role: Option<RoleDto>) -> AdminAct<'static> {
             origin: "form",
             effect: "restart",
         },
+        // Supprimer : le genre seul décide (jamais couvert par l'élévation), ni la cible ni les cases ne comptent.
+        AdminActKindDto::ServiceDelete => AdminAct::ServiceDelete {
+            target: "".into(),
+            data: false,
+            backups: false,
+        },
         AdminActKindDto::ServiceStart => AdminAct::ServiceStart { target: "".into() },
         AdminActKindDto::ServiceStop => AdminAct::ServiceStop { target: "".into() },
         AdminActKindDto::ServiceRestart => AdminAct::ServiceRestart { target: "".into() },
@@ -188,6 +194,8 @@ mod tests {
                 (Kind::ReauthSetting, None, Yes),
                 // Déployer : jamais couvert par l'élévation (BR-DEPLOY-015). Annuler : la table de l'élévation.
                 (Kind::ServiceDeploy, None, Yes),
+                // Supprimer : jamais couvert par l'élévation (BR-DEL-012).
+                (Kind::ServiceDelete, None, Yes),
                 (Kind::OperationCancel, None, UnlessElevated),
                 // Enregistrer les réglages d'un jeu : la table de l'élévation (HRT-108, ADR-0051).
                 (Kind::GameSettingsSave, None, UnlessElevated),

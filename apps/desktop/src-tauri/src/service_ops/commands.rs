@@ -12,6 +12,8 @@ use tauri::State;
 
 use super::catalog;
 use super::catalog_dto::{CatalogDto, FicheInstallRequestDto, FicheLinkKind, FicheReadDto};
+use super::delete;
+use super::delete_dto::{DeleteOutcome, DeletePreviewOutcome, DeleteRequestDto};
 use super::deploy;
 use super::deploy_dto::{
     CancelOutcome, DeployCheckDto, DeployCheckInputDto, DeployOutcome, DeployRequestDto,
@@ -119,6 +121,39 @@ pub async fn service_restart(
     admin_password: Option<String>,
 ) -> Result<LifecycleOutcome, LinkFailure> {
     gesture(link, server_id, key, GestureDto::Restart, admin_password).await
+}
+
+/// De quoi bâtir la fenêtre « Supprimer {nom} ? » (`GET /services/{key}/delete-preview`) : une CONSULTATION, rien n'est
+/// écrit ni journalisé (BR-DEL-009 : la mesure des dossiers dure 10 secondes au plus). Les chemins des dossiers ne
+/// sortent que vers les comptes qui ont le droit de gérer les services ; sans le droit : `MissingServicesRight`.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_preview(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+) -> Result<DeletePreviewOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    delete::preview(link.manager(), &id, &key).await
+}
+
+/// Supprime un service (`DELETE /services/{key}`) : un acte d'administration confirmé, JAMAIS couvert par
+/// l'élévation (le mot de passe à chaque fois, BR-DEL-012). Par défaut rien n'est perdu : les données ne partent que
+/// sur la case cochée et le nom retapé (BR-DEL-005, BR-DEL-011). L'agent répond `202` : l'issue ne se lit jamais ici,
+/// elle arrive par le suivi des opérations. Jamais rejoué : un résultat inconnu se lit sur le flux (BR-DEL-023). Sans
+/// le droit « gérer les services » : `MissingServicesRight`.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_service(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+    deletion: DeleteRequestDto,
+    admin_password: Option<String>,
+) -> Result<DeleteOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let admin_password = admin_password.map(Secret::new);
+    delete::delete(link.manager(), &id, &key, deletion, admin_password.as_ref()).await
 }
 
 /// Les constats du formulaire de déploiement sur le nom, les ports et l'image (`POST /deployments/check`) : une

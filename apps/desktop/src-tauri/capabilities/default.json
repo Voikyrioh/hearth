@@ -72,6 +72,8 @@
     "allow-service-start",
     "allow-service-stop",
     "allow-service-restart",
+    "allow-delete-preview",
+    "allow-delete-service",
     "allow-deploy-check",
     "allow-deploy-service",
     "allow-cancel-service-operation",

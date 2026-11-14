@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-service"
+description = "Enables the delete_service command without any pre-configured scope."
+commands.allow = ["delete_service"]
+
+[[permission]]
+identifier = "deny-delete-service"
+description = "Denies the delete_service command without any pre-configured scope."
+commands.deny = ["delete_service"]
