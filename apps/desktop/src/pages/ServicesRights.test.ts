@@ -150,6 +150,7 @@ describe("états du droit", () => {
         known: true,
         granted: false,
         gameSettings: true,
+        serviceDelete: true,
         account: hostile,
       });
     }, "forge");

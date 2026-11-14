@@ -57,6 +57,8 @@ const STEP_KEYS: Record<string, MessageKey> = {
   rollback: "serviceOps.steps.rollback",
   copy: "serviceOps.steps.copy",
   erase: "serviceOps.steps.erase",
+  remove_container: "serviceOps.steps.removeContainer",
+  forget: "serviceOps.steps.forget",
 };
 
 /** Le texte d'un statut EN COURS ; un statut définitif n'en a pas (son issue se dit par `outcomeText`). */
@@ -114,7 +116,9 @@ export function operationTitle(
   name: string,
   detailed: boolean,
 ): string {
-  if (operation.kind === "delete") {
+  // L'effacement des données ne se dit que lorsqu'il a commencé : avant, la suppression ne touche que le service
+  // (revue UX de Nora du 14/11, constat 1 : un service dont on garde les données ne « efface » rien).
+  if (operation.kind === "delete" && operation.step === "erase") {
     return t(detailed ? "serviceOps.eraseWithRight" : "serviceOps.eraseNoRight", { name });
   }
   return t(LABEL_KEYS[operation.kind], { name });
@@ -196,6 +200,31 @@ function lifecycleOutcome(
   }
 }
 
+/**
+ * L'issue d'une suppression de service (HRT-86, BR-DEL-013 à 016), dite par sa CAUSE : jamais un texte de l'agent.
+ * `null` : pas une suppression, ou un statut que l'issue générale dit déjà (interrompue : le résultat n'est pas connu).
+ */
+function deleteOutcome(
+  operation: ServiceOperation,
+  name: string,
+): { message: string; tone: OutcomeTone } | null {
+  if (operation.kind !== "delete") return null;
+  const say = (key: MessageKey, tone: OutcomeTone) => ({ message: t(key, { name }), tone });
+  switch (operation.status) {
+    case "succeeded":
+      if (operation.cause === "data_not_erased")
+        return say("serviceDelete.outcome.partial", "warn");
+      if (operation.cause === "forced_stop") return say("serviceDelete.outcome.forced", "warn");
+      return say("serviceDelete.outcome.done", "success");
+    case "failed":
+      return say("serviceDelete.outcome.failed", "error");
+    case "cancelled":
+      return say("serviceDelete.outcome.cancelled", "info");
+    default:
+      return null;
+  }
+}
+
 /** L'issue d'une opération terminée : sa phrase et son ton, ou `null` si elle ne l'est pas. */
 export function outcomeOf(
   operation: ServiceOperation,
@@ -204,11 +233,21 @@ export function outcomeOf(
   const key = OUTCOME_KEYS[operation.status];
   if (!key) return null;
   // Un déploiement (HRT-69) se dit par sa cause : le service est en marche, ou pourquoi rien n'a été créé.
-  const specific = deployOutcome(operation, name) ?? lifecycleOutcome(operation, name);
+  const specific =
+    deployOutcome(operation, name) ??
+    lifecycleOutcome(operation, name) ??
+    deleteOutcome(operation, name);
   if (specific) return specific;
   const tone: OutcomeTone =
     operation.status === "succeeded" ? "success" : operation.status === "failed" ? "error" : "warn";
   return { message: t(key, { subject: t(SUBJECT_KEYS[operation.kind], { name }) }), tone };
+}
+
+const COUNT = new Intl.NumberFormat("fr-FR");
+
+/** Un nombre entier à la française (espace insécable entre les milliers), le même partout. */
+export function formatCount(value: number): string {
+  return COUNT.format(Math.round(value));
 }
 
 /** Une taille en octets, en unités binaires lisibles (Ko, Mo, Go) ; arrondie, jamais inventée. */
@@ -243,7 +282,7 @@ export function progressOf(
   } else if (operation.itemsDone !== null) {
     parts.push(
       t(operation.kind === "delete" ? "serviceOps.itemsErased" : "serviceOps.items", {
-        n: operation.itemsDone,
+        n: formatCount(operation.itemsDone),
       }),
     );
   }

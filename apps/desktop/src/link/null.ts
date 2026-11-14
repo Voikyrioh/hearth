@@ -154,6 +154,12 @@ export class NullLinkBridge implements LinkBridge {
   async deployService(): Promise<never> {
     return this.unavailable();
   }
+  async readDeletePreview(): Promise<never> {
+    return this.unavailable();
+  }
+  async deleteService(): Promise<never> {
+    return this.unavailable();
+  }
   async cancelServiceOperation(): Promise<never> {
     return this.unavailable();
   }

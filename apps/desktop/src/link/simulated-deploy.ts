@@ -134,6 +134,11 @@ export class SimulatedDeploys {
     this.deleting.set(serverId, bucket);
   }
 
+  /** Le service de ce nom n'est plus en cours de suppression : le nom est libre (`BR-DEL-019`). */
+  unmarkDeleting(serverId: string, name: string): void {
+    this.deleting.get(serverId)?.delete(name.toLowerCase());
+  }
+
   /**
    * Les bornes de la machine. `null` rétablit celles de la machine du serveur (`hostOf`) ; un objet les remplace.
    * La forme est celle de `GET /engine/capacity`.

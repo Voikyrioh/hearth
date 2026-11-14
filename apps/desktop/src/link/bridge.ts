@@ -27,6 +27,7 @@ import type {
   TrustLevel,
 } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
+import type { DeleteOutcome, DeletePreviewOutcome, DeleteRequest } from "./serviceDelete";
 import type { LifecycleGesture, LifecycleOutcome } from "./serviceLifecycle";
 import type { DecisionOutcome, OperationChoice, ServiceOperationEvent } from "./serviceOps";
 import type { EngineInfo, EnvVariable, ServiceRights, ServicesEvent } from "./services";
@@ -381,6 +382,26 @@ export interface LinkBridge {
     opId: string,
     adminPassword: string | null,
   ): Promise<CancelOutcome>;
+  /**
+   * De quoi bâtir la fenêtre « Supprimer {nom} ? » (HRT-86, BR-DEL-009) : une CONSULTATION, ni suivi ni journal. L'agent
+   * mesure les dossiers gérés pendant 10 secondes au plus, la réponse peut donc être lente. Un service inconnu,
+   * adopté ou un moteur pas prêt est un refus lu par son code. Hors « Connecté » : échec `not_connected` ; sans le
+   * droit : `missing_services_right`. Les chemins ne sortent que vers les comptes qui ont le droit.
+   */
+  readDeletePreview(serverId: string, key: string): Promise<DeletePreviewOutcome>;
+  /**
+   * Supprime un service (`DELETE /services/{key}`) : un acte d'administration confirmé, JAMAIS couvert par l'élévation
+   * (`adminPassword` : redemandé à chaque fois, jamais gardé ; `null` seulement si l'agent n'en demande pas). Par défaut
+   * rien n'est perdu : les données ne partent que sur la case cochée et le nom retapé (BR-DEL-005, 011). L'agent répond
+   * « accepté » (`202`) : l'issue ne se lit jamais ici, elle arrive par le suivi des opérations (`onServiceOperations`).
+   * Jamais rejoué : un résultat inconnu se lit sur le flux (BR-DEL-023). Sans le droit : échec `missing_services_right`.
+   */
+  deleteService(
+    serverId: string,
+    key: string,
+    request: DeleteRequest,
+    adminPassword: string | null,
+  ): Promise<DeleteOutcome>;
   /**
    * Les bornes des curseurs de ressources et la part de la machine déjà engagée (`GET /engine/capacity`,
    * BR-DEPLOY-038) : une lecture. `null` : réponse incomplète ou illisible, rien ne se règle ni ne s'envoie sans
