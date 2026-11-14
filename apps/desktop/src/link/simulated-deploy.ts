@@ -67,6 +67,13 @@ export interface ReceivedDeploy {
   request: DeployRequest;
 }
 
+/** Ce que le conflit dit d'un conteneur hors Hearth : son nom, à défaut son image (comme `conflict_label` de l'agent). */
+function unmanagedLabel(name: string, image: string | null, tag: string | null): string | null {
+  if (name.trim() !== "") return name;
+  if (!image) return null;
+  return tag ? `${image}:${tag}` : image;
+}
+
 /** La réserve du système et de Hearth : le plus grand de 1 Gio et de 5 % de la mémoire (comme `hearth_proto`). */
 function reserveOf(memoryBytes: number): number {
   return Math.max(GIB, Math.floor(memoryBytes / 20));
@@ -191,8 +198,10 @@ export class SimulatedDeploys {
 
   check(serverId: string, input: DeployCheckInput): DeployCheck {
     this.checks.push({ serverId, input: structuredClone(input) });
+    const name = this.nameStatus(serverId, input.name);
     return {
-      name: this.nameStatus(serverId, input.name),
+      name: name.status,
+      nameHolder: name.holder,
       invalidFields: this.invalidFields(input),
       ports: this.judgePorts(serverId, input.ports),
       disk: this.disk(serverId),
@@ -208,17 +217,26 @@ export class SimulatedDeploys {
     return out;
   }
 
-  private nameStatus(serverId: string, name: string): NameStatus {
-    if (nameIssue(name) !== null) return "invalid";
+  /** Le constat sur le nom, et le conteneur hors Hearth qui le porte (son nom, à défaut son image). */
+  private nameStatus(
+    serverId: string,
+    name: string,
+  ): { status: NameStatus; holder: string | null } {
+    if (nameIssue(name) !== null) return { status: "invalid", holder: null };
     const folded = name.toLowerCase();
-    if (this.deleting.get(serverId)?.has(folded)) return "being_deleted";
+    if (this.deleting.get(serverId)?.has(folded)) return { status: "being_deleted", holder: null };
     const listed = this.services
       .list(serverId)
-      .some((service) => service.name.toLowerCase() === folded);
+      .find((service) => service.name.toLowerCase() === folded);
     const running = [...(this.held.get(serverId)?.values() ?? [])].some(
       (held) => held.name.toLowerCase() === folded,
     );
-    return listed || running ? "taken" : "ok";
+    if (!listed && !running) return { status: "ok", holder: null };
+    const unmanaged = listed && listed.origin !== "hearth" && listed.adopted === null;
+    return {
+      status: "taken",
+      holder: unmanaged ? unmanagedLabel(listed.name, listed.image.ref, listed.image.tag) : null,
+    };
   }
 
   /** L'espace libre du disque des images, en octets. */
@@ -237,18 +255,27 @@ export class SimulatedDeploys {
     return this.images.has(`${repository}:${version}`);
   }
 
-  /** Qui tient ce port dans le moteur : un service publié (nommé), un conteneur hors Hearth (jamais nommé). */
+  /**
+   * Qui tient ce port dans le moteur : un service publié (`named`), un conteneur hors Hearth (`label` : son nom, à défaut
+   * son image, BR-ADOPT-022).
+   */
   private claim(
     serverId: string,
     port: number,
     protocol: DeployProtocol,
-  ): { named: string | null; running: boolean } | null {
-    let found: { named: string | null; running: boolean } | null = null;
+  ): { named: string | null; label: string | null; running: boolean } | null {
+    let found: { named: string | null; label: string | null; running: boolean } | null = null;
     for (const service of this.services.list(serverId)) {
       if (!service.ports.some((p) => p.hostPort === port && p.protocol === protocol)) continue;
       const running = service.state !== "stopped" && service.state !== "error";
       const published = service.origin === "hearth" || service.adopted !== null;
-      const claim = { named: published ? service.name : null, running };
+      const claim = {
+        named: published ? service.name : null,
+        label: published
+          ? null
+          : unmanagedLabel(service.name, service.image.ref, service.image.tag),
+        running,
+      };
       // Celui qui tourne passe avant celui qui est arrêté.
       if (!found || (claim.running && !found.running)) found = claim;
     }
@@ -272,7 +299,7 @@ export class SimulatedDeploys {
     const claim = this.claim(serverId, port, protocol);
     if (claim?.running) {
       return claim.named === null
-        ? { status: "held_by_unmanaged", holder: null }
+        ? { status: "held_by_unmanaged", holder: claim.label }
         : { status: "held_by_service", holder: claim.named };
     }
     if (claim) {
@@ -446,9 +473,10 @@ export class SimulatedDeploys {
     const mine = this.held.get(serverId) ?? new Map<string, Held>();
     if (mine.size >= 2) return { kind: "refused", refusal: { kind: "deploy_limit" } };
     const name = this.nameStatus(serverId, plan.name);
-    if (name === "being_deleted")
+    if (name.status === "being_deleted")
       return { kind: "refused", refusal: { kind: "name_being_deleted" } };
-    if (name !== "ok") return { kind: "refused", refusal: { kind: "name_taken" } };
+    if (name.status !== "ok")
+      return { kind: "refused", refusal: { kind: "name_taken", holder: name.holder } };
     for (const check of this.judgePorts(serverId, plan.ports)) {
       const blocks =
         check.status === "reserved_by_stopped"

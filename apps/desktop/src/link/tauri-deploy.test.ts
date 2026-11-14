@@ -36,6 +36,7 @@ describe("le pont réel, déploiement", () => {
   it("consulte le formulaire sans jamais envoyer une variable ni la commande", async () => {
     const calls = ipc(() => ({
       name: "taken",
+      nameHolder: "Cache",
       invalidFields: ["image"],
       ports: [
         {
@@ -65,6 +66,7 @@ describe("le pont réel, déploiement", () => {
     expect(JSON.stringify(calls)).not.toContain('"env"');
     expect(check).toEqual({
       name: "taken",
+      nameHolder: "Cache",
       invalidFields: ["image"],
       ports: [
         {

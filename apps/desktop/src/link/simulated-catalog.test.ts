@@ -316,7 +316,10 @@ describe("refuser comme l'agent, dans l'ordre", () => {
     sim.services.seed("forge", [
       { key: "h_x", name: "mon-terraria", origin: "hearth", state: "running" },
     ]);
-    expect(await refused(sim, terrariaRequest(detail))).toEqual({ kind: "name_taken" });
+    expect(await refused(sim, terrariaRequest(detail))).toEqual({
+      kind: "name_taken",
+      holder: null,
+    });
     // Un programme du serveur tient déjà le port : l'agent propose le port libre le plus proche.
     sim.deploys.listen("forge", 7778, "sshd");
     expect(await refused(sim, terrariaRequest(detail, { name: "autre" }))).toMatchObject({

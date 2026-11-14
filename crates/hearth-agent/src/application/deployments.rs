@@ -118,8 +118,10 @@ pub enum DeployError {
     LimitsRequired,
     #[error("dossier refusé")]
     FolderRefused { index: usize, reason: &'static str },
+    /// `holder` : le nom (à défaut l'image) du conteneur non adopté qui porte ce nom, s'il y en a un
+    /// (`BR-ADOPT-022`, HRT-214).
     #[error("nom pris")]
-    NameTaken,
+    NameTaken { holder: Option<String> },
     /// Les données d'un service supprimé s'effacent encore (`BR-DEL-019`).
     #[error("nom en cours de suppression")]
     NameBeingDeleted,
@@ -472,10 +474,10 @@ impl Deployments {
     pub async fn check(&self, request: &DeployCheckRequest) -> Result<DeployCheck, DeployError> {
         self.ready()?;
         let mut invalid_fields = Vec::new();
-        let name = match validate_name(&request.name) {
+        let (name, name_holder) = match validate_name(&request.name) {
             Err(_) => {
                 invalid_fields.push("name".to_owned());
-                NameStatus::Invalid
+                (NameStatus::Invalid, None)
             }
             Ok(()) => self.name_status(&request.name).await?,
         };
@@ -500,6 +502,7 @@ impl Deployments {
         };
         Ok(DeployCheck {
             name,
+            name_holder,
             invalid_fields,
             ports: ports.into(),
             mounts: mounts.into(),
@@ -508,25 +511,30 @@ impl Deployments {
         })
     }
 
-    async fn name_status(&self, name: &str) -> Result<NameStatus, DeployError> {
+    /// Le constat sur un nom, et, quand un conteneur non adopté le porte, son nom (à défaut son image) : de quoi
+    /// dire à l'administrateur où regarder (`BR-ADOPT-022`, HRT-214).
+    async fn name_status(&self, name: &str) -> Result<(NameStatus, Option<String>), DeployError> {
         let folded = fold_name(name);
         if let Some(by) = self
             .ops
             .locks()
             .with(|table| table.name_reserved_by(&folded))
         {
-            return Ok(if by == OpKind::Delete {
-                NameStatus::BeingDeleted
-            } else {
-                NameStatus::Taken
-            });
+            return Ok((
+                if by == OpKind::Delete {
+                    NameStatus::BeingDeleted
+                } else {
+                    NameStatus::Taken
+                },
+                None,
+            ));
         }
         if self.registry.name_holder(name).is_some() {
-            return Ok(NameStatus::Taken);
+            return Ok((NameStatus::Taken, self.registry.unmanaged_name_label(name)));
         }
         match self.specs_holds(&folded).await {
-            Ok(true) => Ok(NameStatus::Taken),
-            Ok(false) => Ok(NameStatus::Ok),
+            Ok(true) => Ok((NameStatus::Taken, None)),
+            Ok(false) => Ok((NameStatus::Ok, None)),
             Err(error) => Err(DeployError::Internal(error)),
         }
     }
@@ -668,9 +676,9 @@ impl Deployments {
 
         let folded = valid.body.name_folded();
         match self.name_status(&valid.body.name).await? {
-            NameStatus::Ok => {}
-            NameStatus::BeingDeleted => return Err(DeployError::NameBeingDeleted),
-            _ => return Err(DeployError::NameTaken),
+            (NameStatus::Ok, _) => {}
+            (NameStatus::BeingDeleted, _) => return Err(DeployError::NameBeingDeleted),
+            (_, holder) => return Err(DeployError::NameTaken { holder }),
         }
         self.check_ports_for(&valid).await?;
         let image = valid.image();
@@ -708,7 +716,7 @@ impl Deployments {
                     if by == OpKind::Delete {
                         DeployError::NameBeingDeleted
                     } else {
-                        DeployError::NameTaken
+                        DeployError::NameTaken { holder: None }
                     }
                 }
                 other => DeployError::Internal(other.to_string()),
@@ -727,7 +735,7 @@ impl Deployments {
                 "finish",
             );
             return Err(match error {
-                SpecServiceError::NameTaken => DeployError::NameTaken,
+                SpecServiceError::NameTaken => DeployError::NameTaken { holder: None },
                 other => DeployError::Internal(other.to_string()),
             });
         }

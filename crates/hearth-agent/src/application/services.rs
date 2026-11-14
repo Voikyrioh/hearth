@@ -58,9 +58,9 @@ use crate::domain::services::{
     Adoption, Announced, Debounce, Derived, EngineProbe, EngineState, Holder, KeyKind, MountType,
     Observation, PortProtocol, ProbeOutcome, RunState, ServiceKey, ServiceStateKind, StartWindow,
     Transition, TransitionKind, UnitLookup, UnitName, UnitStatus, Visibility, classify_probe,
-    compare_names, confirmation_expired, derive_state, derive_supervised, gone_long_enough,
-    honour_stop_request, lapsed, overlay_transition, stop_grace_s, unit_answered, unit_is_gone,
-    unread_unit_adoptions, visibility_of,
+    compare_names, confirmation_expired, conflict_label, derive_state, derive_supervised,
+    gone_long_enough, honour_stop_request, lapsed, overlay_transition, stop_grace_s, unit_answered,
+    unit_is_gone, unread_unit_adoptions, visibility_of,
 };
 
 /// Capacité de la diffusion : un abonné qui prend plus de 64 lots de retard relit un instantané.
@@ -1789,7 +1789,7 @@ impl ServicesRegistry {
 
     /// Le conteneur qui publie ce port du serveur, arrêtés compris (HRT-68, BR-DEPLOY-008) : celui qui tourne
     /// de préférence (il TIENT le port), sinon un conteneur arrêté (il le RÉSERVE). Un conteneur non géré
-    /// n'est jamais nommé (BR-ADOPT-022).
+    /// est nommé par son nom, à défaut son image, jamais autrement (BR-ADOPT-022, HRT-214).
     pub fn port_claim(
         &self,
         host_port: u16,
@@ -1816,7 +1816,9 @@ impl ServicesRegistry {
             );
             let claimant = match Self::holder_of(&inner, observation) {
                 Holder::Service(name) => Claimant::Service(name),
-                Holder::Unmanaged => Claimant::Unmanaged,
+                Holder::Unmanaged => {
+                    Claimant::Unmanaged(Some(conflict_label(&observation.name, &observation.image)))
+                }
             };
             if best.as_ref().is_none_or(|(held, _)| running && !held) {
                 best = Some((running, claimant));
@@ -1869,6 +1871,21 @@ impl ServicesRegistry {
             .values()
             .find(|observation| observation.name.to_lowercase() == name.to_lowercase())
             .map(|observation| Self::holder_of(&inner, observation))
+    }
+
+    /// Le nom, à défaut l'image, du conteneur NON ADOPTÉ qui porte ce nom (`BR-ADOPT-022`, HRT-214) : ce que
+    /// le contrôle d'un déploiement et le refus d'un nom pris disent à un compte qui gère les services. `None`
+    /// pour un service publié (son nom est dans la liste) ou si personne ne porte ce nom.
+    pub fn unmanaged_name_label(&self, name: &str) -> Option<String> {
+        let inner = self.lock();
+        let observation = inner
+            .containers
+            .values()
+            .find(|observation| observation.name.to_lowercase() == name.to_lowercase())?;
+        match Self::holder_of(&inner, observation) {
+            Holder::Unmanaged => Some(conflict_label(&observation.name, &observation.image)),
+            Holder::Service(_) => None,
+        }
     }
 
     fn holder_of(inner: &Inner, observation: &Observation) -> Holder {
@@ -4802,7 +4819,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_port_or_a_name_held_by_a_container_that_is_not_adopted_is_told_without_naming_it() {
+    async fn a_port_or_a_name_held_by_a_container_that_is_not_adopted_names_the_container() {
         use crate::domain::services::{PortBinding, PortScope};
         let (registry, engine, _supervisor, repo) = unadopted();
         let port = |host_port| PortBinding {
@@ -4821,10 +4838,22 @@ mod tests {
         registry.probe_and_apply(false).await;
         registry.reload_adopted().await;
         registry.resync().await.expect("resync");
-        // Le conteneur non adopté tient le port, même arrêté : dit sans son nom ni son image.
+        // Le conteneur non adopté tient le port, même arrêté : `Holder` ne porte rien (la suppression le lit
+        // aussi, BR-ADOPT-002), le conflit dit le nom à part (HRT-214).
         let held = registry.port_holder(8080, PortProtocol::Tcp);
         assert_eq!(held, Some(Holder::Unmanaged));
         assert!(!format!("{held:?}").contains("sentinel"));
+        assert_eq!(
+            registry.unmanaged_name_label("SENTINEL-hidden").as_deref(),
+            Some("sentinel-hidden"),
+            "le conteneur est nommé, avec la casse du moteur"
+        );
+        assert_eq!(
+            registry.unmanaged_name_label("web"),
+            None,
+            "un service publié"
+        );
+        assert_eq!(registry.unmanaged_name_label("libre"), None);
         assert_eq!(
             registry.name_holder("SENTINEL-hidden"),
             Some(Holder::Unmanaged),

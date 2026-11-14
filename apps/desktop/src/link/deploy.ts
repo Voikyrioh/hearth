@@ -71,7 +71,10 @@ export type PortStatus =
   | "invalid"
   | "unknown";
 
-/** Le constat sur un port du serveur. `holder` : texte du serveur, jamais le nom d'un conteneur non adopté. */
+/**
+ * Le constat sur un port du serveur. `holder` : le service, le programme, ou le conteneur créé hors de Hearth et non
+ * adopté (son nom, à défaut son image : BR-ADOPT-022, HRT-214), selon `status`.
+ */
 export interface PortCheck {
   hostPort: number;
   protocol: DeployProtocol;
@@ -86,6 +89,8 @@ export interface PortCheck {
 /** La réponse de la consultation. Indicative : le serveur refait tout au lancement (BR-DEPLOY-032). */
 export interface DeployCheck {
   name: NameStatus;
+  /** Le conteneur créé hors de Hearth qui porte ce nom (son nom, à défaut son image), s'il y en a un (BR-ADOPT-022). */
+  nameHolder: string | null;
   invalidFields: string[];
   ports: PortCheck[];
   /** L'espace libre là où le moteur range ses images ; `null` : l'agent ne peut pas le lire. */
@@ -115,7 +120,7 @@ export type DeployRefusal =
   | { kind: "invalid"; field: DeployField; reason: string }
   | { kind: "setting_refused" }
   | { kind: "limits_required" }
-  | { kind: "name_taken" }
+  | { kind: "name_taken"; holder: string | null }
   | { kind: "name_being_deleted" }
   | {
       kind: "port_in_use";
@@ -219,6 +224,7 @@ export function toDeployRequestDto(request: DeployRequest): DeployRequestDto {
 export function toDeployCheck(dto: DeployCheckDto): DeployCheck {
   return {
     name: dto.name,
+    nameHolder: dto.nameHolder,
     invalidFields: dto.invalidFields,
     ports: dto.ports.map((port) => ({
       hostPort: port.hostPort,

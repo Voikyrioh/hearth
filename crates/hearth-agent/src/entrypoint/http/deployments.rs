@@ -69,7 +69,12 @@ fn deploy_error(error: DeployError) -> ApiError {
             },
             serde_json::json!({ "field": "mounts", "index": index, "reason": reason }),
         )),
-        DeployError::NameTaken => ApiError::new(ErrorCode::NameTaken, "Ce nom est déjà pris."),
+        DeployError::NameTaken { holder } => ApiError(ErrorBody::with_details(
+            ErrorCode::NameTaken,
+            "Ce nom est déjà pris.",
+            // Le conteneur non adopté qui porte ce nom, à défaut son image (BR-ADOPT-022, HRT-214).
+            serde_json::json!({ "holder": holder }),
+        )),
         DeployError::NameBeingDeleted => ApiError::new(
             ErrorCode::NameBeingDeleted,
             "Ce nom est celui d'un service en cours de suppression. Attends la fin de l'effacement.",

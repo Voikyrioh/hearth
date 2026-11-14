@@ -8,7 +8,7 @@ import QuestionField from "@/components/molecules/QuestionField.vue";
 import VariantChoice from "@/components/molecules/VariantChoice.vue";
 import InstallSettings from "@/components/organisms/InstallSettings.vue";
 import type { FicheInstallState } from "@/composables/useFicheInstall";
-import { nameText, portVerdict } from "@/deploy/messages";
+import { nameTakenText, nameText, portVerdict } from "@/deploy/messages";
 import { currentAnswer } from "@/fiche/answers";
 import { shownHostPort } from "@/fiche/draft";
 import { answerIssueText } from "@/fiche/messages";
@@ -32,9 +32,9 @@ const draft = computed(() => props.install.draft.value);
 const nameError = computed(() => {
   const issue = props.install.nameProblem.value;
   if (issue) return props.install.shown("name") ? nameText(issue) : undefined;
-  // Le constat du serveur est immédiat (BR-DEPLOY-004) : il ne dit jamais qui tient le nom (BR-ADOPT-022).
+  // Le constat du serveur est immédiat (BR-DEPLOY-004) ; il nomme le conteneur hors Hearth qui tient le nom (BR-ADOPT-022).
   const status = props.install.check.value?.name;
-  if (status === "taken") return t("deploy.nameTaken");
+  if (status === "taken") return nameTakenText(props.install.check.value?.nameHolder ?? null);
   if (status === "being_deleted") return t("deploy.nameBeingDeleted");
   return undefined;
 });

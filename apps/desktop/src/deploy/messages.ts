@@ -112,7 +112,14 @@ export function portVerdict(check: PortCheck | undefined): PortVerdict {
         suggested: check.suggested,
       };
     case "held_by_unmanaged":
-      return { ...NONE, error: t("deploy.portUnmanaged"), suggested: check.suggested };
+      return {
+        ...NONE,
+        error:
+          holder === null
+            ? t("deploy.portUnmanaged")
+            : t("deploy.portUnmanagedNamed", { name: holder }),
+        suggested: check.suggested,
+      };
     case "held_by_program":
       return {
         ...NONE,
@@ -151,9 +158,16 @@ const FIELD_KEYS: Record<DeployField, MessageKey> = {
   resources: "deploy.fieldResources",
 };
 
-/** L'occupant d'un port, pour « Le port {port} vient d'être pris par {occupant} » : jamais le nom d'un conteneur hors Hearth. */
+/**
+ * L'occupant d'un port, pour « Le port {port} vient d'être pris par {occupant} ». Un conteneur hors Hearth est nommé
+ * par son nom, à défaut son image (BR-ADOPT-022) ; sans nom connu, la phrase le dit sans le nommer.
+ */
 export function occupantText(status: PortCheck["status"], holder: string | null): string {
-  if (status === "held_by_unmanaged") return t("deploy.occupantUnmanaged");
+  if (status === "held_by_unmanaged") {
+    return holder === null
+      ? t("deploy.occupantUnmanaged")
+      : t("deploy.occupantUnmanagedNamed", { name: safeText(holder) });
+  }
   if (holder !== null && status === "held_by_service") {
     return t("deploy.occupantService", { name: safeText(holder) });
   }
@@ -166,8 +180,15 @@ export function occupantText(status: PortCheck["status"], holder: string | null)
  * seule règle (BR-DEPLOY-008) : le pied du formulaire, la revérification au clic et le récapitulatif la partagent.
  * `null` : rien ne bloque (un port réservé par un service arrêté se coche dans le récapitulatif).
  */
+/** « Ce nom est déjà pris », avec le conteneur créé hors de Hearth qui le porte quand l'agent le dit (BR-ADOPT-022). */
+export function nameTakenText(holder: string | null): string {
+  return holder === null
+    ? t("deploy.nameTaken")
+    : t("deploy.nameTakenNamed", { name: safeText(holder) });
+}
+
 export function checkBlocker(check: DeployCheck): { text: string; field: DeployField } | null {
-  if (check.name === "taken") return { text: t("deploy.nameTaken"), field: "name" };
+  if (check.name === "taken") return { text: nameTakenText(check.nameHolder), field: "name" };
   if (check.name === "being_deleted") {
     return { text: t("deploy.nameBeingDeleted"), field: "name" };
   }
@@ -219,7 +240,7 @@ export function refusalText(
   const refusal = refused as DeployRefusal;
   switch (refusal.kind) {
     case "name_taken":
-      return t("deploy.nameTaken");
+      return nameTakenText(refusal.holder);
     case "name_being_deleted":
       return t("deploy.nameBeingDeleted");
     case "port_in_use":
