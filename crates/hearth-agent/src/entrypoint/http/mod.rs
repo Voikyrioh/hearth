@@ -1051,6 +1051,8 @@ mod tests {
         // le niveau d'accès de la route (voir `Class::ServiceStream`).
         ("GET", "/services/{key}/logs", ServiceStream),
         ("GET", "/services/{key}/env", Service),
+        // Ce que le détail d'un serveur de jeu montre (HRT-104) : ouvert à tout compte authentifié, aucun secret.
+        ("GET", "/services/{key}/game", OpenRead),
         // Le mot de passe du serveur de jeu (HRT-103) : le droit est exigé par le niveau, la révélation est consignée.
         ("GET", "/services/{key}/game-secret", Service),
         // Les réglages d'un serveur de jeu (HRT-108) : le droit est exigé par le niveau ; l'analyse d'un texte collé
