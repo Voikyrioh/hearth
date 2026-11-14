@@ -1052,6 +1052,8 @@ export const fr = {
       rollback: "Retour à l'état d'avant",
       copy: "Copie",
       erase: "Effacement",
+      removeContainer: "Suppression du service",
+      forget: "Effacement de la configuration",
     },
     status: {
       accepted: "L'opération attend son départ.",
@@ -1113,6 +1115,146 @@ export const fr = {
     byYou: "Lancée par vous.",
   },
   // Démarrer, arrêter, redémarrer un service (HRT-65, BR-LIFE-003 à 022).
+  // Supprimer un service (HRT-86, BR-DEL-*) : la carte du détail, la fenêtre de confirmation et celle de suivi.
+  serviceDelete: {
+    cardTitle: "Suppression",
+    button: "Supprimer ce service",
+    adoptedNote:
+      "Hearth ne supprime pas les services créés hors de Hearth. Vous pouvez seulement ne plus le gérer ; pour le supprimer, passez par le serveur.",
+    title: "Supprimer {name} ?",
+    submit: "Supprimer le service",
+    reading: "Lecture des dossiers du service…",
+    readingHelp: "Hearth mesure la taille des dossiers : cela peut durer jusqu'à 10 secondes.",
+    previewFailed: "La liste des dossiers de ce service n'a pas pu être lue.",
+    previewRefused: "Le serveur n'a pas donné la liste des dossiers de ce service.",
+    retry: "Réessayer",
+    // Ce que la suppression fait, dit dans tous les cas (BR-DEL-004, 013).
+    effect:
+      "Le service {name} sera retiré du serveur. Sa configuration (variables, ports, commande) sera effacée avec lui. Ses journaux seront perdus. L'image {image} reste sur le serveur.",
+    containerMissing:
+      "Le conteneur de ce service n'existe plus sur le serveur : seule sa configuration sera effacée.",
+    running:
+      "Le service est en marche : il sera arrêté d'abord. Il recevra l'ordre de s'arrêter proprement ; s'il ne s'est pas arrêté au bout de {delay}, il sera coupé de force. Un programme coupé de force peut perdre ce qu'il n'a pas eu le temps d'enregistrer.",
+    runningNoDelay:
+      "Le service est en marche : il sera arrêté d'abord. Il recevra l'ordre de s'arrêter proprement ; s'il ne s'arrête pas dans son délai d'arrêt, il sera coupé de force. Un programme coupé de force peut perdre ce qu'il n'a pas eu le temps d'enregistrer.",
+    // Le tableau des dossiers (BR-DEL-006 à 009).
+    foldersLabel: "Dossiers du service",
+    colFolder: "Dossier",
+    colSize: "Taille",
+    colItems: "Éléments",
+    colFate: "Sort",
+    noFolders: "Ce service n'a aucun dossier de données géré par Hearth.",
+    notMeasured: "Non mesurée",
+    moreThan: "plus de {size} (mesure interrompue)",
+    moreThanItems: "plus de {n}",
+    sizeNotMeasured: "Taille non mesurée pour {path} : plus grande que {size}.",
+    notMeasuredShort: "taille non mesurée",
+    moreThanShort: "plus de {size}",
+    fate: {
+      erased: "Effacé",
+      kept: "Conservé",
+      keptServer: "Conservé (appartient au serveur)",
+      keptShared: "Conservé (partagé)",
+    },
+    noteShared: "Conservé : {path}, aussi utilisé par {services}.",
+    noteUnverifiable:
+      "Conservé : {path}. Hearth n'a pas pu vérifier qu'aucun autre conteneur ne l'utilise.",
+    noteOutsideRoot: "Conservé : {path} ne se trouve pas dans le dossier de données de Hearth.",
+    unmanagedContainer: "un conteneur créé hors de Hearth",
+    nameList: "{all} et {last}",
+    serverFolders: "Ces dossiers appartiennent au serveur : Hearth ne les efface jamais.",
+    volumesOne:
+      "Ce service utilise un espace de stockage géré par le moteur de conteneurs : Hearth ne l'efface jamais.",
+    volumesMany:
+      "Ce service utilise {n} espaces de stockage gérés par le moteur de conteneurs : Hearth ne les efface jamais.",
+    // Les deux cases, décochées par défaut (BR-DEL-005).
+    boxesLegend: "Ce que la suppression emporte en plus",
+    dataBox: "Supprimer aussi les données",
+    dataHelp: "Efface les dossiers de données gérés par Hearth. Définitif.",
+    backupsBox: "Supprimer aussi les sauvegardes de ce service",
+    keptNotice:
+      "Les dossiers de données gérés par Hearth restent sur le serveur : {list}. Si vous créez plus tard un service nommé {name}, il les retrouvera.",
+    erasedNotice:
+      "Ces dossiers seront effacés avec tout ce qu'ils contiennent : {list}. Cette suppression est définitive : il n'y a pas de corbeille.",
+    backupsNotice:
+      "Les {n} sauvegardes de ce service seront supprimées avec lui. Cette suppression est définitive.",
+    // Hearth ne propose pas encore de sauvegarde (HRT-97) : la phrase seule, sans lien.
+    noBackup: "Vous n'avez aucune sauvegarde de ce service dans Hearth.",
+    nameLabel: "Retapez le nom du service pour confirmer",
+    nameError: "Le nom saisi ne correspond pas.",
+    nameHelp: "Les majuscules et les minuscules comptent.",
+    nameReason: "Retapez le nom du service pour continuer.",
+    // Les refus de l'agent (BR-DEL-002, 003, 011, 018, 021, 022).
+    refusedGone: "Ce service n'existe plus.",
+    refusedAdopted:
+      "Hearth ne supprime pas les services créés hors de Hearth. Vous pouvez seulement ne plus le gérer.",
+    refusedEngine:
+      "Le moteur de conteneurs n'est pas accessible ({state}). Le service n'a pas été supprimé.",
+    refusedEngineNoState:
+      "Le moteur de conteneurs n'est pas accessible. Le service n'a pas été supprimé.",
+    refusedBackups:
+      "Hearth ne gère pas encore les sauvegardes de ce service : décochez cette case.",
+    refusedOther: "Le serveur a refusé la suppression. Le service n'a pas été supprimé.",
+    unknownResult: "Le résultat de cette action n'est pas connu.",
+    forbidden: "Le serveur a refusé cette action.",
+    // Le suivi (BR-DEL-014, 030, 031).
+    progressTitle: "Supprimer {name}",
+    progressSteps: "Étapes de la suppression",
+    steps: {
+      stop: "Arrêt du service",
+      remove: "Suppression du service",
+      erase: "Effacement des données",
+    },
+    closeNote: "Vous pouvez fermer cette fenêtre : la suppression continue sur le serveur.",
+    erasingNote:
+      "L'effacement des données continue même si vous fermez cette fenêtre. Sa progression reste visible dans la bande « Opérations en cours », au-dessus de la liste des services.",
+    cancel: "Annuler la suppression",
+    cancelTitle: "Annuler la suppression de {name} ?",
+    keep: "Poursuivre la suppression",
+    cancelling: "L'annulation est en cours.",
+    cancelNotFound: "Cette suppression n'existe plus.",
+    cancelNotCancellable: "Cette suppression ne peut plus être annulée.",
+    cancelChanged:
+      "La suppression a changé pendant votre demande. Relisez son état, puis réessayez.",
+    cancelOther: "L'annulation n'a pas pu être prise en compte.",
+    tooLate: "Il est trop tard pour annuler : la suppression du service a commencé.",
+    // Les issues (BR-DEL-013 à 016, 020, 023).
+    unknownNow: "Le résultat de cette suppression n'est pas connu.",
+    unknownAfter:
+      "Rien n'est relancé. Quand le lien reviendra, Hearth dira si le service a été supprimé.",
+    interrupted:
+      "La suppression de {name} a été interrompue : le résultat n'est pas connu. Vérifiez dans la liste si le service existe encore.",
+    successKept: "Le service {name} est supprimé. Ses données sont conservées dans {paths}.",
+    successKeptAgain: "Si vous créez plus tard un service nommé {name}, il les retrouvera.",
+    successBare: "Le service {name} est supprimé.",
+    successErased: "Le service {name} et ses données sont supprimés.",
+    partial:
+      "Le service {name} est supprimé, mais certaines données n'ont pas pu être effacées. Des fichiers peuvent rester dans :",
+    partialAfter:
+      "Hearth ne relance pas l'effacement. Vérifiez ces dossiers depuis le serveur et supprimez ce qui reste.",
+    forced: "Le service {name} ne s'est pas arrêté à temps : il a été coupé de force.",
+    failed: "Le service {name} n'a pas été supprimé.",
+    failedKept: "Il reste en place avec sa configuration et ses données.",
+    failedHint:
+      "Vous pouvez réessayer depuis la fiche du service. Si le refus se répète, regardez l'état du moteur de conteneurs sur le serveur.",
+    cancelledStopped: "La suppression a été annulée. Le service {name} est arrêté.",
+    cancelledKept: "La suppression a été annulée. Le service {name} est conservé.",
+    cause: {
+      engineUnavailable: "Le moteur de conteneurs n'est pas accessible.",
+      engineRefused: "Le moteur de conteneurs a refusé de supprimer le service.",
+      timeout: "Le moteur de conteneurs n'a pas répondu à temps.",
+    },
+    // L'issue annoncée par une notification quand aucune fenêtre ne la suit (BR-DEL-013, 015, 016).
+    outcome: {
+      done: "Le service {name} est supprimé.",
+      partial: "Le service {name} est supprimé, mais certaines données n'ont pas pu être effacées.",
+      forced:
+        "Le service {name} est supprimé. Il ne s'est pas arrêté à temps : il a été coupé de force.",
+      failed: "Le service {name} n'a pas été supprimé.",
+      cancelled: "La suppression de {name} a été annulée.",
+    },
+  },
+
   lifecycle: {
     start: "Démarrer",
     stop: "Arrêter",
