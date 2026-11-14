@@ -175,6 +175,14 @@ pub enum OperationCause {
     NameTaken,
     /// Supprimer (HRT-85, BR-DEL-016) : le service est supprimé, mais des données n'ont pas pu être effacées.
     DataNotErased,
+    /// Sauvegarder (HRT-97, BR-BACKUP-009) : pas assez d'espace sur le disque des sauvegardes.
+    NoSpace,
+    /// Sauvegarder (BR-BACKUP-009) : le disque s'est presque rempli pendant la copie, la partie écrite est supprimée.
+    DiskAlmostFull,
+    /// Sauvegarder (BR-BACKUP-013) : la vérification de la sauvegarde a échoué, Hearth l'a supprimée.
+    BackupCorrupt,
+    /// Sauvegarder avec arrêt (BR-BACKUP-008) : le service arrêté pour la copie ne redémarre pas.
+    NotRestarted,
     /// Une cause que ce client ne connaît pas.
     #[serde(other)]
     Unknown,

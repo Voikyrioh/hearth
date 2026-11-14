@@ -20,6 +20,12 @@ pub const ENV_ENGINE_SOCKET: &str = "HEARTH_ENGINE_SOCKET";
 /// `off` / `false` / `0` : l'adoption de conteneurs existants est désactivée (HRT-80, `BR-ADOPT-020`,
 /// ADR-0043) : aucun candidat, l'acte est refusé ; « ne plus gérer » reste possible.
 pub const ENV_SERVICES_ADOPTION: &str = "HEARTH_SERVICES_ADOPTION";
+/// La racine des sauvegardes des services (HRT-97, `BR-BACKUP-005`) : réglée par l'administrateur du serveur, jamais
+/// depuis Hearth.
+pub const ENV_BACKUPS_ROOT: &str = "HEARTH_BACKUPS_ROOT";
+
+/// La racine des sauvegardes par défaut (Linux).
+pub const DEFAULT_BACKUPS_ROOT: &str = "/var/lib/hearth-backups";
 
 /// Socket du moteur de conteneurs par défaut.
 pub const DEFAULT_ENGINE_SOCKET: &str = "/var/run/docker.sock";
@@ -60,11 +66,37 @@ pub struct ServicesConfig {
     /// les services déjà adoptés restent gérés et peuvent être relâchés (`BR-ADOPT-020`). Hearth ne change
     /// jamais ce réglage lui-même.
     pub adoption: bool,
+    /// La racine des sauvegardes (`[backups] root` de `agent.toml`, `HEARTH_BACKUPS_ROOT`) ; `None` : le défaut
+    /// (`/var/lib/hearth-backups`, voisine du dossier de données hors Linux). Elle ne peut ni contenir ni être
+    /// dans un dossier de données (`BR-BACKUP-004` (b)).
+    pub backups_root: Option<PathBuf>,
 }
 
 impl Default for ServicesConfig {
     fn default() -> Self {
-        Self { adoption: true }
+        Self {
+            adoption: true,
+            backups_root: None,
+        }
+    }
+}
+
+impl ServicesConfig {
+    /// La racine des sauvegardes effective.
+    pub fn backups_root(&self, data_dir: &Path) -> PathBuf {
+        match &self.backups_root {
+            Some(root) => root.clone(),
+            #[cfg(not(windows))]
+            None => {
+                let _ = data_dir;
+                PathBuf::from(DEFAULT_BACKUPS_ROOT)
+            }
+            #[cfg(windows)]
+            None => data_dir
+                .parent()
+                .map_or_else(|| data_dir.to_path_buf(), Path::to_path_buf)
+                .join("hearth-backups"),
+        }
     }
 }
 
@@ -114,6 +146,14 @@ struct FileConfig {
     managed: Option<bool>,
     engine: Option<FileEngine>,
     services: Option<FileServices>,
+    backups: Option<FileBackups>,
+}
+
+/// La table `[backups]` de `agent.toml` (HRT-97).
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileBackups {
+    root: Option<PathBuf>,
 }
 
 /// La table `[services]` de `agent.toml`.
@@ -158,7 +198,11 @@ pub fn load(
             .services
             .and_then(|services| services.adoption)
             .unwrap_or(true),
+        backups_root: file.backups.and_then(|backups| backups.root),
     };
+    if let Some(value) = env(ENV_BACKUPS_ROOT) {
+        services.backups_root = Some(PathBuf::from(value));
+    }
     if let Some(value) = env(ENV_SERVICES_ADOPTION) {
         services.adoption = parse_bool(ENV_SERVICES_ADOPTION, &value)?;
     }
@@ -565,6 +609,40 @@ adoption = false
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn the_backups_root_comes_from_the_file_or_the_environment_never_from_hearth() {
+        let dir = crate::test_tmp::tempdir().expect("tempdir");
+        let cli = cli_with_empty_file(dir.path());
+        let data = (ENV_DATA_DIR, "/d");
+        // Sans réglage : le défaut (Linux : `/var/lib/hearth-backups`), voisin du dossier de données ailleurs.
+        let config = load(&cli, &env_of(&[data])).expect("config");
+        assert_eq!(config.services.backups_root, None);
+        #[cfg(not(windows))]
+        assert_eq!(
+            config.services.backups_root(&config.data_dir),
+            PathBuf::from(DEFAULT_BACKUPS_ROOT)
+        );
+        std::fs::write(
+            dir.path().join("agent.toml"),
+            "[backups]
+root = \"/srv/sauvegardes\"
+",
+        )
+        .expect("write");
+        let config = load(&cli, &env_of(&[data])).expect("config");
+        assert_eq!(
+            config.services.backups_root,
+            Some(PathBuf::from("/srv/sauvegardes"))
+        );
+        // L'environnement l'emporte sur le fichier.
+        let env = env_of(&[data, (ENV_BACKUPS_ROOT, "/mnt/autre")]);
+        let config = load(&cli, &env).expect("config");
+        assert_eq!(
+            config.services.backups_root(&config.data_dir),
+            PathBuf::from("/mnt/autre")
+        );
     }
 
     #[test]

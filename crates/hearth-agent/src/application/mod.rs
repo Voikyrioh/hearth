@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod attack_mode;
 pub mod audit;
+pub mod backups;
 pub mod catalog;
 pub mod closing_gates;
 pub mod delete;

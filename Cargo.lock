@@ -2116,6 +2116,7 @@ dependencies = [
  "sqlx",
  "subtle",
  "sysinfo",
+ "tar",
  "tempfile",
  "thiserror 2.0.21",
  "time",

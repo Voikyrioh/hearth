@@ -1170,6 +1170,10 @@ pub(crate) fn reason_of(cause: Cause) -> Reason {
         Cause::PlatformMismatch => Reason::PlatformMismatch,
         Cause::DiskFull => Reason::DiskFull,
         Cause::NameTaken => Reason::NameTaken,
+        Cause::NoSpace => Reason::NoSpace,
+        Cause::DiskAlmostFull => Reason::DiskAlmostFull,
+        Cause::BackupCorrupt => Reason::BackupCorrupt,
+        Cause::NotRestarted => Reason::NotRestarted,
         Cause::NotExecuted
         | Cause::RunsWithPrevious
         | Cause::RunsWithNew

@@ -447,6 +447,7 @@ impl TestAgent {
                     safe_fs: None,
                     host_paths: None,
                     catalog: hearth_agent::app::CatalogParts::production(),
+                    backups: hearth_agent::app::BackupParts::production(),
                 },
             )
             .await

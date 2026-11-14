@@ -6,6 +6,7 @@
 pub mod accounts;
 pub mod audit;
 pub mod audit_csv;
+pub mod backups;
 pub mod catalog;
 pub mod deploy;
 pub mod devices;

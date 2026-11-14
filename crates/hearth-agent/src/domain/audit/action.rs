@@ -95,6 +95,8 @@ pub enum AuditAction {
     ServiceBackupRestore,
     /// Une sauvegarde est supprimée (HRT-97).
     ServiceBackupDelete,
+    /// Les éléments ignorés par les sauvegardes d'un service changent (HRT-97).
+    ServiceBackupSettings,
     /// Un monde est repris d'ailleurs (genre `world_import`).
     ServiceWorldImport,
     /// Les réglages d'un serveur de jeu sont enregistrés (HRT-108).
@@ -119,7 +121,7 @@ pub enum AuditAction {
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 50] = [
+    pub const ALL: [AuditAction; 51] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -162,6 +164,7 @@ impl AuditAction {
         Self::ServiceBackupCreate,
         Self::ServiceBackupRestore,
         Self::ServiceBackupDelete,
+        Self::ServiceBackupSettings,
         Self::ServiceWorldImport,
         Self::ServiceGameSettings,
         Self::ServiceGamePasswordReveal,
@@ -217,6 +220,7 @@ impl AuditAction {
             Self::ServiceBackupCreate => action::SERVICE_BACKUP_CREATE,
             Self::ServiceBackupRestore => action::SERVICE_BACKUP_RESTORE,
             Self::ServiceBackupDelete => action::SERVICE_BACKUP_DELETE,
+            Self::ServiceBackupSettings => action::SERVICE_BACKUP_SETTINGS,
             Self::ServiceWorldImport => action::SERVICE_WORLD_IMPORT,
             Self::ServiceGameSettings => action::SERVICE_GAME_SETTINGS,
             Self::ServiceGamePasswordReveal => action::SERVICE_GAME_PASSWORD_REVEAL,
@@ -273,6 +277,7 @@ impl AuditAction {
             Self::ServiceBackupCreate => "Sauvegarde d'un service",
             Self::ServiceBackupRestore => "Restauration d'un service",
             Self::ServiceBackupDelete => "Suppression d'une sauvegarde",
+            Self::ServiceBackupSettings => "Éléments ignorés par les sauvegardes",
             Self::ServiceWorldImport => "Reprise d'un monde",
             Self::ServiceGameSettings => "Réglages d'un jeu",
             Self::ServiceGamePasswordReveal => "Mot de passe de serveur de jeu révélé",

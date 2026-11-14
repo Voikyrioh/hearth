@@ -191,6 +191,14 @@ mod tests {
             ),
             (AdminAct::BackupDelete { target: "01BK" }, false),
             (
+                AdminAct::BackupSettings {
+                    target: "c_a".into(),
+                    count: 0,
+                    digest: [0; 32],
+                },
+                true,
+            ),
+            (
                 AdminAct::OperationDecide {
                     target: "01OP",
                     choice: hearth_proto::api::service_ops::OperationChoice::Keep,

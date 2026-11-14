@@ -67,12 +67,26 @@ pub fn parts_supervised(
         delete: fast_delete(),
         safe_fs: Some(Arc::new(super::fake_safe_fs::FakeSafeFs::new())),
         host_paths: None,
+        backups: hearth_agent::app::BackupParts {
+            timings: fast_backup(),
+            files: Some(Arc::new(super::fake_backup_files::FakeBackupFiles::new())),
+        },
         catalog: hearth_agent::app::CatalogParts {
             include_preview: false,
             random: Arc::new(super::fake_random::FakeRandom::counting_from(0)),
             service: None,
             phases: None,
         },
+    }
+}
+
+/// Une sauvegarde aux délais courts (HRT-97) : le signe de vie de la copie toutes les 20 ms.
+pub fn fast_backup() -> hearth_agent::application::backups::BackupTimings {
+    hearth_agent::application::backups::BackupTimings {
+        progress_every: Duration::from_millis(20),
+        // Un « gros fichier » de test : 7 octets (le monde du test en pèse 8).
+        big_file_bytes: 7,
+        ..hearth_agent::application::backups::BackupTimings::production()
     }
 }
 
