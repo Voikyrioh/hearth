@@ -779,6 +779,9 @@ impl ServiceUpdates {
             + timings.pull_deadline
             + wait_budget_with(job.grace_s, timings.stop_margin, timings.stop_floor)
             + timings.watch
+            + timings.step_wait * 4
+            // Le retour en arrière a son propre budget (retirer le nouveau, rendre son nom à l'ancien, le relancer) :
+            // le délai ne le coupe jamais à mi-chemin, ce qui laisserait une opération close sans décision possible.
             + timings.step_wait * 4;
         let finish =
             match tokio::time::timeout_at(deadline, self.run(&job, &candidate, deadline)).await {
@@ -958,7 +961,18 @@ impl ServiceUpdates {
             .await
         {
             tracing::error!(%error, "conteneur créé non consigné : retiré");
-            return self.roll_back(job, Cause::StepFailed, Some(new_id)).await;
+            // Pas consigné : `restore` ne le verrait pas. Il garderait le nom du service et l'ancien ne pourrait plus
+            // le reprendre.
+            let lines = self.tail_of(&new_id).await;
+            self.tails.keep(&job.id, lines);
+            let removed =
+                tokio::time::timeout(self.context.timings.step_wait, self.engine.remove(&new_id))
+                    .await
+                    .unwrap_or(Err(EngineError::Timeout));
+            if removed.is_err() {
+                tracing::error!(operation = %job.id, "conteneur créé non consigné : non retiré");
+            }
+            return self.roll_back(job, Cause::StepFailed, None).await;
         }
         self.registry.register_hearth_container(&job.key, &new_id);
         self.registry.reread(&new_id).await;
@@ -1422,19 +1436,32 @@ impl ServiceUpdates {
     /// retire le nouveau conteneur, abandonne la révision candidate, rend son nom à l'ancien, le relance s'il
     /// tournait. Sert à l'échec d'une modification ET à la décision « Revenir à l'état d'avant ».
     async fn restore_previous(&self, job: &Job) -> Result<(), ()> {
-        self.restore(&job.key, &job.name, job.shape.was_running)
+        self.restore(&job.key, &job.name, job.shape, Some(job.old_rev))
             .await
     }
 
-    async fn restore(&self, key: &ServiceKey, name: &str, was_running: bool) -> Result<(), ()> {
+    async fn restore(
+        &self,
+        key: &ServiceKey,
+        name: &str,
+        shape: Shape,
+        known_base: Option<u32>,
+    ) -> Result<(), ()> {
+        let was_running = shape.was_running;
         let consigned = self.containers.of(key).await.map_err(|_| ())?;
         let prefix = format!("{name}.hearth-prev-");
         let mut parked: Option<(String, RunState)> = None;
+        // La révision de départ : celle du nom mis de côté quand il existe (il la porte), sinon celle que l'appelant
+        // connaît.
+        let mut base = known_base;
         let mut named: Vec<(String, RunState)> = Vec::new();
         for id in consigned {
             match self.engine.inspect(&id).await {
                 Ok(Some(observation)) => {
-                    if observation.name.starts_with(&prefix) {
+                    if let Some(rev) = observation.name.strip_prefix(&prefix) {
+                        if let Ok(rev) = rev.parse::<u32>() {
+                            base = Some(rev);
+                        }
                         parked = Some((id, observation.run_state));
                     } else if observation.name == name {
                         named.push((id, observation.run_state));
@@ -1473,25 +1500,30 @@ impl ServiceUpdates {
                 }
                 (old, state)
             }
+            // Pas de conteneur d'avant (« Recréer le service » d'un conteneur disparu) : ce qui porte le nom est le
+            // nouveau, il part ; il n'y a rien à remettre.
+            None if !shape.had_container => {
+                for (new, _) in &named {
+                    let removed = tokio::time::timeout(wait, self.engine.remove(new))
+                        .await
+                        .unwrap_or(Err(EngineError::Timeout));
+                    if removed.is_err() {
+                        return Err(());
+                    }
+                    if let Err(error) = self.containers.forget_container(new).await {
+                        tracing::warn!(%error, "conteneur retiré non oublié");
+                    }
+                    self.registry.forget_hearth_container(new);
+                }
+                return self.abandon_candidate(key, base).await;
+            }
             // L'ancien n'a jamais été mis de côté : c'est celui qui porte le nom.
             None => match named.into_iter().next() {
                 Some(old) => old,
                 None => return Err(()),
             },
         };
-        // La révision candidate est abandonnée : l'ancienne redevient la courante.
-        match self.specs.revisions(key).await {
-            Ok(revisions) if revisions.len() >= 2 => {
-                if let Some(candidate) = revisions.iter().max().copied()
-                    && let Err(error) = self.specs.abandon(key, candidate).await
-                {
-                    tracing::error!(%error, "révision candidate non abandonnée");
-                    return Err(());
-                }
-            }
-            Ok(_) => {}
-            Err(_) => return Err(()),
-        }
+        self.abandon_candidate(key, base).await?;
         let (old_id, state) = old;
         if was_running && state != RunState::Running {
             let started = tokio::time::timeout(wait, self.engine.start(&old_id))
@@ -1504,6 +1536,27 @@ impl ServiceUpdates {
             self.forget_stop(key).await;
         }
         self.registry.reread(&old_id).await;
+        Ok(())
+    }
+
+    /// La révision candidate est abandonnée : la révision de départ redevient la courante. Seule une révision
+    /// plus récente que celle de départ est candidate (jamais la vraie révision courante d'un service dont la
+    /// candidate n'a pas été écrite). Sans révision de départ connue : la plus haute, s'il y en a deux.
+    async fn abandon_candidate(&self, key: &ServiceKey, base: Option<u32>) -> Result<(), ()> {
+        let Ok(revisions) = self.specs.revisions(key).await else {
+            return Err(());
+        };
+        let candidate = match base {
+            Some(base) => revisions.iter().copied().filter(|rev| *rev > base).max(),
+            None if revisions.len() >= 2 => revisions.iter().copied().max(),
+            None => None,
+        };
+        if let Some(candidate) = candidate
+            && let Err(error) = self.specs.abandon(key, candidate).await
+        {
+            tracing::error!(%error, "révision candidate non abandonnée");
+            return Err(());
+        }
         Ok(())
     }
 
@@ -1521,7 +1574,16 @@ impl ServiceUpdates {
             .iter()
             .any(|planned| planned.name.as_str() == step::STOP_OLD);
         let name = record.service_name.clone();
-        let outcome = self.restore(&record.service, &name, was_running).await;
+        let had_container = record
+            .plan
+            .steps()
+            .iter()
+            .any(|planned| planned.name.as_str() == step::RENAME_OLD);
+        let shape = Shape {
+            had_container,
+            was_running,
+        };
+        let outcome = self.restore(&record.service, &name, shape, None).await;
         let (status, cause) = match outcome {
             Ok(()) => (OpStatus::RolledBack, Some(Cause::DecidedByAccount)),
             Err(()) => (OpStatus::Interrupted, Some(Cause::StepFailed)),
@@ -1533,6 +1595,26 @@ impl ServiceUpdates {
     /// partent. Rien n'est démarré.
     async fn keep_interrupted(&self, snapshot: &OpSnapshot) {
         let record = &snapshot.record;
+        // L'opération est déjà `succeeded` : son verrou est rendu. Le geste reprend le verrou exclusif du service,
+        // sinon il supprimerait l'ancien conteneur (et la révision de retour arrière) d'une modification acceptée
+        // entre-temps. Service tenu : rien n'est retiré, l'ancien reste de côté.
+        let holder = format!("keep-{}", record.id);
+        let held = self
+            .ops
+            .locks()
+            .with(|table| table.acquire_exclusive(record.service.as_str(), &holder, OpKind::Update))
+            .is_ok();
+        if !held {
+            tracing::warn!(operation = %record.id, "service tenu par une autre action : garder n'a rien retiré");
+            return;
+        }
+        self.keep_locked(record).await;
+        self.ops.locks().with(|table| {
+            table.release_exclusive(record.service.as_str(), &holder);
+        });
+    }
+
+    async fn keep_locked(&self, record: &crate::application::ports::OpRecord) {
         let prefix = format!("{}.hearth-prev-", record.service_name);
         let Ok(consigned) = self.containers.of(&record.service).await else {
             return;

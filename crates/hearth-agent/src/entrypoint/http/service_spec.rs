@@ -25,9 +25,10 @@ use axum::response::{IntoResponse, Response};
 use hearth_proto::api::service_update::{OperationTail, ServiceSpecView, SpecChange};
 use hearth_proto::error::{ErrorBody, ErrorCode};
 
-use super::auth::Requester;
+use super::auth::{Caller, Requester};
 use super::deployments::deploy_error;
 use super::error::TargetMark;
+use super::service_ops::{access_error, checked_id, viewer_of};
 use super::services::operation_key;
 use super::{ApiError, AppState};
 use crate::application::service_update::{UpdateError, UpdateFailed};
@@ -195,10 +196,18 @@ pub async fn update(
 /// `GET /api/v1/operations/services/{id}/tail`.
 pub async fn tail(
     State(state): State<AppState>,
+    Caller(session): Caller,
     Path(id): Path<String>,
 ) -> Result<Json<OperationTail>, ApiError> {
-    let valid = !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric());
-    let found = valid.then(|| state.service_updates.tail(&id)).flatten();
+    let id = checked_id(&id)?;
+    // Les lignes d'un journal sont sensibles : la même visibilité que `GET /operations/services/{id}` (une
+    // opération d'un service que le compte ne voit pas est une opération inconnue).
+    state
+        .service_ops
+        .read(id, viewer_of(&session))
+        .await
+        .map_err(access_error)?;
+    let found = state.service_updates.tail(id);
     found.map(Json).ok_or_else(|| {
         ApiError::new(
             ErrorCode::OperationNotFound,

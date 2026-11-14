@@ -878,3 +878,155 @@ async fn one_action_at_a_time_per_service() {
         "{operation:?}"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Un redémarrage de l'agent au milieu d'une modification : « Revenir » et « Garder » (BR-EDIT-031)
+// ---------------------------------------------------------------------------------------------
+
+/// Une modification coupée par le redémarrage de l'agent, pendant la surveillance du nouveau (10 secondes), l'ancien étant de côté : un second
+/// agent démarre sur la même base et le même moteur, l'opération y est « à vérifier ».
+async fn interrupted_by_a_restart(b: &Bench, name: &str, port: u16) -> (Deployed, Agent, String) {
+    let service = b.deploy(name, port).await;
+    let operation_id = b
+        .accepted(
+            &service.key,
+            json!({ "base_rev": 1, "env": [{ "name": "AUTRE", "op": "set", "value": NEW_VALUE }] }),
+        )
+        .await;
+    let started = Instant::now();
+    loop {
+        let operation = b.operation(&operation_id).await;
+        if operation.step.as_deref() == Some("watch") {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(15), "{operation:?}");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let mut parts = parts_supervised(
+        b.engine.clone(),
+        Arc::new(FakeSupervisor::new()),
+        fast_timings(),
+    );
+    parts.host_ports = Arc::new(FakeHostPorts::new());
+    parts.free_space = Arc::new(FakeFreeSpace::new());
+    parts.safe_fs = Some(Arc::new(FakeSafeFs::new()));
+    let second = https::start_engined(&b.env, parts).await;
+    let reply = second
+        .request("GET", &format!("/operations/services/{operation_id}"))
+        .token(&b.dan.token)
+        .send()
+        .await;
+    assert_eq!(reply.status, 200, "{}", reply.text);
+    let operation: OperationView = serde_json::from_value(reply.body).expect("OperationView");
+    assert_eq!(
+        operation.status,
+        OperationStatus::NeedsAttention,
+        "{operation:?}"
+    );
+    (service, second, operation_id)
+}
+
+async fn decide(b: &Bench, second: &Agent, operation_id: &str, choice: &str) {
+    let reply = second
+        .confirmed(
+            &b.ada,
+            "POST",
+            &format!("/operations/services/{operation_id}/decision"),
+            json!({ "choice": choice }),
+        )
+        .await
+        .send()
+        .await;
+    assert_eq!(reply.status, 200, "{}", reply.text);
+}
+
+#[tokio::test]
+async fn reverting_an_interrupted_update_puts_the_old_service_back_under_its_name() {
+    let b = bench().await;
+    let (service, second, operation_id) = interrupted_by_a_restart(&b, "web", 18_100).await;
+    decide(&b, &second, &operation_id, "revert").await;
+    let started = Instant::now();
+    loop {
+        let reply = second
+            .request("GET", &format!("/operations/services/{operation_id}"))
+            .token(&b.dan.token)
+            .send()
+            .await;
+        let operation: OperationView = serde_json::from_value(reply.body).expect("OperationView");
+        if operation.status == OperationStatus::RolledBack {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(15), "{operation:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(b.engine.container_ids().contains(&service.container));
+    assert_eq!(b.engine_state(&service.container), RunState::Running);
+    assert!(b.engine.removed_keeping_volumes().is_empty());
+    assert_eq!(b.revisions(&service.key).await, 1, "candidate abandoned");
+    second.shutdown().await;
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn keeping_an_interrupted_update_removes_the_parked_container_only() {
+    let b = bench().await;
+    let (service, second, operation_id) = interrupted_by_a_restart(&b, "web", 18_101).await;
+    decide(&b, &second, &operation_id, "keep").await;
+    let started = Instant::now();
+    while !b
+        .engine
+        .removed_keeping_volumes()
+        .contains(&service.container)
+    {
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "the parked container is never removed"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let started = Instant::now();
+    while b.revisions(&service.key).await != 1 {
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "revisions kept"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    second.shutdown().await;
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_vanished_container_whose_recreation_fails_leaves_the_description_as_it_was() {
+    let b = bench().await;
+    let service = b.deploy("web", 18_102).await;
+    b.engine.remove(&service.container);
+    b.resync().await;
+    b.engine.fail_create(Some(EngineError::PortInUse));
+    let operation_id = b
+        .accepted(
+            &service.key,
+            json!({ "base_rev": 1, "seen_drift": "container_missing", "tag": "1.27" }),
+        )
+        .await;
+    let operation = b.finished(&operation_id).await;
+    assert_eq!(
+        operation.status,
+        OperationStatus::RolledBack,
+        "{operation:?}"
+    );
+    assert_eq!(b.spec(&service.key).await.rev, 1);
+    assert_eq!(b.revisions(&service.key).await, 1);
+}
+
+#[tokio::test]
+async fn the_tail_of_an_operation_is_refused_to_an_account_that_does_not_see_it() {
+    let b = bench().await;
+    let reply = b
+        .agent
+        .request("GET", "/operations/services/inconnue/tail")
+        .token(&b.dan.token)
+        .send()
+        .await;
+    assert_eq!(reply.status, 404, "{}", reply.text);
+}

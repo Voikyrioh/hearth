@@ -29,7 +29,7 @@ use crate::entrypoint::service_ops_wire;
 /// identifiant, et la réponse est celle d'une opération inconnue.
 const ID_MAX_LEN: usize = 64;
 
-fn viewer_of(session: &CurrentSession) -> Viewer {
+pub(super) fn viewer_of(session: &CurrentSession) -> Viewer {
     Viewer {
         may_manage_services: session.account.may_manage_services(),
     }
@@ -42,7 +42,7 @@ fn unknown() -> ApiError {
     )
 }
 
-fn checked_id(id: &str) -> Result<&str, ApiError> {
+pub(super) fn checked_id(id: &str) -> Result<&str, ApiError> {
     let valid =
         !id.is_empty() && id.len() <= ID_MAX_LEN && id.bytes().all(|b| b.is_ascii_alphanumeric());
     if valid { Ok(id) } else { Err(unknown()) }
@@ -65,7 +65,7 @@ fn decision_refused(reason: &'static str) -> ApiError {
     ))
 }
 
-fn access_error(error: AccessError) -> ApiError {
+pub(super) fn access_error(error: AccessError) -> ApiError {
     match error {
         AccessError::NotFound => unknown(),
         AccessError::TooLate => ApiError::new(
