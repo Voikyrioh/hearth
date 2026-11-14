@@ -619,7 +619,12 @@ async fn a_name_taken_by_an_unmanaged_container_names_it_and_never_what_it_holds
         assert!(!refused.text.contains(secret), "{}", refused.text);
     }
     // Le journal d'activité garde le refus, jamais le conteneur ni ce qu'il porte.
-    let journal = format!("{:?}", b.journal().await).to_lowercase();
+    let entries = b.journal().await;
+    assert!(
+        entries.iter().any(|(outcome, ..)| outcome != "ok"),
+        "le refus doit être journalisé : {entries:?}"
+    );
+    let journal = format!("{entries:?}").to_lowercase();
     for kept_out in ["sentinel_env_name_91", "sentinel-cmd-62", "busybox"] {
         assert!(!journal.contains(kept_out), "{kept_out} dans {journal}");
     }

@@ -67,7 +67,7 @@ export interface ReceivedDeploy {
   request: DeployRequest;
 }
 
-/** Ce que le conflit dit d'un conteneur hors Hearth : son nom, à défaut son image (comme `conflict_label` de l'agent). */
+/** Ce que le conflit dit d'un conteneur hors Hearth : son nom, à défaut son image. Version simplifiée de `conflict_label` de l'agent (ni borne à 64, ni identifiant court de repli) : le simulateur n'a que des données d'exemple. */
 function unmanagedLabel(name: string, image: string | null, tag: string | null): string | null {
   if (name.trim() !== "") return name;
   if (!image) return null;

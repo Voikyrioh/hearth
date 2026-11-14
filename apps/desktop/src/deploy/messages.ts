@@ -175,11 +175,6 @@ export function occupantText(status: PortCheck["status"], holder: string | null)
   return t("deploy.occupantUnknown");
 }
 
-/**
- * Ce qui empêche de lancer, d'après un constat du serveur : un nom pris ou en cours d'effacement, un port tenu. UNE
- * seule règle (BR-DEPLOY-008) : le pied du formulaire, la revérification au clic et le récapitulatif la partagent.
- * `null` : rien ne bloque (un port réservé par un service arrêté se coche dans le récapitulatif).
- */
 /** « Ce nom est déjà pris », avec le conteneur créé hors de Hearth qui le porte quand l'agent le dit (BR-ADOPT-022). */
 export function nameTakenText(holder: string | null): string {
   return holder === null
@@ -187,6 +182,11 @@ export function nameTakenText(holder: string | null): string {
     : t("deploy.nameTakenNamed", { name: safeText(holder) });
 }
 
+/**
+ * Ce qui empêche de lancer, d'après un constat du serveur : un nom pris ou en cours d'effacement, un port tenu. UNE
+ * seule règle (BR-DEPLOY-008) : le pied du formulaire, la revérification au clic et le récapitulatif la partagent.
+ * `null` : rien ne bloque (un port réservé par un service arrêté se coche dans le récapitulatif).
+ */
 export function checkBlocker(check: DeployCheck): { text: string; field: DeployField } | null {
   if (check.name === "taken") return { text: nameTakenText(check.nameHolder), field: "name" };
   if (check.name === "being_deleted") {
