@@ -378,7 +378,16 @@ export function stepsOf(
   operation: ServiceOperation | null,
   plan: { stop: boolean; erase: boolean },
 ): ProgressStep[] {
-  const stages = stagesOf(plan);
+  // Le plan vient de l'aperçu, qui peut être périmé (le service a démarré, ou s'est arrêté, entre la lecture et la
+  // confirmation) : les étapes que l'agent a réellement ouvertes l'emportent (revue de Stephen, round 1).
+  const opened = new Set<DeleteStage | undefined>([
+    ...(operation?.steps ?? []).map((line) => STAGE_OF[line.step]),
+    operation?.step ? STAGE_OF[operation.step] : undefined,
+  ]);
+  const stages = stagesOf({
+    stop: plan.stop || opened.has("stop"),
+    erase: plan.erase || opened.has("erase"),
+  });
   const current = operation?.step ? STAGE_OF[operation.step] : undefined;
   const index = Math.max(0, current ? stages.indexOf(current) : 0);
   return stages.map((stage, position): ProgressStep => {

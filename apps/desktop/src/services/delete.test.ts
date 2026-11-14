@@ -278,6 +278,20 @@ describe("les étapes et l'issue (BR-DEL-013 à 016)", () => {
     expect(states("erase")).toEqual(["done", "done", "now"]);
   });
 
+  it("les étapes que l'agent a ouvertes l'emportent sur un plan périmé (le service a démarré entre-temps)", () => {
+    // L'aperçu disait « arrêté » (pas d'arrêt au plan) ; l'agent a pourtant arrêté le service.
+    const stale = stepsOf(op({ step: "stop", steps: [{ step: "stop", state: "intent" }] }), {
+      stop: false,
+      erase: false,
+    });
+    expect(stale.map((step) => [step.key, step.state])).toEqual([
+      ["stop", "now"],
+      ["remove", "later"],
+    ]);
+    const erasing = stepsOf(op({ step: "erase" }), { stop: false, erase: false });
+    expect(erasing.map((step) => step.key)).toEqual(["remove", "erase"]);
+  });
+
   it("l'effacement dit les éléments effacés", () => {
     const erase = stepsOf(op({ step: "erase", itemsDone: 1500 }), {
       stop: false,

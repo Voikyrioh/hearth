@@ -36,8 +36,8 @@ import {
 // l'image reste), montre les dossiers de données gérés par Hearth avec leur taille et leur sort, puis propose deux
 // cases DÉCOCHÉES : effacer les données, effacer les sauvegardes. Cocher une case demande de retaper le nom du service,
 // casse comprise ; « Supprimer le service » reste plein rouge dans tous les cas. Les dossiers du serveur ne sont jamais
-// effacés. La mesure des dossiers dure jusqu'à 10 secondes : la confirmation reste possible pendant ce temps, la fenêtre
-// attend la liste avant de proposer les cases (rien ne s'efface sans que la liste ait été lue). Si le service change sous
+// effacés. La mesure des dossiers dure jusqu'à 10 secondes : la confirmation reste impossible tant que la liste n'est pas
+// lue (rien ne s'efface sans que la liste ait été lue ; la mesure interrompue, elle, laisse confirmer). Si le service change sous
 // la fenêtre (BR-LIFE-022) elle le dit et la confirmation devient inactive ; « Annuler » reste actif et ne laisse aucune
 // trace. Le moteur pas prêt ou le service disparu désactive aussi la confirmation (BR-DEL-018, 022).
 const props = defineProps<{
@@ -91,10 +91,6 @@ const canSubmit = computed(() => ready.value !== null && stale.value === null &&
 function send(adminPassword: string | null): Promise<ActReport> {
   return props.perform(requestOf(boxes.value, typed.value), adminPassword);
 }
-
-function refusal(refused: { kind: string }): string {
-  return refusalText(refused);
-}
 </script>
 
 <template>
@@ -108,7 +104,7 @@ function refusal(refused: { kind: string }): string {
     :can-submit="canSubmit"
     :blocked-reason="nameWrong ? t('serviceDelete.nameReason') : undefined"
     :perform="send"
-    :refusal-text="refusal"
+    :refusal-text="refusalText"
     destructive
     wide
     @close="emit('close')"

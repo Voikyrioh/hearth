@@ -1,6 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { SimulatedLinkBridge } from "@/link";
+import { LinkCommandError, type SimulatedLinkBridge } from "@/link";
 import Services from "@/pages/Services.vue";
 import { useServersStore } from "@/stores/servers";
 import { useServiceOpsStore } from "@/stores/serviceOps";
@@ -714,6 +714,32 @@ describe("la revue UX de Nora du 14/11", () => {
     expect(document.querySelector("[data-delete-not-deleted]")?.textContent).toContain(
       "Vous pouvez réessayer depuis la fiche du service.",
     );
+    wrapper.unmount();
+  });
+});
+
+describe("le droit retiré (BR-DEL-027)", () => {
+  it("retiré avant la confirmation : rien n'est supprimé, la fenêtre se ferme et le dit", async () => {
+    const { wrapper, bridge } = await open();
+    await openDialog(wrapper);
+    vi.spyOn(bridge, "deleteService").mockRejectedValue(
+      new LinkCommandError({ kind: "missing_services_right" }),
+    );
+    await confirmDialog("Supprimer le service", OWN);
+    expect(toasts()).toContain("Vous n'avez plus le droit de gérer les services de ce serveur.");
+    expect(document.querySelector("dialog[open]")).toBeNull();
+    expect(bridge.deletes.received).toEqual([]);
+    wrapper.unmount();
+  });
+
+  it("retiré avant la lecture des dossiers : la fenêtre se ferme et le dit", async () => {
+    const { wrapper, bridge } = await open();
+    vi.spyOn(bridge, "readDeletePreview").mockRejectedValue(
+      new LinkCommandError({ kind: "missing_services_right" }),
+    );
+    await openDialog(wrapper);
+    expect(toasts()).toContain("Vous n'avez plus le droit de gérer les services de ce serveur.");
+    expect(document.querySelector("dialog[open]")).toBeNull();
     wrapper.unmount();
   });
 });
