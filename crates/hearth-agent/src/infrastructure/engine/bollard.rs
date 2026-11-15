@@ -784,10 +784,6 @@ fn layer_event(info: &CreateImageInfo) -> Option<LayerEvent> {
     .then_some(LayerEvent::Done { layer })
 }
 
-/// Le corps de création d'un conteneur, depuis le plan fermé : rien d'autre que ce que [`ContainerPlan`] porte.
-/// Les dossiers montés sont des montages de type `bind` structurés (jamais une chaîne `source:cible` à
-/// découper), les ports n'ont pas d'adresse (tout le réseau, BR-DEPLOY-035), le redémarrage est
-/// `unless-stopped`, les limites sont posées, le swap est égal à la mémoire (la limite est réelle).
 // FIX:01M7G757NC6ZK02PVR6KY2C7N2 — une image épinglée `dépôt:version@sha256:…` est passée entière au moteur (docs/bugs/FIX-01M7G757NC6ZK02PVR6KY2C7N2.md)
 /// Ce que `POST /images/create` reçoit pour récupérer `image` : `(fromImage, tag)`. Une référence épinglée par
 /// empreinte (`dépôt:version@sha256:…`, toute fiche) est donnée ENTIÈRE et sans `tag` : la couper au dernier « : »
@@ -801,6 +797,10 @@ fn pull_target(image: &str) -> (String, Option<String>) {
     (repository, Some(tag))
 }
 
+/// Le corps de création d'un conteneur, depuis le plan fermé : rien d'autre que ce que [`ContainerPlan`] porte.
+/// Les dossiers montés sont des montages de type `bind` structurés (jamais une chaîne `source:cible` à
+/// découper), les ports n'ont pas d'adresse (tout le réseau, BR-DEPLOY-035), le redémarrage est
+/// `unless-stopped`, les limites sont posées, le swap est égal à la mémoire (la limite est réelle).
 fn create_body(plan: &ContainerPlan) -> ContainerCreateBody {
     let mut port_bindings: PortMap = HashMap::new();
     let mut exposed = Vec::new();

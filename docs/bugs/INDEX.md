@@ -120,6 +120,8 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | [FIX-01M47XJXQ0GHV77FN4J6R1NXPZ](./FIX-01M47XJXQ0GHV77FN4J6R1NXPZ.md) | Le filtre d'adresses du téléchargement se contournait avec HTTPS_PROXY | 2026-10-06 |
 | [FIX-01M47PHYR8MD87HAXY9PARQXAN](./FIX-01M47PHYR8MD87HAXY9PARQXAN.md) | La patience de la surveillance concluait « échec du superviseur » même quand l'échange des binaires avait eu lieu | 2026-10-06 |
 | [FIX-01M47N6Z485TWN2H770KQ5H80R](./FIX-01M47N6Z485TWN2H770KQ5H80R.md) | Une version posée à la main par-dessus une mise à jour laissée en cours était défaite au démarrage (ancien binaire et copie périmée de la base remis) | 2026-10-06 |
+| [FIX-01M7G6V7E6DY5PHJ6TQ848YJ7A](./FIX-01M7G6V7E6DY5PHJ6TQ848YJ7A.md) | Un pack de mods envoyé n'est jamais retrouvé par l'agent (dépôt cherché sous le nom du compte, rangé sous son identifiant) (HRT-124) | 2026-11-15 |
+| [FIX-01M7G757NC6ZK02PVR6KY2C7N2](./FIX-01M7G757NC6ZK02PVR6KY2C7N2.md) | Toute installation depuis une fiche refusée par le moteur : image épinglée `@sha256` mal découpée au téléchargement | 2026-11-15 |
 
 À créer lors de tout bugfix conformément à `skills/bugfix/SKILL.md` et `docs/code-rules.md`.
 
@@ -157,5 +159,3 @@ Code changé, commit hash, stratégie (patch, refactoring).
 ```
 
 Pointeur code : `// FIX:{ULID}` au-dessus de la ligne corrigée.
-| [FIX-01M7G6V7E6DY5PHJ6TQ848YJ7A](./FIX-01M7G6V7E6DY5PHJ6TQ848YJ7A.md) | Un pack de mods envoyé n'est jamais retrouvé par l'agent (dépôt cherché sous le nom du compte, rangé sous son identifiant) (HRT-124) | 2026-11-15 |
-| [FIX-01M7G757NC6ZK02PVR6KY2C7N2](./FIX-01M7G757NC6ZK02PVR6KY2C7N2.md) | Toute installation depuis une fiche refusée par le moteur : image épinglée `@sha256` mal découpée au téléchargement | 2026-11-15 |
