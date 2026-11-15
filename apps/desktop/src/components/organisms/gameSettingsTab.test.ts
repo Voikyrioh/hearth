@@ -71,7 +71,7 @@ describe("l'onglet", () => {
   it("n'existe que pour un service né d'une fiche, deuxième après « Détail »", async () => {
     const { wrapper } = await open();
     const tabs = wrapper.findAll("[role=tab]").map((tab) => tab.text());
-    expect(tabs).toEqual(["Détail", "Réglages", "Journaux"]);
+    expect(tabs).toEqual(["Détail", "Réglages", "Sauvegardes", "Journaux"]);
     wrapper.unmount();
   });
 
@@ -82,6 +82,7 @@ describe("l'onglet", () => {
     expect(wrapper.findAll("[role=tab]").map((tab) => tab.text())).toEqual([
       "Détail",
       "Réglages",
+      "Sauvegardes",
       "Journaux",
     ]);
     expect(wrapper.get("[data-settings-absent]").text()).toContain(

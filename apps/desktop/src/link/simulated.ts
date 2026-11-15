@@ -31,6 +31,19 @@ import type {
 } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
 import {
+  BACKUP_CREATE_ACT_KIND,
+  BACKUP_DELETE_ACT_KIND,
+  BACKUP_SETTINGS_ACT_KIND,
+  type BackupCreateOutcome,
+  type BackupDeleteOutcome,
+  type BackupPreviewOutcome,
+  type BackupRequest,
+  type BackupSettings,
+  type BackupSettingsOutcome,
+  type BackupsOutcome,
+  type BackupVerifyOutcome,
+} from "./serviceBackups";
+import {
   DELETE_ACT_KIND,
   type DeleteOutcome,
   type DeletePreviewOutcome,
@@ -55,6 +68,7 @@ import {
 } from "./simulated-accounts";
 import { SimulatedAgentUpdates } from "./simulated-agent-update";
 import { SimulatedAudit } from "./simulated-audit";
+import { SimulatedBackups } from "./simulated-backups";
 import { SimulatedCatalog } from "./simulated-catalog";
 import { SimulatedDeletes } from "./simulated-delete";
 import { SimulatedDeploys } from "./simulated-deploy";
@@ -245,6 +259,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly deploys: SimulatedDeploys;
   /** Supprimer un service (HRT-86) : l'agent simulé juge comme le vrai ; la suite est pilotée (`deletes.toStep`, `erasing`, `succeed`, `fail`). */
   readonly deletes: SimulatedDeletes;
+  /** Les sauvegardes d'un service (HRT-98) : l'agent simulé juge comme le vrai ; la suite est pilotée (`backups.seed`, `toStep`, `progress`, `succeed`, `fail`). */
+  readonly backups: SimulatedBackups;
   /** Le Catalogue et l'installation depuis une fiche (HRT-102) : l'agent simulé propose Terraria (`catalog.addRich()` en ajoute une plus riche). */
   readonly catalog: SimulatedCatalog;
   /** Les réglages des services de jeu (HRT-109). */
@@ -286,6 +302,7 @@ export class SimulatedLinkBridge implements LinkBridge {
       this.machine.hostOf(id),
     );
     this.deletes = new SimulatedDeletes(this.services, this.serviceOps, this.deploys);
+    this.backups = new SimulatedBackups(this.services, this.serviceOps);
     this.catalog = new SimulatedCatalog(this.deploys);
     this.gameSettings = new SimulatedGameSettings(this.catalog);
     // Un service installé depuis une fiche a ses réglages dès que l'agent l'accepte.
@@ -688,6 +705,10 @@ export class SimulatedLinkBridge implements LinkBridge {
     if (this.deletes.running(serverId).some((item) => item.operationId === opId)) {
       return this.deletes.cancel(serverId, opId);
     }
+    // Une sauvegarde s'annule jusqu'à sa fin : rien n'est conservé (BR-BACKUP-011).
+    if (this.backups.running(serverId).some((item) => item.operationId === opId)) {
+      return this.backups.cancel(serverId, opId);
+    }
     return this.deploys.cancel(serverId, opId);
   }
 
@@ -746,6 +767,158 @@ export class SimulatedLinkBridge implements LinkBridge {
       return { kind: "unknown", opId };
     }
     return accept();
+  }
+
+  // --- Les sauvegardes d'un service (HRT-98) ---
+
+  async readBackups(serverId: string, key: string): Promise<BackupsOutcome> {
+    this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("backups list");
+    // Ouverte à tout compte : ni droit ni confirmation n'est demandé pour lire.
+    if (this.backups.failList) throw this.fail({ kind: "unreachable" });
+    return this.backups.list(serverId, key);
+  }
+
+  async readBackupPreview(serverId: string, key: string): Promise<BackupPreviewOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("backup preview");
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    // L'estimation de la taille dure (BR-BACKUP-009) : un test peut ralentir la réponse.
+    if (this.backups.previewDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.backups.previewDelayMs));
+    }
+    if (this.backups.failPreview) throw this.fail({ kind: "unreachable" });
+    return this.backups.preview(serverId, key);
+  }
+
+  async createBackup(
+    serverId: string,
+    key: string,
+    request: BackupRequest,
+    adminPassword: string | null,
+  ): Promise<BackupCreateOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("backup create");
+    // Les contrôles dans l'ordre de l'agent : droit, confirmation (couverte par l'élévation), moteur, demande.
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    const confirmation = this.reauth.confirm(
+      serverId,
+      BACKUP_CREATE_ACT_KIND,
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    const engine = this.services.engineState(serverId);
+    if (engine !== "ready") {
+      return { kind: "refused", refusal: { kind: "engine_unavailable", engine } };
+    }
+    const by = server.username ?? "marie";
+    const accept = () => this.backups.accept(serverId, key, request, by);
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) accept();
+      this.publish(serverId, "reconnecting");
+      const opId = "sim-op-" + this.nextOperation++;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return accept();
+  }
+
+  async verifyBackup(serverId: string, backupId: string): Promise<BackupVerifyOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("backup verify");
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    if (this.backups.verifyDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.backups.verifyDelayMs));
+    }
+    return this.backups.verify(serverId, backupId);
+  }
+
+  async deleteBackup(
+    serverId: string,
+    backupId: string,
+    adminPassword: string | null,
+  ): Promise<BackupDeleteOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("backup delete");
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    // Jamais couvert par l'élévation : le mot de passe à chaque fois (BR-BACKUP-027).
+    const confirmation = this.reauth.confirm(
+      serverId,
+      BACKUP_DELETE_ACT_KIND,
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) this.backups.remove(serverId, backupId);
+      this.publish(serverId, "reconnecting");
+      const opId = "sim-op-" + this.nextOperation++;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return this.backups.remove(serverId, backupId);
+  }
+
+  async saveBackupSettings(
+    serverId: string,
+    key: string,
+    settings: BackupSettings,
+    adminPassword: string | null,
+  ): Promise<BackupSettingsOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("backup settings");
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    const confirmation = this.reauth.confirm(
+      serverId,
+      BACKUP_SETTINGS_ACT_KIND,
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) this.backups.saveSettings(serverId, key, settings);
+      this.publish(serverId, "reconnecting");
+      const opId = "sim-op-" + this.nextOperation++;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return this.backups.saveSettings(serverId, key, settings);
   }
 
   async readEngineCapacity(serverId: string): Promise<EngineCapacity | null> {

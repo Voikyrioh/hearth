@@ -88,6 +88,22 @@ import {
   toSecurityState,
 } from "./security";
 import {
+  type BackupCreateOutcome,
+  type BackupDeleteOutcome,
+  type BackupPreviewOutcome,
+  type BackupRequest,
+  type BackupSettings,
+  type BackupSettingsOutcome,
+  type BackupsOutcome,
+  type BackupVerifyOutcome,
+  toBackupCreateOutcome,
+  toBackupDeleteOutcome,
+  toBackupPreviewOutcome,
+  toBackupSettingsOutcome,
+  toBackupsOutcome,
+  toBackupVerifyOutcome,
+} from "./serviceBackups";
+import {
   type DeleteOutcome,
   type DeletePreviewOutcome,
   type DeleteRequest,
@@ -676,6 +692,51 @@ export class TauriLinkBridge implements LinkBridge {
   ): Promise<DeleteOutcome> {
     return toDeleteOutcome(
       unwrap(await commands.deleteService(serverId, key, request, adminPassword)),
+    );
+  }
+
+  // Les sauvegardes d'un service (HRT-98) : trois lectures et trois actes confirmés.
+  async readBackups(serverId: string, key: string): Promise<BackupsOutcome> {
+    return toBackupsOutcome(unwrap(await commands.listBackups(serverId, key)));
+  }
+
+  async readBackupPreview(serverId: string, key: string): Promise<BackupPreviewOutcome> {
+    return toBackupPreviewOutcome(unwrap(await commands.backupPreview(serverId, key)));
+  }
+
+  async createBackup(
+    serverId: string,
+    key: string,
+    request: BackupRequest,
+    adminPassword: string | null,
+  ): Promise<BackupCreateOutcome> {
+    return toBackupCreateOutcome(
+      unwrap(await commands.createBackup(serverId, key, request, adminPassword)),
+    );
+  }
+
+  async verifyBackup(serverId: string, backupId: string): Promise<BackupVerifyOutcome> {
+    return toBackupVerifyOutcome(unwrap(await commands.verifyBackup(serverId, backupId)));
+  }
+
+  async deleteBackup(
+    serverId: string,
+    backupId: string,
+    adminPassword: string | null,
+  ): Promise<BackupDeleteOutcome> {
+    return toBackupDeleteOutcome(
+      unwrap(await commands.deleteBackup(serverId, backupId, adminPassword)),
+    );
+  }
+
+  async saveBackupSettings(
+    serverId: string,
+    key: string,
+    settings: BackupSettings,
+    adminPassword: string | null,
+  ): Promise<BackupSettingsOutcome> {
+    return toBackupSettingsOutcome(
+      unwrap(await commands.saveBackupSettings(serverId, key, settings, adminPassword)),
     );
   }
 

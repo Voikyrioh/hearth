@@ -19,6 +19,7 @@ mod persist;
 mod reauth;
 mod rights;
 mod security;
+mod service_backups;
 mod service_delete;
 mod service_deploy;
 mod service_lifecycle;

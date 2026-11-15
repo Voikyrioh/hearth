@@ -2,12 +2,15 @@
 //! fidèle de `hearth_proto::api::service_ops`, rien de sensible), `book` (les opérations en cours de
 //! chaque serveur et les issues pas encore annoncées, rejouées à l'abonnement, ADR-0013 point 3),
 //! `service` (la décision, un acte confirmé), `lifecycle` (démarrer, arrêter, redémarrer : trois actes
-//! confirmés, HRT-65), `delete` et `delete_dto` (supprimer un service : la consultation de la fenêtre et l'acte,
+//! confirmés, HRT-65), `backups` et `backups_dto` (les sauvegardes d'un service : liste, estimation, créer, vérifier, supprimer, éléments
+//! ignorés, HRT-98), `delete` et `delete_dto` (supprimer un service : la consultation de la fenêtre et l'acte,
 //! HRT-86), `deploy` et `deploy_dto` (déployer une image, annuler son opération, consulter le formulaire et
 //! lire les bornes de la machine, HRT-69) et `commands` (lister, acquitter, décider, piloter). Les seules commandes
 //! qui créent ou annulent une opération sont celles de `deploy` (déployer, annuler) et de `lifecycle` (démarrer, arrêter, redémarrer) : chacune est un acte
 //! confirmé, jamais rejoué.
 
+pub mod backups;
+pub mod backups_dto;
 pub mod book;
 pub mod catalog;
 pub mod catalog_dto;

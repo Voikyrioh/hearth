@@ -10,6 +10,7 @@ import { formatDateTime } from "@/composables/format";
 import { useNow } from "@/composables/useNow";
 import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
+import { backupsDoor } from "@/services/backups";
 import { deleteDoor } from "@/services/delete";
 import {
   adoptedLine,
@@ -36,6 +37,7 @@ import LifecycleButtons from "../molecules/LifecycleButtons.vue";
 import OperationCard from "../molecules/OperationCard.vue";
 import OriginTags from "../molecules/OriginTags.vue";
 import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
+import BackupsTab from "./BackupsTab.vue";
 import EnvVarsSection from "./EnvVarsSection.vue";
 import GameCards from "./GameCards.vue";
 import GameSettingsTab from "./GameSettingsTab.vue";
@@ -57,12 +59,14 @@ const props = defineProps<{
   engineReady: boolean;
   /** Mettre le focus sur le titre à l'ouverture (ouvert par un geste, jamais par l'adresse). */
   focusTitle: boolean;
-  /** L'onglet affiché (dans l'adresse : `&onglet=journaux` ou `&onglet=reglages`). */
-  tab: "detail" | "settings" | "logs";
+  /** L'onglet affiché (dans l'adresse : `&onglet=journaux`, `&onglet=reglages` ou `&onglet=sauvegardes`). */
+  tab: "detail" | "settings" | "backups" | "logs";
   /** L'agent annonce `game-settings` (`ServiceRights.gameSettings`) : l'onglet « Réglages » peut exister. */
   gameSettings: boolean;
   /** L'agent annonce `service-delete` (`ServiceRights.serviceDelete`) : la carte « Suppression » peut exister (HRT-86). */
   serviceDelete: boolean;
+  /** L'agent annonce `service-backups` (`ServiceRights.serviceBackups`) : l'onglet « Sauvegardes » peut exister (HRT-98). */
+  serviceBackups: boolean;
   /** Dernier contact avec le serveur (pour « Vu il y a… » dans les journaux). */
   lastContactAt: number | null;
 }>();
@@ -70,7 +74,7 @@ const emit = defineEmits<{
   back: [];
   openOther: [key: string];
   retryRights: [];
-  "update:tab": [tab: "detail" | "settings" | "logs"];
+  "update:tab": [tab: "detail" | "settings" | "backups" | "logs"];
   decide: [operation: TrackedOperation];
   gesture: [service: ServiceInfo, gesture: Gesture];
   delete: [service: ServiceInfo];
@@ -142,11 +146,22 @@ const hasSettings = computed(
     service.value.state !== "deploying",
 );
 
+// L'onglet « Sauvegardes » (HRT-98, BR-BACKUP-028) : l'agent annonce `service-backups` ; un service créé par Hearth, ni adopté
+// (l'agent refuse encore ses sauvegardes, HRT-70) ni en cours de déploiement. La liste est lisible par tout compte : le droit
+// ne commande que les boutons d'écriture.
+const hasBackups = computed(
+  () =>
+    service.value !== null &&
+    backupsDoor({ service: service.value, gone: gone.value, supported: props.serviceBackups })
+      .kind === "shown",
+);
+
 const tabs = computed(() => [
   { id: "detail" as const, label: t("serviceDetail.tabDetail") },
   ...(hasSettings.value
     ? [{ id: "settings" as const, label: t("serviceDetail.tabSettings") }]
     : []),
+  ...(hasBackups.value ? [{ id: "backups" as const, label: t("serviceDetail.tabBackups") }] : []),
   { id: "logs" as const, label: t("serviceDetail.tabLogs") },
 ]);
 /** Qui lit les journaux de ce service (BR-SLOG-018) : tous pour un service créé par Hearth, le droit pour un adopté. */
@@ -192,7 +207,7 @@ const commandNote = computed(() => {
 
 <template>
   <section
-    :class="['detail', { 'detail--logs': tab === 'logs' }]"
+    :class="['detail', { 'detail--logs': tab === 'logs', 'detail--wide': tab === 'backups' }]"
     :aria-label="service ? t('serviceDetail.region', { name: clip(service.name, 80).text }) : t('serviceDetail.unnamed')"
     :aria-busy="opened.kind === 'waiting' ? 'true' : undefined"
     :data-gone="gone ? '' : undefined"
@@ -293,6 +308,26 @@ const commandNote = computed(() => {
         :connected="connected"
         :engine-ready="engineReady"
         @restart="emit('gesture', service, 'restart')"
+      />
+    </div>
+
+    <!-- L'onglet Sauvegardes (HRT-98) : la liste, l'espace, les éléments ignorés ; l'opération qui court est la carte du haut -->
+    <div
+      v-if="service && tab === 'backups' && hasBackups"
+      :id="`${idBase}-panel-backups`"
+      class="detail__backups"
+      role="tabpanel"
+      :aria-labelledby="`${idBase}-tab-backups`"
+      data-detail-backups
+    >
+      <BackupsTab
+        :server-id="serverId"
+        :service="service"
+        :gate="gate"
+        :lock="lock"
+        :rights-reason-id="reasonId"
+        :connected="connected"
+        :engine-ready="engineReady"
       />
     </div>
 
@@ -499,6 +534,11 @@ const commandNote = computed(() => {
   overflow-y: auto;
 }
 
+/* Les sauvegardes ont besoin de la largeur de la table, comme les réglages et les journaux. */
+.detail--wide {
+  max-width: none;
+}
+
 .detail[data-gone] .detail__body {
   filter: grayscale(var(--grayscale-stale));
   opacity: var(--opacity-stale);
@@ -587,6 +627,7 @@ const commandNote = computed(() => {
 }
 
 /* L'onglet Journaux prend toute la hauteur restante : une seule barre de défilement, celle des lignes. */
+.detail__backups,
 .detail__settings {
   display: flex;
   flex-direction: column;

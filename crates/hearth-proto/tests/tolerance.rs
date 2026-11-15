@@ -701,6 +701,10 @@ const LOCAL_ENUMS: &[(&str, &str)] = &[
         "domain/pending_ops.rs::Phase",
         "carnet des opérations du client (disque)",
     ),
+    (
+        "service_ops/backups_dto.rs::BackupModeDto",
+        "commande de la WebView (mode choisi pour la sauvegarde) ; lu de l'agent par `hearth_proto::BackupMode`",
+    ),
 ];
 
 #[test]

@@ -18,6 +18,7 @@ import { type OperationChoice, type OperationKind, toOperation } from "@/link/se
 import { endNotice, gapKindOf, gapText, LOG_STATE_KEYS, sourceTag } from "@/logs/view";
 import { ATTACK_STATE_KEYS } from "@/security/messages";
 import { CHOICE_KEYS, LABEL_KEYS, outcomeText, statusText } from "@/serviceOps/messages";
+import { flagLabels, integrityText, modeLabel } from "@/services/backups";
 import { fateText } from "@/services/delete";
 import { mountView, restartText } from "@/services/detail";
 import { STATE_KEYS } from "@/services/format";
@@ -105,6 +106,22 @@ const SAYS: Record<string, (value: string) => void> = {
     ),
   AgentUpdateReasonDto: (value) => {
     text(REASONS[value as keyof typeof REASONS]);
+  },
+  BackupModeDto: (value) => {
+    // Le mode d'une sauvegarde (HRT-98, BR-BACKUP-012) : un mode plus récent se lit « inconnu ».
+    key(modeLabel(value as never));
+    expect(modeLabel(value as never)).not.toMatch(/^backups\./);
+  },
+  BackupIntegrityDto: (value) => {
+    // L'état d'une sauvegarde (HRT-98, BR-BACKUP-013) : un état plus récent se lit « inconnu », jamais « vérifiée ».
+    const said = integrityText({ integrity: value as never, verifiedAt: null });
+    key(said);
+    expect(said).not.toMatch(/^backups\./);
+  },
+  BackupFlagDto: (value) => {
+    // Un repère inconnu est écarté, jamais affiché tel quel (HRT-98) ; les autres ont un libellé.
+    const labels = flagLabels({ flags: [value as never] });
+    expect(labels).toHaveLength(value === "unknown" ? 0 : 1);
   },
   FicheQuestionKindDto: (value) => {
     // Le genre d'une question se dit par `kindText` ; un genre inconnu devient « Valeur » et un champ de texte (HRT-102).
@@ -331,6 +348,8 @@ const NOT_SHOWN: Record<string, string> = {
     "choisit un bandeau (fichier illisible, fichier disparu) ; un état inconnu n'en montre aucun (HRT-109)",
   ValueStateDto:
     "un état inconnu se lit « non écrit » (le jeu prend son défaut) ; la valeur n'est jamais inventée (HRT-109)",
+  IgnoredWhyDto:
+    "seul « looks_like_backups » dit « ressemble à des sauvegardes » ; tout autre motif, inconnu compris, se lit « ajouté par un compte » (HRT-98)",
   NameStatusDto:
     "indicatif : seuls « taken » et « being_deleted » font un texte (DeployForm) ; tout autre constat, inconnu compris, ne dit rien et le serveur tranche au lancement (BR-DEPLOY-032)",
 };

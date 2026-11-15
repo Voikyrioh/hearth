@@ -28,6 +28,16 @@ import type {
   TrustLevel,
 } from "./reauth";
 import type { AttackModeOutcome, SecurityRead, SecurityState } from "./security";
+import type {
+  BackupCreateOutcome,
+  BackupDeleteOutcome,
+  BackupPreviewOutcome,
+  BackupRequest,
+  BackupSettings,
+  BackupSettingsOutcome,
+  BackupsOutcome,
+  BackupVerifyOutcome,
+} from "./serviceBackups";
 import type { DeleteOutcome, DeletePreviewOutcome, DeleteRequest } from "./serviceDelete";
 import type { LifecycleGesture, LifecycleOutcome } from "./serviceLifecycle";
 import type { DecisionOutcome, OperationChoice, ServiceOperationEvent } from "./serviceOps";
@@ -403,6 +413,42 @@ export interface LinkBridge {
     request: DeleteRequest,
     adminPassword: string | null,
   ): Promise<DeleteOutcome>;
+  // Sauvegarder les données d'un service (HRT-98, HRT-97, BR-BACKUP-*) : trois lectures (liste, estimation, vérification),
+  // trois actes confirmés (créer, supprimer, régler les éléments ignorés). Hors « Connecté » : échec `not_connected` ;
+  // les actes sans le droit : `missing_services_right`. Un chemin est celui du SERVICE ; la note n'est jamais signée.
+
+  /** La liste des sauvegardes d'un service créé par Hearth (`GET /services/{key}/backups`) : ouverte à tout compte. */
+  readBackups(serverId: string, key: string): Promise<BackupsOutcome>;
+  /**
+   * De quoi bâtir la fenêtre de création (`POST …/backups/preview`) : une CONSULTATION, ni suivi ni journal. L'agent estime
+   * la taille des données pendant 60 secondes au plus (BR-BACKUP-009) : la réponse peut être lente.
+   */
+  readBackupPreview(serverId: string, key: string): Promise<BackupPreviewOutcome>;
+  /**
+   * Crée une sauvegarde (`POST …/backups`) : un acte confirmé, couvert par l'élévation. L'agent répond « accepté » : l'issue
+   * arrive par le suivi des opérations. Jamais rejoué : un résultat inconnu se lit sur le flux.
+   */
+  createBackup(
+    serverId: string,
+    key: string,
+    request: BackupRequest,
+    adminPassword: string | null,
+  ): Promise<BackupCreateOutcome>;
+  /** Relit l'archive et la juge contre son manifeste (`POST /backups/{id}/verify`) : une consultation (BR-BACKUP-013). */
+  verifyBackup(serverId: string, backupId: string): Promise<BackupVerifyOutcome>;
+  /** Supprime une sauvegarde (`DELETE /backups/{id}`) : le mot de passe est redemandé à chaque fois (BR-BACKUP-027). */
+  deleteBackup(
+    serverId: string,
+    backupId: string,
+    adminPassword: string | null,
+  ): Promise<BackupDeleteOutcome>;
+  /** Enregistre les éléments ignorés d'un service (`PUT …/backup-settings`, BR-BACKUP-003) : couvert par l'élévation. */
+  saveBackupSettings(
+    serverId: string,
+    key: string,
+    settings: BackupSettings,
+    adminPassword: string | null,
+  ): Promise<BackupSettingsOutcome>;
   /**
    * Les bornes des curseurs de ressources et la part de la machine déjà engagée (`GET /engine/capacity`,
    * BR-DEPLOY-038) : une lecture. `null` : réponse incomplète ou illisible, rien ne se règle ni ne s'envoie sans

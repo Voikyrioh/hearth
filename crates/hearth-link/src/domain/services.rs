@@ -11,6 +11,7 @@
 //! Rien ici ne porte une valeur ou un nom de variable d'environnement ni une commande : les types du
 //! protocole n'en ont pas dans cette tranche.
 
+use hearth_proto::api::backups::CAPABILITY_SERVICE_BACKUPS;
 use hearth_proto::api::game_settings::CAPABILITY_GAME_SETTINGS;
 use hearth_proto::api::service_delete::CAPABILITY_SERVICE_DELETE;
 use hearth_proto::api::services::{
@@ -50,6 +51,14 @@ pub fn agent_serves_service_delete(capabilities: &[String]) -> bool {
     capabilities
         .iter()
         .any(|capability| capability == CAPABILITY_SERVICE_DELETE)
+}
+
+/// L'agent sait-il sauvegarder les données d'un service (capacité `service-backups`, HRT-97) ? Sinon le client ne
+/// montre pas l'onglet « Sauvegardes » : un agent d'avant refuserait les routes.
+pub fn agent_serves_service_backups(capabilities: &[String]) -> bool {
+    capabilities
+        .iter()
+        .any(|capability| capability == CAPABILITY_SERVICE_BACKUPS)
 }
 
 /// Les sujets à demander à un agent : les mesures, la fin de session et la mise à jour de l'agent
@@ -145,6 +154,13 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn the_backups_tab_is_offered_only_to_an_agent_that_announces_it() {
+        let announced = vec!["services".to_owned(), "service-backups".to_owned()];
+        assert!(agent_serves_service_backups(&announced));
+        assert!(!agent_serves_service_backups(&["services".to_owned()]));
+    }
 
     #[test]
     fn deleting_a_service_is_offered_only_to_an_agent_that_announces_it() {

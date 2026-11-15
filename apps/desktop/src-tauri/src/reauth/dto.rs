@@ -69,6 +69,12 @@ pub enum AdminActKindDto {
     GameSettingsSave,
     /// Supprimer un service (HRT-86, BR-DEL-012) : le mot de passe à chaque fois, jamais couvert par l'élévation.
     ServiceDelete,
+    /// Créer une sauvegarde (HRT-98) : couvert par l'élévation de cinq minutes.
+    BackupCreate,
+    /// Supprimer une sauvegarde (HRT-98) : le mot de passe à chaque fois, jamais couvert par l'élévation.
+    BackupDelete,
+    /// Régler les éléments ignorés des sauvegardes d'un service (HRT-98) : couvert par l'élévation de cinq minutes.
+    BackupSettings,
 }
 
 /// L'état de confiance du compte que l'agent annonce (HRT-194, BR-TRUST-052) : de lui dépend si piloter un

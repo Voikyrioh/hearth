@@ -196,6 +196,13 @@ export class SimulatedAccounts {
 
   /** La capacité `service-delete` de l'agent simulé (vraie par défaut ; `false` : un agent d'avant HRT-85). */
   private readonly withoutServiceDelete = new Set<string>();
+  private readonly withoutServiceBackups = new Set<string>();
+
+  /** La capacité `service-backups` de l'agent simulé (vraie par défaut ; `false` : un agent d'avant HRT-97). */
+  setServiceBackupsServed(serverId: string, served: boolean): void {
+    if (served) this.withoutServiceBackups.delete(serverId);
+    else this.withoutServiceBackups.add(serverId);
+  }
 
   setServiceDeleteServed(serverId: string, served: boolean): void {
     if (served) this.withoutServiceDelete.delete(serverId);
@@ -228,6 +235,7 @@ export class SimulatedAccounts {
       // `setGameSettingsServed(…, false)` retire la capacité SEULE.
       gameSettings: known && !this.withoutGameSettings.has(server.id),
       serviceDelete: known && !this.withoutServiceDelete.has(server.id),
+      serviceBackups: known && !this.withoutServiceBackups.has(server.id),
       account: me?.username ?? server.username.toLowerCase(),
     };
   }

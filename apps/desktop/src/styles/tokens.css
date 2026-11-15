@@ -218,6 +218,14 @@
   --log-chrome: 224px;
   --log-edge: 2px;
 
+  /* Sauvegardes d'un service (HRT-98) : colonnes de la table et largeurs de base des lignes. */
+  --backup-date-min: 176px;
+  --backup-note-min: 128px;
+  --backup-state-min: 176px;
+  --backup-progress-min: 128px;
+  --backup-detail-col: 224px;
+  --backup-path-basis: 224px;
+
   /* États */
   --opacity-disabled: 0.7;
   --opacity-stale: 0.62;

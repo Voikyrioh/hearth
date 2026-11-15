@@ -96,6 +96,19 @@ fn act_of(kind: AdminActKindDto, role: Option<RoleDto>) -> AdminAct<'static> {
             data: false,
             backups: false,
         },
+        // Sauvegardes : le genre seul décide (la table de l'élévation), ni la cible ni le corps ne comptent.
+        AdminActKindDto::BackupCreate => AdminAct::BackupCreate {
+            target: "".into(),
+            mode: "hot",
+            count: 0,
+            digest: [0; hearth_proto::admin_act::FINGERPRINT_LEN],
+        },
+        AdminActKindDto::BackupDelete => AdminAct::BackupDelete { target: "" },
+        AdminActKindDto::BackupSettings => AdminAct::BackupSettings {
+            target: "".into(),
+            count: 0,
+            digest: [0; hearth_proto::admin_act::FINGERPRINT_LEN],
+        },
         AdminActKindDto::ServiceStart => AdminAct::ServiceStart { target: "".into() },
         AdminActKindDto::ServiceStop => AdminAct::ServiceStop { target: "".into() },
         AdminActKindDto::ServiceRestart => AdminAct::ServiceRestart { target: "".into() },
@@ -197,6 +210,10 @@ mod tests {
                 // Supprimer : jamais couvert par l'élévation (BR-DEL-012).
                 (Kind::ServiceDelete, None, Yes),
                 (Kind::OperationCancel, None, UnlessElevated),
+                // Sauvegardes (HRT-98) : créer et régler suivent l'élévation, supprimer ne la suit jamais.
+                (Kind::BackupCreate, None, UnlessElevated),
+                (Kind::BackupSettings, None, UnlessElevated),
+                (Kind::BackupDelete, None, Yes),
                 // Enregistrer les réglages d'un jeu : la table de l'élévation (HRT-108, ADR-0051).
                 (Kind::GameSettingsSave, None, UnlessElevated),
             ] {
