@@ -11,6 +11,7 @@ use hearth_proto::api::sessions::{
     ChallengeRequest, ChallengeResponse, DeviceLoginRequest, DeviceLoginResponse, LoginRequest,
     LoginResponse,
 };
+use hearth_proto::api::transfers::UploadServerMessage;
 use hearth_proto::error::ErrorCode;
 use hearth_proto::fingerprint::Fingerprint;
 use hearth_proto::stream::{ClientMessage, ServerMessage, ServicesMessage, SignedAuth};
@@ -221,6 +222,34 @@ pub trait LogsConn: Send {
     async fn recv(&mut self) -> Result<LogsFrame, TransportError>;
 }
 
+/// Ce qui se lit sur le socket d'un envoi (HRT-96).
+pub enum UploadFrame {
+    Message(Box<UploadServerMessage>),
+    /// Trame sans intérêt (contrôle, binaire, message mal formé) : signe de vie, jamais une erreur.
+    Other,
+}
+
+/// Un socket d'envoi ouvert (`GET /transfers/{id}`, HRT-95). Même règle que [`LogsConn`] : `recv` peut être
+/// abandonné et repris sans perdre de message. **Rien de ce qui passe ici ne se trace** : ni un octet du fichier ni
+/// son contenu ; seuls des nombres sont tracés par l'appelant.
+#[async_trait]
+pub trait UploadConn: Send {
+    /// Premier message : `auth`, avec en option la preuve de la clé d'appareil.
+    async fn send_auth(&mut self, auth: &SignedAuth) -> Result<(), TransportError>;
+    /// `open` : l'agent répond `ready` avec l'offset durable (la reprise se demande).
+    async fn send_open(&mut self) -> Result<(), TransportError>;
+    /// Un morceau : trame binaire `[rang][empreinte][données]`.
+    async fn send_chunk(
+        &mut self,
+        index: u64,
+        digest: &[u8; 32],
+        data: &[u8],
+    ) -> Result<(), TransportError>;
+    /// `finish` avec l'empreinte de la suite des empreintes de morceaux.
+    async fn send_finish(&mut self, tree_digest: &[u8; 32]) -> Result<(), TransportError>;
+    async fn recv(&mut self) -> Result<UploadFrame, TransportError>;
+}
+
 #[async_trait]
 pub trait Transport: Send + Sync {
     /// `GET /hello` : identité de l'agent et empreinte du certificat présenté.
@@ -322,6 +351,18 @@ pub trait Transport: Send + Sync {
     ) -> Result<Box<dyn LogsConn>, TransportError> {
         Err(TransportError::Protocol(
             "journaux non pris en charge".into(),
+        ))
+    }
+
+    /// Ouvre le socket d'un envoi (HRT-96) : `id` est l'identifiant d'un dépôt (un ULID) déjà vérifié par l'appelant ;
+    /// l'authentification et `open` sont envoyés par lui. Par défaut non pris en charge (transports simulés).
+    async fn open_transfer(
+        &self,
+        _target: &Target,
+        _id: &str,
+    ) -> Result<Box<dyn UploadConn>, TransportError> {
+        Err(TransportError::Protocol(
+            "transferts non pris en charge".into(),
         ))
     }
 }

@@ -316,6 +316,8 @@ pub struct TestAgent {
     supervisor: Option<Arc<dyn ServiceSupervisor>>,
     /// Les nombres du frein des journaux (HRT-67) : sans limite par défaut, sauf pour les scénarios qui les éprouvent.
     brake: hearth_agent::domain::services::BrakeSettings,
+    /// La zone d'attente des transferts de l'agent (HRT-96) : un faux en mémoire, sans quoi la vraie (Linux seulement).
+    transfers: Option<Arc<dyn hearth_agent::application::ports::TransferFiles>>,
     pub addr: SocketAddr,
 }
 
@@ -366,6 +368,17 @@ impl TestAgent {
         supervisor: Option<Arc<dyn ServiceSupervisor>>,
         brake: hearth_agent::domain::services::BrakeSettings,
     ) -> Self {
+        Self::install_transferring(updating, engine, supervisor, brake, None).await
+    }
+
+    /// Comme `install_braked`, avec cette zone d'attente de transferts (HRT-96).
+    pub async fn install_transferring(
+        updating: Option<UpdatingFactory>,
+        engine: Option<Arc<FakeEngine>>,
+        supervisor: Option<Arc<dyn ServiceSupervisor>>,
+        brake: hearth_agent::domain::services::BrakeSettings,
+        transfers: Option<Arc<dyn hearth_agent::application::ports::TransferFiles>>,
+    ) -> Self {
         let dir = tmp::tempdir().unwrap();
         let db = Database::open(dir.path()).await.unwrap();
         let clock = Arc::new(TestClock(Mutex::new(
@@ -396,6 +409,7 @@ impl TestAgent {
             engine,
             supervisor,
             brake,
+            transfers,
             addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         };
         agent.start().await;
@@ -449,7 +463,10 @@ impl TestAgent {
                     host_paths: None,
                     catalog: hearth_agent::app::CatalogParts::production(),
                     backups: hearth_agent::app::BackupParts::production(),
-                    transfers: hearth_agent::app::TransferParts::production(),
+                    transfers: hearth_agent::app::TransferParts {
+                        files: self.transfers.clone(),
+                        ..hearth_agent::app::TransferParts::production()
+                    },
                 },
             )
             .await
