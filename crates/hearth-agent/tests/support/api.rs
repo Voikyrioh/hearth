@@ -317,6 +317,17 @@ fn state_over_rig(
         deployments,
         service_deletion,
         backups,
+        transfers: hearth_agent::application::transfers::Transfers::new(
+            Arc::new(
+                hearth_agent::infrastructure::sqlite::SqliteTransferRepo::new(
+                    env.db.pool().clone(),
+                ),
+            ),
+            Arc::new(super::fake_transfer_files::FakeTransferFiles::new()),
+            env.clock.clone(),
+            Arc::new(hearth_agent::infrastructure::ids::UlidGen),
+            super::engine::fast_transfers(),
+        ),
         game_settings,
         catalog: Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         world_import: hearth_agent::application::world_import::WorldImport::new(

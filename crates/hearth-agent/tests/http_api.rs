@@ -1547,6 +1547,21 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
         reply.body["backup_id"].as_str().unwrap().to_owned()
     };
 
+    // Un dépôt déjà ouvert (HRT-95), pour que l'abandon d'un transfert ait de quoi abandonner : son ouverture est
+    // menée à son terme AVANT le balayage, son entrée de journal comprise.
+    let existing_deposit = {
+        let reply = api
+            .act(
+                &marie,
+                Method::POST,
+                "/deposits",
+                json!({ "name": "pack.zip", "size": 4096 }),
+            )
+            .await;
+        assert_eq!(reply.status, StatusCode::CREATED, "{:?}", reply.body);
+        reply.body["transfer_id"].as_str().unwrap().to_owned()
+    };
+
     let mut swept = 0;
     for endpoint in ENDPOINTS.iter().filter(|endpoint| endpoint.modifies()) {
         // La mise à jour de l'agent répond `202` et s'exécute côté serveur : son entrée réussie est
@@ -1793,6 +1808,23 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                 )
                 .await
             }
+            // Ouvrir un dépôt dans la zone d'attente (HRT-95) : `201`, UNE entrée réussie, écrite dans la requête.
+            ("POST", "/deposits") => {
+                api.act(
+                    &marie,
+                    Method::POST,
+                    "/deposits",
+                    json!({ "name": "pack.zip", "size": 4096 }),
+                )
+                .await
+            }
+            // Abandonner un dépôt (HRT-95, exception nommée : pas d'acte) : `200`, UNE entrée réussie.
+            ("DELETE", "/transfers/{id}") => {
+                api.call(Method::DELETE, &format!("/transfers/{existing_deposit}"))
+                    .token(&marie.token)
+                    .send()
+                    .await
+            }
             // Supprimer une sauvegarde : `200`, UNE entrée réussie, écrite dans la requête.
             ("DELETE", "/backups/{id}") => {
                 api.act(
@@ -1914,6 +1946,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             "/services/{key}/logs" => continue,
             // Lire la description d'un service (HRT-87) : une lecture, aucune entrée de journal.
             "/services/{key}/spec" => format!("/services/{}/spec", game_key.as_str()),
+            // Le socket d'un envoi (HRT-95) : WebSocket aussi (service_transfers_https.rs).
+            "/transfers/{id}" => continue,
             // Un POST sans effet : testé à part (device_proof.rs).
             "/sessions/challenge" => continue,
             other => panic!("route de lecture sans scénario : {other}"),

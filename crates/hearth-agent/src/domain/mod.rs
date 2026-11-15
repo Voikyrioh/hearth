@@ -29,6 +29,7 @@ pub mod session_token;
 pub mod sessions;
 pub mod stream;
 pub mod text;
+pub mod transfers;
 pub mod trust;
 pub mod update;
 pub mod worlds;

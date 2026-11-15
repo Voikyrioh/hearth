@@ -299,6 +299,12 @@ impl Agent {
         self.running.services.clone()
     }
 
+    /// La zone d'attente des transferts de cet agent (HRT-95) : un test y consomme un dépôt comme le ferait le lot qui
+    /// range un pack (HRT-124).
+    pub fn transfers(&self) -> Arc<hearth_agent::application::transfers::Transfers> {
+        self.running.transfers.clone()
+    }
+
     /// Le journal des opérations de service de cet agent (HRT-144) : un test y ACCEPTE une opération comme le
     /// ferait un lot de geste (HRT-64, HRT-68), puis la lit, l'annule ou la décide par les routes.
     pub fn ops(&self) -> Arc<hearth_agent::application::service_ops::ServiceOps> {

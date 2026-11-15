@@ -15,6 +15,7 @@ use crate::application::metrics::{MetricsError, MetricsService};
 use crate::application::security::SecurityService;
 use crate::application::service_ops::ServiceOps;
 use crate::application::services::ServicesRegistry;
+use crate::application::transfers::Transfers;
 
 /// Période de la purge (sessions expirées, traces anciennes, opérations de plus de 24 h).
 pub const PURGE_PERIOD: Duration = Duration::from_secs(60 * 60);
@@ -175,6 +176,20 @@ pub fn spawn_sampler(service: Arc<MetricsService>, period: Duration) -> Backgrou
                 Err(error) => {
                     tracing::warn!(%error, "échantillon manquant, reprise au prochain passage");
                 }
+            }
+        }
+    })
+}
+
+/// Retire les dépôts de la zone d'attente sans activité depuis 24 heures (HRT-95, BR-FILES-019, BR-MOD-015) : la
+/// partie reçue d'un envoi jamais repris, ou le fichier complet que personne n'a consommé.
+pub fn spawn_transfers_purge(transfers: Arc<Transfers>, period: Duration) -> BackgroundTask {
+    every("transfers-purge", period, move || {
+        let transfers = transfers.clone();
+        async move {
+            let removed = transfers.purge_expired().await;
+            if removed > 0 {
+                tracing::info!(removed, "zone d'attente : dépôts expirés retirés");
             }
         }
     })

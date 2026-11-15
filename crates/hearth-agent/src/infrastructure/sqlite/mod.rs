@@ -24,6 +24,7 @@ mod services_right_repo;
 mod session_repo;
 mod specs_repo;
 mod store;
+mod transfers_repo;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -48,6 +49,7 @@ pub use services_repo::SqliteServiceRepo;
 pub use session_repo::SqliteSessionRepo;
 pub use specs_repo::SqliteSpecRepo;
 pub use store::SqliteStore;
+pub use transfers_repo::SqliteTransferRepo;
 
 pub const DATABASE_FILE: &str = "hearth.db";
 

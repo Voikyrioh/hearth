@@ -9,6 +9,7 @@
 
 mod connection;
 mod service_logs;
+mod transfers;
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -306,6 +307,50 @@ pub async fn logs(
         .max_message_size(MAX_CLIENT_MESSAGE_BYTES)
         .max_frame_size(MAX_CLIENT_MESSAGE_BYTES)
         .on_upgrade(move |socket| service_logs::run(socket, state, permit, ip.to_string(), key)))
+}
+
+/// `GET /api/v1/transfers/{id}` : le socket d'un envoi reprenable (HRT-95, ADR-0048). Mise à niveau comme `/stream` :
+/// même quota des connexions en attente d'authentification, jeton dans le premier message. Un identifiant qui n'est
+/// pas un ULID est refusé avant la mise à niveau. Les trames binaires sont bornées à un morceau de 4 Mio et son
+/// en-tête ; une trame plus grande ferme le socket.
+pub async fn transfer(
+    upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let upgrade = upgrade.map_err(|_| {
+        ApiError::invalid(
+            "upgrade",
+            "Cette route est un flux WebSocket : ouvre-la par une mise à niveau",
+        )
+    })?;
+    let id = crate::domain::transfers::TransferId::parse(&id)
+        .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "Ce transfert n'existe pas."))?;
+    let ip = peer.ip().to_canonical();
+    let sessions = state.sessions.clone();
+    let permit = state
+        .stream
+        .wait_for_place(ip, || async move {
+            sessions
+                .address_is_known(&ip.to_string())
+                .await
+                .unwrap_or_else(|error| {
+                    tracing::warn!(%error, "lecture des adresses connues impossible : place refusée");
+                    false
+                })
+        })
+        .await
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::Busy,
+                "Trop de connexions en attente d'authentification : envoie auth plus vite ou réessaie dans un instant",
+            )
+        })?;
+    Ok(upgrade
+        .max_message_size(hearth_proto::api::transfers::MAX_BINARY_FRAME_BYTES)
+        .max_frame_size(hearth_proto::api::transfers::MAX_BINARY_FRAME_BYTES)
+        .on_upgrade(move |socket| transfers::run(socket, state, permit, ip.to_string(), id)))
 }
 
 #[cfg(test)]

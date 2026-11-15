@@ -32,6 +32,7 @@ use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
 use crate::application::pack_intake::PackIntake;
+use crate::application::ports::TransferFiles;
 use crate::application::ports::{
     AuditFeed, AuditSink, BackupFiles, BootInfo, ChallengeCrypto, Clock, ContainerEngine,
     CryptoError, FingerprintSecretError, FingerprintSecretStore, FreeSpace, GpuProbe, HashError,
@@ -53,6 +54,7 @@ use crate::application::service_update::{ServiceUpdates, UpdateContext, UpdateTi
 use crate::application::services::{EngineTimings, ServicesRegistry};
 use crate::application::services_right::ServicesRightService;
 use crate::application::sessions::SessionService;
+use crate::application::transfers::{TransferTimings, Transfers};
 use crate::application::trust::TrustService;
 use crate::application::world_import::WorldImport;
 use crate::domain::ops::ObjectRoot;
@@ -102,6 +104,7 @@ use crate::infrastructure::system::{
 };
 use crate::infrastructure::tls::{self, FileIdentityStore, TlsError};
 use crate::infrastructure::world_fs::{STAGING_DIR, SystemWorldFs};
+use crate::infrastructure::transfer_files::StdTransferFiles;
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -228,6 +231,25 @@ pub struct EngineParts {
     pub catalog: CatalogParts,
     /// Les sauvegardes des services (HRT-97) : leurs délais et, pour les tests, un faux de la racine des sauvegardes.
     pub backups: BackupParts,
+    /// La zone d'attente des transferts (HRT-95) : ses délais et, pour les tests, un faux de la zone.
+    pub transfers: TransferParts,
+}
+
+/// Ce qu'il faut aux transferts reprenables (HRT-95, ADR-0048) : les délais, et la zone d'attente.
+pub struct TransferParts {
+    pub timings: TransferTimings,
+    /// La zone d'attente. `None` : la vraie, `<données>/transfers` (`0700`, hors de tout dossier de service) ; les
+    /// tests y posent un faux en mémoire.
+    pub files: Option<Arc<dyn TransferFiles>>,
+}
+
+impl TransferParts {
+    pub fn production() -> Self {
+        Self {
+            timings: TransferTimings::production(),
+            files: None,
+        }
+    }
 }
 
 /// Ce qu'il faut aux sauvegardes (HRT-97, ADR-0047) : les délais, et la racine des sauvegardes.
@@ -305,6 +327,7 @@ impl EngineParts {
             host_paths: None,
             catalog: CatalogParts::production(),
             backups: BackupParts::production(),
+            transfers: TransferParts::production(),
         }
     }
 }
@@ -367,6 +390,11 @@ pub struct RunningAgent {
     pub foundations: ServiceFoundations,
     /// Décisions expirées et opérations de service purgées : arrêtée avec l'agent.
     pub service_ops_sweep: BackgroundTask,
+    /// Dépôts de la zone d'attente sans activité depuis 24 heures : retirés, arrêtée avec l'agent (HRT-95).
+    pub transfers_purge: BackgroundTask,
+    /// La zone d'attente des transferts (HRT-95) : les tests y lisent l'état et la consomment comme le ferait le
+    /// lot qui range un dépôt (HRT-124).
+    pub transfers: Arc<Transfers>,
     /// Les sessions : l'agent EXIGE la confirmation des actes
     /// dès la construction du service : aucun réglage, aucune porte, même en test.
     pub sessions: Arc<SessionService>,
@@ -388,6 +416,7 @@ impl RunningAgent {
             attack_sweep: _attack_sweep,
             services_task: _services_task,
             service_ops_sweep: _service_ops_sweep,
+            transfers_purge: _transfers_purge,
             audit_recorder,
             security,
             ..
@@ -463,6 +492,9 @@ pub async fn service_foundations(
 /// la configuration (HRT-97, `BR-BACKUP-005`), ce défaut ne sert qu'aux assemblages sans configuration (tests). Une
 /// racine qui n'existe pas encore ne retire rien (« déjà parti »).
 const BACKUPS_DIR: &str = "backups";
+/// La zone d'attente des transferts (HRT-95) : un dossier de l'agent à côté de ses données, jamais sous
+/// `services/<clé>/`, donc jamais montée dans un service.
+const TRANSFERS_DIR: &str = "transfers";
 
 /// Assemble le socle, DIT l'état de la clé des secrets, et classe les opérations restées en plein geste
 /// (reprendre le verrou de celles à vérifier, retirer ce que les autres avaient créé pour elles-mêmes).
@@ -1097,6 +1129,31 @@ pub async fn start_engined(
         engine.free_space.clone(),
         config.data_dir.clone(),
     );
+    // Les transferts reprenables (HRT-95) : le registre en base, la zone d'attente sur le disque (`<données>/transfers`,
+    // `0700`, hors de tout dossier de service et de tout montage). Ce que 24 heures ont rendu inutile part au démarrage.
+    let transfer_files: Arc<dyn TransferFiles> = engine
+        .transfers
+        .files
+        .unwrap_or_else(|| Arc::new(StdTransferFiles::new(config.data_dir.join(TRANSFERS_DIR))));
+    let transfers = Transfers::new(
+        Arc::new(crate::infrastructure::sqlite::SqliteTransferRepo::new(
+            database.pool().clone(),
+        )),
+        transfer_files,
+        adapters.clock.clone(),
+        adapters.ids.clone(),
+        engine.transfers.timings,
+    );
+    let purged = transfers.purge_expired().await;
+    if purged > 0 {
+        tracing::info!(
+            purged,
+            "zone d'attente : dépôts expirés retirés au démarrage"
+        );
+    }
+    let transfers_purge =
+        tasks::spawn_transfers_purge(transfers.clone(), engine.transfers.timings.purge_period);
+    let transfers_for_state = transfers.clone();
     let deployments = Deployments::new(
         registry.clone(),
         foundations.ops.clone(),
@@ -1186,6 +1243,7 @@ pub async fn start_engined(
         service_deletion,
         service_updates,
         backups,
+        transfers: transfers.clone(),
         catalog,
         world_import,
         game_settings,
@@ -1227,6 +1285,8 @@ pub async fn start_engined(
         services: registry,
         foundations,
         service_ops_sweep,
+        transfers_purge,
+        transfers: transfers_for_state,
         sessions,
         audit_recorder: services.audit_recorder,
         security: services.security,
