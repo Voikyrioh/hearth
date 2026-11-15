@@ -3,6 +3,7 @@
 //! Il rend une structure applicative ; la conversion vers le type du fil
 //! (`hearth_proto::api::hello::HelloResponse`) est faite par `entrypoint/http`.
 
+use hearth_proto::api::backups::CAPABILITY_SERVICE_BACKUPS;
 use hearth_proto::api::deploy::CAPABILITY_SERVICE_DEPLOY;
 use hearth_proto::api::game_settings::CAPABILITY_GAME_SETTINGS;
 use hearth_proto::api::service_delete::CAPABILITY_SERVICE_DELETE;
@@ -74,6 +75,8 @@ impl HelloService {
                     // Modifier un service par recréation (HRT-87) : `GET` et `PUT /services/{key}/spec`, les lignes du
                     // nouveau service qui n'a pas démarré.
                     CAPABILITY_SERVICE_UPDATE,
+                    // Sauvegarder les données d'un service (HRT-97) : lister, estimer, créer, vérifier, supprimer.
+                    CAPABILITY_SERVICE_BACKUPS,
                 ],
             },
         }
@@ -132,7 +135,8 @@ mod tests {
                 "game-settings",
                 "game-services",
                 "service-delete",
-                "service-update"
+                "service-update",
+                "service-backups"
             ]
         );
     }

@@ -14,6 +14,7 @@
 mod accounts;
 mod audit;
 mod auth;
+mod backups;
 mod catalog;
 mod deployments;
 mod devices;
@@ -46,6 +47,7 @@ use tracing::Level;
 
 use crate::application::accounts::AccountService;
 use crate::application::audit::AuditService;
+use crate::application::backups::Backups;
 use crate::application::delete::ServiceDeletion;
 use crate::application::deployments::Deployments;
 use crate::application::game_settings::GameSettings;
@@ -101,6 +103,8 @@ pub struct AppState {
     /// Modifier un service par recréation (HRT-87) : la description, l'acte `0x13` et les lignes du nouveau service
     /// qui n'a pas démarré.
     pub service_updates: Arc<crate::application::service_update::ServiceUpdates>,
+    /// Sauvegarder les données d'un service (HRT-97, ADR-0047) : lister, estimer, créer, vérifier, supprimer.
+    pub backups: Arc<Backups>,
     /// Les fiches de serveurs de jeu que cet agent propose (HRT-101, ADR-0050).
     pub catalog: Arc<crate::application::catalog::CatalogService>,
     /// Les réglages d'un serveur de jeu : lire, analyser un texte collé, enregistrer (HRT-108, ADR-0051).
@@ -156,6 +160,10 @@ const READ_ONLY_POSTS: &[&str] = &[
     "/engine/recheck",
     "/deployments/check",
     "/services/{key}/settings/analyze",
+    // Les sauvegardes (HRT-97) : l'estimation de la fenêtre de création n'écrit rien ; la vérification n'écrit que
+    // l'état d'intégrité d'une sauvegarde.
+    "/services/{key}/backups/preview",
+    "/backups/{id}/verify",
 ];
 
 impl Endpoint {
@@ -462,6 +470,66 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: true,
         audit: Some(AuditAction::ServiceDelete),
         route: || delete(service_delete::delete),
+    },
+    // Les sauvegardes d'un service (HRT-97, ADR-0047, BR-BACKUP-001) : la liste d'un service créé par Hearth est
+    // visible de tout compte (ses boutons sont désactivés côté client) ; estimer, créer, vérifier, supprimer et
+    // régler les éléments ignorés exigent le droit « gérer les services » (niveau `Services`). Créer (`0x19`),
+    // supprimer (`0x1B`, jamais couvert par l'élévation) et régler (`0x1C`) sont des actes confirmés.
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/backups",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(backups::list),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/services/{key}/backups/preview",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::ServiceBackupCreate),
+        route: || post(backups::preview),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/services/{key}/backups",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceBackupCreate),
+        route: || post(backups::create),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/backups/{id}/verify",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        // Une consultation réservée au droit de gérer les services : seul un refus faute de droit est consigné,
+        // sous l'action de la sauvegarde (le cas d'usage n'écrit rien en vérifiant).
+        audit: Some(AuditAction::ServiceBackupCreate),
+        route: || post(backups::verify),
+    },
+    Endpoint {
+        method: Method::DELETE,
+        path: "/backups/{id}",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceBackupDelete),
+        route: || delete(backups::delete),
+    },
+    Endpoint {
+        method: Method::PUT,
+        path: "/services/{key}/backup-settings",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceBackupSettings),
+        route: || put(backups::settings),
     },
     // Le catalogue des fiches de serveurs de jeu (HRT-101, ADR-0050) : une consultation ouverte à tout compte
     // authentifié, sans effet ni journal (BR-FICHE-001 à 004). Installer passe par `POST /deployments`.
@@ -851,6 +919,8 @@ mod tests {
                         | "/engine/recheck"
                         | "/deployments/check"
                         | "/services/{key}/settings/analyze"
+                        | "/services/{key}/backups/preview"
+                        | "/backups/{id}/verify"
                 ),
                 "{}",
                 endpoint.path
@@ -1031,6 +1101,14 @@ mod tests {
         ("PUT", "/services/{key}/spec", Service),
         ("GET", "/operations/services/{id}/tail", Service),
         ("DELETE", "/services/{key}", Service),
+        // Les sauvegardes (HRT-97) : la liste est ouverte à tout compte ; l'estimation et la vérification sont des
+        // consultations du droit ; créer, supprimer et régler sont des actes confirmés (`0x19`, `0x1B`, `0x1C`).
+        ("GET", "/services/{key}/backups", OpenRead),
+        ("POST", "/services/{key}/backups/preview", ServiceCheck),
+        ("POST", "/services/{key}/backups", Service),
+        ("POST", "/backups/{id}/verify", ServiceCheck),
+        ("DELETE", "/backups/{id}", Service),
+        ("PUT", "/services/{key}/backup-settings", Service),
         // Les opérations de service (HRT-144) : lire est ouvert à tout compte (la visibilité du service est
         // jugée par `ServiceOpAccess`), annuler et décider exigent le droit et la confirmation de l'acte.
         ("GET", "/operations/services/{id}", OpenRead),
@@ -1102,6 +1180,8 @@ mod tests {
         "/adoptions",
         "/containers",
         "/operations/services",
+        // Les sauvegardes (HRT-97) : jamais autre chose que de niveau `Services` (ou la liste ouverte).
+        "/backups",
         // Le catalogue des fiches de serveurs de jeu (HRT-101) : ouvert à tous en lecture, jamais autre chose.
         "/catalog",
     ];
@@ -1214,6 +1294,7 @@ mod tests {
         assert_eq!(
             service_routes,
             [
+                ("DELETE", "/backups/{id}"),
                 ("DELETE", "/operations/services/{id}"),
                 ("DELETE", "/services/{key}"),
                 ("GET", "/operations/services/{id}/tail"),
@@ -1226,10 +1307,12 @@ mod tests {
                 ("POST", "/deployments"),
                 ("POST", "/operations/services/{id}/decision"),
                 ("POST", "/services/adopt"),
+                ("POST", "/services/{key}/backups"),
                 ("POST", "/services/{key}/release"),
                 ("POST", "/services/{key}/restart"),
                 ("POST", "/services/{key}/start"),
                 ("POST", "/services/{key}/stop"),
+                ("PUT", "/services/{key}/backup-settings"),
                 ("PUT", "/services/{key}/settings"),
                 ("PUT", "/services/{key}/spec"),
             ]

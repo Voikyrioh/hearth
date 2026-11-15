@@ -152,6 +152,10 @@ pub enum OperationCauseDto {
     DiskFull,
     NameTaken,
     DataNotErased,
+    NoSpace,
+    DiskAlmostFull,
+    BackupCorrupt,
+    NotRestarted,
     Unknown,
 }
 
@@ -186,6 +190,10 @@ impl From<OperationCause> for OperationCauseDto {
             OperationCause::DiskFull => Self::DiskFull,
             OperationCause::NameTaken => Self::NameTaken,
             OperationCause::DataNotErased => Self::DataNotErased,
+            OperationCause::NoSpace => Self::NoSpace,
+            OperationCause::DiskAlmostFull => Self::DiskAlmostFull,
+            OperationCause::BackupCorrupt => Self::BackupCorrupt,
+            OperationCause::NotRestarted => Self::NotRestarted,
             OperationCause::Unknown => Self::Unknown,
         }
     }

@@ -1438,6 +1438,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     // description (HRT-85, BR-DEL-018), sans case cochée.
     let delete_key = support::game::terraria_service(&env, &deploy_rig.safe_fs, 2).await;
     let game_rev = state.service_updates.view(&game_key).await.unwrap().rev;
+    // Un troisième, dont on sauvegarde les données (HRT-97) : sa description a un dossier géré, pas de conteneur.
+    let backup_key = support::game::terraria_service(&env, &deploy_rig.safe_fs, 3).await;
     // Deux opérations de service dans le journal (HRT-144) : une qu'on annulera, une qui attend une décision.
     let (cancel_op, decide_op) = {
         use hearth_agent::application::service_ops::AcceptRequest;
@@ -1518,6 +1520,31 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                 .await
                 .unwrap()
         }
+    };
+
+    // Une sauvegarde déjà faite (HRT-97), pour que la suppression d'une sauvegarde ait de quoi supprimer : sa
+    // création est menée à son terme AVANT le balayage, son entrée de journal comprise.
+    let existing_backup = {
+        let before = successes(&env).await;
+        let reply = api
+            .act(
+                &marie,
+                Method::POST,
+                &format!("/services/{}/backups", backup_key.as_str()),
+                json!({ "mode": "stopped" }),
+            )
+            .await;
+        assert_eq!(reply.status, StatusCode::ACCEPTED, "{:?}", reply.body);
+        let started = std::time::Instant::now();
+        while successes(&env).await - before < 1 {
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(10),
+                "la sauvegarde préparée ne finit pas"
+            );
+            env.audit_recorder.flush_all().await;
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        reply.body["backup_id"].as_str().unwrap().to_owned()
     };
 
     let mut swept = 0;
@@ -1755,6 +1782,37 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                 )
                 .await
             }
+            // Sauvegarder les données d'un service (HRT-97) : `202`, et UNE entrée réussie, écrite à la fin de la
+            // copie à l'arrière-plan (attendue plus bas).
+            ("POST", "/services/{key}/backups") => {
+                api.act(
+                    &marie,
+                    Method::POST,
+                    &format!("/services/{}/backups", backup_key.as_str()),
+                    json!({ "mode": "stopped" }),
+                )
+                .await
+            }
+            // Supprimer une sauvegarde : `200`, UNE entrée réussie, écrite dans la requête.
+            ("DELETE", "/backups/{id}") => {
+                api.act(
+                    &marie,
+                    Method::DELETE,
+                    &format!("/backups/{existing_backup}"),
+                    json!({}),
+                )
+                .await
+            }
+            // Régler les éléments ignorés des sauvegardes : `200`, UNE entrée réussie.
+            ("PUT", "/services/{key}/backup-settings") => {
+                api.act(
+                    &marie,
+                    Method::PUT,
+                    &format!("/services/{}/backup-settings", backup_key.as_str()),
+                    json!({ "ignored": [{ "root": "/config", "path": "logs" }], "included": [] }),
+                )
+                .await
+            }
             (method, path) => {
                 panic!("route modifiante sans scénario de réussite : {method} {path}")
             }
@@ -1818,6 +1876,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             // `404 FICHE_UNKNOWN` ; rien n'est écrit au journal.
             "/catalog/{id}" => "/catalog/terraria".to_owned(),
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),
+            // La liste des sauvegardes d'un service (HRT-97) : une lecture, aucune entrée de journal.
+            "/services/{key}/backups" => format!("/services/{}/backups", backup_key.as_str()),
             // Lire une opération de service (HRT-144) : une lecture, aucune entrée de journal.
             "/operations/services/{id}" => "/operations/services/INCONNUE".to_owned(),
             // Un POST qui ne modifie rien : il relance la détection du moteur (HRT-61, lecture seule).

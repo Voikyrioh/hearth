@@ -185,7 +185,10 @@ async fn start_engine_with(
             enabled,
             ..hearth_agent::infrastructure::config::EngineConfig::default()
         },
-        services: hearth_agent::infrastructure::config::ServicesConfig { adoption },
+        services: hearth_agent::infrastructure::config::ServicesConfig {
+            adoption,
+            ..hearth_agent::infrastructure::config::ServicesConfig::default()
+        },
     };
     let adapters = Adapters {
         hasher: env.hasher.clone(),

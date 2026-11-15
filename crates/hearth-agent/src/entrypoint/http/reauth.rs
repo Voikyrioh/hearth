@@ -27,6 +27,7 @@ use hearth_proto::admin_act::{ActKind, AdminAct, RouteAct, decode_segment};
 use hearth_proto::api::accounts::{
     ChangeOwnPasswordRequest, ChangeRoleRequest, CreateAccountRequest, RoleName,
 };
+use hearth_proto::api::backups::{BackupMode, BackupRequest, BackupSettings};
 use hearth_proto::api::deploy::DeploySpec;
 use hearth_proto::api::game_settings::{
     ChangeAction, DriftResolution, SaveOrigin, SaveSettingsRequest, SettingEffect,
@@ -98,6 +99,12 @@ enum Parsed {
     /// non secrète, les NOMBRES de variables posées et retirées et la présence d'une commande sont signés
     /// (`AdminAct::service_update`, la fonction de la liaison cliente) ; jamais un nom, une valeur ni la commande.
     ServiceChange(Box<SpecChange>),
+    /// Sauvegarder (HRT-97) : la clé du chemin est la cible, le mode et le nombre d'éléments ignorés pour cette fois
+    /// sont signés ; ni la note ni un chemin.
+    BackupCreate(BackupRequest),
+    /// Régler les éléments ignorés (HRT-97) : le nombre d'éléments et l'empreinte de la liste sont signés
+    /// (`BackupSettings::act_digest`, la fonction de la liaison cliente) ; jamais un chemin.
+    BackupSettings(BackupSettings),
     /// Acte dont la cible est dans le chemin et dont aucun paramètre ne vient du corps.
     TargetOnly,
 }
@@ -148,7 +155,8 @@ impl Parsed {
             | ActKind::ServiceStart
             | ActKind::ServiceStop
             | ActKind::ServiceRestart
-            | ActKind::OperationCancel => Some(Self::TargetOnly),
+            | ActKind::OperationCancel
+            | ActKind::BackupDelete => Some(Self::TargetOnly),
             ActKind::ServiceDeploy => {
                 serde_json::from_slice::<DeploySpec>(bytes)
                     .ok()
@@ -194,8 +202,6 @@ impl Parsed {
                 }
                 serde_json::from_slice(bytes).ok().map(Self::Delete)
             }
-            // Déclarés pour les tranches suivantes : aucune route ne les porte, donc aucun corps à lire.
-            ActKind::BackupCreate | ActKind::BackupDelete => None,
             // Modifier : un corps illisible (ou un membre d'énumération que cette version ne connaît pas) n'est
             // jamais un acte signé avec un repli.
             ActKind::ServiceUpdate => serde_json::from_slice::<SpecChange>(bytes)
@@ -209,6 +215,12 @@ impl Parsed {
                         && change.seen_drift != Some(DriftView::Unknown)
                 })
                 .map(|change| Self::ServiceChange(Box::new(change))),
+            // Sauvegarder : un mode que cette version ne connaît pas rend le corps illisible (BR-COMPAT-001 point 5).
+            ActKind::BackupCreate => serde_json::from_slice(bytes)
+                .ok()
+                .filter(|request: &BackupRequest| request.mode != BackupMode::Unknown)
+                .map(Self::BackupCreate),
+            ActKind::BackupSettings => serde_json::from_slice(bytes).ok().map(Self::BackupSettings),
         }
     }
 
@@ -252,6 +264,7 @@ impl Parsed {
             (Self::TargetOnly, ActKind::OperationCancel) => {
                 AdminAct::OperationCancel { target: id }
             }
+            (Self::TargetOnly, ActKind::BackupDelete) => AdminAct::BackupDelete { target: id },
             (Self::Deploy(deploy), _) => AdminAct::ServiceDeploy {
                 name: deploy.name.as_str().into(),
                 image: deploy.image.as_str().into(),
@@ -269,6 +282,23 @@ impl Parsed {
             },
             (Self::ServiceChange(change), _) => {
                 AdminAct::service_update(std::borrow::Cow::Borrowed(id), change)
+            }
+            (Self::BackupCreate(request), _) => {
+                let (count, digest) = request.act_digest();
+                AdminAct::BackupCreate {
+                    target: id.into(),
+                    mode: request.mode.as_str(),
+                    count,
+                    digest,
+                }
+            }
+            (Self::BackupSettings(settings), _) => {
+                let (count, digest) = settings.act_digest();
+                AdminAct::BackupSettings {
+                    target: id.into(),
+                    count,
+                    digest,
+                }
             }
             (Self::Decide(request), _) => AdminAct::OperationDecide {
                 target: id,
@@ -296,7 +326,7 @@ impl Parsed {
                 | ActKind::ServiceDelete
                 | ActKind::ServiceUpdate
                 | ActKind::BackupCreate
-                | ActKind::BackupDelete
+                | ActKind::BackupSettings
                 | ActKind::GameSettingsSave,
             ) => return None,
         })
@@ -560,6 +590,7 @@ mod tests {
                     | ActKind::ServiceStop
                     | ActKind::ServiceRestart
                     | ActKind::OperationCancel
+                    | ActKind::BackupDelete
             );
             assert_eq!(act.is_some(), target_only, "{kind:?}");
             if let Some(act) = act {
