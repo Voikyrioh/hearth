@@ -460,8 +460,11 @@ mod tests {
         let id = id();
         let ident = files.create(&id).expect("créé");
         let path = dir.path().join("transfers").join(id.part_name());
-        std::fs::remove_file(&path).expect("retiré à la main");
-        std::fs::write(&path, b"foreign").expect("remplacé à la main");
+        // Le fichier étranger est créé AVANT le retrait de la partie et posé par un renommage : il a forcément un autre
+        // inode (un numéro libéré peut être réattribué tout de suite par certains systèmes de fichiers).
+        let foreign = dir.path().join("transfers").join("etranger");
+        std::fs::write(&foreign, b"foreign").expect("créé à la main");
+        std::fs::rename(&foreign, &path).expect("remplacé à la main");
         assert_eq!(
             files.append(&id, ident, 0, 0, b"abcd", &[1; 32]),
             Err(BackupFsError::Unsafe)
