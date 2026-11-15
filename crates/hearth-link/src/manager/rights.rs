@@ -19,7 +19,8 @@ use tokio::time::timeout;
 use super::LinkManager;
 use crate::domain::server::ServerId;
 use crate::domain::services::{
-    agent_knows_service_rights, agent_serves_game_settings, agent_serves_service_delete,
+    agent_knows_service_rights, agent_serves_game_settings, agent_serves_service_backups,
+    agent_serves_service_delete,
 };
 use crate::error::LinkError;
 use crate::ports::transport::Target;
@@ -37,6 +38,8 @@ pub struct ServiceRightsRead {
     pub game_settings: bool,
     /// L'agent annonce `service-delete` : la carte « Suppression » d'un service créé par Hearth peut exister (HRT-86).
     pub service_delete: bool,
+    /// L'agent annonce `service-backups` : l'onglet « Sauvegardes » d'un service créé par Hearth peut exister (HRT-98).
+    pub service_backups: bool,
     /// L'identifiant du compte connecté, tel que l'agent le connaît : la commande à lancer sur le serveur
     /// le porte (BR-GRANT-014). Texte de l'agent, à valider avant tout affichage.
     pub account: String,
@@ -71,6 +74,7 @@ impl LinkManager {
             granted: agent_knows && has_right(&me.account.rights, RIGHT_SERVICES),
             game_settings: agent_serves_game_settings(&capabilities),
             service_delete: agent_serves_service_delete(&capabilities),
+            service_backups: agent_serves_service_backups(&capabilities),
             account: me.account.username,
         })
     }

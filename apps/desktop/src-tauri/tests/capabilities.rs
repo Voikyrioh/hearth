@@ -386,6 +386,23 @@ const EXPECTED: &[(&str, &str)] = &[
         "deleteService",
         "serverId: string, key: string, deletion: DeleteRequestDto, adminPassword: string | null",
     ),
+    // HRT-98 : les sauvegardes. Trois lectures (liste, estimation, vérification) et trois actes (créer, supprimer, régler
+    // les éléments ignorés). Un chemin est celui du SERVICE ; la note n'est jamais signée.
+    ("listBackups", "serverId: string, key: string"),
+    ("backupPreview", "serverId: string, key: string"),
+    (
+        "createBackup",
+        "serverId: string, key: string, backup: BackupRequestDto, adminPassword: string | null",
+    ),
+    ("verifyBackup", "serverId: string, backupId: string"),
+    (
+        "deleteBackup",
+        "serverId: string, backupId: string, adminPassword: string | null",
+    ),
+    (
+        "saveBackupSettings",
+        "serverId: string, key: string, settings: BackupSettingsDto, adminPassword: string | null",
+    ),
     (
         "deployCheck",
         "serverId: string, input: DeployCheckInputDto",
@@ -450,6 +467,9 @@ const ADMIN_COMMANDS: &[(&str, &str)] = &[
     ("serviceRestart", "adminPassword"),
     ("deployService", "adminPassword"),
     ("deleteService", "adminPassword"),
+    ("createBackup", "adminPassword"),
+    ("deleteBackup", "adminPassword"),
+    ("saveBackupSettings", "adminPassword"),
     ("installFiche", "adminPassword"),
     ("saveGameSettings", "adminPassword"),
     ("cancelServiceOperation", "adminPassword"),
@@ -511,6 +531,9 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "listServiceOperations",
     "ackServiceOperations",
     "deletePreview",
+    "listBackups",
+    "backupPreview",
+    "verifyBackup",
     "deployCheck",
     "readEngineCapacity",
     "readCatalog",

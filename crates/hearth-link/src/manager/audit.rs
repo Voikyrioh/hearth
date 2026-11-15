@@ -180,6 +180,21 @@ impl LinkManager {
             .await
     }
 
+    /// Une consultation lente (`POST`), au délai ordinaire plus `extra` : l'estimation de la taille d'une sauvegarde
+    /// (jusqu'à 60 secondes, BR-BACKUP-009). Le corps ne porte aucun secret.
+    pub(super) async fn typed_post_slow(
+        &self,
+        target: &Target,
+        token: &crate::domain::secret::Secret,
+        path: String,
+        body: Value,
+        extra: std::time::Duration,
+    ) -> Result<Value, LinkError> {
+        let limit = self.inner.deps.config.request_timeout + extra;
+        self.typed_read_within(target, token, Method::Post, path, Some(body), limit)
+            .await
+    }
+
     async fn audit_get(
         &self,
         target: &Target,

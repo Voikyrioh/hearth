@@ -10,6 +10,11 @@ use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use tauri::State;
 
+use super::backups;
+use super::backups_dto::{
+    BackupCreateOutcome, BackupDeleteOutcome, BackupPreviewOutcome, BackupRequestDto,
+    BackupSettingsDto, BackupSettingsOutcome, BackupVerifyOutcome, BackupsOutcome,
+};
 use super::catalog;
 use super::catalog_dto::{CatalogDto, FicheInstallRequestDto, FicheLinkKind, FicheReadDto};
 use super::delete;
@@ -156,6 +161,92 @@ pub async fn delete_service(
     let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
     let admin_password = admin_password.map(Secret::new);
     delete::delete(link.manager(), &id, &key, deletion, admin_password.as_ref()).await
+}
+
+/// La liste des sauvegardes d'un service créé par Hearth (`GET /services/{key}/backups`, HRT-98) : une LECTURE, ouverte à
+/// tout compte. Les chemins sont ceux du service ; la note d'un compte est un texte à montrer tel quel (jamais du HTML).
+#[tauri::command]
+#[specta::specta]
+pub async fn list_backups(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+) -> Result<BackupsOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    backups::list(link.manager(), &id, &key).await
+}
+
+/// De quoi bâtir la fenêtre de création d'une sauvegarde (`POST …/backups/preview`) : une CONSULTATION, rien n'est
+/// écrit ni journalisé (BR-BACKUP-009 : l'estimation de la taille dure 60 secondes au plus).
+#[tauri::command]
+#[specta::specta]
+pub async fn backup_preview(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+) -> Result<BackupPreviewOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    backups::preview(link.manager(), &id, &key).await
+}
+
+/// Crée une sauvegarde (`POST …/backups`, acte `BackupCreate`) : un acte d'administration confirmé, couvert par
+/// l'élévation. L'agent répond `202` : l'issue ne se lit jamais ici, elle arrive par le suivi des opérations. Jamais
+/// rejoué. Ni la note ni un chemin ne sont signés. Sans le droit « gérer les services » : `MissingServicesRight`.
+#[tauri::command]
+#[specta::specta]
+pub async fn create_backup(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+    backup: BackupRequestDto,
+    admin_password: Option<String>,
+) -> Result<BackupCreateOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let admin_password = admin_password.map(Secret::new);
+    backups::create(link.manager(), &id, &key, backup, admin_password.as_ref()).await
+}
+
+/// Relit l'archive d'une sauvegarde et la juge (`POST /backups/{id}/verify`, BR-BACKUP-013) : une consultation.
+#[tauri::command]
+#[specta::specta]
+pub async fn verify_backup(
+    link: Runtime_<'_>,
+    server_id: String,
+    backup_id: String,
+) -> Result<BackupVerifyOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    backups::verify(link.manager(), &id, &backup_id).await
+}
+
+/// Supprime une sauvegarde (`DELETE /backups/{id}`) : un acte JAMAIS couvert par l'élévation (le mot de passe à chaque
+/// fois, BR-BACKUP-027). Jamais rejoué.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_backup(
+    link: Runtime_<'_>,
+    server_id: String,
+    backup_id: String,
+    admin_password: Option<String>,
+) -> Result<BackupDeleteOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let admin_password = admin_password.map(Secret::new);
+    backups::delete(link.manager(), &id, &backup_id, admin_password.as_ref()).await
+}
+
+/// Enregistre les éléments ignorés d'un service (`PUT …/backup-settings`, BR-BACKUP-003) : un acte couvert par
+/// l'élévation. Jamais rejoué.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_backup_settings(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+    settings: BackupSettingsDto,
+    admin_password: Option<String>,
+) -> Result<BackupSettingsOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let admin_password = admin_password.map(Secret::new);
+    backups::save_settings(link.manager(), &id, &key, settings, admin_password.as_ref()).await
 }
 
 /// Les constats du formulaire de déploiement sur le nom, les ports et l'image (`POST /deployments/check`) : une

@@ -36,6 +36,7 @@ fn read(known: bool, granted: bool, account: &str) -> ServiceRightsDto {
         // Un agent qui connaît le droit annonce aussi les réglages de jeu, dans cette fiche de référence.
         game_settings: known,
         service_delete: known,
+        service_backups: known,
         account: account.to_owned(),
     }
     .into()

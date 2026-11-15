@@ -116,6 +116,9 @@ impl HttpTransport {
         if path.ends_with("/delete-preview") {
             self.config.request_timeout
                 + Duration::from_secs(hearth_proto::api::service_delete::MEASURE_BUDGET_S)
+        } else if path.ends_with("/backups/preview") {
+            self.config.request_timeout
+                + Duration::from_secs(hearth_proto::api::backups::ESTIMATE_BUDGET_S)
         } else {
             self.config.request_timeout
         }

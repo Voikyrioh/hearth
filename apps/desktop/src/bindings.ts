@@ -253,6 +253,34 @@ export const commands = {
 	 */
 	deleteService: (serverId: string, key: string, deletion: DeleteRequestDto, adminPassword: string | null) => typedError<DeleteOutcome, LinkFailure>(__TAURI_INVOKE("delete_service", { serverId, key, deletion, adminPassword })),
 	/**
+	 *  La liste des sauvegardes d'un service créé par Hearth (`GET /services/{key}/backups`, HRT-98) : une LECTURE, ouverte à
+	 *  tout compte. Les chemins sont ceux du service ; la note d'un compte est un texte à montrer tel quel (jamais du HTML).
+	 */
+	listBackups: (serverId: string, key: string) => typedError<BackupsOutcome, LinkFailure>(__TAURI_INVOKE("list_backups", { serverId, key })),
+	/**
+	 *  De quoi bâtir la fenêtre de création d'une sauvegarde (`POST …/backups/preview`) : une CONSULTATION, rien n'est
+	 *  écrit ni journalisé (BR-BACKUP-009 : l'estimation de la taille dure 60 secondes au plus).
+	 */
+	backupPreview: (serverId: string, key: string) => typedError<BackupPreviewOutcome, LinkFailure>(__TAURI_INVOKE("backup_preview", { serverId, key })),
+	/**
+	 *  Crée une sauvegarde (`POST …/backups`, acte `BackupCreate`) : un acte d'administration confirmé, couvert par
+	 *  l'élévation. L'agent répond `202` : l'issue ne se lit jamais ici, elle arrive par le suivi des opérations. Jamais
+	 *  rejoué. Ni la note ni un chemin ne sont signés. Sans le droit « gérer les services » : `MissingServicesRight`.
+	 */
+	createBackup: (serverId: string, key: string, backup: BackupRequestDto, adminPassword: string | null) => typedError<BackupCreateOutcome, LinkFailure>(__TAURI_INVOKE("create_backup", { serverId, key, backup, adminPassword })),
+	/**  Relit l'archive d'une sauvegarde et la juge (`POST /backups/{id}/verify`, BR-BACKUP-013) : une consultation. */
+	verifyBackup: (serverId: string, backupId: string) => typedError<BackupVerifyOutcome, LinkFailure>(__TAURI_INVOKE("verify_backup", { serverId, backupId })),
+	/**
+	 *  Supprime une sauvegarde (`DELETE /backups/{id}`) : un acte JAMAIS couvert par l'élévation (le mot de passe à chaque
+	 *  fois, BR-BACKUP-027). Jamais rejoué.
+	 */
+	deleteBackup: (serverId: string, backupId: string, adminPassword: string | null) => typedError<BackupDeleteOutcome, LinkFailure>(__TAURI_INVOKE("delete_backup", { serverId, backupId, adminPassword })),
+	/**
+	 *  Enregistre les éléments ignorés d'un service (`PUT …/backup-settings`, BR-BACKUP-003) : un acte couvert par
+	 *  l'élévation. Jamais rejoué.
+	 */
+	saveBackupSettings: (serverId: string, key: string, settings: BackupSettingsDto, adminPassword: string | null) => typedError<BackupSettingsOutcome, LinkFailure>(__TAURI_INVOKE("save_backup_settings", { serverId, key, settings, adminPassword })),
+	/**
 	 *  Les constats du formulaire de déploiement sur le nom, les ports et l'image (`POST /deployments/check`) : une
 	 *  CONSULTATION, ni suivi ni journal (BR-DEPLOY-033), jamais un secret. Hors « Connecté » : `NotConnected`.
 	 */
@@ -453,7 +481,13 @@ export type AdminActKindDto = "account_create" | "account_role" | "account_passw
 /**  Enregistrer les réglages d'un serveur de jeu (HRT-109) : couvert par l'élévation de cinq minutes. */
 "game_settings_save" | 
 /**  Supprimer un service (HRT-86, BR-DEL-012) : le mot de passe à chaque fois, jamais couvert par l'élévation. */
-"service_delete";
+"service_delete" | 
+/**  Créer une sauvegarde (HRT-98) : couvert par l'élévation de cinq minutes. */
+"backup_create" | 
+/**  Supprimer une sauvegarde (HRT-98) : le mot de passe à chaque fois, jamais couvert par l'élévation. */
+"backup_delete" | 
+/**  Régler les éléments ignorés des sauvegardes d'un service (HRT-98) : couvert par l'élévation de cinq minutes. */
+"backup_settings";
 
 /**  Qui a adopté un service, et quand (HRT-79). */
 export type AdoptionDto = {
@@ -720,6 +754,128 @@ export type AvailableDto = {
 	version: string,
 	/**  Texte brut (jamais du HTML) ; vide si la release n'en porte pas. */
 	notes: string,
+};
+
+/**
+ *  L'issue de la création : acceptée (`202`, l'opération court à l'arrière-plan), refusée, ou résultat inconnu (le
+ *  lien est tombé avant la réponse : jamais rejoué).
+ */
+export type BackupCreateOutcome = { kind: "accepted"; operationId: string; backupId: string } | { kind: "refused"; refusal: BackupRefusal } | { kind: "unknown"; opId: string };
+
+/**  L'issue de la suppression d'une sauvegarde. */
+export type BackupDeleteOutcome = { kind: "done"; removedFiles: boolean } | { kind: "refused"; refusal: BackupRefusal } | { kind: "unknown"; opId: string };
+
+/**  Un repère d'une sauvegarde (BR-BACKUP-012). */
+export type BackupFlagDto = "hot" | "maybe_inconsistent" | "forced_stop" | "before_restore" | "unknown";
+
+/**  L'état d'intégrité d'une sauvegarde (BR-BACKUP-013). */
+export type BackupIntegrityDto = "verified" | "corrupt" | "unchecked" | "missing" | "unknown";
+
+/**  Comment la copie est faite (BR-BACKUP-006). */
+export type BackupModeDto = "stopped" | "hot" | "stop_copy_start" | "unknown";
+
+/**  De quoi bâtir la fenêtre de création. */
+export type BackupPreviewDto = {
+	name: string,
+	running: boolean,
+	stopGraceS: number,
+	roots: string[],
+	notSaved: string[],
+	bytes: number | null,
+	files: number | null,
+	partial: boolean,
+	bigFiles: BigFileDto[],
+	ignored: IgnoredViewDto[],
+	ignoredMore: number,
+	freeBytes: number | null,
+	reserveBytes: number | null,
+	enoughSpace: boolean,
+	sameDisk: boolean,
+	nothingToSave: boolean,
+};
+
+/**  L'estimation de la fenêtre de création : prête, ou refusée par son code. */
+export type BackupPreviewOutcome = { kind: "ready"; preview: BackupPreviewDto } | { kind: "refused"; refusal: BackupReadRefusal };
+
+/**  Pourquoi l'agent n'a pas donné une lecture (liste, estimation, vérification). Sans texte. */
+export type BackupReadRefusal = { kind: "service_not_found" } | 
+/**  Un service adopté : ses sauvegardes ne sont pas prises en charge (BR-BACKUP-028). */
+{ kind: "service_adopted" } | { kind: "engine_unavailable"; engine: EngineStateDto | null } | 
+/**  La racine des sauvegardes chevauche un dossier de données ou n'est pas utilisable (BR-BACKUP-005). */
+{ kind: "path_refused"; reason: string | null } | { kind: "backup_not_found" } | 
+/**  Une opération utilise la sauvegarde (BR-BACKUP-027). */
+{ kind: "backup_in_use" } | { kind: "other" };
+
+/**  Pourquoi l'agent a refusé un acte de sauvegarde. Sans texte : l'interface choisit le message d'après `kind`. */
+export type BackupRefusal = { kind: "wrong_password" } | { kind: "password_required" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "busy" } | { kind: "engine_unavailable"; engine: EngineStateDto | null } | { kind: "service_not_found" } | { kind: "service_adopted" } | 
+/**  Une action tient déjà le service ; qui, et laquelle. */
+{ kind: "service_busy"; by: string | null; action: OperationKindDto | null } | 
+/**  Une autre sauvegarde ou restauration tient la place du serveur (BR-BACKUP-010). */
+{ kind: "heavy_io_busy" } | { kind: "not_drivable"; state: ServiceStateDto | null } | 
+/**  Pas assez de place sur le disque des sauvegardes, aucune case pour passer outre (BR-BACKUP-009). */
+{ kind: "no_space"; needed_bytes: number | null; free_bytes: number | null; reserve_bytes: number | null } | 
+/**  Le service n'a aucun dossier de données à sauvegarder (BR-BACKUP-002). */
+{ kind: "nothing_to_save" } | 
+/**  La note dépasse 80 caractères ou la liste d'éléments est trop longue. */
+{ kind: "invalid_input"; field: string | null } | { kind: "path_refused"; reason: string | null } | { kind: "backup_not_found" } | { kind: "backup_in_use" } | 
+/**  Le mode demandé n'est pas permis dans l'état du service. */
+{ kind: "mode_refused" } | { kind: "other" };
+
+/**  La demande de création : le mode, la note facultative et les éléments ignorés pour cette sauvegarde seulement. */
+export type BackupRequestDto = {
+	mode: BackupModeDto,
+	note: string | null,
+	ignoreOnce: IgnoredItemDto[],
+};
+
+/**  Les éléments ignorés d'un service : ce que le compte ajoute, et ce qu'il retire des ignorés par défaut. */
+export type BackupSettingsDto = {
+	ignored: IgnoredItemDto[],
+	included: IgnoredItemDto[],
+};
+
+/**  L'issue de l'enregistrement des éléments ignorés. */
+export type BackupSettingsOutcome = { kind: "done"; settings: BackupSettingsDto } | { kind: "refused"; refusal: BackupRefusal } | { kind: "unknown"; opId: string };
+
+/**  Le résultat d'une vérification : rendu, ou refusé par son code. */
+export type BackupVerifyOutcome = { kind: "done"; result: VerifyResultDto } | { kind: "refused"; refusal: BackupReadRefusal };
+
+/**  Une sauvegarde de la liste. */
+export type BackupViewDto = {
+	id: string,
+	createdAt: string,
+	archiveBytes: number | null,
+	dataBytes: number | null,
+	files: number | null,
+	mode: BackupModeDto,
+	flags: BackupFlagDto[],
+	changedFiles: number,
+	skipped: number,
+	note: string | null,
+	account: string,
+	image: string,
+	integrity: BackupIntegrityDto,
+	verifiedAt: string | null,
+};
+
+/**  La liste des sauvegardes : prête, ou refusée par son code. */
+export type BackupsOutcome = { kind: "ready"; view: BackupsViewDto } | { kind: "refused"; refusal: BackupReadRefusal };
+
+/**  La liste des sauvegardes d'un service, l'espace pris et les éléments ignorés. */
+export type BackupsViewDto = {
+	backups: BackupViewDto[],
+	totalBytes: number | null,
+	freeBytes: number | null,
+	sameDisk: boolean,
+	settings: BackupSettingsDto,
+	nothingToSave: boolean,
+};
+
+/**  Un gros fichier signalé à la fenêtre de création (BR-BACKUP-033). */
+export type BigFileDto = {
+	root: string,
+	path: string,
+	bytes: number | null,
 };
 
 export type BlockedDto = "fingerprint_changed" | "incompatible_agent" | "incompatible_client";
@@ -1454,6 +1610,22 @@ export type HostDto = {
 	declarative: boolean,
 };
 
+/**  Un dossier du service et un chemin dans ce dossier (`/` pour séparateur ; vide : le dossier entier). */
+export type IgnoredItemDto = {
+	root: string,
+	path: string,
+};
+
+/**  Un élément ignoré et sa raison. */
+export type IgnoredViewDto = {
+	root: string,
+	path: string,
+	why: IgnoredWhyDto,
+};
+
+/**  Pourquoi un élément est ignoré (BR-BACKUP-003). */
+export type IgnoredWhyDto = "looks_like_backups" | "chosen" | "this_time" | "unknown";
+
 export type ImageDto = {
 	/**  Absent : une image sans nom (« image sans nom {identifiant} », `BR-SVC-022`). */
 	ref: string | null,
@@ -2035,6 +2207,8 @@ export type ServiceRightsDto = {
 	gameSettings: boolean,
 	/**  L'agent annonce `service-delete` (HRT-85) : seul cas où la carte « Suppression » peut exister (HRT-86). */
 	serviceDelete: boolean,
+	/**  L'agent annonce `service-backups` (HRT-97) : seul cas où l'onglet « Sauvegardes » peut exister (HRT-98). */
+	serviceBackups: boolean,
 	account: string,
 };
 
@@ -2215,6 +2389,13 @@ export type UpdateStateDto = {
 export type UsernameProblemDto = "empty" | "too_short" | "too_long" | "invalid_chars";
 
 export type ValueStateDto = "written" | "unwritten" | "secret_set" | "unknown";
+
+/**  Le résultat d'une vérification. */
+export type VerifyResultDto = {
+	integrity: BackupIntegrityDto,
+	verifiedAt: string | null,
+	filesChecked: number | null,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
