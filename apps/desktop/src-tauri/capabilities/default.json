@@ -86,6 +86,8 @@
     "allow-read-engine-capacity",
     "allow-read-catalog",
     "allow-read-fiche",
+    "allow-read-worlds",
+    "allow-inspect-world",
     "allow-install-fiche",
     "allow-open-fiche-link",
     "allow-read-game-settings",

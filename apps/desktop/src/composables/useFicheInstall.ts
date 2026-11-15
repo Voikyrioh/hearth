@@ -3,6 +3,7 @@ import { useDeployCheck } from "@/composables/useDeployCheck";
 import type { DeployFlowSource } from "@/composables/useDeployFlow";
 import { useEngineCapacity } from "@/composables/useEngineCapacity";
 import { useFicheDetail } from "@/composables/useFicheDetail";
+import { useWorldImport } from "@/composables/useWorldImport";
 import type { PortVerdict } from "@/deploy/messages";
 import { portVerdict } from "@/deploy/messages";
 import { nameIssue } from "@/deploy/rules";
@@ -20,6 +21,7 @@ import {
   readableHostPorts,
   startingHostPort,
 } from "@/fiche/ports";
+import { ficheKnowsWorlds, hiddenByWorld, worldMissing } from "@/fiche/world";
 import { type DeployCheckInput, type DeployRefusal, getLinkBridge, type ServiceInfo } from "@/link";
 import type { Resources } from "@/resources";
 import { problemText } from "@/settings/messages";
@@ -82,8 +84,18 @@ export function useFicheInstall(
   }
 
   // ── Les défauts de forme ─────────────────────────────────────────────────────────────────────
+  // Reprendre un monde : le monde porte son nom et ses réglages figés, la page ne les pose pas (HRT-106, BR-MONDE-014).
+  const hidden = computed(() =>
+    detail.value && draft.value
+      ? hiddenByWorld(detail.value, draft.value.world)
+      : new Set<string>(),
+  );
   const questions = computed(() =>
-    detail.value && draft.value ? visibleQuestions(detail.value, draft.value.variant) : [],
+    detail.value && draft.value
+      ? visibleQuestions(detail.value, draft.value.variant).filter(
+          (question) => !hidden.value.has(question.id),
+        )
+      : [],
   );
   const answerProblems = computed(() =>
     draft.value ? answerIssues(questions.value, draft.value.answers) : new Map(),
@@ -91,7 +103,11 @@ export function useFicheInstall(
   // Les réglages de « Voir tous les réglages » (HRT-109, BR-FICHE-040) : ceux qui ne sont pas des questions. Leur défaut de
   // forme ne compte que s'ils ont été touchés (sinon la valeur est celle que la fiche propose).
   const extras = computed(() =>
-    detail.value && draft.value ? extraSettings(detail.value, draft.value.variant) : [],
+    detail.value && draft.value
+      ? extraSettings(detail.value, draft.value.variant).filter(
+          (setting) => !hidden.value.has(setting.question.id),
+        )
+      : [],
   );
   const extraProblems = computed(() => {
     const found = new Map<string, string>();
@@ -125,13 +141,24 @@ export function useFicheInstall(
     return found;
   });
   const nameProblem = computed(() => (draft.value ? nameIssue(draft.value.name) : null));
+  /** Reprendre un monde sans l'avoir choisi : la page ne continue pas (BR-MONDE-002). */
+  const worldProblem = computed(() => (draft.value ? worldMissing(draft.value.world) : false));
   /** Au moins un défaut de forme sur la page « Réponses ». */
   const answersInvalid = computed(
     () =>
       nameProblem.value !== null ||
+      worldProblem.value ||
       answerProblems.value.size > 0 ||
       extraProblems.value.size > 0 ||
       portProblems.value.size > 0,
+  );
+
+  // ── Le monde repris (HRT-106) ────────────────────────────────────────────────────────────────
+  const worldImport = useWorldImport(
+    serverId,
+    ficheId,
+    enabled,
+    () => detail.value !== null && ficheKnowsWorlds(detail.value),
   );
 
   // ── Les constats du serveur ──────────────────────────────────────────────────────────────────
@@ -250,6 +277,41 @@ export function useFicheInstall(
       if (!on && index >= 0) current.optionalPorts.splice(index, 1);
     });
   }
+  /** Reprendre un monde existant, ou créer un monde neuf. Revenir au monde neuf oublie le monde choisi. */
+  function setResume(resume: boolean): void {
+    edit((current) => {
+      current.world.resume = resume;
+      if (!resume) {
+        current.world.folder = null;
+        current.world.path = null;
+        current.world.name = null;
+        worldImport.clear();
+      }
+    });
+  }
+  /** Choisit le monde à reprendre et l'inspecte (une consultation, rien n'est écrit). */
+  function chooseWorld(folder: string, path: string, name: string): void {
+    edit((current) => {
+      current.world.resume = true;
+      current.world.folder = folder;
+      current.world.path = path;
+      current.world.name = name;
+    });
+    void worldImport.inspect({ folder, path });
+  }
+  function changeWorld(): void {
+    edit((current) => {
+      current.world.folder = null;
+      current.world.path = null;
+      current.world.name = null;
+    });
+    worldImport.clear();
+  }
+  function setKeepIfChanged(keep: boolean): void {
+    edit((current) => {
+      current.world.keepIfChanged = keep;
+    });
+  }
   function setResources(resources: Resources): void {
     edit((current) => {
       current.resources = resources;
@@ -265,6 +327,7 @@ export function useFicheInstall(
     store.wipe(serverId(), ficheId());
     resetTouched();
     checks.reset();
+    worldImport.clear();
     agreed.value = [];
     step.value = 1;
   }
@@ -280,7 +343,12 @@ export function useFicheInstall(
       const fiche = detail.value;
       const current = draft.value;
       if (!fiche || !current) return null;
-      const request = toInstallRequest(fiche, current, { accept, agreements: agreed.value });
+      // Le geste « Je comprends » de la version du monde est une case du récapitulatif : le parcours n'arrive ici qu'après.
+      const request = toInstallRequest(fiche, current, {
+        accept,
+        agreements: agreed.value,
+        worldVersionUnderstood: true,
+      });
       if (!request) return null;
       return {
         name: request.name,
@@ -303,6 +371,8 @@ export function useFicheInstall(
     published,
     portProblems,
     nameProblem,
+    worldProblem,
+    worldImport,
     answersInvalid,
     touch,
     touchAll,
@@ -329,6 +399,10 @@ export function useFicheInstall(
     resetAnswer,
     setHostPort,
     setOptionalPort,
+    setResume,
+    chooseWorld,
+    changeWorld,
+    setKeepIfChanged,
     setResources,
     agreed,
     wipe,

@@ -131,6 +131,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             service_ops::commands::read_engine_capacity,
             service_ops::commands::read_catalog,
             service_ops::commands::read_fiche,
+            service_ops::commands::read_worlds,
+            service_ops::commands::inspect_world,
             service_ops::commands::install_fiche,
             service_ops::commands::open_fiche_link,
             service_ops::commands::read_game_settings,

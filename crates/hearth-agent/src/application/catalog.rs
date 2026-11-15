@@ -10,7 +10,8 @@ use hearth_proto::api::catalog::{
     EvidenceView, FicheCard, FicheDetail, FicheStatus, FirstStartView, FolderView, ImageView,
     ImposedView, ItemCharsetView, LevelView, ListView, MemoryNeed, ModsView, PackGenreView,
     PackWayView, PortMappingView, PortView, QuestionKind, QuestionView, RefusedFiche,
-    ResourcesView, SecretKindView, SettingView, StopView, ThemeView, VariantView, WorldSavedView,
+    ResourcesView, SecretKindView, SettingView, StopView, ThemeView, VariantView, WorldImportView,
+    WorldSavedView,
 };
 
 use crate::application::ports::AuditSink;
@@ -345,6 +346,14 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
             .collect::<Vec<_>>()
             .into(),
         mods: mods_view(fiche),
+        // Ce que la reprise d'un monde remplit ou ne touche pas (HRT-106, BR-MONDE-014) : seulement une fiche qui sait
+        // reprendre un monde.
+        world_import: crate::domain::worlds::WorldRules::from_fiche(fiche)
+            .ok()
+            .map(|rules| WorldImportView {
+                names_setting: rules.names_setting,
+                carried_by_world: rules.carried,
+            }),
     }
 }
 
@@ -602,6 +611,10 @@ mod tests {
         // Le premier démarrage, l'arrêt et ce que la fiche impose sont dits par la fiche.
         let first = terraria.first_start.as_ref().unwrap();
         assert!(first.world_generation && first.ready_timeout_s > 0);
+        // Ce que la reprise d'un monde remplit et ne touche pas, dit par la fiche (HRT-106, BR-MONDE-014).
+        let worlds = terraria.world_import.as_ref().unwrap();
+        assert_eq!(worlds.names_setting, "world_name");
+        assert!(worlds.carried_by_world.iter().any(|id| id == "world_size"));
         let stop = terraria.stop.as_ref().unwrap();
         assert_eq!(stop.world_saved, WorldSavedView::BySequence);
         assert!(

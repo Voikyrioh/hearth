@@ -58,3 +58,25 @@ async fn an_identifier_that_is_not_one_never_leaves() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_world_read_never_leaves_with_an_identifier_that_is_not_one() {
+    // HRT-106 : la liste et l'inspection d'un monde construisent leur chemin avec le même garde.
+    let world = World::connected(options()).await;
+    let pick = hearth_proto::api::worlds::WorldRef {
+        folder: "/srv/jeux".into(),
+        path: "Worlds/Alpha.wld".into(),
+    };
+    for bad in ["", "../hello", "a/b", "A"] {
+        let listed = world.manager.read_worlds(&world.id, bad).await;
+        assert!(
+            matches!(listed, Err(LinkError::InvalidInput(InputField::Fiche))),
+            "{bad}: {listed:?}"
+        );
+        let inspected = world.manager.inspect_world(&world.id, bad, &pick).await;
+        assert!(
+            matches!(inspected, Err(LinkError::InvalidInput(InputField::Fiche))),
+            "{bad}: {inspected:?}"
+        );
+    }
+}

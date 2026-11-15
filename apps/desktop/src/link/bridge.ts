@@ -57,6 +57,7 @@ import type {
   ServerInfo,
   Unsubscribe,
 } from "./types";
+import type { WorldInspectRead, WorldRef, WorldsRead } from "./worlds";
 
 /**
  * Pont entre l'interface et la liaison avec les serveurs. L'interface ne connaît que
@@ -463,6 +464,14 @@ export interface LinkBridge {
   readCatalog(serverId: string): Promise<Catalog>;
   /** Le détail d'une fiche avec son empreinte ; `unknown` : l'agent ne la propose pas (jamais une panne). */
   readFiche(serverId: string, ficheId: string): Promise<FicheRead>;
+  /**
+   * Les mondes que la fiche reconnaît dans les dossiers ouverts aux services (HRT-106, BR-MONDE-002, 003, 039) : une
+   * lecture, ni acte ni journal, rien n'est écrit. `not_supported` : la fiche ne dit pas ce qu'est un monde. Sans le
+   * droit « gérer les services » : échec `missing_services_right`.
+   */
+  readWorlds(serverId: string, ficheId: string): Promise<WorldsRead>;
+  /** Ce que la reprise d'un monde copierait et laisserait où il est (BR-MONDE-006, 009, 012) ; un monde refusé n'est pas une panne. */
+  inspectWorld(serverId: string, ficheId: string, world: WorldRef): Promise<WorldInspectRead>;
   /**
    * Installe un serveur de jeu depuis une fiche : le déploiement ordinaire avec un membre `source` (BR-FICHE-013), donc
    * le même acte confirmé, JAMAIS couvert par l'élévation (`adminPassword` redemandé à chaque fois, jamais gardé), le

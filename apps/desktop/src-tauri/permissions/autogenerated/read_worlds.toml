@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-worlds"
+description = "Enables the read_worlds command without any pre-configured scope."
+commands.allow = ["read_worlds"]
+
+[[permission]]
+identifier = "deny-read-worlds"
+description = "Denies the read_worlds command without any pre-configured scope."
+commands.deny = ["read_worlds"]

@@ -124,6 +124,8 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`BackupDialog`](./BackupDialog.md) — La fenêtre de création d'une sauvegarde (BR-BACKUP-006 à 012, 033) (HRT-98).
 - [`DeleteBackupDialog`](./DeleteBackupDialog.md) — La confirmation de la suppression d'une sauvegarde (BR-BACKUP-027) (HRT-98).
 - [`IgnoredItemsDialog`](./IgnoredItemsDialog.md) — La fenêtre « Éléments ignorés » (BR-BACKUP-003, 033) (HRT-98).
+- [`WorldCard`](./WorldCard.md) — La carte « Monde » de l'installation d'un serveur de jeu (HRT-106).
+- [`ExistingServerHelp`](./ExistingServerHelp.md) — L'aide « J'ai déjà un serveur de jeu » (HRT-106).
 - [`ServiceRowMenu`](./ServiceRowMenu.md) — Le menu d'actions d'une ligne de la liste des services.
 - [`OperationDecisionDialog`](./OperationDecisionDialog.md) — La fenêtre de décision d'une opération (acte confirmé, mot de passe à chaque réponse).
 - [`AgentUpdateSteps`](./AgentUpdateSteps.md) — Les étapes d'une mise à jour de l'agent (téléchargement, vérification, installation, redémarrage, contrôle).

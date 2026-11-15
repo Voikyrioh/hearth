@@ -29,6 +29,7 @@ mod service_ops;
 mod services;
 mod task;
 mod watchers;
+mod worlds;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -57,6 +58,7 @@ pub use service_logs::{LogEnd, LogOutput, ServiceLogReader};
 pub use service_ops::OperationActResult;
 pub use services::{Acted, KnownServices};
 use task::Command;
+pub use worlds::{InspectOutcome, WorldsOutcome};
 
 use crate::adapters::DeviceKey;
 use crate::adapters::{

@@ -28,8 +28,21 @@ import {
 } from "@/fiche/messages";
 import { forVariant, publishedPorts, readableHostPorts } from "@/fiche/ports";
 import { proofOf } from "@/fiche/proof";
+import {
+  folderText,
+  inspectionFiles,
+  inspectionSize,
+  notCopiedLines,
+  worldName,
+} from "@/fiche/world";
 import { t } from "@/i18n";
-import type { DeployCheck, FicheDetail, FicheQuestion, FicheSetting } from "@/link";
+import type {
+  DeployCheck,
+  FicheDetail,
+  FicheQuestion,
+  FicheSetting,
+  WorldInspection,
+} from "@/link";
 import { type EngineCapacity, formatCpu, formatMemory } from "@/resources";
 import { formatSize } from "@/serviceOps/messages";
 
@@ -50,6 +63,8 @@ const props = defineProps<{
   questions: readonly FicheQuestion[];
   /** Les réglages de « Voir tous les réglages » (HRT-109) : seuls ceux qui diffèrent de la valeur proposée sont listés. */
   extras?: readonly FicheSetting[];
+  /** Ce que l'inspection du monde repris a mesuré (HRT-106) ; `null` : pas de reprise, ou mesure pas lue. */
+  worldInspection?: WorldInspection | null;
   capacity: EngineCapacity | null;
   /** Les constats frais du serveur à l'ouverture ; `null` : la consultation n'a pas pu être faite. */
   check: DeployCheck | null;
@@ -84,8 +99,28 @@ const points = computed<AttentionPoint[]>(() =>
     check: props.check,
     resources: props.draft.resources,
     forceLowDisk: props.forceLowDisk,
+    resumesWorld: props.draft.world.resume,
   }),
 );
+
+/** Le monde repris, tel que la fenêtre le dit (HRT-106, BR-MONDE-004, 006) : nom, dossier, copie, éléments laissés. */
+const resumed = computed(() => {
+  const world = props.draft.world;
+  if (!world.resume || world.folder === null || world.name === null) return null;
+  const inspection = props.worldInspection ?? null;
+  return {
+    name: worldName({ name: world.name }),
+    folder: folderText(world.folder),
+    copy:
+      inspection === null
+        ? null
+        : t("fiche.world.copyOf", {
+            size: inspectionSize(inspection),
+            files: inspectionFiles(inspection),
+          }),
+    left: inspection === null ? [] : notCopiedLines(inspection),
+  };
+});
 const attentionDone = computed(() => allValidated(points.value, ticked.value));
 
 const published = computed(() =>
@@ -253,6 +288,16 @@ function refusal(refused: { kind: string }): string | undefined {
           <span v-for="(download, index) in downloads" :key="index" class="sum__block">
             {{ downloadText(download) }}
           </span>
+        </dd>
+      </div>
+      <div v-if="resumed" class="sum__row">
+        <dt>{{ t("fiche.world.sumTitle") }}</dt>
+        <dd data-sum-world>
+          <span class="sum__strong">{{ resumed.name }}</span>
+          <span class="sum__block">{{ t("fiche.world.sumFolder", { folder: resumed.folder }) }}</span>
+          <span v-if="resumed.copy" class="sum__block" data-sum-world-copy>{{ resumed.copy }}</span>
+          <span v-for="line in resumed.left" :key="line" class="sum__block" data-sum-world-left>{{ line }}</span>
+          <span class="sum__note">{{ t("fiche.world.neverDeleted") }}</span>
         </dd>
       </div>
       <div class="sum__row">

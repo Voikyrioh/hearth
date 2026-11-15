@@ -15,6 +15,7 @@ pub use hearth_proto::version::API_VERSION;
 pub use error::{InputField, LinkError, RefusalReason};
 pub use manager::{
     AccountsRead, Acted, ActionOutcome, ActionRequest, Analysis, AuditExportFile, EventStream,
-    LinkConfig, LinkManager, LogEnd, LogOutput, LoginInfo, NewServer, OperationActResult, Ports,
-    ProbeResult, ReauthState, ServerUpdate, ServiceLogReader, ServiceRightsRead, is_stable_id,
+    InspectOutcome, LinkConfig, LinkManager, LogEnd, LogOutput, LoginInfo, NewServer,
+    OperationActResult, Ports, ProbeResult, ReauthState, ServerUpdate, ServiceLogReader,
+    ServiceRightsRead, WorldsOutcome, is_stable_id,
 };

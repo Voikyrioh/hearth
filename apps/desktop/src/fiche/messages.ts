@@ -16,6 +16,7 @@ import type { AttentionPoint } from "./attention";
 import { characterName } from "./character";
 import type { Coverage, DiskVerdict, Lack, MemoryNotice, MinimumVerdict } from "./fit";
 import { type ProofKind, proofOf } from "./proof";
+import { installRefusalText } from "./world";
 
 /**
  * Les textes de l'installation depuis une fiche (HRT-102), des fonctions pures : les CODES des règles
@@ -300,6 +301,8 @@ export function attentionText(point: AttentionPoint): string | null {
         chosen: formatMemory(point.chosen),
         minimum: formatMemory(point.minimum),
       });
+    case "world_version":
+      return t("fiche.world.versionWarning");
     case "publisher_minimum":
       return t(point.lack === "memory" ? "fiche.publisherAboveMemory" : "fiche.publisherAboveCpu", {
         needed: amount(point.lack, point.needed),
@@ -363,6 +366,10 @@ export function ficheRefusalText(
         free: formatSize(refused.freeBytes),
         missing: formatSize(refused.missingBytes),
       });
+    case "heavy_io_busy":
+    case "invalid":
+      // Reprendre un monde (HRT-106) : les refus propres au monde ; tout autre champ est celui d'un déploiement.
+      return installRefusalText(refused);
     default:
       return null;
   }

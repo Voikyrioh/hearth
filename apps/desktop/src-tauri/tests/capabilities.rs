@@ -421,6 +421,12 @@ const EXPECTED: &[(&str, &str)] = &[
     // coquille la relit dans la fiche chez l'agent (genre et identifiant seulement).
     ("readCatalog", "serverId: string"),
     ("readFiche", "serverId: string, fiche: string"),
+    // HRT-106 : reprendre un monde existant. Deux lectures (la liste, l'inspection), ni acte ni mot de passe.
+    ("readWorlds", "serverId: string, fiche: string"),
+    (
+        "inspectWorld",
+        "serverId: string, fiche: string, world: WorldRefDto",
+    ),
     (
         "installFiche",
         "serverId: string, installation: FicheInstallRequestDto, adminPassword: string | null",
@@ -538,6 +544,8 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "readEngineCapacity",
     "readCatalog",
     "readFiche",
+    "readWorlds",
+    "inspectWorld",
     "openFicheLink",
     "readGameSettings",
     "analyzeGameSettings",

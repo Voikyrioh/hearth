@@ -108,7 +108,10 @@ export type DeployField =
   | "ports"
   | "mounts"
   | "command"
-  | "resources";
+  | "resources"
+  /** Le membre `source` de la demande et le monde à reprendre (HRT-106) : leur raison dit lequel des refus. */
+  | "source"
+  | "world";
 
 /** Pourquoi l'agent a refusé le déploiement, avant tout geste (rien n'est créé). Des CODES, jamais un texte. */
 export type DeployRefusal =
@@ -131,6 +134,8 @@ export type DeployRefusal =
       suggested: number | null;
     }
   | { kind: "deploy_limit" }
+  /** Une sauvegarde, une restauration ou une autre reprise de monde tient déjà la place du serveur (BR-MONDE-013). */
+  | { kind: "heavy_io_busy" }
   | { kind: "no_space"; freeBytes: number | null }
   // Installer depuis une fiche (HRT-102) : des CODES, jamais un texte de l'agent ni la valeur d'une réponse.
   | { kind: "fiche_unknown" }
@@ -176,7 +181,16 @@ export type CancelOutcome =
 
 /** Le plan d'un déploiement, dans l'ordre de l'agent (`op_plan`) : `create` est le point de non-retour (BR-DEPLOY-016). */
 export const DEPLOY_STEPS = ["check", "pull", "create", "start", "watch"] as const;
-export type DeployStep = (typeof DEPLOY_STEPS)[number];
+/** Le plan d'un déploiement qui reprend un monde : la copie du monde vient après la récupération de l'image (HRT-106, BR-MONDE-013). */
+export const DEPLOY_STEPS_WITH_WORLD = [
+  "check",
+  "pull",
+  "world",
+  "create",
+  "start",
+  "watch",
+] as const;
+export type DeployStep = (typeof DEPLOY_STEPS_WITH_WORLD)[number];
 
 /** Les champs qu'un refus de validation peut désigner sont connus ; tout autre texte de l'agent devient `other`. */
 export const DEPLOY_FIELDS: readonly DeployField[] = [
@@ -188,6 +202,8 @@ export const DEPLOY_FIELDS: readonly DeployField[] = [
   "mounts",
   "command",
   "resources",
+  "source",
+  "world",
 ];
 
 // ── Conversions depuis les types générés (`bindings.ts`) ──────────────────────────────────────────

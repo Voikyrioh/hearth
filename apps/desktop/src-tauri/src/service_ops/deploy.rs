@@ -225,6 +225,7 @@ pub fn interpret_deploy(status: u16, body: &Value) -> Result<DeployOutcome, Link
             None => refused(DeployRefusal::Other),
         },
         ErrorCode::DeployLimit => refused(DeployRefusal::DeployLimit),
+        ErrorCode::HeavyIoBusy => refused(DeployRefusal::HeavyIoBusy),
         ErrorCode::NoSpace => {
             let install = details.get("reason").and_then(Value::as_str) == Some("install");
             match (

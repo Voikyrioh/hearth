@@ -14,6 +14,7 @@ import { type EngineCapacity, engineCapacityFromWire, GIB } from "@/resources";
 import {
   type CancelOutcome,
   DEPLOY_STEPS,
+  DEPLOY_STEPS_WITH_WORLD,
   type DeployCheck,
   type DeployCheckInput,
   type DeployField,
@@ -59,6 +60,8 @@ interface Held {
   step: DeployStep;
   image: string;
   by: string;
+  /** L'installation reprend un monde : le plan a l'étape `world` entre `pull` et `create` (HRT-106). */
+  world: boolean;
 }
 
 /** Une demande reçue, telle que le serveur la garde pour un test : jamais une valeur dans un état de l'interface. */
@@ -98,6 +101,8 @@ export class SimulatedDeploys {
   private readonly images = new Set<string>();
   private readonly deleting = new Map<string, Set<string>>();
   private readonly held = new Map<string, Map<string, Held>>();
+  /** `true` : une sauvegarde, une restauration ou une autre reprise tient la place des opérations lourdes (HRT-106). */
+  heavyIoBusy = false;
   private nextKey = 1;
 
   constructor(
@@ -466,11 +471,19 @@ export class SimulatedDeploys {
       tag: string;
       ports: readonly DeployPort[];
       accept: { reservedPorts: boolean; lowDisk: boolean };
+      /** Reprendre un monde : prend la place des opérations lourdes du serveur (HRT-106, BR-MONDE-013). */
+      world?: boolean;
     },
     by: string,
     remember: () => void,
   ): DeployOutcome {
     const mine = this.held.get(serverId) ?? new Map<string, Held>();
+    if (
+      plan.world === true &&
+      (this.heavyIoBusy || [...mine.values()].some((held) => held.world))
+    ) {
+      return { kind: "refused", refusal: { kind: "heavy_io_busy" } };
+    }
     if (mine.size >= 2) return { kind: "refused", refusal: { kind: "deploy_limit" } };
     const name = this.nameStatus(serverId, plan.name);
     if (name.status === "being_deleted")
@@ -535,6 +548,7 @@ export class SimulatedDeploys {
       step: "check",
       image: `${plan.repository}:${plan.tag}`,
       by,
+      world: plan.world === true,
     });
     this.held.set(serverId, mine);
     remember();
@@ -562,10 +576,33 @@ export class SimulatedDeploys {
     this.ops.update(serverId, opId, {
       status: "running",
       step: "pull",
-      steps: stepsUpTo("pull"),
+      steps: stepsUpTo("pull", "intent", held.world),
       percent,
       bytesDone,
       bytesTotal,
+      cancellable: true,
+    });
+  }
+
+  /**
+   * La copie du monde progresse (HRT-106, BR-MONDE-011) : l'étape devient « world », annulable jusqu'à « create ».
+   * `bytesTotal` : ce que l'inspection a mesuré.
+   */
+  worldProgress(
+    serverId: string,
+    opId: string,
+    figures: { itemsDone: number; bytesDone: number; bytesTotal: number },
+  ): void {
+    const held = this.heldOf(serverId, opId);
+    held.step = "world";
+    this.ops.update(serverId, opId, {
+      status: "running",
+      step: "world",
+      steps: stepsUpTo("world", "intent", true),
+      percent: Math.round((figures.bytesDone / Math.max(figures.bytesTotal, 1)) * 100),
+      itemsDone: figures.itemsDone,
+      bytesDone: figures.bytesDone,
+      bytesTotal: figures.bytesTotal,
       cancellable: true,
     });
   }
@@ -577,8 +614,8 @@ export class SimulatedDeploys {
     this.ops.update(serverId, opId, {
       status: "running",
       step,
-      steps: stepsUpTo(step),
-      cancellable: step === "check" || step === "pull",
+      steps: stepsUpTo(step, "intent", held.world),
+      cancellable: step === "check" || step === "pull" || step === "world",
     });
   }
 
@@ -606,7 +643,7 @@ export class SimulatedDeploys {
       exitCode: crashed ? (after.exitCode ?? 1) : null,
       since: new Date(this.now()).toISOString(),
     });
-    this.ops.update(serverId, opId, { steps: stepsUpTo("watch", "done") });
+    this.ops.update(serverId, opId, { steps: stepsUpTo("watch", "done", held.world) });
     this.ops.finish(serverId, opId, "succeeded", crashed ? "stopped_right_after_start" : null);
     this.release(serverId, opId);
   }
@@ -681,9 +718,10 @@ export class SimulatedDeploys {
 }
 
 /** Les lignes de journal d'un plan arrivé à `step` : les étapes d'avant faites, celle-ci en cours (ou faite). */
-function stepsUpTo(step: DeployStep, last: "intent" | "done" = "intent") {
-  const index = DEPLOY_STEPS.indexOf(step);
-  return DEPLOY_STEPS.slice(0, index + 1).map((name, i) => ({
+function stepsUpTo(step: DeployStep, last: "intent" | "done" = "intent", world = false) {
+  const plan: readonly DeployStep[] = world ? DEPLOY_STEPS_WITH_WORLD : DEPLOY_STEPS;
+  const index = plan.indexOf(step);
+  return plan.slice(0, index + 1).map((name, i) => ({
     step: name,
     state: i < index ? ("done" as const) : last,
   }));

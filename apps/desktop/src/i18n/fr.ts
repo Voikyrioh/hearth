@@ -409,6 +409,7 @@ export const fr = {
     catalogue: "Catalogue",
     ficheDetail: "Fiche d'un jeu",
     installFiche: "Installer un serveur de jeu",
+    existingServerHelp: "J'ai déjà un serveur de jeu",
     accounts: "Comptes",
     audit: "Journal d'activité",
     security: "Sécurité",
@@ -1041,6 +1042,7 @@ export const fr = {
     steps: {
       check: "Vérification",
       pull: "Récupération de l'image",
+      world: "Copie du monde",
       create: "Création du service",
       watch: "Vérification du démarrage",
       stop: "Arrêt du service",
@@ -1981,6 +1983,105 @@ export const fr = {
     waitingText: "Le catalogue s'affichera dès que ce serveur sera joignable.",
   },
   fiche: {
+    // Reprendre un monde existant (HRT-106, BR-MONDE-*). Vouvoiement, phrases complètes.
+    // L'aide « J'ai déjà un serveur de jeu » (HRT-106, BR-MONDE-021) : aucun jeu ni dossier nommé.
+    help: {
+      intro:
+        "Votre serveur de jeu tourne déjà, lancé par le système de votre serveur. Voici comment l'amener dans Hearth sans risquer votre partie.",
+      stepsLabel: "Les trois temps",
+      tryTitle: "1. Essayer",
+      tryText:
+        "Installez le même jeu depuis sa fiche, sur un autre port, en reprenant une copie de votre monde. Votre ancien serveur reste en place. Testez avec vos joueurs.",
+      tryLink: "Ouvrir le Catalogue",
+      switchTitle: "2. Basculer",
+      switchText:
+        "Quand le résultat vous convient, arrêtez l'ancien serveur, retirez-le de la configuration de votre serveur, puis donnez à votre nouveau service le port habituel.",
+      adoptTitle: "3. Facultatif : adopter",
+      adoptText:
+        "Adoptez le service existant. Rien ne change pour lui : vous le voyez, vous pouvez l'arrêter, le relancer et lire ses journaux. Sa configuration reste celle de votre serveur.",
+      adoptButton: "Adopter un service existant",
+      advice:
+        "Conseil : laissez Hearth piloter seul ce serveur. Deux outils qui lancent des conteneurs se partagent le processeur et la mémoire sans se voir. Adopter ne bloque rien.",
+      stayTitle: "Si vous restez adopté",
+      stayText:
+        "Vous gardez votre configuration telle quelle. Vous ne pouvez pas régler ses ressources depuis Hearth, ni lui faire enregistrer son monde avant un arrêt, ni modifier ses réglages.",
+      moveTitle: "Si vous basculez",
+      moveText:
+        "Vous gagnez les ressources au curseur, la modification, l'enregistrement du monde avant l'arrêt, l'adresse des joueurs, le mot de passe et tous les réglages du jeu, modifiables dans l'onglet Réglages. Vous perdez les réglages que la fiche ne reprend pas, la déclaration dans la configuration de votre serveur et l'ancien emplacement des données.",
+      neverTitle: "Ce qui ne change jamais.",
+      neverText:
+        "Votre monde d'origine et vos sauvegardes existantes ne sont ni lus, ni copiés, ni modifiés, ni effacés, hors le monde que vous choisissez de reprendre : celui-là est copié, jamais déplacé.",
+      foldersTitle: "Conseil d'ouverture des dossiers.",
+      foldersText:
+        "Faites ouvrir aux services le dossier qui contient le monde, pas son dossier parent, et pas vos dossiers de sauvegardes.",
+      foot: "Si votre jeu n'a pas de fiche dans le Catalogue, seule l'adoption est possible.",
+      link: "J'ai déjà un serveur de jeu",
+    },
+    world: {
+      title: "Monde",
+      legend: "Monde du serveur",
+      new: "Créer un nouveau monde",
+      newHelp: "Le jeu crée un monde neuf au premier démarrage.",
+      existing: "Reprendre un monde existant",
+      existingHelp:
+        "Hearth copie un monde déjà présent sur ce serveur. Le monde d'origine n'est pas modifié.",
+      noFolder:
+        "Aucun dossier du serveur n'est ouvert aux services. Un administrateur du serveur peut en ouvrir un dans la configuration de l'agent Hearth.",
+      change: "Changer de monde",
+      measuring: "Mesure du monde en cours…",
+      copyOf: "Copie de {size} dans {files}.",
+      inspectFailed: "Le monde n'a pas pu être mesuré. Choisissez-le de nouveau pour réessayer.",
+      noRoom:
+        "La copie demande {needed} et il ne reste que {free} sur le disque. Libérez de la place avant de continuer.",
+      noRoomBare: "Le disque n'a pas assez de place pour copier ce monde.",
+      noRoomReason: "Le disque n'a pas assez de place pour copier ce monde.",
+      neverDeleted:
+        "Hearth ne supprime jamais le monde d'origine. Vous pourrez le supprimer vous-même après avoir contrôlé le résultat.",
+      coherence:
+        "Si un jeu écrit dans ce monde pendant la copie, la copie peut être incohérente. Arrêtez d'abord le jeu qui s'en sert.",
+      keepIfChanged: "Garder la copie si des fichiers changent pendant la copie",
+      carried:
+        "Le nom du monde et les réglages que le monde décide sont ceux du monde repris : cette page ne les demande pas.",
+      otherPort: "Pour essayer avant de remplacer votre ancien serveur, gardez un autre port.",
+      pick: "Choisissez un monde à reprendre",
+      empty: "Aucun monde trouvé dans les dossiers ouverts aux services.",
+      unusable: "Le nom de ce monde n'est pas accepté par ce jeu.",
+      chooseLabel: "Choisir le monde {name}",
+      choose: "Choisir",
+      truncated: "La recherche s'est arrêtée à {n} éléments : des mondes peuvent manquer.",
+      unreadable: "Un dossier ouvert aux services n'a pas pu être lu.",
+      missing: "Choisissez un monde à reprendre.",
+      sumTitle: "Monde repris",
+      sumFolder: "Dossier : {folder}",
+      unmeasured: "non mesuré",
+      fileOne: "1 fichier",
+      files: "{count} fichiers",
+      atLeast: "au moins {size}",
+      andMore: "{list} et {n} autres",
+      notCopied: "Éléments non copiés ({count}) : {list}. Ils restent où ils sont.",
+      skipped: "Liens et fichiers spéciaux non copiés ({count}) : {list}.",
+      versionWarning:
+        "Hearth ne peut pas savoir avec quelle version du jeu ce monde a été enregistré. Un monde enregistré par une version plus récente peut ne pas se charger.",
+      cancelResume: "Annuler la reprise",
+      copyFailed:
+        "La copie du monde n'a pas abouti. Rien n'a été créé et le monde d'origine n'a pas été touché.",
+      refusals: {
+        unknownFolder: "Ce dossier n'est plus ouvert aux services.",
+        badPath: "Ce chemin n'est pas valable.",
+        notAWorld: "Ce n'est pas un monde que ce jeu reconnaît.",
+        notFound: "Ce monde n'existe plus.",
+        gone: "Ce monde n'existe plus. Rien n'a été créé.",
+        tooBig: "Ce monde est trop gros pour être repris.",
+        nameUnusable: "Le nom de ce monde n'est pas accepté par ce jeu.",
+        unreadable: "Ce monde n'a pas pu être lu.",
+        other: "Ce monde ne peut pas être repris.",
+        unavailable: "Ce serveur ne sait pas reprendre un monde. Mettez l'agent à jour.",
+        notSupported: "Ce type de monde ne se reprend pas encore.",
+        versionNotUnderstood: "Confirmez que vous comprenez le risque lié à la version du jeu.",
+        heavyIo:
+          "Une reprise de monde, une sauvegarde ou une restauration est déjà en cours sur ce serveur. Attendez sa fin.",
+      },
+    },
     back: "Retour au catalogue",
     notFoundTitle: "Cette fiche n'est pas proposée par ce serveur.",
     notFoundText:
@@ -2741,6 +2842,8 @@ export const fr = {
     fieldMounts: "les dossiers",
     fieldCommand: "la commande",
     fieldResources: "les ressources",
+    fieldSource: "la demande",
+    fieldWorld: "le monde à reprendre",
     // Abandon de saisie (BR-DEPLOY-029)
     abandonTitle: "Abandonner votre saisie ?",
     abandonText: "Ce que vous avez saisi sera effacé.",

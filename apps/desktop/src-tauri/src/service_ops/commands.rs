@@ -33,6 +33,8 @@ use super::game_view;
 use super::game_view_dto::{GameReadDto, GameSecretDto};
 use super::lifecycle::{self, GestureDto, LifecycleOutcome};
 use super::service;
+use super::worlds;
+use super::worlds_dto::{WorldInspectReadDto, WorldRefDto, WorldsReadDto};
 use crate::link::LinkRuntime;
 use crate::link_dto::LinkFailure;
 
@@ -330,6 +332,33 @@ pub async fn read_fiche(
 ) -> Result<FicheReadDto, LinkFailure> {
     let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
     catalog::fiche(link.manager(), &id, &fiche).await
+}
+
+/// Les mondes que la fiche reconnaît dans les dossiers ouverts aux services (`GET /catalog/{id}/worlds`, HRT-106) : une
+/// lecture, ni acte ni journal. Sans le droit « gérer les services » : `MissingServicesRight`.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_worlds(
+    link: Runtime_<'_>,
+    server_id: String,
+    fiche: String,
+) -> Result<WorldsReadDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    worlds::list(link.manager(), &id, &fiche).await
+}
+
+/// Inspecte un monde (`POST /catalog/{id}/worlds/inspect`, HRT-106) : une consultation, rien n'est écrit ; un monde
+/// refusé se lit par son code, ce n'est pas une panne.
+#[tauri::command]
+#[specta::specta]
+pub async fn inspect_world(
+    link: Runtime_<'_>,
+    server_id: String,
+    fiche: String,
+    world: WorldRefDto,
+) -> Result<WorldInspectReadDto, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    worlds::inspect(link.manager(), &id, &fiche, world).await
 }
 
 /// Installe un serveur de jeu depuis une fiche (`POST /deployments` avec un membre `source`) : le même acte

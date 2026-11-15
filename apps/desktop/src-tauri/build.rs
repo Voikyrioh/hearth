@@ -85,6 +85,8 @@ const COMMANDS: &[&str] = &[
     "read_engine_capacity",
     "read_catalog",
     "read_fiche",
+    "read_worlds",
+    "inspect_world",
     "install_fiche",
     "open_fiche_link",
     "read_game_settings",

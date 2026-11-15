@@ -156,6 +156,8 @@ const FIELD_KEYS: Record<DeployField, MessageKey> = {
   mounts: "deploy.fieldMounts",
   command: "deploy.fieldCommand",
   resources: "deploy.fieldResources",
+  source: "deploy.fieldSource",
+  world: "deploy.fieldWorld",
 };
 
 /**
@@ -256,6 +258,8 @@ export function refusalText(
       return t("deploy.refusedSetting");
     case "deploy_limit":
       return t("deploy.refusedLimit");
+    case "heavy_io_busy":
+      return t("fiche.world.refusals.heavyIo");
     case "engine_unavailable": {
       const state = refusal.engine ?? engineState ?? null;
       const key = state && state !== "checking" ? ENGINE_STATE_KEYS[state] : undefined;

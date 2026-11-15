@@ -27,6 +27,7 @@ import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { deployDoor } from "@/deploy/availability";
 import { minimumText } from "@/fiche/messages";
+import { notEnoughRoom } from "@/fiche/world";
 import { t } from "@/i18n";
 import { resourcesIssue } from "@/resources";
 import { useFicheInstallStore } from "@/stores/ficheInstall";
@@ -81,6 +82,8 @@ const agentVersion = useAgentVersion(serverId);
 const answers = ref<InstanceType<typeof InstallAnswers> | null>(null);
 
 const edited = () => drafts.edited(serverId(), ficheId());
+// La copie d'un monde est une étape du plan : retenue quand le récapitulatif s'ouvre, la saisie étant effacée au lancement.
+const resumedWorld = ref(false);
 const back = () => ({ name: "fiche" as const, params: { id: serverId(), fiche: ficheId() } });
 const guard = useLeaveGuard({
   dirty: edited,
@@ -95,6 +98,13 @@ const flow = useDeployFlow({
   focusField: () => undefined,
   focusQuestion: (id) => answers.value?.focusQuestion(id),
 });
+
+watch(
+  () => flow.summaryOpen.value,
+  (open) => {
+    if (open) resumedWorld.value = draft.value?.world.resume === true;
+  },
+);
 
 // ── Le pied : pourquoi « Continuer » est inactif ────────────────────────────────────────────────
 const linkReason = useNeedsLink(() => true);
@@ -127,6 +137,13 @@ const reason = computed<Reason | null>(() => {
   if (!detail.value.card.installable) return { text: t("fiche.unavailableReason"), fixable: false };
   if (detail.value.unreadable > 0) return { text: t("fiche.unreadableReason"), fixable: false };
   if (install.tooSmallVerdict.value) return { text: t("fiche.tooSmallReason"), fixable: false };
+  if (install.worldImport.inspection.value.kind === "ready") {
+    // Plus de place que le disque n'en a : aucune case ne permet de passer outre (BR-MONDE-012).
+    const measured = install.worldImport.inspection.value.inspection;
+    if (draft.value.world.resume && notEnoughRoom(measured)) {
+      return { text: t("fiche.world.noRoomReason"), fixable: false };
+    }
+  }
   if (install.step.value === 1) {
     return install.answersInvalid.value || serverBlocks.value
       ? { text: t("fiche.fixAnswers"), fixable: true }
@@ -340,6 +357,11 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
         :draft="draft"
         :questions="install.questions.value"
         :extras="install.extras.value"
+        :world-inspection="
+          install.worldImport.inspection.value.kind === 'ready'
+            ? install.worldImport.inspection.value.inspection
+            : null
+        "
         :capacity="install.capacity.value"
         :check="flow.summaryCheck.value"
         :force-low-disk="flow.forceLowDisk.value"
@@ -355,6 +377,7 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
     <DeployProgressDialog
       v-if="server && flow.launch.value"
       installing
+      :with-world="resumedWorld"
       :open="progressOpen"
       :server-id="server.id"
       :name="flow.launch.value.name"

@@ -190,6 +190,12 @@ export class NullLinkBridge implements LinkBridge {
   async readFiche(): Promise<never> {
     return this.unavailable();
   }
+  async readWorlds(): Promise<never> {
+    return this.unavailable();
+  }
+  async inspectWorld(): Promise<never> {
+    return this.unavailable();
+  }
   async installFiche(): Promise<never> {
     return this.unavailable();
   }

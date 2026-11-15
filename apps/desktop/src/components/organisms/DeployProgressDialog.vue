@@ -9,7 +9,12 @@ import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import type { ActReport } from "@/composables/useReauth";
 import { cancelRefusalText, exitSummary, failureText } from "@/deploy/messages";
 import { t } from "@/i18n";
-import { DEPLOY_STEPS, type ServiceInfo, type ServiceOperation } from "@/link";
+import {
+  DEPLOY_STEPS,
+  DEPLOY_STEPS_WITH_WORLD,
+  type ServiceInfo,
+  type ServiceOperation,
+} from "@/link";
 import { progressOf, stepName } from "@/serviceOps/messages";
 
 // La progression d'un déploiement (HRT-69, BR-DEPLOY-016, 019, 020, 028) : une fenêtre modale (`FormDialog`, qui tient
@@ -44,6 +49,8 @@ const props = defineProps<{
   performCancel: (adminPassword: string | null) => Promise<ActReport>;
   /** L'installation d'un serveur de jeu depuis une fiche (HRT-102) : le même parcours, un autre titre. */
   installing?: boolean;
+  /** L'installation reprend un monde existant (HRT-106) : le plan a une étape de plus, « Copie du monde ». */
+  withWorld?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -80,14 +87,27 @@ const cancelHint = computed(() => {
   return tooLate.value ? t("deploy.tooLate") : undefined;
 });
 
+/** Le plan de CETTE opération : avec la copie du monde quand la demande en porte un ou que l'agent l'a annoncée. */
+const plan = computed<readonly string[]>(() => {
+  const announced = [props.operation, props.ended].some(
+    (op) => op !== null && (op.step === "world" || op.steps.some((line) => line.step === "world")),
+  );
+  return props.withWorld === true || announced ? DEPLOY_STEPS_WITH_WORLD : DEPLOY_STEPS;
+});
+/** La copie du monde court : le bouton d'annulation devient « Annuler la reprise » (BR-MONDE-013). */
+const copyingWorld = computed(() => props.operation?.step === "world");
+const cancelLabel = computed(() =>
+  copyingWorld.value ? t("fiche.world.cancelResume") : t("deploy.cancel"),
+);
+
 const steps = computed<ProgressStep[]>(() => {
   const op = props.operation;
-  const current = op?.step ? DEPLOY_STEPS.indexOf(op.step as (typeof DEPLOY_STEPS)[number]) : -1;
+  const current = op?.step ? plan.value.indexOf(op.step) : -1;
   const index = current < 0 ? 0 : current;
-  return DEPLOY_STEPS.map((key, position): ProgressStep => {
+  return plan.value.map((key, position): ProgressStep => {
     const state = position < index ? "done" : position === index ? "now" : "later";
     const label = stepName(key) ?? key;
-    if (key === "pull" && state === "now" && op) {
+    if ((key === "pull" || key === "world") && state === "now" && op) {
       const progress = progressOf(op, true);
       return { key, label, state, bar: { ratio: progress.ratio, text: progress.text } };
     }
@@ -126,7 +146,17 @@ const kept = computed(() => {
   };
 });
 
-const failure = computed(() => (props.ended ? failureText(props.ended) : ""));
+/** Une copie du monde qui n'a pas abouti se dit pour ce qu'elle est : rien n'est créé, le monde d'origine n'est pas touché. */
+const failedInWorld = computed(
+  () =>
+    props.ended !== null &&
+    (props.ended.step === "world" ||
+      props.ended.steps.some((line) => line.step === "world" && line.state !== "done")),
+);
+const failure = computed(() => {
+  if (!props.ended) return "";
+  return failedInWorld.value ? t("fiche.world.copyFailed") : failureText(props.ended);
+});
 
 function onCancelKey() {
   // Échap : en course, c'est « Continuer en arrière-plan » ; une issue demande un geste explicite.
@@ -174,7 +204,7 @@ function onCancelKey() {
           :hint="cancelHint"
           @click="cancelOpen = true"
         >
-          {{ t("deploy.cancel") }}
+          {{ cancelLabel }}
         </HButton>
         <HButton variant="secondary" autofocus data-deploy-background @click="emit('background')">
           {{ t("deploy.background") }}
@@ -214,7 +244,7 @@ function onCancelKey() {
     :server-id="serverId"
     kind="operation_cancel"
     :title="t('deploy.cancelTitle', { name })"
-    :submit-label="t('deploy.cancel')"
+    :submit-label="cancelLabel"
     :cancel-label="t('deploy.keep')"
     destructive
     :perform="performCancel"
