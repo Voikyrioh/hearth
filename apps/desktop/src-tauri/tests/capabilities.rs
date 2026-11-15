@@ -448,6 +448,11 @@ const EXPECTED: &[(&str, &str)] = &[
     ),
     // HRT-104 : le quotidien d'un serveur de jeu, deux lectures (la vue ; le mot de passe, réservé au droit).
     ("readGameView", "serverId: string, key: string"),
+    // HRT-215 : l'adresse des joueurs, un acte confirmé (la modification d'un service), jamais couvert par l'élévation.
+    (
+        "setPublicAddress",
+        "serverId: string, key: string, address: string, adminPassword: string | null",
+    ),
     ("revealGamePassword", "serverId: string, key: string"),
 ];
 
@@ -477,6 +482,7 @@ const ADMIN_COMMANDS: &[(&str, &str)] = &[
     ("deleteBackup", "adminPassword"),
     ("saveBackupSettings", "adminPassword"),
     ("installFiche", "adminPassword"),
+    ("setPublicAddress", "adminPassword"),
     ("saveGameSettings", "adminPassword"),
     ("cancelServiceOperation", "adminPassword"),
 ];

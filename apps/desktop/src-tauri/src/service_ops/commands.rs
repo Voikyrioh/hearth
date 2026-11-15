@@ -32,6 +32,7 @@ use super::game_settings_dto::{
 use super::game_view;
 use super::game_view_dto::{GameReadDto, GameSecretDto};
 use super::lifecycle::{self, GestureDto, LifecycleOutcome};
+use super::public_address::{self, PublicAddressOutcome};
 use super::service;
 use super::worlds;
 use super::worlds_dto::{WorldInspectReadDto, WorldRefDto, WorldsReadDto};
@@ -441,6 +442,23 @@ pub async fn save_game_settings(
     let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
     let admin_password = admin_password.map(Secret::new);
     game_settings::save(link.manager(), &id, &key, settings, admin_password.as_ref()).await
+}
+
+/// Change l'adresse que le propriétaire donne à ses joueurs (`PUT /services/{key}/spec`, HRT-215) : la modification
+/// d'un service qui ne change que cette adresse (`""` l'efface), un acte d'administration confirmé, JAMAIS couvert par
+/// l'élévation, jamais rejoué. Sans le droit « gérer les services » : `MissingServicesRight`.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_public_address(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+    address: String,
+    admin_password: Option<String>,
+) -> Result<PublicAddressOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let admin_password = admin_password.map(Secret::new);
+    public_address::set(link.manager(), &id, &key, &address, admin_password.as_ref()).await
 }
 
 /// Ce que le détail d'un serveur de jeu montre (`GET /services/{key}/game`) : la fiche, la façon d'arrêter, les ports

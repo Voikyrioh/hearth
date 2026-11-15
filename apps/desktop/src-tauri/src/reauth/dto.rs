@@ -75,6 +75,9 @@ pub enum AdminActKindDto {
     BackupDelete,
     /// Régler les éléments ignorés des sauvegardes d'un service (HRT-98) : couvert par l'élévation de cinq minutes.
     BackupSettings,
+    /// Modifier un service, ici l'adresse de ses joueurs (HRT-215, HRT-87) : le mot de passe à chaque fois, jamais
+    /// couvert par l'élévation (BR-EDIT-017).
+    ServiceUpdate,
 }
 
 /// L'état de confiance du compte que l'agent annonce (HRT-194, BR-TRUST-052) : de lui dépend si piloter un

@@ -93,6 +93,7 @@ const COMMANDS: &[&str] = &[
     "analyze_game_settings",
     "save_game_settings",
     "read_game_view",
+    "set_public_address",
     "reveal_game_password",
 ];
 

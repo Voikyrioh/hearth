@@ -109,6 +109,15 @@ fn act_of(kind: AdminActKindDto, role: Option<RoleDto>) -> AdminAct<'static> {
             count: 0,
             digest: [0; hearth_proto::admin_act::FINGERPRINT_LEN],
         },
+        // Modifier : le genre seul décide (jamais couvert par l'élévation), ni la cible ni le corps ne comptent.
+        AdminActKindDto::ServiceUpdate => AdminAct::ServiceUpdate {
+            target: "".into(),
+            base_rev: 0,
+            digest: [0; hearth_proto::admin_act::FINGERPRINT_LEN],
+            env_set: 0,
+            env_removed: 0,
+            command: false,
+        },
         AdminActKindDto::ServiceStart => AdminAct::ServiceStart { target: "".into() },
         AdminActKindDto::ServiceStop => AdminAct::ServiceStop { target: "".into() },
         AdminActKindDto::ServiceRestart => AdminAct::ServiceRestart { target: "".into() },
@@ -209,6 +218,8 @@ mod tests {
                 (Kind::ServiceDeploy, None, Yes),
                 // Supprimer : jamais couvert par l'élévation (BR-DEL-012).
                 (Kind::ServiceDelete, None, Yes),
+                // Modifier un service : jamais couvert par l'élévation (BR-EDIT-017).
+                (Kind::ServiceUpdate, None, Yes),
                 (Kind::OperationCancel, None, UnlessElevated),
                 // Sauvegardes (HRT-98) : créer et régler suivent l'élévation, supprimer ne la suit jamais.
                 (Kind::BackupCreate, None, UnlessElevated),
