@@ -1177,9 +1177,17 @@ pub async fn start_engined(
         phases,
         Some(world_import.clone()),
     );
-    if let Some(deposits) = engine.catalog.pack_deposits.clone() {
-        deployments.set_pack_intake(Arc::new(PackIntake::new(deposits)));
-    }
+    // Un pack de mods déposé (HRT-124) : lu dans la zone d'attente des transferts (HRT-95), rangé par le dossier géré
+    // du service. Un essai peut injecter sa propre zone.
+    let pack_deposits: Arc<dyn PackDeposits> =
+        engine.catalog.pack_deposits.clone().unwrap_or_else(|| {
+            Arc::new(crate::infrastructure::pack_deposits::ZonePackDeposits::new(
+                transfers.clone(),
+                safe_fs.clone(),
+                tokio::runtime::Handle::current(),
+            ))
+        });
+    deployments.set_pack_intake(Arc::new(PackIntake::new(pack_deposits)));
     // Modifier un service par recréation (HRT-87) : l'ancien est mis de côté, le nouveau créé depuis la description,
     // l'ancien remis si le nouveau échoue.
     let service_updates = ServiceUpdates::new(

@@ -178,7 +178,8 @@ async fn hello_announces_the_services_capability() {
             "service-update",
             "service-backups",
             "world-import",
-            "service-transfers"
+            "service-transfers",
+            "game-packs"
         ])
     );
     // L'interface ne monte pas : un client ancien parle encore à cet agent (ADR-0033, ADR-0038).

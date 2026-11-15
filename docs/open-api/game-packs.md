@@ -2,7 +2,7 @@
 
 Un pack de mods se dépose dans la zone d'attente de l'agent (transfert reprenable) puis s'installe avec le serveur de jeu. L'agent LIT le pack (il ne le déballe pas), le range en lecture seule sous un nom fixe et passe son chemin au programme du jeu. Règles `BR-MOD-001`, `BR-MOD-007`, `BR-MOD-008`, `BR-MOD-012`, `BR-MOD-016`, `BR-MOD-017` ; décision ADR-0054 (points 4, 5 et 8) et ADR-0055 (lecture d'archive hostile).
 
-- **Capacité** : `game-packs` dans `GET /hello`. Sans elle, un client ne montre pas le formulaire de pack.
+- **Capacité** : `game-packs` dans `GET /hello`. Sans elle, un client ne montre pas le formulaire de pack. Annoncée depuis le câblage de la zone d'attente des transferts (HRT-95).
 - **Aucune voie CurseForge** : l'agent ne contacte aucun hôte pour un pack, n'a aucune clé CurseForge, et une fiche ne peut écrire ni variable `CF_*` ni `AUTO_CURSEFORGE` (`BR-MOD-017`).
 
 ## `GET /api/v1/catalog/{id}` : le membre `mods`
