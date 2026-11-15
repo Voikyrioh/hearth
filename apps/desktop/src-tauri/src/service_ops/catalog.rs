@@ -129,6 +129,7 @@ mod tests {
                 host_port: 7778,
             }],
             optional_ports: vec![],
+            world: None,
             resources: DeployResourcesDto {
                 memory_bytes: 2_147_483_648.0,
                 cpu_millis: 1000,
@@ -174,12 +175,62 @@ mod tests {
         assert_eq!(agreements, &vec!["eula".to_owned()]);
         assert_eq!(ports[0].host_port, 7778);
         assert_eq!(answers.len(), 1);
-        // La reprise d'un monde n'existe pas dans cette version.
+        // Sans monde choisi, rien n'est repris.
         assert!(!world_imported);
         // Le corps est exactement celui que l'agent relit : un membre `source`, sans membre inconnu.
         let body = serde_json::to_value(&spec).unwrap();
         assert_eq!(body["source"]["type"], "fiche");
         assert!(spec.extra.is_empty());
+    }
+
+    #[test]
+    fn a_chosen_world_travels_with_its_two_gestures_and_is_never_named_in_debug() {
+        use crate::service_ops::worlds_dto::WorldPickDto;
+        let mut asked = request();
+        asked.world = Some(WorldPickDto {
+            folder: "/srv/SENTINEL-FOLDER".into(),
+            path: "Worlds/SENTINEL-WORLD.wld".into(),
+            version_understood: true,
+            keep_if_changed: false,
+        });
+        let spec = asked.into_spec().unwrap();
+        let Some(DeploySource::Fiche {
+            world_imported,
+            world,
+            ..
+        }) = &spec.source
+        else {
+            panic!("source attendue");
+        };
+        assert!(world_imported);
+        let pick = world.as_ref().expect("monde choisi");
+        assert!(pick.version_understood && !pick.keep_if_changed);
+        let shown = format!("{spec:?}");
+        assert!(
+            !shown.contains("SENTINEL-WORLD") && !shown.contains("SENTINEL-FOLDER"),
+            "{shown}"
+        );
+    }
+
+    #[test]
+    fn a_busy_heavy_slot_and_a_refused_world_are_read_by_their_code() {
+        assert_eq!(
+            read(409, error("HEAVY_IO_BUSY", json!({}))),
+            DeployRefusal::HeavyIoBusy
+        );
+        assert_eq!(
+            read(
+                422,
+                error(
+                    "VALIDATION_ERROR",
+                    json!({ "field": "source.world", "reason": "version_not_understood" })
+                )
+            ),
+            DeployRefusal::Invalid {
+                field: crate::service_ops::deploy_dto::DeployFieldDto::World,
+                reason: "version_not_understood".into()
+            }
+        );
     }
 
     #[test]

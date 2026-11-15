@@ -116,7 +116,8 @@ impl HttpTransport {
         if path.ends_with("/delete-preview") {
             self.config.request_timeout
                 + Duration::from_secs(hearth_proto::api::service_delete::MEASURE_BUDGET_S)
-        } else if path.ends_with("/backups/preview") {
+        } else if path.ends_with("/backups/preview") || path.ends_with("/worlds/inspect") {
+            // Estimer une sauvegarde ou mesurer un monde dure jusqu'à une minute (BR-BACKUP-009, BR-MONDE-006).
             self.config.request_timeout
                 + Duration::from_secs(hearth_proto::api::backups::ESTIMATE_BUDGET_S)
         } else {

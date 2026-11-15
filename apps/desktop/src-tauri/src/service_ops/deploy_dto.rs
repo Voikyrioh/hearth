@@ -295,6 +295,10 @@ pub enum DeployFieldDto {
     Mounts,
     Command,
     Resources,
+    /// Le membre `source` de la demande (fiche) : une incohérence entre la reprise d'un monde et la demande (HRT-106).
+    Source,
+    /// Le monde à reprendre (`source.world`, HRT-106) : son code de raison dit lequel des refus.
+    World,
 }
 
 impl DeployFieldDto {
@@ -309,6 +313,8 @@ impl DeployFieldDto {
             "mounts" => Self::Mounts,
             "command" => Self::Command,
             "resources" => Self::Resources,
+            "source" => Self::Source,
+            "source.world" => Self::World,
             _ => return None,
         })
     }
@@ -323,6 +329,8 @@ impl DeployFieldDto {
             Self::Mounts => "mounts",
             Self::Command => "command",
             Self::Resources => "resources",
+            Self::Source => "source",
+            Self::World => "source.world",
         }
     }
 }
@@ -440,6 +448,9 @@ pub enum DeployRefusal {
         suggested: Option<u16>,
     },
     DeployLimit,
+    /// Une sauvegarde, une restauration ou une autre reprise de monde tient déjà la place des opérations lourdes
+    /// du serveur (`BR-MONDE-013`) : le client attend, rien n'est mis en file.
+    HeavyIoBusy,
     NoSpace {
         #[serde(rename = "freeBytes")]
         free_bytes: Option<f64>,

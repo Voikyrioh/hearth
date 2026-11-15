@@ -605,6 +605,14 @@ impl From<&SettingView> for FicheSettingDto {
     }
 }
 
+/// Les réglages que la reprise d'un monde remplit ou ne touche pas (HRT-106, BR-MONDE-014).
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FicheWorldImportDto {
+    pub names_setting: String,
+    pub carried_by_world: Vec<String>,
+}
+
 /// Le détail d'une fiche (`GET /catalog/{id}`).
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -627,6 +635,8 @@ pub struct FicheDetailDto {
     pub themes: Vec<FicheThemeDto>,
     /// Le catalogue complet de réglages (HRT-109) ; vide d'un agent plus ancien.
     pub settings: Vec<FicheSettingDto>,
+    /// Ce que la fiche dit d'un monde repris (HRT-106) ; `None` : la fiche ne reprend pas de monde.
+    pub world_import: Option<FicheWorldImportDto>,
     /// Des réglages ou thèmes d'une version plus récente que ce client, illisibles ici : l'onglet le dit, mais la
     /// fiche reste installable (ils ne changent pas ce que l'installation écrit).
     pub settings_unreadable: u32,
@@ -656,6 +666,7 @@ impl From<&FicheDetail> for FicheDetailDto {
             settings,
             // Les voies de mods : lues par le client avec HRT-125, pas encore par cette projection.
             mods: _,
+            world_import,
         } = detail;
         let ImageView {
             repository,
@@ -693,6 +704,10 @@ impl From<&FicheDetail> for FicheDetailDto {
             imposed: imposed.iter().map(imposed_dto).collect(),
             themes: themes.iter().map(FicheThemeDto::from).collect(),
             settings: settings.iter().map(FicheSettingDto::from).collect(),
+            world_import: world_import.as_ref().map(|view| FicheWorldImportDto {
+                names_setting: view.names_setting.clone(),
+                carried_by_world: view.carried_by_world.clone(),
+            }),
             settings_unreadable: themes.unreadable().saturating_add(settings.unreadable()),
             unreadable,
         }
@@ -864,6 +879,8 @@ pub struct FicheInstallRequestDto {
     pub agreements: Vec<String>,
     pub ports: Vec<FichePortChoiceDto>,
     pub optional_ports: Vec<String>,
+    /// Reprendre un monde existant (HRT-106) : le monde choisi et les deux gestes ; `None` : un monde neuf.
+    pub world: Option<super::worlds_dto::WorldPickDto>,
     pub resources: DeployResourcesDto,
     pub accept: DeployAcceptDto,
 }
@@ -938,9 +955,8 @@ impl FicheInstallRequestDto {
                     })
                     .collect(),
                 optional_ports: self.optional_ports,
-                world_imported: false,
-                // Reprendre un monde (HRT-105) : le client ne le demande pas encore.
-                world: None,
+                world_imported: self.world.is_some(),
+                world: self.world.map(Into::into),
                 pack: None,
             }),
             extra: std::collections::BTreeMap::new(),

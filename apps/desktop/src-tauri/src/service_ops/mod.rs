@@ -26,3 +26,5 @@ pub mod game_view;
 pub mod game_view_dto;
 pub mod lifecycle;
 pub mod service;
+pub mod worlds;
+pub mod worlds_dto;
