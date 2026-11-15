@@ -529,7 +529,9 @@ export type AdminActKindDto = "account_create" | "account_role" | "account_passw
  *  Modifier un service, ici l'adresse de ses joueurs (HRT-215, HRT-87) : le mot de passe à chaque fois, jamais
  *  couvert par l'élévation (BR-EDIT-017).
  */
-"service_update";
+"service_update" | 
+/**  Déposer un fichier dans la zone d'attente de l'agent (HRT-96, BR-FILES-023) : couvert par l'élévation de cinq minutes. */
+"file_write";
 
 /**  Qui a adopté un service, et quand (HRT-79). */
 export type AdoptionDto = {

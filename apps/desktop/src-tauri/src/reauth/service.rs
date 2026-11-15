@@ -117,6 +117,7 @@ fn act_of(kind: AdminActKindDto, role: Option<RoleDto>) -> AdminAct<'static> {
             env_set: 0,
             env_removed: 0,
             command: false,
+        },
         // Déposer un fichier : le genre seul décide (la table de l'élévation), ni le nom ni la taille ne comptent.
         AdminActKindDto::FileWrite => AdminAct::FileWrite {
             target: "deposit".into(),
