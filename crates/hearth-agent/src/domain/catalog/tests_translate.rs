@@ -77,6 +77,7 @@ impl Inputs {
             optional_ports: &self.optional,
             generated: &self.generated,
             world_imported,
+            pack: None,
         }
     }
 }

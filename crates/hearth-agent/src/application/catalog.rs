@@ -8,9 +8,9 @@
 use hearth_proto::api::catalog::{
     AgreementView, CatalogView, CharsetView, ChoiceView, CpuNeed, DiskNeed, DownloadView,
     EvidenceView, FicheCard, FicheDetail, FicheStatus, FirstStartView, FolderView, ImageView,
-    ImposedView, ItemCharsetView, LevelView, ListView, MemoryNeed, PortMappingView, PortView,
-    QuestionKind, QuestionView, RefusedFiche, ResourcesView, SecretKindView, SettingView, StopView,
-    ThemeView, VariantView, WorldSavedView,
+    ImposedView, ItemCharsetView, LevelView, ListView, MemoryNeed, ModsView, PackGenreView,
+    PackWayView, PortMappingView, PortView, QuestionKind, QuestionView, RefusedFiche,
+    ResourcesView, SecretKindView, SettingView, StopView, ThemeView, VariantView, WorldSavedView,
 };
 
 use crate::application::ports::AuditSink;
@@ -18,8 +18,8 @@ use crate::domain::audit::{Actor, AuditAction, ClientName, Outcome, Reason, Targ
 use crate::domain::catalog::embedded;
 use crate::domain::catalog::loading::model::{Fiche, ValueSpec};
 use crate::domain::catalog::loading::schema::fiche::{
-    Evidence, FolderRole, PlainEvidence, Platform, PortMapping, PortRole, Proof, Protocol, Publish,
-    Status, WorldSaved,
+    Evidence, FolderRole, ModWay, PackGenre, PlainEvidence, Platform, PortMapping, PortRole, Proof,
+    Protocol, Publish, Status, WorldSaved,
 };
 use crate::domain::catalog::loading::schema::settings::{ItemCharset, Level, SecretKind};
 
@@ -194,6 +194,7 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
         FolderRole::Config => "config",
         FolderRole::Logs => "logs",
         FolderRole::Mods => "mods",
+        FolderRole::Packs => "packs",
         FolderRole::Data => "data",
     };
     FicheDetail {
@@ -343,7 +344,45 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
             .map(setting_view)
             .collect::<Vec<_>>()
             .into(),
+        mods: mods_view(fiche),
     }
+}
+
+/// Les voies de mods de la fiche (HRT-124) : rien d'autre que ce qu'elle déclare.
+fn mods_view(fiche: &Fiche) -> Option<ModsView> {
+    let file = &fiche.file;
+    let mods = file.mods.as_ref()?;
+    let ways: Vec<String> = mods
+        .ways
+        .iter()
+        .map(|way| match way {
+            ModWay::DropFiles => "drop_files".to_owned(),
+            ModWay::DropPack => "drop_pack".to_owned(),
+        })
+        .collect();
+    let pack = mods.pack.as_ref().map(|pack| PackWayView {
+        genres: pack
+            .genre
+            .iter()
+            .map(|genre| PackGenreView {
+                kind: match genre.kind {
+                    PackGenre::ServerPack => "server_pack".to_owned(),
+                    PackGenre::ModrinthPack => "modrinth_pack".to_owned(),
+                },
+                variants: genre.variants.clone().into(),
+            })
+            .collect::<Vec<_>>()
+            .into(),
+    });
+    Some(ModsView {
+        ways: ways.into(),
+        pack,
+        files_hint: file
+            .folder
+            .iter()
+            .find(|f| f.role == FolderRole::Mods)
+            .and_then(|f| f.drop_hint.clone()),
+    })
 }
 
 /// Un réglage du catalogue : son contrôle (le même que celui d'une question), son nom technique, son thème, son

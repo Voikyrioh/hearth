@@ -106,6 +106,17 @@ impl ServiceRoot for unix::UnixRoot {
         self.write_file(rel, bytes, perms)
     }
 
+    fn write_stream(
+        &self,
+        rel: &RelPath,
+        source: &mut dyn std::io::Read,
+        perms: Perms,
+        max_bytes: u64,
+        expect_sha256: &[u8; 32],
+    ) -> Result<u64, FsError> {
+        self.write_file_stream(rel, source, perms, max_bytes, expect_sha256)
+    }
+
     fn read_bounded(&self, rel: &RelPath, max: u64) -> Result<Vec<u8>, FsError> {
         self.read_file(rel, max)
     }

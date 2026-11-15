@@ -25,8 +25,8 @@
 //! réglage hors du plan fermé.
 
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -36,6 +36,7 @@ use hearth_proto::api::deploy::{
     MAX_CONCURRENT_DEPLOYMENTS, MountCheck, MountStatus, NameStatus, PortCheck, PortStatus,
     reserve_bytes,
 };
+use hearth_proto::api::packs::{ModrinthPackView, PackGenreWire, PackInspectView};
 use thiserror::Error;
 use tokio::time::Instant;
 
@@ -43,9 +44,10 @@ use super::catalog::CatalogService;
 use super::fiche_install::{FicheInstaller, InstallAudit, WorldPrep};
 use super::folders::{FolderFacts, check_mount_folder};
 use super::game_phase::GamePhases;
+use super::pack_intake::{JudgedPack, PackError, PackIntake};
 use super::ports::{
-    Clock, ContainerEngine, EngineError, EngineInfo, FreeSpace, HostFolders, HostPorts, IdGen,
-    ImportDir, Ownership, Perms, PullProgress, SafeFs, SecretRandom, ServiceContainers,
+    Clock, ContainerEngine, DepositId, EngineError, EngineInfo, FreeSpace, HostFolders, HostPorts,
+    IdGen, ImportDir, Ownership, Perms, PullProgress, SafeFs, SecretRandom, ServiceContainers,
 };
 use super::service_lifecycle::reason_of;
 use super::service_ops::{AcceptRequest, AuditDraft, OpError, ServiceOps};
@@ -55,6 +57,7 @@ use super::world_import::copy::{Control, CopyError, CopyReport, copy_world};
 use super::world_import::{Prepared as WorldPrepared, WorldImport};
 use crate::application::ports::Progress;
 use crate::domain::audit::{Actor, ClientName, Outcome, Reason, Target, WorldNote, WorldResult};
+use crate::domain::catalog::loading::schema::fiche::PackGenre;
 use crate::domain::files::RelPath;
 use crate::domain::ops::{
     Cause, CreatedObject, ObjectKind, ObjectRoot, OpKind, OpStatus, Refusal as LockRefusal,
@@ -64,7 +67,7 @@ use crate::domain::services::deploy::{
     self, ImageRef, Invalid, Machine, Refusal, ValidDeploy, op_plan, op_plan_world, step, validate,
     validate_name,
 };
-use crate::domain::services::from_fiche::ProducedFile;
+use crate::domain::services::from_fiche::{PackPlacement, ProducedFile};
 use crate::domain::services::plan::{PlanContext, image_reference};
 use crate::domain::services::ports::{Listener, PortWorld, duplicates, suggest, verdict};
 use crate::domain::services::spec::{SecretsAccess, fold_name};
@@ -156,6 +159,12 @@ pub enum DeployError {
     /// La fiche de l'agent n'est plus celle que le client a vue (version ou empreinte).
     #[error("fiche changée")]
     FicheChanged,
+    /// Le pack déposé n'existe pas ou est refusé (HRT-124, BR-MOD-008, BR-MOD-016).
+    #[error("pack refusé")]
+    Pack(PackError),
+    /// Un autre pack est en cours de lecture (BR-MOD-007) : réessayer.
+    #[error("lecture de pack occupée")]
+    PackBusy,
     /// Un contrat de la fiche n'est pas accepté (BR-FICHE-058) : les identifiants manquants.
     #[error("contrat non accepté")]
     AgreementRequired(Vec<String>),
@@ -228,6 +237,8 @@ struct Job {
     install: Option<InstallAudit>,
     /// Le monde existant à reprendre par copie vérifiée (HRT-105).
     world: Option<WorldJob>,
+    /// Le pack déposé à ranger dans le dossier des packs avant la création (HRT-124).
+    pack: Option<JobPack>,
     /// L'ordre de création est parti (ou va partir) : passé ce point, un délai dépassé laisse un résultat
     /// INCONNU, même si le conteneur n'est pas encore consigné (le moteur peut l'avoir créé sans que l'agent
     /// ait lu sa réponse).
@@ -374,6 +385,19 @@ pub struct Deployments {
     phases: Arc<GamePhases>,
     /// Reprendre un monde existant (HRT-105) ; absent : la reprise est refusée.
     world_import: Option<Arc<WorldImport>>,
+    /// Le jugement et le rangement des packs déposés (HRT-124) : posé une fois par la racine de composition ;
+    /// sans lui, une installation qui porte un pack est refusée.
+    packs: OnceLock<Arc<PackIntake>>,
+    /// Un seul pack est lu à la fois : lire un pack relit toute l'archive (jusqu'à 4 Gio), donc un compte qui
+    /// enchaîne les lectures ne doit pas occuper l'agent.
+    pack_gate: Arc<tokio::sync::Semaphore>,
+}
+
+/// Le pack à ranger : le dépôt jugé, son emplacement fixe dans le dossier géré des packs, son empreinte.
+struct JobPack {
+    deposit: DepositId,
+    place: PackPlacement,
+    sha256: [u8; 32],
 }
 
 /// Les ports du serveur tels que le domaine les juge (`PortWorld`) : le moteur, les sockets en écoute, le port de
@@ -447,7 +471,74 @@ impl Deployments {
             installer,
             phases,
             world_import,
+            packs: OnceLock::new(),
+            pack_gate: Arc::new(tokio::sync::Semaphore::new(1)),
         })
+    }
+
+    /// Ce que l'agent lit dans un pack déposé par ce compte (HRT-124, BR-MOD-007) : rien n'est rangé ni écrit. Un
+    /// pack refusé est retiré de la zone d'attente aussitôt.
+    pub async fn inspect_pack(
+        &self,
+        deposit: &str,
+        actor: &Actor,
+    ) -> Result<PackInspectView, DeployError> {
+        Ok(pack_view(&self.judge_deposit(deposit, actor).await?))
+    }
+
+    /// Juge un dépôt, hors du fil asynchrone (la lecture relit toute l'archive), une lecture de pack à la fois.
+    async fn judge_deposit(&self, deposit: &str, actor: &Actor) -> Result<JudgedPack, DeployError> {
+        let intake = Arc::clone(self.packs.get().ok_or_else(pack_unavailable)?);
+        let permit = self.pack_permit()?;
+        let deposit = deposit.to_owned();
+        let account = account_of(actor);
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            intake.judge(&deposit, &account)
+        })
+        .await
+        .map_err(|_| DeployError::Internal("jugement du pack interrompu".into()))?
+        .map_err(DeployError::Pack)
+    }
+
+    /// La place de lecture d'un pack : une seule à la fois, jamais d'attente (`PackBusy`).
+    fn pack_permit(&self) -> Result<tokio::sync::OwnedSemaphorePermit, DeployError> {
+        Arc::clone(&self.pack_gate)
+            .try_acquire_owned()
+            .map_err(|_| DeployError::PackBusy)
+    }
+
+    /// Branche le jugement des packs déposés (racine de composition, une seule fois).
+    pub fn set_pack_intake(&self, intake: Arc<PackIntake>) {
+        let _ = self.packs.set(intake);
+    }
+
+    /// Juge le pack déposé que la demande porte, hors du fil asynchrone (lit tout le fichier), et vérifie la place
+    /// : le pack se range tel quel, puis le programme du jeu le déballe dans le dossier du service.
+    async fn judge_pack(
+        &self,
+        spec: &DeploySpec,
+        actor: &Actor,
+        free_disk: Option<u64>,
+    ) -> Result<Option<JudgedPack>, DeployError> {
+        let Some(DeploySource::Fiche {
+            pack: Some(pack), ..
+        }) = &spec.source
+        else {
+            return Ok(None);
+        };
+        let judged = self.judge_deposit(&pack.deposit, actor).await?;
+        if let Some(free) = free_disk {
+            let needed = judged.size.saturating_add(judged.report.unpacked);
+            if needed > free {
+                return Err(DeployError::NotEnoughSpace {
+                    needed,
+                    free,
+                    missing: needed - free,
+                });
+            }
+        }
+        Ok(Some(judged))
     }
 
     // -----------------------------------------------------------------------------------------
@@ -724,20 +815,40 @@ impl Deployments {
         // Reprendre un monde (HRT-105) : jugé AVANT la traduction, qui en prend le nom et la place à copier.
         let world = self.judge_world(&spec).await?;
         // Une fiche est traduite puis jugée comme une image à la main ; sinon le formulaire (BR-FICHE-013).
-        let (valid, files, install) = if spec.source.is_some() {
+        let (valid, files, install, pack) = if spec.source.is_some() {
             let free = self.install_free_space(info.as_ref()).await;
             let prep = world.as_ref().map(|(prepared, _)| WorldPrep {
                 name: &prepared.name,
                 names_setting: &prepared.rules.names_setting,
                 bytes: prepared.bytes,
             });
-            let prepared = self
-                .installer
-                .prepare(&spec, &actor, machine, free, prep.as_ref())?;
-            (prepared.valid, prepared.files, Some(prepared.audit))
+            let judged = self.judge_pack(&spec, &actor, free).await?;
+            let prepared = self.installer.prepare(
+                &spec,
+                &actor,
+                machine,
+                free,
+                prep.as_ref(),
+                judged.as_ref().map(|j| j.report.genre),
+            )?;
+            let pack = match (judged, prepared.pack) {
+                (Some(judged), Some(place)) => Some(JobPack {
+                    deposit: judged.id,
+                    place,
+                    sha256: judged.sha256,
+                }),
+                (None, None) => None,
+                // Un pack jugé sans emplacement (ou l'inverse) ne s'oublie jamais en silence.
+                _ => {
+                    return Err(DeployError::Internal(
+                        "pack jugé sans emplacement ou emplacement sans pack".into(),
+                    ));
+                }
+            };
+            (prepared.valid, prepared.files, Some(prepared.audit), pack)
         } else {
             let valid = validate(&spec, machine).map_err(|refusal| self.refusal(&spec, refusal))?;
-            (valid, Vec::new(), None)
+            (valid, Vec::new(), None, None)
         };
 
         // Deux déploiements au plus, tous comptes confondus (BR-DEPLOY-023).
@@ -854,6 +965,7 @@ impl Deployments {
                     result: WorldResult::NotReached,
                 }),
             }),
+            pack,
             create_sent: AtomicBool::new(false),
         };
         let shown = Shown {
@@ -1279,6 +1391,18 @@ impl Deployments {
                 }),
             _ => None,
         };
+        // Le pack déposé (HRT-124) : l'emplacement et l'empreinte jugés, rangés en lecture seule pour le conteneur.
+        let pack = job.pack.as_ref().and_then(|pack| {
+            let rel = RelPath::parse(&format!(
+                "{}/{}",
+                pack.place.folder_source, pack.place.file_name
+            ))
+            .ok()?;
+            Some((pack.deposit.clone(), rel, pack.sha256))
+        });
+        let wants_pack = job.pack.is_some();
+        let account = job.account.clone();
+        let deposits = self.packs.get().map(|intake| Arc::clone(intake.deposits()));
         // Les fichiers produits (BR-FICHE-024) : octets, chemin, propriétaire et droits décidés par le domaine.
         let files: Vec<ProducedBytes> = job
             .files
@@ -1319,6 +1443,14 @@ impl Deployments {
                     .and_then(|owner| Perms::new(owner, file.mode))
                     .ok_or(())?;
                 root.write_atomic(&rel, &file.bytes, file_perms)
+                    .map_err(|_| ())?;
+            }
+            if wants_pack {
+                let (Some((deposit, rel, sha256)), Some(deposits)) = (&pack, &deposits) else {
+                    return Err(());
+                };
+                deposits
+                    .place(deposit, &account, &key, rel, sha256)
                     .map_err(|_| ())?;
             }
             Ok(())
@@ -1771,6 +1903,38 @@ struct ProducedBytes {
 /// Le chemin d'un dossier dans le service, normalisé comme le domaine.
 fn normalized(target: &str) -> Result<String, ()> {
     deploy::normalize_target(target).map_err(|_| ())
+}
+
+fn pack_unavailable() -> DeployError {
+    DeployError::Invalid(Invalid {
+        field: "source.pack",
+        reason: "unavailable",
+    })
+}
+
+/// Ce que l'écran lit d'un pack jugé.
+fn pack_view(judged: &JudgedPack) -> PackInspectView {
+    let report = &judged.report;
+    PackInspectView {
+        genre: match report.genre {
+            PackGenre::ServerPack => PackGenreWire::ServerPack,
+            PackGenre::ModrinthPack => PackGenreWire::ModrinthPack,
+        },
+        size_bytes: judged.size,
+        files: u64::try_from(report.files).unwrap_or(u64::MAX),
+        mods: u64::try_from(report.mods).unwrap_or(u64::MAX),
+        unpacked_bytes: report.unpacked,
+        top_dirs: report.top_dirs.clone().into(),
+        modrinth: report.modrinth.as_ref().map(|m| ModrinthPackView {
+            name: m.name.clone(),
+            version: m.version.clone(),
+            minecraft: m.minecraft.clone(),
+            loader: m.loader.as_ref().map(|(name, _)| name.clone()),
+            loader_version: m.loader.as_ref().map(|(_, version)| version.clone()),
+            downloads: u32::try_from(m.downloads).unwrap_or(u32::MAX),
+            hosts: m.hosts.clone().into(),
+        }),
+    }
 }
 
 fn account_of(actor: &Actor) -> String {

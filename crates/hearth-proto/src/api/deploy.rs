@@ -223,7 +223,23 @@ pub enum DeploySource {
         /// Le monde à reprendre par copie vérifiée (HRT-105, BR-MONDE-002 à 026).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         world: Option<WorldPick>,
+        /// Un pack de mods déjà déposé dans la zone d'attente de l'agent (HRT-124, BR-MOD-007) : seulement son
+        /// identifiant. Le genre, le moteur permis et le contenu sont jugés par l'agent, jamais crus du client.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pack: Option<DeployPack>,
     },
+}
+
+/// Un pack déposé : l'identifiant que l'agent a donné au dépôt (jamais un chemin ni un nom de fichier).
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeployPack {
+    pub deposit: String,
+}
+
+impl fmt::Debug for DeployPack {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DeployPack").finish_non_exhaustive()
+    }
 }
 
 impl fmt::Debug for DeploySource {
@@ -488,6 +504,7 @@ mod tests {
                 optional_ports: vec![],
                 world_imported: false,
                 world: None,
+                pack: None,
             }),
             extra: BTreeMap::new(),
         };

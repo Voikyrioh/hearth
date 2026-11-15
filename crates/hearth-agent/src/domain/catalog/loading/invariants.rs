@@ -4,6 +4,7 @@
 //! | # | Invariant | Où |
 //! |---|---|---|
 //! | I1 | une seule voie, plan fermé (aucun champ de privilège, image épinglée, port ≥ 1024) | `check_fiche_file` (+ format fermé) |
+//! | I1 | (suite) aucune variable `CF_*`, aucun `AUTO_CURSEFORGE` (BR-MOD-017) | `check_no_curseforge`, `check_cross` |
 //! | I2 | tous les montages sont des dossiers gérés du service | `check_fiche_file` |
 //! | I3 | aucun texte n'atteint un interpréteur (arguments, ordres, valeurs dérivées) | `check_fiche_file`, `check_cross` |
 //! | I4 | aucune exécution : aucun genre d'étape qui lance une commande | `check_steps` |
@@ -21,8 +22,8 @@ use super::loader::{check_text, check_variant_refs};
 use super::memory::{TierId, TierListError, declared_ids, hidden_ids, recommended_gap};
 use super::model::{Fiche, Setting, ValueSpec};
 use super::schema::fiche::{
-    Channel, ChannelKind, Derive, Evidence, FicheFile, FolderRole, MemoryTier, PlainEvidence,
-    PortRole, Proof, Publish, Status, Step, StepKind, WorldSaved,
+    Channel, ChannelKind, Derive, Evidence, FicheFile, FolderRole, MemoryTier, ModWay,
+    PlainEvidence, PortRole, Proof, Publish, Status, Step, StepKind, WorldSaved,
 };
 use super::schema::settings::{ArgForm, SettingsFile};
 use super::value::{
@@ -466,6 +467,8 @@ pub fn check_fiche_file(file: &FicheFile) -> Result<(), FicheRefusee> {
     check_image(file)?;
     check_variants(file)?;
     check_folders(file)?;
+    check_mods(file)?;
+    check_no_curseforge(file)?;
     check_ports(file)?;
     check_channels(file)?;
     check_env_and_secrets(file)?;
@@ -639,11 +642,168 @@ fn check_folders(file: &FicheFile) -> Result<(), FicheRefusee> {
         if let Some(hint) = &folder.drop_hint {
             check_text(f, &at, "indication de dépôt", hint, MAX_HELP_CHARS)?;
         }
+        // Le dossier des packs est toujours en lecture seule et hors sauvegarde, avec ou sans bloc `[mods]`.
+        if folder.role == FolderRole::Packs && (!folder.read_only || folder.backup) {
+            return Err(refuse(
+                f,
+                at,
+                Motif::ModsIncoherent {
+                    raison: "un dossier de rôle `packs` est en lecture seule et hors sauvegarde",
+                },
+            ));
+        }
         if let Some(only) = &folder.only_variants {
             check_variant_refs(file, f, &at, only)?;
         }
     }
     Ok(())
+}
+
+/// Le bloc `[mods]` (HRT-124, BR-MOD-001) : les voies sont une liste fermée (l'analyse refuse le reste), chaque
+/// voie s'appuie sur un dossier géré du bon rôle, chaque genre de pack nomme une variable valide et des variantes
+/// qui existent.
+fn check_mods(file: &FicheFile) -> Result<(), FicheRefusee> {
+    let f = Fichier::Fiche;
+    let Some(mods) = &file.mods else {
+        return Ok(());
+    };
+    let incoherent =
+        |at: &str, raison: &'static str| refuse(f, at.to_owned(), Motif::ModsIncoherent { raison });
+    if mods.ways.is_empty() {
+        return Err(incoherent("mods.ways", "aucune voie (omettez le bloc)"));
+    }
+    if mods
+        .ways
+        .iter()
+        .enumerate()
+        .any(|(i, w)| mods.ways[..i].contains(w))
+    {
+        return Err(incoherent("mods.ways", "une voie est déclarée deux fois"));
+    }
+    if mods.ways.contains(&ModWay::DropFiles)
+        && !file
+            .folder
+            .iter()
+            .any(|d| d.role == FolderRole::Mods && !d.read_only)
+    {
+        return Err(incoherent(
+            "mods.ways",
+            "`drop_files` demande un dossier de rôle `mods` écrit par l'agent",
+        ));
+    }
+    let wants_pack = mods.ways.contains(&ModWay::DropPack);
+    match (&mods.pack, wants_pack) {
+        (None, true) => return Err(incoherent("mods.pack", "`drop_pack` demande `[mods.pack]`")),
+        (Some(_), false) => {
+            return Err(incoherent(
+                "mods.pack",
+                "`[mods.pack]` demande la voie `drop_pack`",
+            ));
+        }
+        _ => {}
+    }
+    let Some(pack) = &mods.pack else {
+        return Ok(());
+    };
+    let Some(folder) = file.folder.iter().find(|d| d.id == pack.folder) else {
+        return Err(refuse(
+            f,
+            "mods.pack.folder",
+            Motif::DossierInconnu {
+                id: pack.folder.clone(),
+            },
+        ));
+    };
+    if folder.role != FolderRole::Packs || !folder.read_only || folder.backup {
+        return Err(incoherent(
+            "mods.pack.folder",
+            "le dossier des packs a le rôle `packs`, en lecture seule, hors sauvegarde",
+        ));
+    }
+    if pack.genre.is_empty() {
+        return Err(incoherent("mods.pack.genre", "aucun genre de pack"));
+    }
+    for (i, genre) in pack.genre.iter().enumerate() {
+        let at = format!("mods.pack.genre[{i}]");
+        if pack.genre[..i].iter().any(|g| g.kind == genre.kind) {
+            return Err(incoherent(&at, "un genre est déclaré deux fois"));
+        }
+        if !env_name_ok(&genre.env) {
+            return Err(refuse(
+                f,
+                at,
+                Motif::IdentifiantInvalide {
+                    ou: "nom de variable",
+                },
+            ));
+        }
+        if genre.variants.is_empty() {
+            return Err(refuse(f, at, Motif::ListeDeVariantesVide));
+        }
+        check_variant_refs(file, f, &at, &genre.variants)?;
+    }
+    Ok(())
+}
+
+/// BR-MOD-017 : aucune variable `CF_*`, aucun type `AUTO_CURSEFORGE`, nulle part où une fiche écrit une variable
+/// (variables fixes, variantes, contrat, variable d'un genre de pack). Les réglages sont contrôlés par `check_cross`.
+fn check_no_curseforge(file: &FicheFile) -> Result<(), FicheRefusee> {
+    let f = Fichier::Fiche;
+    let forbidden = |name: &str, value: Option<&str>| {
+        is_curseforge_name(name) || value.is_some_and(is_curseforge_value)
+    };
+    let refused = |at: String, ou: &str| refuse(f, at, Motif::CurseForgeInterdit { ou: ou.into() });
+    for (i, env) in file.env.iter().enumerate() {
+        if forbidden(&env.name, env.value.as_deref()) {
+            return Err(refused(format!("env[{i}]"), "variable fixe"));
+        }
+    }
+    for (i, variant) in file.variant.iter().enumerate() {
+        for (j, env) in variant.env.iter().enumerate() {
+            if forbidden(&env.name, Some(&env.value)) {
+                return Err(refused(
+                    format!("variant[{i}].env[{j}]"),
+                    "variable d'une variante",
+                ));
+            }
+        }
+    }
+    for (i, agreement) in file.agreement.iter().enumerate() {
+        if forbidden(&agreement.binds.key, Some(&agreement.binds.accepted_value)) {
+            return Err(refused(format!("agreement[{i}]"), "contrat"));
+        }
+    }
+    if let Some(pack) = file.mods.as_ref().and_then(|m| m.pack.as_ref()) {
+        for (i, genre) in pack.genre.iter().enumerate() {
+            if forbidden(&genre.env, None) {
+                return Err(refused(
+                    format!("mods.pack.genre[{i}]"),
+                    "variable d'un genre de pack",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Un nom de variable de la famille `CF_` de l'image (clé et réglages de CurseForge), sans tenir compte de la casse.
+pub fn is_curseforge_name(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    upper.starts_with("CF_") || upper.contains("CURSEFORGE")
+}
+
+/// Le type de serveur `AUTO_CURSEFORGE` de l'image, sans tenir compte de la casse ni des espaces.
+pub fn is_curseforge_value(value: &str) -> bool {
+    value.to_ascii_uppercase().contains("CURSEFORGE")
+}
+
+/// Les variables de l'image qui choisissent le type de serveur ou la plateforme de mods : une fiche ne les laisse
+/// jamais en texte libre (l'utilisateur pourrait y écrire `AUTO_CURSEFORGE`).
+fn selects_the_server_type(key: &str) -> bool {
+    matches!(
+        key.to_ascii_uppercase().as_str(),
+        "TYPE" | "MOD_PLATFORM" | "MODPACK_PLATFORM"
+    )
 }
 
 fn check_ports(file: &FicheFile) -> Result<(), FicheRefusee> {
@@ -1465,6 +1625,35 @@ pub fn check_cross(fiche: &Fiche) -> Result<(), FicheRefusee> {
                     ou: "nom de variable d'un réglage",
                 },
             ));
+        }
+        // BR-MOD-017 : aucun réglage n'écrit une variable `CF_*` ni le type `AUTO_CURSEFORGE`.
+        if channel.is_some_and(|c| c.kind == ChannelKind::Env) {
+            let value_is_curseforge =
+                |v: &Option<String>| v.as_deref().is_some_and(is_curseforge_value);
+            let choice_is_curseforge = matches!(
+                &setting.spec,
+                ValueSpec::Choice { choices } if choices.iter().any(|c| is_curseforge_value(&c.value))
+            );
+            let free_server_type = selects_the_server_type(&setting.key)
+                && !matches!(&setting.spec, ValueSpec::Choice { .. });
+            if is_curseforge_name(&setting.key)
+                || free_server_type
+                || value_is_curseforge(&setting.proposed)
+                || value_is_curseforge(&setting.game_default)
+                || setting
+                    .imposed
+                    .as_ref()
+                    .is_some_and(|i| value_is_curseforge(&i.value))
+                || choice_is_curseforge
+            {
+                return Err(refuse(
+                    s,
+                    at,
+                    Motif::CurseForgeInterdit {
+                        ou: "réglage".into(),
+                    },
+                ));
+            }
         }
         if let Some(imposed) = &setting.imposed
             && imposed.secret.is_some()

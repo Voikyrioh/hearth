@@ -32,6 +32,7 @@ mod machine_info;
 mod monotonic_clock;
 mod op_journal;
 mod operation_repo;
+mod pack_deposits;
 mod password_hasher;
 mod proof;
 mod safe_fs;
@@ -97,6 +98,7 @@ pub use op_journal::{
     RecordedContainers, RecordedService, RemoveOutcome, ServiceObserver, StepGuard,
 };
 pub use operation_repo::{OperationRepo, OperationTx};
+pub use pack_deposits::{DepositError, DepositFile, DepositId, PackDeposits};
 pub use password_hasher::{HashError, PasswordHasher};
 pub use proof::{ChallengeCrypto, CryptoError, ProofVerifier};
 pub use safe_fs::{

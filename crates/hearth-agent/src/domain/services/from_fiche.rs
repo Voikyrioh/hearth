@@ -23,10 +23,12 @@ use super::spec::{
     SpecMountKind, SpecPort, SpecProtocol, SpecRestart, SpecSecrets, SpecSettings,
 };
 use crate::domain::catalog::loading::model::Fiche;
-use crate::domain::catalog::loading::schema::fiche::{Evidence, PlainEvidence, PortRole, Protocol};
+use crate::domain::catalog::loading::schema::fiche::{
+    Evidence, PackGenre, PlainEvidence, PortRole, Protocol,
+};
 use crate::domain::catalog::loading::schema::settings::ChangeWhen;
 use crate::domain::catalog::settings_state::{SettingsState, Slot};
-use crate::domain::catalog::translate::{DeploymentValidator, ServiceSpecDraft};
+use crate::domain::catalog::translate::{DeploymentValidator, ServiceSpecDraft, pack_file_name};
 use crate::domain::sealed::{AnswerId, MAX_ANSWER_ID_CHARS};
 use crate::domain::secret::Secret;
 
@@ -107,11 +109,21 @@ pub struct ProducedFile {
     pub content: Secret,
 }
 
+/// Où ranger le pack déposé (HRT-124) : le sous-dossier géré des packs et le nom FIXE du fichier. Le contenu vient
+/// de la zone d'attente, jamais de la description.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackPlacement {
+    pub folder_source: String,
+    pub file_name: &'static str,
+    pub genre: PackGenre,
+}
+
 /// Ce que l'installation écrit : la même demande jugée que le formulaire, plus les fichiers produits.
 #[derive(Debug)]
 pub struct FicheDeploy {
     pub valid: ValidDeploy,
     pub files: Vec<ProducedFile>,
+    pub pack: Option<PackPlacement>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -331,7 +343,32 @@ pub fn body_and_secrets_from(
     let valid = ValidDeploy::from_parts(body, secrets, inputs.accept, requested)
         .map_err(FromFicheError::Spec)?;
 
-    Ok(FicheDeploy { valid, files })
+    // Le pack déposé : le dossier géré des packs (déclaré par la fiche) et le nom fixe du fichier.
+    let pack = match draft.pack {
+        None => None,
+        Some(genre) => {
+            let way = inputs
+                .fiche
+                .file
+                .mods
+                .as_ref()
+                .and_then(|m| m.pack.as_ref())
+                .ok_or(FromFicheError::Folder)?;
+            let folder = draft
+                .folders
+                .iter()
+                .find(|f| f.id == way.folder)
+                .ok_or(FromFicheError::Folder)?;
+            let target = normalize_target(&folder.target).map_err(|_| FromFicheError::Folder)?;
+            Some(PackPlacement {
+                folder_source: flatten_target(&target).ok_or(FromFicheError::Folder)?,
+                file_name: pack_file_name(genre),
+                genre,
+            })
+        }
+    };
+
+    Ok(FicheDeploy { valid, files, pack })
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -685,6 +722,7 @@ disk = { evidence = \"unmeasured\" }",
                 optional_ports: &optional,
                 generated: &generated,
                 world_imported: false,
+                pack: None,
             },
         )
         .expect("traduite");
@@ -774,6 +812,7 @@ disk = { evidence = \"unmeasured\" }",
                 optional_ports: &optional,
                 generated: &generated,
                 world_imported: false,
+                pack: None,
             },
         )
         .expect("traduite");
@@ -823,6 +862,7 @@ disk = { evidence = \"unmeasured\" }",
                 optional_ports: &optional,
                 generated: &generated,
                 world_imported: false,
+                pack: None,
             },
         )
         .expect("traduite");

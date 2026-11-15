@@ -654,6 +654,8 @@ impl From<&FicheDetail> for FicheDetailDto {
             imposed,
             themes,
             settings,
+            // Les voies de mods : lues par le client avec HRT-125, pas encore par cette projection.
+            mods: _,
         } = detail;
         let ImageView {
             repository,
@@ -939,6 +941,7 @@ impl FicheInstallRequestDto {
                 world_imported: false,
                 // Reprendre un monde (HRT-105) : le client ne le demande pas encore.
                 world: None,
+                pack: None,
             }),
             extra: std::collections::BTreeMap::new(),
         })

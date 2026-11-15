@@ -17,6 +17,7 @@ pub mod hello;
 pub mod machine;
 pub mod metrics;
 pub mod operations;
+pub mod packs;
 pub mod reauth;
 pub mod security;
 pub mod service_delete;

@@ -102,6 +102,12 @@ pub enum Motif {
     ConsoleIncoherente {
         raison: &'static str,
     },
+    // ---- I1 (suite) : aucune voie CurseForge (BR-MOD-017) ---------------------------------------
+    /// Une variable `CF_*` ou le type de serveur `AUTO_CURSEFORGE` : jamais, ni dans une valeur fixe, ni dans une
+    /// variante, ni dans un réglage.
+    CurseForgeInterdit {
+        ou: String,
+    },
     // ---- I8 : un contrat ne s'accepte que par un geste ----------------------------------------
     ContratAccepteDAvance {
         ou: String,
@@ -126,6 +132,10 @@ pub enum Motif {
     },
     /// `only_variants = []` : « toutes » s'écrit en omettant le champ (BR-FICHE-060).
     ListeDeVariantesVide,
+    /// Le bloc `[mods]` est incohérent (voie sans dossier, genre sans variante...).
+    ModsIncoherent {
+        raison: &'static str,
+    },
     ReferenceInconnue {
         genre: &'static str,
         id: String,
@@ -201,7 +211,8 @@ impl Motif {
             | EmpreinteInvalide
             | PublieeSansEmpreinte
             | PortReserve { .. }
-            | PortEnDouble { .. } => "I1",
+            | PortEnDouble { .. }
+            | CurseForgeInterdit { .. } => "I1",
             CheminInvalide { .. } | CibleEnDouble | DossierInconnu { .. } => "I2",
             ArgumentNonLitteral
             | SecretEnArgument
@@ -219,6 +230,7 @@ impl Motif {
             | IdentifiantEnDouble { .. }
             | CleEnDouble { .. }
             | ListeDeVariantesVide
+            | ModsIncoherent { .. }
             | ReferenceInconnue { .. }
             | TropDEssentiels { .. }
             | ValeurProposeeInvalide { .. }
@@ -273,12 +285,14 @@ impl Motif {
             ConsolePubliee => "une console distante n'est jamais publiée (`publish = \"never\"` obligatoire)".into(),
             ConsoleMotDePasseNonGenere => "le mot de passe d'une console distante est un secret généré par l'agent".into(),
             ConsoleIncoherente { raison } => format!("console distante incohérente : {raison}"),
+            CurseForgeInterdit { ou } => format!("aucune voie CurseForge : une variable `CF_*` ou le type `AUTO_CURSEFORGE` est interdit ({ou}, BR-MOD-017)"),
             ContratAccepteDAvance { ou } => format!("la valeur d'acceptation d'un contrat est écrite par un autre chemin que le geste de l'utilisateur ({ou})"),
             BorneDepassee { quoi, limite, trouve } => format!("borne dépassée : {quoi} ({trouve} pour une limite de {limite})"),
             IdentifiantInvalide { ou } => format!("identifiant invalide ({ou}) : minuscules, chiffres, tirets"),
             IdentifiantEnDouble { genre, id } => format!("{genre} `{id}` déclaré deux fois"),
             CleEnDouble { canal, cle } => format!("la clé `{cle}` est réglée deux fois dans le canal `{canal}`"),
             ListeDeVariantesVide => "`only_variants` est vide : pour toutes les variantes, omettez le champ".into(),
+            ModsIncoherent { raison } => format!("bloc `[mods]` incohérent : {raison}"),
             ReferenceInconnue { genre, id } => format!("{genre} `{id}` introuvable"),
             TropDEssentiels { trouve } => format!("{trouve} réglages `essential` pour 8 au plus (BR-FICHE-038)"),
             ValeurProposeeInvalide { reglage, raison } => format!("la valeur proposée ou par défaut du réglage `{reglage}` est invalide : {raison}"),

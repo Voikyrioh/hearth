@@ -39,6 +39,7 @@ use hearth_proto::api::game_settings::{
 };
 use hearth_proto::api::metrics::HistoryWindow;
 use hearth_proto::api::operations::OperationStatus as HttpOperationStatus;
+use hearth_proto::api::packs::PackGenreWire;
 use hearth_proto::api::reauth::ReauthMode;
 use hearth_proto::api::security::{AttackModeEnd, AttackModeState, SessionDevice};
 use hearth_proto::api::service_delete::FolderFate;
@@ -187,6 +188,8 @@ fn enums() -> Vec<Entry> {
             SettingEffect
         ),
         entry!("api/game_settings.rs::ValueState", Tolerant, ValueState),
+        // Le genre d'un pack lu par l'agent (HRT-124) : un genre plus récent que ce client se lit `Unknown`.
+        entry!("api/packs.rs::PackGenreWire", Tolerant, PackGenreWire),
         entry!("api/catalog.rs::FicheStatus", Tolerant, FicheStatus),
         entry!("api/catalog.rs::EvidenceView", Tolerant, EvidenceView),
         entry!("api/catalog.rs::QuestionKind", Tolerant, QuestionKind),

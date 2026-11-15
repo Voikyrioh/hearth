@@ -28,6 +28,8 @@ pub const CAPABILITY_SERVICE_TRANSFERS: &str = "service-transfers";
 pub const CAPABILITY_SERVICE_BACKUPS: &str = "service-backups";
 /// Capacité : catalogue de fiches de serveur de jeu (lot suivant).
 pub const CAPABILITY_CATALOG: &str = "catalog";
+/// Les packs de mods déposés (HRT-124) : `POST /deployments/pack-check`, et `source.pack` de `POST /deployments`.
+pub const CAPABILITY_GAME_PACKS: &str = "game-packs";
 /// Capacité : un serveur de jeu au quotidien (lot suivant).
 pub const CAPABILITY_GAME_SERVICES: &str = "game-services";
 

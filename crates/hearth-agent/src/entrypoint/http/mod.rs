@@ -162,6 +162,8 @@ const READ_ONLY_POSTS: &[&str] = &[
     "/sessions/challenge",
     "/engine/recheck",
     "/deployments/check",
+    // Lire un pack déposé avant de l'installer (HRT-124) : rien n'est rangé, rien n'est écrit.
+    "/deployments/pack-check",
     "/services/{key}/settings/analyze",
     // Les sauvegardes (HRT-97) : l'estimation de la fenêtre de création n'écrit rien ; la vérification n'écrit que
     // l'état d'intégrité d'une sauvegarde.
@@ -409,6 +411,17 @@ pub static ENDPOINTS: &[Endpoint] = &[
         // Une consultation : seul un refus faute de droit est consigné (BR-AUDIT-021), jamais un constat.
         audit: Some(AuditAction::ServiceDeploy),
         route: || post(deployments::check),
+    },
+    // Lire un pack de mods déposé (HRT-124, BR-MOD-007) : le genre est lu dans le contenu par l'agent. Une
+    // consultation du même droit ; seul un refus faute de droit est consigné.
+    Endpoint {
+        method: Method::POST,
+        path: "/deployments/pack-check",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::ServiceDeploy),
+        route: || post(deployments::pack_check),
     },
     Endpoint {
         method: Method::POST,
@@ -956,6 +969,7 @@ mod tests {
                     "/sessions/challenge"
                         | "/engine/recheck"
                         | "/deployments/check"
+                        | "/deployments/pack-check"
                         | "/services/{key}/settings/analyze"
                         | "/services/{key}/backups/preview"
                         | "/backups/{id}/verify"
@@ -1106,6 +1120,7 @@ mod tests {
         // ouvertes à tous (des totaux, jamais un nom).
         ("POST", "/deployments", Service),
         ("POST", "/deployments/check", ServiceCheck),
+        ("POST", "/deployments/pack-check", ServiceCheck),
         ("GET", "/engine/capacity", OpenRead),
         // Le catalogue des fiches (HRT-101) : ouvert à tout compte authentifié, aucune écriture.
         ("GET", "/catalog", OpenRead),

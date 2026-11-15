@@ -14,8 +14,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use rustix::fs::{
-    AtFlags, CWD, Dir, FileType, Mode, OFlags, Stat, fchmod, fstat, fsync, mkdirat, openat,
-    readlinkat, renameat, statat, unlinkat,
+    AtFlags, CWD, Dir, FileType, Mode, OFlags, RenameFlags, Stat, fchmod, fstat, fsync, mkdirat,
+    openat, readlinkat, renameat, renameat_with, statat, unlinkat,
 };
 use rustix::io::Errno;
 
@@ -285,6 +285,49 @@ impl UnixRoot {
         outcome
     }
 
+    /// Écrit en flux (HRT-124) : refuse tout ce qui existe déjà sous ce nom (`Io(AlreadyExists)`), nom d'attente
+    /// créé en exclusivité, propriétaire et droits avant la première donnée, puis renommage SANS REMPLACEMENT dans
+    /// le même dossier. La taille et l'empreinte sont jugées AVANT le renommage.
+    pub(super) fn write_file_stream(
+        &self,
+        rel: &RelPath,
+        source: &mut dyn Read,
+        perms: Perms,
+        max_bytes: u64,
+        expect_sha256: &[u8; 32],
+    ) -> Result<u64, FsError> {
+        let (parent, leaf) = self.parent_of(rel)?;
+        // Jamais de remplacement : ce qui existe déjà sous ce nom, quoi que ce soit, est refusé.
+        match statat(&parent, leaf, AtFlags::SYMLINK_NOFOLLOW) {
+            Ok(_) => return Err(FsError::Io(io::ErrorKind::AlreadyExists)),
+            Err(Errno::NOENT) => {}
+            Err(errno) => return Err(fs_error(errno)),
+        }
+        let staging = format!(".hearth-tmp-{}", ulid::Ulid::generate());
+        let fd = openat(
+            &parent,
+            staging.as_str(),
+            CREATE_FILE,
+            Mode::RUSR | Mode::WUSR,
+        )
+        .map_err(fs_error)?;
+        let outcome = stream_and_place(
+            fd,
+            &parent,
+            &staging,
+            leaf,
+            source,
+            perms,
+            max_bytes,
+            expect_sha256,
+        );
+        if outcome.is_err() {
+            // Au mieux : c'est CE nom d'attente, créé par nous (`O_EXCL`), jamais suivi.
+            let _ = unlinkat(&parent, staging.as_str(), AtFlags::empty());
+        }
+        outcome
+    }
+
     /// Désigne puis ouvre en lecture un fichier ordinaire du service : jugé AVANT d'ouvrir (sur un périphérique,
     /// c'est l'ouverture elle-même qui agit), jamais par un lien, sur le périphérique de la racine, et c'est
     /// bien l'objet jugé qui est ouvert (même périphérique et même inode).
@@ -527,6 +570,53 @@ fn fill_and_place(
     drop(file);
     renameat(parent, staging, parent, leaf).map_err(fs_error)?;
     fsync(parent).map_err(fs_error)
+}
+
+/// Remplit le fichier d'attente par morceaux de 1 Mio en calculant l'empreinte, juge la taille et l'empreinte, le
+/// rend durable puis le met en place par renommage dans le MÊME dossier.
+#[allow(clippy::too_many_arguments)]
+fn stream_and_place(
+    fd: OwnedFd,
+    parent: &OwnedFd,
+    staging: &str,
+    leaf: &str,
+    source: &mut dyn Read,
+    perms: Perms,
+    max_bytes: u64,
+    expect_sha256: &[u8; 32],
+) -> Result<u64, FsError> {
+    use sha2::{Digest, Sha256};
+    // Propriétaire et droits AVANT la première donnée.
+    apply(&fd, perms)?;
+    let mut file = File::from(fd);
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 1024 * 1024];
+    let mut total = 0u64;
+    loop {
+        let read = match source.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(FsError::Io(error.kind())),
+        };
+        total += read as u64;
+        if total > max_bytes {
+            return Err(FsError::TooLarge);
+        }
+        hasher.update(&buffer[..read]);
+        file.write_all(&buffer[..read])
+            .map_err(|e| FsError::Io(e.kind()))?;
+    }
+    let digest: [u8; 32] = hasher.finalize().into();
+    if &digest != expect_sha256 {
+        return Err(FsError::Io(io::ErrorKind::InvalidData));
+    }
+    file.sync_all().map_err(|e| FsError::Io(e.kind()))?;
+    drop(file);
+    // Sans remplacement, même si un autre geste a posé ce nom entre le contrôle et le renommage.
+    renameat_with(parent, staging, parent, leaf, RenameFlags::NOREPLACE).map_err(fs_error)?;
+    fsync(parent).map_err(fs_error)?;
+    Ok(total)
 }
 
 /// Parcours de mesure : somme de `st_blocks`, un fichier à plusieurs noms compté une fois.

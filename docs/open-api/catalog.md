@@ -50,3 +50,7 @@ Réponse (`FicheDetail`) :
 ## Règles
 
 BR-FICHE-001 à 004, 006, 007, 008, 010, 016, 037, 041, 056. Le client (HRT-102) lit ces deux routes par `read_catalog` et `read_fiche` de la coquille ; une fiche inconnue de l'agent se lit « inconnue », jamais comme une panne.
+
+## Voies de mods (HRT-124)
+
+`GET /catalog/{id}` porte un membre `mods` quand la fiche déclare des voies de mods (`ways`, genres de pack et variantes permises, indication du dossier « Tes mods »). Absent : aucune voie (BR-MOD-014). Détail et lecture d'un pack : [game-packs](./game-packs.md). Le rôle de dossier `packs` (lecture seule, hors sauvegarde) s'ajoute aux rôles de `folders`.

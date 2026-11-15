@@ -19,6 +19,7 @@ pub mod install;
 pub mod maintenance;
 pub mod metrics;
 pub mod operations;
+pub mod pack_intake;
 pub mod ports;
 pub mod secret_vault;
 pub mod security;
