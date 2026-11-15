@@ -1,7 +1,15 @@
+import { isHearthUsername } from "@/accounts/name";
 import { safeText } from "@/audit/text";
 import type { ProgressStep } from "@/components/molecules/ProgressSteps.vue";
 import { type MessageKey, t } from "@/i18n";
-import type { FicheStop, GamePort, GameView, ServiceInfo, ServiceOperation } from "@/link";
+import type {
+  FicheStop,
+  GamePort,
+  GameView,
+  PublicAddressRefusal,
+  ServiceInfo,
+  ServiceOperation,
+} from "@/link";
 
 /**
  * Le quotidien d'un serveur de jeu (HRT-104, `BR-JEU-004`, `010`, `012`, `017` à `021`, `027`) : des fonctions pures, sans
@@ -148,27 +156,88 @@ export function portsListText(ports: readonly GamePort[]): string {
 }
 
 export interface Address {
-  /** « {adresse}:{port} » : celle que ce client utilise pour joindre le serveur, avec le port de base du jeu. */
+  /** « {adresse}:{port} » : l'adresse publique renseignée, sinon celle que ce client utilise pour joindre le serveur. */
   text: string;
+  /** L'adresse est celle que le propriétaire a renseignée pour ses joueurs (BR-JEU-022), pas celle de ce client. */
+  public: boolean;
   /** Le jeu utilise d'autres ports que celui-ci : la carte le dit (BR-JEU-020). */
   others: boolean;
 }
 
 /**
- * L'adresse que le propriétaire donne à ses joueurs (BR-JEU-020, 021) : celle sous laquelle ce client joint le serveur,
- * avec le port de base du jeu (le port de rôle « jeu », sinon le plus petit). `null` : aucun port publié, donc rien à
- * donner. Une adresse IPv6 s'écrit entre crochets.
+ * L'adresse que le propriétaire donne à ses joueurs (BR-JEU-020, 021, 022) : l'adresse publique qu'il a renseignée, sinon
+ * celle sous laquelle ce client joint le serveur, avec le port de base du jeu (le port de rôle « jeu », sinon le plus
+ * petit). `null` : aucun port publié, donc rien à donner. Une adresse IPv6 s'écrit entre crochets.
  */
-export function addressOf(host: string, ports: readonly GamePort[]): Address | null {
+export function addressOf(
+  host: string,
+  ports: readonly GamePort[],
+  publicAddress: string | null = null,
+): Address | null {
   const rows = [...ports]
     .filter((port) => protocolText(port.protocol) !== null)
     .sort((a, b) => a.hostPort - b.hostPort);
   const base = rows.find((port) => port.role === "game") ?? rows[0];
   if (!base) return null;
-  const clean = safeText(host);
+  const given = publicAddress === null ? "" : safeText(publicAddress).trim();
+  const clean = given === "" ? safeText(host) : given;
   const shown = clean.includes(":") && !clean.startsWith("[") ? `[${clean}]` : clean;
   const distinct = new Set(rows.map((port) => port.hostPort));
-  return { text: `${shown}:${base.hostPort}`, others: distinct.size > 1 };
+  return { text: `${shown}:${base.hostPort}`, public: given !== "", others: distinct.size > 1 };
+}
+
+/** La longueur maximale d'une adresse publique (BR-JEU-022) : celle d'un nom de domaine. */
+export const MAX_PUBLIC_ADDRESS_CHARS = 253;
+
+/** Pourquoi une adresse saisie n'est pas valable (BR-JEU-022) ; une adresse vide est valable : elle efface celle de la fiche. */
+export type PublicAddressIssue = "too_long" | "scheme" | "port" | "space";
+
+/**
+ * L'adresse que les joueurs utilisent, sans protocole ni port : un nom de domaine ou une adresse IP, 253 caractères au
+ * plus. Le client refuse avant d'envoyer ; l'agent juge ensuite la forme de ce qu'il garde.
+ */
+export function publicAddressIssue(typed: string): PublicAddressIssue | null {
+  const text = typed.trim();
+  if (text === "") return null;
+  if ([...text].length > MAX_PUBLIC_ADDRESS_CHARS) return "too_long";
+  if (/\s/u.test(text)) return "space";
+  if (text.includes("://")) return "scheme";
+  // Une adresse avec un seul « : » suivi de chiffres est « hôte:port » ; une IPv6 en porte plusieurs, et entre crochets
+  // elle ne s'écrit pas sans port non plus : on refuse un port, jamais une adresse IPv6 nue.
+  if (/^\[.*\]:\d+$/u.test(text) || /^[^:]+:\d+$/u.test(text)) return "port";
+  return null;
+}
+
+const ISSUE_KEYS: Record<PublicAddressIssue, MessageKey> = {
+  too_long: "game.address.issue.tooLong",
+  scheme: "game.address.issue.scheme",
+  port: "game.address.issue.port",
+  space: "game.address.issue.space",
+};
+
+export function publicAddressIssueText(issue: PublicAddressIssue): string {
+  return t(ISSUE_KEYS[issue]);
+}
+
+/** La phrase d'un refus de l'agent qui n'est pas celui de la confirmation ; un code inconnu devient le refus général. */
+export function publicAddressRefusalText(refusal: { kind: string }): string | undefined {
+  const known = refusal as PublicAddressRefusal;
+  switch (known.kind) {
+    case "conflict":
+      return t("game.address.refused.conflict");
+    case "service_busy":
+      return known.by !== null && isHearthUsername(known.by)
+        ? t("game.address.refused.busyBy", { account: known.by })
+        : t("game.address.refused.busy");
+    case "gone":
+      return t("game.address.refused.gone");
+    case "engine_unavailable":
+      return t("game.address.refused.engine");
+    case "invalid":
+      return t("game.address.refused.invalid");
+    default:
+      return t("game.address.refused.other");
+  }
 }
 
 // ── La séquence d'un arrêt ou d'un redémarrage (BR-JEU-003, 005, 008) ──────────────────────────────────

@@ -1266,6 +1266,8 @@ impl GameSettings {
             stop: stop_view(fiche),
             ports,
             has_password,
+            // L'adresse des joueurs est une donnée de la description durable, jamais un secret (BR-JEU-022).
+            public_address: loaded.body.settings.public_address.clone(),
         })
     }
 

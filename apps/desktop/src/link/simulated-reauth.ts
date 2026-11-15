@@ -71,6 +71,8 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
     case "service_delete":
     // Supprimer une sauvegarde n'est JAMAIS couvert par l'élévation (BR-BACKUP-027).
     case "backup_delete":
+    // Modifier un service (l'adresse des joueurs, HRT-215) n'est JAMAIS couvert par l'élévation (BR-EDIT-017).
+    case "service_update":
     // Répondre à une opération n'est jamais couvert par l'élévation seule (agent d'avant la grille).
     case "operation_decide":
       return false;
@@ -102,6 +104,7 @@ function isPiloting(kind: AdminActKind): boolean {
     case "backup_create":
     case "backup_delete":
     case "backup_settings":
+    case "service_update":
       return false;
   }
 }

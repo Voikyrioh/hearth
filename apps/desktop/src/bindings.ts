@@ -360,6 +360,12 @@ export const commands = {
 	 */
 	readGameView: (serverId: string, key: string) => typedError<GameReadDto, LinkFailure>(__TAURI_INVOKE("read_game_view", { serverId, key })),
 	/**
+	 *  Change l'adresse que le propriétaire donne à ses joueurs (`PUT /services/{key}/spec`, HRT-215) : la modification
+	 *  d'un service qui ne change que cette adresse (`""` l'efface), un acte d'administration confirmé, JAMAIS couvert par
+	 *  l'élévation, jamais rejoué. Sans le droit « gérer les services » : `MissingServicesRight`.
+	 */
+	setPublicAddress: (serverId: string, key: string, address: string, adminPassword: string | null) => typedError<PublicAddressOutcome, LinkFailure>(__TAURI_INVOKE("set_public_address", { serverId, key, address, adminPassword })),
+	/**
 	 *  Le mot de passe du serveur de jeu (`GET /services/{key}/game-secret`, `BR-JEU-025`) : une lecture réservée au droit
 	 *  « gérer les services », consignée au journal sans la valeur. La valeur est rendue à l'appelant et à lui seul : la
 	 *  coquille ne la garde pas, ne la trace pas, ne la met pas dans un événement. Hors « Connecté » : `NotConnected`.
@@ -497,7 +503,12 @@ export type AdminActKindDto = "account_create" | "account_role" | "account_passw
 /**  Supprimer une sauvegarde (HRT-98) : le mot de passe à chaque fois, jamais couvert par l'élévation. */
 "backup_delete" | 
 /**  Régler les éléments ignorés des sauvegardes d'un service (HRT-98) : couvert par l'élévation de cinq minutes. */
-"backup_settings";
+"backup_settings" | 
+/**
+ *  Modifier un service, ici l'adresse de ses joueurs (HRT-215, HRT-87) : le mot de passe à chaque fois, jamais
+ *  couvert par l'élévation (BR-EDIT-017).
+ */
+"service_update";
 
 /**  Qui a adopté un service, et quand (HRT-79). */
 export type AdoptionDto = {
@@ -1593,6 +1604,8 @@ export type GameViewDto = {
 	stop: FicheStopDto,
 	ports: GamePortDto[],
 	hasPassword: boolean,
+	/**  L'adresse que le propriétaire donne à ses joueurs (HRT-215, BR-JEU-022) ; `None` : pas renseignée. */
+	publicAddress: string | null,
 };
 
 export type GapReasonDto = "slow" | "rotated" | "resume_lost" | "first_page" | "unknown";
@@ -2011,6 +2024,23 @@ export type ProbeDto = {
 };
 
 export type ProtocolDto = "tcp" | "udp" | "sctp" | "unknown";
+
+/**
+ *  Ce que l'envoi a donné : enregistrée, refusée, ou résultat inconnu (le lien est tombé avant la réponse : jamais
+ *  rejoué, l'interface relit la vue du jeu).
+ */
+export type PublicAddressOutcome = { kind: "saved" } | { kind: "refused"; refusal: PublicAddressRefusal } | { kind: "unknown"; opId: string };
+
+/**  Pourquoi l'agent a refusé le changement d'adresse (rien n'a été modifié). Des CODES, jamais un texte. */
+export type PublicAddressRefusal = { kind: "wrong_password" } | { kind: "password_required" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "busy" } | 
+/**  La description du service a changé entre la lecture et l'envoi (autre révision) : relire et réessayer. */
+{ kind: "conflict" } | 
+/**  Une autre action tient le service pour l'instant. */
+{ kind: "service_busy"; by: string | null } | 
+/**  Le service est adopté ou n'existe plus : rien à modifier. */
+{ kind: "gone" } | { kind: "engine_unavailable" } | 
+/**  L'agent refuse la forme de l'adresse. */
+{ kind: "invalid" } | { kind: "other" };
 
 export type ReasonDto = "no_session" | "expired" | "stored_password_refused" | "user_disconnected" | "revoked" | 
 /**  Fin de session pour un motif que cette version ne connaît pas (agent plus récent). */

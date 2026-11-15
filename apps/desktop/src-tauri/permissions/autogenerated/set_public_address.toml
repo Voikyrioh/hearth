@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-public-address"
+description = "Enables the set_public_address command without any pre-configured scope."
+commands.allow = ["set_public_address"]
+
+[[permission]]
+identifier = "deny-set-public-address"
+description = "Denies the set_public_address command without any pre-configured scope."
+commands.deny = ["set_public_address"]

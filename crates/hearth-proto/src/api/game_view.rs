@@ -44,6 +44,10 @@ pub struct GameView {
     /// Le serveur a un mot de passe de jeu (`BR-JEU-027`) ; jamais sa valeur.
     #[serde(default)]
     pub has_password: bool,
+    /// L'adresse que le propriétaire donne à ses joueurs (domaine ou IP publique, sans protocole ni port) ; absente
+    /// tant qu'il n'en a pas renseigné (`BR-JEU-022`). Un changement passe par `PUT /services/{key}/spec`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_address: Option<String>,
 }
 
 #[cfg(test)]
@@ -69,6 +73,7 @@ mod tests {
                 changed: false,
             }],
             has_password: true,
+            public_address: Some("jeu.example.org".into()),
         };
         let json = serde_json::to_value(&view).expect("json");
         assert_eq!(json["stop"]["world_saved"], "by_sequence");

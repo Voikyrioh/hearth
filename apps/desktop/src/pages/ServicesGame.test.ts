@@ -8,7 +8,7 @@ import { useServiceOpsStore } from "@/stores/serviceOps";
 import { useServiceRightsStore } from "@/stores/serviceRights";
 import { useServicesStore } from "@/stores/services";
 import { useToastsStore } from "@/stores/toasts";
-import { confirmDialog, dialogButton, OWN } from "@/test/confirm";
+import { confirmDialog, dialogButton, OWN, reauthField, typeInto } from "@/test/confirm";
 import { mountContext } from "@/test/mount";
 
 // Un serveur de jeu au quotidien (HRT-104, BR-JEU-004, 006, 007, 010, 012, 017 à 021, 025, 027), sur le pont simulé dont
@@ -133,7 +133,7 @@ describe("la carte « Adresse pour vos joueurs » (BR-JEU-020, BR-JEU-021, BR-JE
     const host = useServersStore().byId("forge")?.host ?? "";
     expect(wrapper.get("[data-game-address-value]").text()).toBe(`${host}:7777`);
     expect(wrapper.get("[data-game-address-local]").text()).toBe(
-      "Cette adresse ne marche que depuis votre réseau.",
+      "Cette adresse ne marche que depuis votre réseau. Renseignez l'adresse publique de votre serveur pour afficher celle de vos joueurs.",
     );
     expect(wrapper.get("[data-game-address-unverified]").text()).toBe(
       "Hearth ne peut pas vérifier que cette adresse est joignable.",
@@ -193,6 +193,109 @@ describe("la carte « Adresse pour vos joueurs » (BR-JEU-020, BR-JEU-021, BR-JE
     expect(
       wrapper.get("[data-game-address-body]").find("[data-game-address-stopped]").exists(),
     ).toBe(false);
+    wrapper.unmount();
+  });
+});
+
+describe("l'adresse publique des joueurs (HRT-215, BR-JEU-022)", () => {
+  const input = () =>
+    document.querySelector<HTMLInputElement>(
+      "[data-public-address-input] input, input[data-public-address-input]",
+    );
+
+  async function openDialog(wrapper: ReturnType<typeof mount>) {
+    await wrapper.get("[data-game-address-edit]").trigger("click");
+    await flushPromises();
+  }
+
+  async function fill(value: string) {
+    typeInto(input(), value);
+    await flushPromises();
+  }
+
+  it("montre l'adresse publique renseignée avec le port du jeu, sans la phrase « ne marche que depuis votre réseau »", async () => {
+    const { wrapper } = await open((bridge) =>
+      bridge.games.patch("forge", "h_game", { publicAddress: "jeu.example.org" }),
+    );
+    expect(wrapper.get("[data-game-address-value]").text()).toBe("jeu.example.org:7777");
+    expect(wrapper.find("[data-game-address-local]").exists()).toBe(false);
+    expect(wrapper.get("[data-game-address-public]").text()).toBe(
+      "C'est l'adresse que vous avez renseignée pour vos joueurs.",
+    );
+    wrapper.unmount();
+  });
+
+  it("change l'adresse par un acte confirmé (mot de passe demandé), sans rien recréer, puis relit la carte", async () => {
+    const { wrapper, bridge } = await open();
+    await openDialog(wrapper);
+    await fill("jeu.example.org");
+    // Jamais couvert par l'élévation : le champ du mot de passe est là, et sans lui rien ne part.
+    expect(reauthField()).not.toBeNull();
+    dialogButton("Enregistrer l'adresse")?.click();
+    await flushPromises();
+    expect(bridge.games.addressChanges).toHaveLength(0);
+    await confirmDialog("Enregistrer l'adresse", OWN);
+    expect(bridge.games.addressChanges).toEqual([
+      { serverId: "forge", key: "h_game", address: "jeu.example.org" },
+    ]);
+    expect(toasts()).toContain("L'adresse de vos joueurs est enregistrée.");
+    expect(wrapper.get("[data-game-address-value]").text()).toBe("jeu.example.org:7777");
+    wrapper.unmount();
+  });
+
+  it("efface l'adresse avec un champ vide et revient à l'adresse du réseau", async () => {
+    const { wrapper, bridge } = await open((b) =>
+      b.games.patch("forge", "h_game", { publicAddress: "jeu.example.org" }),
+    );
+    await openDialog(wrapper);
+    await fill("");
+    await confirmDialog("Enregistrer l'adresse", OWN);
+    expect(bridge.games.addressChanges.at(-1)?.address).toBe("");
+    expect(toasts()).toContain("L'adresse de vos joueurs est effacée.");
+    expect(wrapper.find("[data-game-address-public]").exists()).toBe(false);
+    expect(wrapper.find("[data-game-address-local]").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("refuse avant d'envoyer un protocole, un port, un espace ou une adresse trop longue", async () => {
+    const { wrapper, bridge } = await open();
+    await openDialog(wrapper);
+    for (const [typed, text] of [
+      ["https://jeu.example.org", "sans « https:// »"],
+      ["jeu.example.org:7777", "sans le port"],
+      ["jeu example.org", "pas contenir d'espace"],
+      ["a".repeat(254), "253 caractères au plus"],
+    ] as const) {
+      await fill(typed);
+      input()?.dispatchEvent(new Event("blur"));
+      await flushPromises();
+      expect(dialogText()).toContain(text);
+      expect(dialogButton("Enregistrer l'adresse")?.getAttribute("aria-disabled")).toBe("true");
+    }
+    expect(bridge.games.addressChanges).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it("dit le refus de l'agent par son code et garde la saisie", async () => {
+    const { wrapper, bridge } = await open((b) => {
+      b.games.nextAddressRefusal = "service_busy";
+    });
+    await openDialog(wrapper);
+    await fill("jeu.example.org");
+    await confirmDialog("Enregistrer l'adresse", OWN);
+    expect(dialogText()).toContain(
+      "Une action est déjà en cours sur ce service. Lancée par claire.",
+    );
+    expect(input()?.value).toBe("jeu.example.org");
+    expect(bridge.games.addressChanges).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it("le bouton « Modifier l'adresse » est inactif sans le droit de gérer les services", async () => {
+    const { wrapper } = await open((bridge) =>
+      bridge.setServiceRightOnServer("forge", "marie", false),
+    );
+    expect(wrapper.get("[data-game-address-edit]").attributes("aria-disabled")).toBe("true");
     wrapper.unmount();
   });
 });

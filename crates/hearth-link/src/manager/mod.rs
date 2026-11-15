@@ -26,6 +26,7 @@ mod service_lifecycle;
 mod service_logs;
 mod service_logs_retry;
 mod service_ops;
+mod service_spec;
 mod services;
 mod task;
 mod watchers;

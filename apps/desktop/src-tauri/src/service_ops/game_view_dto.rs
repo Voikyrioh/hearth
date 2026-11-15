@@ -31,6 +31,8 @@ pub struct GameViewDto {
     pub stop: FicheStopDto,
     pub ports: Vec<GamePortDto>,
     pub has_password: bool,
+    /// L'adresse que le propriétaire donne à ses joueurs (HRT-215, BR-JEU-022) ; `None` : pas renseignée.
+    pub public_address: Option<String>,
 }
 
 impl From<&GameView> for GameViewDto {
@@ -42,6 +44,7 @@ impl From<&GameView> for GameViewDto {
             stop,
             ports,
             has_password,
+            public_address,
         } = view;
         Self {
             fiche: fiche.clone(),
@@ -66,6 +69,7 @@ impl From<&GameView> for GameViewDto {
                 })
                 .collect(),
             has_password: *has_password,
+            public_address: public_address.clone(),
         }
     }
 }
@@ -133,6 +137,7 @@ mod tests {
                 changed: true,
             }],
             has_password: true,
+            public_address: Some("jeu.example.org".into()),
         };
         let json = serde_json::to_value(GameViewDto::from(&view)).expect("json");
         assert_eq!(json["ficheVersion"], 1);
@@ -141,5 +146,6 @@ mod tests {
         assert_eq!(json["ports"][0]["hostPort"], 7778);
         assert_eq!(json["ports"][0]["changed"], true);
         assert_eq!(json["hasPassword"], true);
+        assert_eq!(json["publicAddress"], "jeu.example.org");
     }
 }

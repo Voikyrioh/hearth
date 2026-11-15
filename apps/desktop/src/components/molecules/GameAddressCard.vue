@@ -13,13 +13,33 @@ import type { Address } from "@/services/game";
 // reste lisible). Lien coupé : l'adresse reste, « Copier » reste actif (c'est une copie locale). Hearth ne peut pas
 // vérifier que l'adresse est joignable : la carte le dit. Aucune adresse publique n'est connue de ce client : la carte dit
 // que celle-ci ne marche que depuis le réseau du serveur.
-defineProps<{ address: Address | null; stopped: boolean }>();
+defineProps<{
+  address: Address | null;
+  stopped: boolean;
+  /** Le compte peut changer l'adresse (droit « gérer les services », lien et moteur prêts). */
+  canEdit: boolean;
+  /** Pourquoi le bouton est inactif, écrit sous la carte ; `undefined` : il est actif ou absent. */
+  reason?: string;
+}>();
+const emit = defineEmits<{ edit: [] }>();
 
 const copier = useCopyText(() => t("game.address.toast"));
 </script>
 
 <template>
   <DashCard :title="t('game.address.title')" data-game-address>
+    <template #aside>
+      <HButton
+        variant="secondary"
+        size="sm"
+        needs-link
+        :disabled="!canEdit"
+        data-game-address-edit
+        @click="emit('edit')"
+      >
+        {{ t("game.address.edit") }}
+      </HButton>
+    </template>
     <p v-if="stopped" class="addr__stopped" role="status" data-game-address-stopped>
       <HIcon name="info" size="sm" />
       {{ t("game.address.stopped") }}
@@ -47,7 +67,11 @@ const copier = useCopyText(() => t("game.address.toast"));
         <Callout v-if="copier.state.value === 'failed'" tone="warn" inline data-game-address-failed>
           {{ t("game.address.copyFailed") }}
         </Callout>
-        <p class="addr__note" data-game-address-local>
+        <p v-if="address.public" class="addr__note" data-game-address-public>
+          <HIcon name="info" size="sm" />
+          {{ t("game.address.publicNote") }}
+        </p>
+        <p v-else class="addr__note" data-game-address-local>
           <HIcon name="info" size="sm" />
           {{ t("game.address.localOnly") }}
         </p>
@@ -57,6 +81,7 @@ const copier = useCopyText(() => t("game.address.toast"));
         </p>
       </template>
       <p v-else class="addr__note" data-game-address-none>{{ t("game.address.noPort") }}</p>
+      <p v-if="reason" class="addr__note" data-game-address-reason>{{ reason }}</p>
     </div>
   </DashCard>
 </template>
