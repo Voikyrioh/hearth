@@ -19,6 +19,8 @@ pub enum InputField {
     Filter,
     /// L'identifiant d'une fiche du catalogue qui n'en est pas un (HRT-102).
     Fiche,
+    /// L'identifiant d'un dépôt de pack qui n'en est pas un (HRT-124).
+    Deposit,
 }
 
 /// La raison d'un refus d'adoption ou de relâche (`details.reason`). Tolérant : toute valeur inconnue est

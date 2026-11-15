@@ -158,6 +158,7 @@ const FIELD_KEYS: Record<DeployField, MessageKey> = {
   resources: "deploy.fieldResources",
   source: "deploy.fieldSource",
   world: "deploy.fieldWorld",
+  pack: "deploy.fieldPack",
 };
 
 /**

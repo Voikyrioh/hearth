@@ -498,7 +498,9 @@ impl From<LinkError> for LinkFailure {
                     InputField::Port => InvalidField::Port,
                     InputField::Credentials => InvalidField::Credentials,
                     InputField::Fingerprint => InvalidField::Fingerprint,
-                    InputField::Filter | InputField::Fiche => InvalidField::Other,
+                    InputField::Filter | InputField::Fiche | InputField::Deposit => {
+                        InvalidField::Other
+                    }
                 },
             },
             LinkError::FingerprintChanged => Self::FingerprintChanged,

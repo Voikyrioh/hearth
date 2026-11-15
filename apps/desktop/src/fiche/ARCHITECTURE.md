@@ -6,6 +6,7 @@ Le Catalogue et l'installation d'un serveur de jeu depuis une fiche (HRT-102, AD
 fiche/
 ├── proof.ts         → la preuve d'un chiffre de ressource : `proofOf`, `isMeasured`, `proofUrl`, `proven` (sans preuve, aucun nombre) — BR-FICHE-008, 057
 ├── answers.ts       → les questions jugées sur ce que la fiche dit (genre, bornes, choix, jeu de caractères, longueur), comme l'agent : `answerIssue` (des CODES, au plus UN caractère refusé), `visibleQuestions` (par variante), `answersToSend`, `changedAnswers` — BR-FICHE-016, 017, 038, 040, 060
+├── pack.ts          → le pack de mods déposé (HRT-125) : `packIssue` (case cochée, fichier, lecture, moteur permis pour le genre), `allowedVariants`, `packFacts`, `packSentences` (BR-MOD-009), `packRefusalSentences` (BR-MOD-008, 016) — le genre est LU PAR L'AGENT, jamais saisi
 ├── ports.ts         → les ports : `publishedPorts`, `parseHostPort` (1024 à 65535), `readableHostPorts`, `duplicateHostPorts` — BR-FICHE-019
 ├── name.ts          → le nom du service proposé : `slugOf`, `proposedName` (-2, -3…) — BR-FICHE-015
 ├── fit.ts           → la machine et la place : `minimumVerdicts` (seul un minimum MESURÉ bloque), `coverage`, `diskVerdict`, `placement` (où placer les curseurs), `memoryNotices` — BR-FICHE-020 à 023

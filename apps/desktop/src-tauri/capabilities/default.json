@@ -94,6 +94,7 @@
     "allow-read-fiche",
     "allow-read-worlds",
     "allow-inspect-world",
+    "allow-inspect-pack",
     "allow-install-fiche",
     "allow-open-fiche-link",
     "allow-read-game-settings",

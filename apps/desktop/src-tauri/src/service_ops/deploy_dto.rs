@@ -299,6 +299,8 @@ pub enum DeployFieldDto {
     Source,
     /// Le monde à reprendre (`source.world`, HRT-106) : son code de raison dit lequel des refus.
     World,
+    /// Le pack de mods joint à l'installation (HRT-124) : `source.pack`.
+    Pack,
 }
 
 impl DeployFieldDto {
@@ -315,6 +317,7 @@ impl DeployFieldDto {
             "resources" => Self::Resources,
             "source" => Self::Source,
             "source.world" => Self::World,
+            "source.pack" => Self::Pack,
             _ => return None,
         })
     }
@@ -331,6 +334,7 @@ impl DeployFieldDto {
             Self::Resources => "resources",
             Self::Source => "source",
             Self::World => "source.world",
+            Self::Pack => "source.pack",
         }
     }
 }
@@ -469,6 +473,15 @@ pub enum DeployRefusal {
         id: Option<String>,
         reason: String,
         character: Option<String>,
+    },
+    /// Le pack de mods joint n'existe plus dans la zone d'attente de l'agent : à déposer de nouveau (HRT-124).
+    PackUnknown,
+    /// Le pack de mods est refusé : un code fixe de l'agent (`reason`), le nombre de mods d'une liste CurseForge
+    /// (`mods`) ou l'hôte refusé (`host`), jamais un nom d'entrée (BR-MOD-008, BR-MOD-016).
+    PackRefused {
+        reason: String,
+        mods: Option<u32>,
+        host: Option<String>,
     },
     /// La machine est trop petite pour un minimum MESURÉ (`cpu` en millicœurs, `memory` en octets).
     HostTooSmall {

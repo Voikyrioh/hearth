@@ -18,3 +18,4 @@ Exemples (futurs) :
 - Installer client Windows (NSIS, coffre, Tauri)
 - Récupérer certificat agent
 - Diagnostiquer coupure réseau
+- [Installer un serveur Minecraft avec un pack de mods](./installer-un-serveur-minecraft-avec-un-pack.md) — prérequis du serveur (construction d'essai, port 25565, mémoire), étapes côté utilisateur (exemple : Prominence II), refus et limites

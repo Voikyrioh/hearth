@@ -43,6 +43,7 @@ function terrariaRequest(
     optionalPorts: [],
     resources: { memoryBytes: 2 * GIB, cpuMillis: 1000 },
     accept: { reservedPorts: false, lowDisk: false },
+    pack: null,
     ...patch,
   };
 }

@@ -2166,6 +2166,7 @@ export const fr = {
       config: "La configuration",
       logs: "Les journaux du jeu",
       mods: "Les mods",
+      packs: "Les packs de mods (en lecture seule)",
       data: "Les données",
     },
     folderRoleOther: "Un dossier du jeu",
@@ -2463,6 +2464,79 @@ export const fr = {
   // L'onglet « Réglages » d'un serveur de jeu et « Voir tous les réglages » de l'installation (HRT-109,
   // BR-FICHE-037, 040 à 049, 051 à 054). Textes de la spec `installer-serveur-de-jeu` et du design (sections 16 et 17), mis au
   // vouvoiement ; les libellés, aides, bornes et choix d'un réglage viennent de la fiche, jamais d'ici.
+  // Le pack de mods d'un serveur de jeu (HRT-124, HRT-125, BR-MOD-006 à 009, 016) : vouvoiement, mots simples.
+  pack: {
+    card: "Mods",
+    toggle: "Installer avec un pack de mods",
+    help: "Téléchargez le pack serveur du modpack (un fichier .zip) ou un pack Modrinth (un fichier .mrpack), puis choisissez-le ici. Hearth le lit sans l'ouvrir.",
+    choose: "Choisir un fichier",
+    replace: "Choisir un autre fichier",
+    reading: "Lecture du pack en cours…",
+    send: "Envoyer le fichier au serveur",
+    sendNote: "Le fichier part par un envoi qui reprend là où il s'est arrêté si le lien coupe.",
+    sendTitle: "Envoyer le pack au serveur",
+    sendHelp:
+      "Hearth envoie « {name} » dans la zone d'attente du serveur. Rien n'est installé avant que vous lanciez l'installation.",
+    sendSubmit: "Envoyer",
+    sendLater: "Plus tard",
+    sending: "Envoi du pack en cours : {progress}.",
+    sendFailed: "L'envoi du pack s'est arrêté. Choisissez le fichier de nouveau.",
+    issueUnsent: "Envoyez le fichier au serveur pour continuer.",
+    issueSending: "Le fichier est encore en route vers le serveur : attendez la fin de l'envoi.",
+    chosen: "Fichier choisi : {name}",
+    genreLabel: "Genre du pack",
+    genreServer: "Pack serveur",
+    genreModrinth: "Pack Modrinth",
+    genreUnknown: "Genre inconnu de cette version",
+    readNote: "C'est Hearth qui a reconnu ce genre en lisant le contenu du fichier.",
+    factMods: "{n} mods",
+    factFiles: "{n} fichiers",
+    factSize: "{size} dans le fichier, {unpacked} une fois ouvert par le jeu",
+    factDirs: "Dossiers : {dirs}",
+    factModrinth: "{name}, version {version}",
+    factAnnounces: "Le pack annonce : {what}",
+    engineNote:
+      "Le moteur de serveur et la version de Minecraft ne sont pas écrits dans un pack serveur : regardez sur la page du pack, ils y sont. Choisissez-les dans les réponses ci-dessous.",
+    engineModrinth: "Le moteur vient du pack : gardez le choix « Selon le pack Modrinth ».",
+    memoryNote:
+      "Un pack de plusieurs centaines de mods demande beaucoup de mémoire : lisez la page du pack et réglez la mémoire à l'étape suivante.",
+    issueNoFile: "Choisissez le fichier du pack, ou décochez l'installation avec un pack.",
+    issueUnread: "Hearth n'a pas encore lu ce pack.",
+    readFailed: "Hearth n'a pas pu lire ce pack. Choisissez-le de nouveau.",
+    issueRefused: "Ce pack n'est pas installable : choisissez un autre fichier.",
+    issueGenre: "Ce serveur de jeu ne prend pas ce genre de pack.",
+    issueEngine:
+      "Ce pack ne s'installe pas avec le moteur choisi : changez de moteur dans les réponses.",
+    checkModrinth:
+      "Ce pack fait télécharger {n} fichiers par le programme du jeu, depuis {hosts}. Hearth ne les vérifie pas.",
+    checkServer:
+      "Ce pack contient {n} mods. Le programme du jeu copie son contenu dans son dossier. Hearth ne l'ouvre pas et ne le vérifie pas.",
+    checkAlways:
+      "Un mod est un programme écrit par quelqu'un d'autre. Il tourne avec les droits du serveur de jeu.",
+    sumPack: "Pack de mods",
+    refusedUnknown: "Ce fichier n'est plus sur le serveur. Choisissez-le de nouveau.",
+    refusedArchive: "Ce fichier n'est pas une archive que Hearth peut lire en sécurité.",
+    refusedPath: "Ce pack veut écrire hors du dossier du jeu.",
+    refusedIndex:
+      "La description de ce pack Modrinth est illisible, ou ce n'est pas celle d'un pack Minecraft.",
+    refusedWrapped:
+      "Ce pack range tout dans un dossier. Refaites l'archive avec son contenu à la racine : les dossiers « mods » et « config » doivent être au premier niveau.",
+    refusedUnrecognized: "Hearth ne reconnaît pas ce pack.",
+    refusedHost:
+      "Ce pack demande de télécharger depuis {host}, qui n'est pas permis par le format des packs Modrinth.",
+    refusedHostUnknown:
+      "Ce pack demande de télécharger depuis un hôte que le format des packs Modrinth ne permet pas.",
+    refusedOther: "Hearth ne peut pas installer ce pack.",
+    listWhat:
+      "Ce fichier est la version du pack pour le lanceur de jeu : il ne contient pas les mods, seulement leur liste ({n} mods). Hearth ne peut pas les télécharger pour vous sur CurseForge.",
+    listWhatNoCount:
+      "Ce fichier est la version du pack pour le lanceur de jeu : il ne contient pas les mods, seulement leur liste. Hearth ne peut pas les télécharger pour vous sur CurseForge.",
+    listInstead:
+      "À la place, téléchargez le pack serveur de ce modpack. Sur la page du pack sur CurseForge, ouvrez l'onglet des fichiers, choisissez la version, puis cherchez « Server Pack » dans les fichiers supplémentaires. Choisissez ce fichier-là ici.",
+    listModrinth:
+      "Ce pack n'a pas de pack serveur ? Regardez s'il existe sur Modrinth : Hearth sait installer un pack Modrinth (.mrpack).",
+    installRefused: "Hearth n'a pas pu installer le pack de mods.",
+  },
   gameSettings: {
     loading: "Lecture des réglages en cours.",
     readFailed: "Impossible de lire les réglages de ce service.",
@@ -2924,6 +2998,7 @@ export const fr = {
     fieldResources: "les ressources",
     fieldSource: "la demande",
     fieldWorld: "le monde à reprendre",
+    fieldPack: "le pack de mods",
     // Abandon de saisie (BR-DEPLOY-029)
     abandonTitle: "Abandonner votre saisie ?",
     abandonText: "Ce que vous avez saisi sera effacé.",

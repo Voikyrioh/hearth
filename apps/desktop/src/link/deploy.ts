@@ -111,7 +111,9 @@ export type DeployField =
   | "resources"
   /** Le membre `source` de la demande et le monde à reprendre (HRT-106) : leur raison dit lequel des refus. */
   | "source"
-  | "world";
+  | "world"
+  /** Le pack de mods joint à l'installation (HRT-124). */
+  | "pack";
 
 /** Pourquoi l'agent a refusé le déploiement, avant tout geste (rien n'est créé). Des CODES, jamais un texte. */
 export type DeployRefusal =
@@ -140,6 +142,10 @@ export type DeployRefusal =
   // Installer depuis une fiche (HRT-102) : des CODES, jamais un texte de l'agent ni la valeur d'une réponse.
   | { kind: "fiche_unknown" }
   | { kind: "fiche_changed" }
+  /** Le pack de mods joint n'est plus dans la zone d'attente de l'agent : à déposer de nouveau (HRT-124). */
+  | { kind: "pack_unknown" }
+  /** Le pack de mods est refusé : un code fixe de l'agent, le nombre de mods d'une liste CurseForge ou l'hôte refusé. */
+  | { kind: "pack_refused"; reason: string; mods: number | null; host: string | null }
   | { kind: "agreement_required"; ids: string[] }
   /** Une réponse est refusée : la question (si c'est une de la fiche), la raison (code) et au plus UN caractère. */
   | { kind: "answer_refused"; id: string | null; reason: string; character: string | null }

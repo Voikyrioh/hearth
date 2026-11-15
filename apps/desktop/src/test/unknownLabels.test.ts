@@ -5,12 +5,14 @@ import { OUTCOME_KEYS, originOf } from "@/audit/format";
 import bindings from "@/bindings.ts?raw";
 import { portVerdict } from "@/deploy/messages";
 import { kindText, stopTexts } from "@/fiche/messages";
+import { genreLabel } from "@/fiche/pack";
 import { refusalText as worldRefusalText } from "@/fiche/world";
 import { type MessageKey, t } from "@/i18n";
 import type {
   AuditEntry,
   FolderFate,
   ImportState,
+  PackInspect,
   QuestionKind,
   SettingEffect,
   WorldSaved,
@@ -134,6 +136,13 @@ const SAYS: Record<string, (value: string) => void> = {
     // Le genre d'une question se dit par `kindText` ; un genre inconnu devient « Valeur » et un champ de texte (HRT-102).
     key(kindText(value as QuestionKind));
     expect(kindText(value as QuestionKind)).not.toMatch(/^fiche\./);
+  },
+  PackGenreDto: (value) => {
+    // Le genre d'un pack lu par l'agent (HRT-125) : un genre plus récent se dit « inconnu de cette version », jamais deviné.
+    const said = genreLabel(value as PackInspect["kind"]);
+    expect(said.length).toBeGreaterThan(0);
+    expect(said).not.toMatch(/^pack\./);
+    if (value === "unknown") expect(said).toContain("inconnu");
   },
   SettingEffectDto: (value) => {
     // La mention d'effet d'un réglage (HRT-109, BR-FICHE-042) : un effet inconnu dit que Hearth ne sait pas ; « none » ne dit rien.

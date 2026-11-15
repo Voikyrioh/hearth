@@ -120,6 +120,7 @@ export function terraria(): FicheDetail {
       namesSetting: "world_name",
       carriedByWorld: ["world_size", "difficulty", "seed"],
     },
+    mods: null,
     settingsUnreadable: 0,
     unreadable: 0,
   };
@@ -276,7 +277,7 @@ function setting(
  * d'identifiants, un texte opaque, un choix long, un interrupteur, un réglage imposé, un réglage d'une variante, un défaut
  * non vérifié, un réglage ajouté dans une version).
  */
-function richSettings(): Pick<FicheDetail, "themes" | "settings" | "settingsUnreadable"> {
+function richSettings(): Pick<FicheDetail, "themes" | "settings" | "settingsUnreadable" | "mods"> {
   const themes: FicheTheme[] = [
     { id: "server", label: "Serveur", order: 1 },
     { id: "gameplay", label: "Partie", order: 2 },
@@ -404,7 +405,16 @@ function richSettings(): Pick<FicheDetail, "themes" | "settings" | "settingsUnre
       { list: { itemCharset: "digits", separator: ",", maxItems: 5 } },
     ),
   ];
-  return { themes, settings, settingsUnreadable: 0 };
+  // Les voies de mods de la fiche d'essai (HRT-124) : le dépôt d'un pack serveur (avec le moteur à mods) ou Modrinth.
+  const mods = {
+    ways: ["drop_pack" as const],
+    packGenres: [
+      { kind: "server_pack" as const, variants: ["modded"] },
+      { kind: "modrinth_pack" as const, variants: ["vanilla"] },
+    ],
+    filesHint: null,
+  };
+  return { themes, settings, settingsUnreadable: 0, mods };
 }
 
 /** Les questions d'installation de la fiche d'essai. */

@@ -56,6 +56,7 @@ export default defineConfig({
         "hrt69-deploy.spec.ts",
         "hrt86-delete.spec.ts",
         "hrt96-transfers.spec.ts",
+        "hrt125-pack.spec.ts",
         "hrt104-game.spec.ts",
         "hrt102-catalogue.spec.ts",
         "hrt109-reglages.spec.ts",

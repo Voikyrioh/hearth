@@ -151,6 +151,26 @@ impl LinkManager {
         body: Option<Value>,
         limit: std::time::Duration,
     ) -> Result<Value, LinkError> {
+        let (status, body) = self
+            .raw_read_within(target, token, method, path, body, limit)
+            .await?;
+        if !(200..300).contains(&status) {
+            return Err(rejection_at(&body, status));
+        }
+        Ok(body)
+    }
+
+    /// La réponse telle que l'agent l'a rendue (statut et corps), sans juger le statut : pour une consultation dont
+    /// le refus porte des détails que l'interface doit dire (la lecture d'un pack, HRT-124).
+    pub(super) async fn raw_read_within(
+        &self,
+        target: &Target,
+        token: &crate::domain::secret::Secret,
+        method: Method,
+        path: String,
+        body: Option<Value>,
+        limit: std::time::Duration,
+    ) -> Result<(u16, Value), LinkError> {
         let request = ApiRequest {
             method,
             path,
@@ -161,10 +181,22 @@ impl LinkManager {
         let response = timeout(limit, deps.transport.request(target, token, &request))
             .await
             .map_err(|_| LinkError::Timeout)??;
-        if !(200..300).contains(&response.status) {
-            return Err(rejection_at(&response.body, response.status));
-        }
-        Ok(response.body)
+        Ok((response.status, response.body))
+    }
+
+    /// Une CONSULTATION lente par `POST` (la lecture d'un pack, HRT-124), au délai ordinaire plus `extra` : statut et
+    /// corps rendus tels quels.
+    pub(super) async fn post_slow_raw(
+        &self,
+        target: &Target,
+        token: &crate::domain::secret::Secret,
+        path: String,
+        body: Value,
+        extra: std::time::Duration,
+    ) -> Result<(u16, Value), LinkError> {
+        let limit = self.inner.deps.config.request_timeout + extra;
+        self.raw_read_within(target, token, Method::Post, path, Some(body), limit)
+            .await
     }
 
     /// Une lecture lente (`GET`), au délai ordinaire plus `extra` : la mesure des dossiers d'une suppression.

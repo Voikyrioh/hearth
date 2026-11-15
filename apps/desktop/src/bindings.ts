@@ -324,6 +324,13 @@ export const commands = {
 	 */
 	inspectWorld: (serverId: string, fiche: string, world: WorldRefDto) => typedError<WorldInspectReadDto, LinkFailure>(__TAURI_INVOKE("inspect_world", { serverId, fiche, world })),
 	/**
+	 *  Ce que l'agent lit dans un pack de mods déjà déposé dans sa zone d'attente (`POST /deployments/pack-check`) : une
+	 *  CONSULTATION, ni acte ni journal. Le genre est lu par l'agent dans le contenu, jamais fourni par l'interface ; un
+	 *  refus est rendu par un code fixe (BR-MOD-008, BR-MOD-016). Sans le droit « gérer les services » :
+	 *  `MissingServicesRight`.
+	 */
+	inspectPack: (serverId: string, deposit: string) => typedError<PackCheckOutcome, LinkFailure>(__TAURI_INVOKE("inspect_pack", { serverId, deposit })),
+	/**
 	 *  Installe un serveur de jeu depuis une fiche (`POST /deployments` avec un membre `source`) : le même acte
 	 *  d'administration confirmé que le déploiement d'une image, JAMAIS couvert par l'élévation (le mot de passe à
 	 *  chaque fois), jamais rejoué. La valeur d'une réponse (mot de passe du serveur, jeton) n'est ni tracée ni gardée.
@@ -1109,7 +1116,9 @@ export type DeployFieldDto = "name" | "image" | "tag" | "env" | "ports" | "mount
 /**  Le membre `source` de la demande (fiche) : une incohérence entre la reprise d'un monde et la demande (HRT-106). */
 "source" | 
 /**  Le monde à reprendre (`source.world`, HRT-106) : son code de raison dit lequel des refus. */
-"world";
+"world" | 
+/**  Le pack de mods joint à l'installation (HRT-124) : `source.pack`. */
+"pack";
 
 /**
  *  L'issue de l'envoi : accepté (`202`, l'opération court à l'arrière-plan), refusé, ou résultat inconnu (le
@@ -1148,6 +1157,13 @@ export type DeployRefusal = { kind: "wrong_password" } | { kind: "password_requi
  *  caractère refusé, jamais la valeur.
  */
 { kind: "answer_refused"; id: string | null; reason: string; character: string | null } | 
+/**  Le pack de mods joint n'existe plus dans la zone d'attente de l'agent : à déposer de nouveau (HRT-124). */
+{ kind: "pack_unknown" } | 
+/**
+ *  Le pack de mods est refusé : un code fixe de l'agent (`reason`), le nombre de mods d'une liste CurseForge
+ *  (`mods`) ou l'hôte refusé (`host`), jamais un nom d'entrée (BR-MOD-008, BR-MOD-016).
+ */
+{ kind: "pack_refused"; reason: string; mods: number | null; host: string | null } | 
 /**  La machine est trop petite pour un minimum MESURÉ (`cpu` en millicœurs, `memory` en octets). */
 { kind: "host_too_small"; lack: FicheLackDto; needed: number | null; has: number | null } | 
 /**  L'espace libre est sous le besoin mesuré de l'installation : aucune case ne permet de passer outre. */
@@ -1377,6 +1393,8 @@ export type FicheDetailDto = {
 	settings: FicheSettingDto[],
 	/**  Ce que la fiche dit d'un monde repris (HRT-106) ; `None` : la fiche ne reprend pas de monde. */
 	worldImport: FicheWorldImportDto | null,
+	/**  Les voies de mods que la fiche offre (HRT-124, BR-MOD-001) ; absent : le jeu n'en offre aucune (BR-MOD-014). */
+	mods: FicheModsDto | null,
 	/**
 	 *  Des réglages ou thèmes d'une version plus récente que ce client, illisibles ici : l'onglet le dit, mais la
 	 *  fiche reste installable (ils ne changent pas ce que l'installation écrit).
@@ -1450,6 +1468,8 @@ export type FicheInstallRequestDto = {
 	world: WorldPickDto | null,
 	resources: DeployResourcesDto,
 	accept: DeployAcceptDto,
+	/**  L'identifiant du pack de mods déjà déposé dans la zone d'attente de l'agent (HRT-124), jamais un chemin. */
+	pack: string | null,
 };
 
 export type FicheItemCharsetDto = "digits" | "slug" | "unknown";
@@ -1480,6 +1500,27 @@ export type FicheMemoryNeedDto = {
 	minBytes: number | null,
 	recommendedBytes: number | null,
 	evidence: FicheEvidenceDto,
+};
+
+/**  Les voies de mods d'une fiche (HRT-124), dans l'ordre où l'écran les montre. */
+export type FicheModsDto = {
+	/**  `drop_files` ou `drop_pack` ; une voie que ce client ne connaît pas n'est pas montrée. */
+	ways: string[],
+	pack: FichePackWayDto | null,
+	/**  L'indication de la fiche pour le dossier « Tes mods ». */
+	filesHint: string | null,
+};
+
+export type FichePackGenreDto = {
+	/**  `server_pack` ou `modrinth_pack`. */
+	kind: string,
+	/**  Les variantes de la fiche (moteurs de serveur) permises avec ce genre. */
+	variants: string[],
+};
+
+/**  Les genres de pack que la fiche prend. */
+export type FichePackWayDto = {
+	genres: FichePackGenreDto[],
 };
 
 /**  Un port de la fiche et le port du serveur choisi. */
@@ -1928,6 +1969,20 @@ export type MetricsEvent = {
 	levels: LevelsDto,
 };
 
+/**  Ce qu'un pack Modrinth dit de lui-même (textes nettoyés et bornés par l'agent). */
+export type ModrinthPackDto = {
+	name: string,
+	version: string,
+	minecraft: string | null,
+	/**  `fabric-loader`, `quilt-loader`, `forge` ou `neoforge`. */
+	loader: string | null,
+	loaderVersion: string | null,
+	/**  Le nombre de fichiers que le programme du jeu télécharge. */
+	downloads: number,
+	/**  Les hôtes de ces téléchargements. */
+	hosts: string[],
+};
+
 export type MountDto = {
 	kind: MountKindDto,
 	/**  Dossier du serveur, ou nom du volume géré par le moteur. */
@@ -2029,6 +2084,35 @@ export type OtherSettingDto = {
 };
 
 export type OutcomeDto = "done" | "not_executed" | "unknown";
+
+/**  L'issue de la lecture : le pack lu, ou refusé. */
+export type PackCheckOutcome = { kind: "read"; pack: PackInspectDto } | { kind: "refused"; refusal: PackRefusalDto };
+
+/**  Le genre d'un pack (BR-MOD-007). `unknown` : un genre plus récent que ce client, dit sans être deviné. */
+export type PackGenreDto = "server_pack" | "modrinth_pack" | "unknown";
+
+/**  Ce que l'agent a lu dans le pack (`POST /deployments/pack-check`). */
+export type PackInspectDto = {
+	genre: PackGenreDto,
+	sizeBytes: number | null,
+	files: number | null,
+	/**  Pack serveur : le nombre de `.jar` dans `mods` ou `plugins` ; pack Modrinth : 0. */
+	mods: number | null,
+	unpackedBytes: number | null,
+	/**  Les dossiers de premier niveau. */
+	topDirs: string[],
+	modrinth: ModrinthPackDto | null,
+};
+
+/**  Pourquoi l'agent ne dit pas ce qu'est ce pack : des CODES, jamais un texte de l'agent ni un nom d'entrée. */
+export type PackRefusalDto = 
+/**  Aucun dépôt complet sous cet identifiant : à déposer de nouveau. */
+{ kind: "unknown" } | 
+/**
+ *  Le pack est refusé : `reason` est un code fixe (`PACK_IS_A_DOWNLOAD_LIST`, `PACK_HOST_FORBIDDEN`,
+ *  `ARCHIVE_REFUSED`, ...), `mods` le nombre de mods listés par une liste CurseForge, `host` l'hôte refusé.
+ */
+{ kind: "refused"; reason: string; mods: number | null; host: string | null };
 
 /**
  *  Ce que l'agent exige du mot de passe pour un acte (HRT-194, BR-GRANT-017) : aucun, sauf élévation en

@@ -437,6 +437,7 @@ const EXPECTED: &[(&str, &str)] = &[
         "inspectWorld",
         "serverId: string, fiche: string, world: WorldRefDto",
     ),
+    ("inspectPack", "serverId: string, deposit: string"),
     (
         "installFiche",
         "serverId: string, installation: FicheInstallRequestDto, adminPassword: string | null",
@@ -564,6 +565,7 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "readFiche",
     "readWorlds",
     "inspectWorld",
+    "inspectPack",
     "openFicheLink",
     "readGameSettings",
     "analyzeGameSettings",

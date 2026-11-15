@@ -26,6 +26,7 @@ import {
   stopTexts,
   valueLabel,
 } from "@/fiche/messages";
+import { genreLabel, packSentences, readPack } from "@/fiche/pack";
 import { forVariant, publishedPorts, readableHostPorts } from "@/fiche/ports";
 import { proofOf } from "@/fiche/proof";
 import {
@@ -129,6 +130,8 @@ const published = computed(() =>
 const folders = computed(() => forVariant(props.detail.folders, props.draft.variant));
 /** Les ports qui partent : le port du serveur choisi et celui du service, tels que la demande les dit. */
 const portLines = computed(() => readableHostPorts(published.value, props.draft.hostPorts));
+// Le pack de mods lu par l'agent (HRT-125, BR-MOD-009) : ce que le programme du jeu fera de lui, et la phrase qui finit toujours.
+const pack = computed(() => (props.draft.packWanted ? readPack(props.draft.pack) : null));
 const variant = computed(() =>
   props.detail.variants.find((item) => item.id === props.draft.variant),
 );
@@ -269,6 +272,15 @@ function refusal(refused: { kind: string }): string | undefined {
       <div v-if="variant" class="sum__row">
         <dt>{{ t("fiche.sumVariant") }}</dt>
         <dd data-sum-variant>{{ safeText(variant.label) }}</dd>
+      </div>
+      <div v-if="pack" class="sum__row" data-sum-pack>
+        <dt>{{ t("pack.sumPack") }}</dt>
+        <dd>
+          <span class="sum__strong">{{ genreLabel(pack.kind) }}</span>
+          <ul class="sum__list">
+            <li v-for="sentence in packSentences(pack)" :key="sentence">{{ sentence }}</li>
+          </ul>
+        </dd>
       </div>
       <div class="sum__row">
         <dt>{{ t("fiche.sumName") }}</dt>

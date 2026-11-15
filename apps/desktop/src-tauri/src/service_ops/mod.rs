@@ -25,6 +25,8 @@ pub mod game_settings_dto;
 pub mod game_view;
 pub mod game_view_dto;
 pub mod lifecycle;
+pub mod pack;
+pub mod pack_dto;
 pub mod public_address;
 pub mod service;
 pub mod worlds;
