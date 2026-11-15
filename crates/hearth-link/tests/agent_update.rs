@@ -21,7 +21,7 @@ use hearth_link::domain::state::{LinkState, Thresholds};
 use hearth_link::ports::transport::Method;
 use hearth_link::{ActionOutcome, ActionRequest, LinkConfig, LinkError};
 use hearth_proto::api::update::{UpdateOutcome, UpdateProgress, UpdateStep};
-use support::update_rig::{self, Rig, rig};
+use support::update_rig::{self, NEWER, Rig, rig};
 use support::{Options, PASSWORD, SCALE, WAIT, World, never};
 
 const BINARY: &[u8] = b"nouvel agent";
@@ -46,7 +46,7 @@ async fn start_update(world: &World, rig: &Rig) -> ActionOutcome {
             ActionRequest {
                 method: Method::Post,
                 path: "/agent/update".into(),
-                body: Some(rig.request("0.2.0", BINARY)),
+                body: Some(rig.request_for(NEWER, BINARY)),
             },
             Some(&Secret::from(PASSWORD)),
         )
@@ -63,7 +63,7 @@ async fn the_update_is_a_confirmed_act_signed_with_its_version_and_sum() {
     let action = |rig: &Rig| ActionRequest {
         method: Method::Post,
         path: "/agent/update".into(),
-        body: Some(rig.request("0.2.0", BINARY)),
+        body: Some(rig.request_for(NEWER, BINARY)),
     };
     // Jamais couvert par l'élévation : sans mot de passe, rien ne part.
     let writes = world.spy.write_count();
@@ -177,7 +177,7 @@ async fn the_steps_arrive_on_the_stream_in_order_with_the_download_percentage() 
         })
         .await;
     let first = progress_of(first);
-    assert_eq!(first.version, "0.2.0");
+    assert_eq!(first.version, NEWER);
     assert!(first.percent.is_none_or(|percent| percent <= 100));
     // Lu aussi par la lecture typée, pendant qu'elle est en cours.
     let status = world.manager.agent_update_status(&world.id).await.unwrap();
@@ -247,7 +247,7 @@ async fn wait_attempt(world: &World, before: u64) {
 
 fn succeeded_record() -> UpdateRecord {
     UpdateRecord {
-        version: Some("0.2.0".to_owned()),
+        version: Some(NEWER.to_owned()),
         previous: "0.1.0".to_owned(),
         outcome: UpdateOutcome::Succeeded.into(),
         reason: None,
@@ -325,7 +325,7 @@ async fn a_restart_announced_by_the_agent_is_an_expected_cut_then_the_result_is_
         .unwrap()
         .expect("un dernier résultat");
     assert_eq!(last.outcome, UpdateOutcome::Succeeded, "{last:?}");
-    assert_eq!(last.version, "0.2.0");
+    assert_eq!(last.version, NEWER);
     let status = world.manager.agent_update_status(&world.id).await.unwrap();
     assert_eq!(status.last.unwrap().outcome, UpdateOutcome::Succeeded);
 }
@@ -387,7 +387,7 @@ async fn a_read_only_account_sees_an_update_started_by_someone_else_and_every_co
             ActionRequest {
                 method: Method::Post,
                 path: "/agent/update".into(),
-                body: Some(rig.request("0.2.0", BINARY)),
+                body: Some(rig.request_for(NEWER, BINARY)),
             },
             Some(&Secret::from(PASSWORD)),
         )

@@ -73,10 +73,18 @@ pub fn factory(rig: Arc<Rig>) -> super::agent::UpdatingFactory {
 
 /// Un banc : `allowed` faux simule une installation gérée ; `gated` garde le téléchargement
 /// « en cours » tant que le test n'a pas appelé `release_gate`.
+// FIX:01M7G9JGSR3FNA775EFAAV07KN : la version visée est toujours plus récente que celle du vrai agent de test (celle du dépôt change à chaque release) (docs/bugs/FIX-01M7G9JGSR3FNA775EFAAV07KN.md)
+pub const NEWER: &str = "99.0.0";
+
 pub fn rig(allowed: bool, gated: bool) -> Rig {
     let env = Env {
         audit_sink: Arc::new(NoSink),
         clock: Arc::new(SystemClock),
     };
-    Rig::new(&env, allowed, gated)
+    let rig = Rig::new(&env, allowed, gated);
+    // Le binaire déposé annonce la version visée, sinon il est refusé à l'installation.
+    rig.host.with(|state| {
+        state.announced = Some(hearth_agent::domain::install::Version::new(99, 0, 0))
+    });
+    rig
 }

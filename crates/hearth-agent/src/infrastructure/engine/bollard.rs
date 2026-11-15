@@ -627,17 +627,19 @@ impl ContainerEngine for BollardEngine {
 
     fn pull(&self, image: &str) -> PullStream {
         let inner = self.inner.clone();
-        let (repository, tag) = split_image(image, None);
+        let (repository, tag) = pull_target(image);
         stream::once(async move { inner.docker().await })
             .flat_map(move |docker| match docker {
                 Ok(docker) => {
                     // Un téléchargement dure des minutes : la borne est celle du déploiement (30 minutes),
                     // pas les 10 s des lectures. L'appelant l'arrête avant, ou l'abandonne (annulation).
                     let docker = docker.with_timeout(Duration::from_secs(DEPLOY_TIMEOUT_S));
-                    let options = CreateImageOptionsBuilder::default()
-                        .from_image(&repository)
-                        .tag(&tag)
-                        .build();
+                    let builder = CreateImageOptionsBuilder::default().from_image(&repository);
+                    let options = match &tag {
+                        Some(tag) => builder.tag(tag),
+                        None => builder,
+                    }
+                    .build();
                     docker
                         .create_image(Some(options), None, None)
                         .scan(PullTracker::new(), |tracker, item| {
@@ -782,6 +784,19 @@ fn layer_event(info: &CreateImageInfo) -> Option<LayerEvent> {
     .then_some(LayerEvent::Done { layer })
 }
 
+// FIX:01M7G757NC6ZK02PVR6KY2C7N2 — une image épinglée `dépôt:version@sha256:…` est passée entière au moteur (docs/bugs/FIX-01M7G757NC6ZK02PVR6KY2C7N2.md)
+/// Ce que `POST /images/create` reçoit pour récupérer `image` : `(fromImage, tag)`. Une référence épinglée par
+/// empreinte (`dépôt:version@sha256:…`, toute fiche) est donnée ENTIÈRE et sans `tag` : la couper au dernier « : »
+/// (celui de `sha256:`) rendait `dépôt:version@sha256` + version `<hex>`, que le moteur refuse (`400`, « invalid
+/// reference format »), donc `engine_refused` en quelques millisecondes. Sans empreinte : `(dépôt, version)`.
+fn pull_target(image: &str) -> (String, Option<String>) {
+    if image.contains('@') {
+        return (image.trim().to_owned(), None);
+    }
+    let (repository, tag) = split_image(image, None);
+    (repository, Some(tag))
+}
+
 /// Le corps de création d'un conteneur, depuis le plan fermé : rien d'autre que ce que [`ContainerPlan`] porte.
 /// Les dossiers montés sont des montages de type `bind` structurés (jamais une chaîne `source:cible` à
 /// découper), les ports n'ont pas d'adresse (tout le réseau, BR-DEPLOY-035), le redémarrage est
@@ -913,6 +928,22 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+
+    // FIX:01M7G757NC6ZK02PVR6KY2C7N2
+    #[test]
+    fn a_pinned_image_is_pulled_whole_and_an_unpinned_one_by_repository_and_tag() {
+        let digest = format!("sha256:{}", "ab".repeat(32));
+        let pinned = format!("itzg/minecraft-server:java21@{digest}");
+        assert_eq!(pull_target(&pinned), (pinned.clone(), None));
+        assert_eq!(
+            pull_target("nginx:1.27"),
+            ("nginx".to_owned(), Some("1.27".to_owned()))
+        );
+        assert_eq!(
+            pull_target("registry:5000/app"),
+            ("registry:5000/app".to_owned(), Some("latest".to_owned()))
+        );
     }
 
     #[test]

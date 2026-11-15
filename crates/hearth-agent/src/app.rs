@@ -1183,6 +1183,7 @@ pub async fn start_engined(
         engine.catalog.pack_deposits.clone().unwrap_or_else(|| {
             Arc::new(crate::infrastructure::pack_deposits::ZonePackDeposits::new(
                 transfers.clone(),
+                Arc::new(SqliteAccountRepo::new(database.pool().clone())),
                 safe_fs.clone(),
                 tokio::runtime::Handle::current(),
             ))

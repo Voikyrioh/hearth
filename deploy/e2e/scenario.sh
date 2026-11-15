@@ -819,7 +819,11 @@ ok "même version, autre binaire : service redémarré, mêmes comptes, même em
 # --------------------------------------------------------------------------------------------
 # Le binaire « ancien » est le même, dont la chaîne de version est remplacée par 0.0.9 (même
 # longueur : le binaire reste valide).
-LC_ALL=C sed 's/0\.1\.0/0.0.9/g' "$BIN" >/tmp/agent-old && chmod 0755 /tmp/agent-old
+# FIX:01M7G9JGSR3FNA775EFAAV07KN : la version courante est lue dans le binaire, jamais un numéro écrit ici (docs/bugs/FIX-01M7G9JGSR3FNA775EFAAV07KN.md) ; le dépôt change de version à chaque release.
+CUR_VERSION=$("$BIN" --version | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+[ "${#CUR_VERSION}" = 5 ] || die "la version courante doit tenir sur 5 caractères pour être remplacée par 0.0.9 : '$CUR_VERSION'"
+CUR_RE=$(printf '%s' "$CUR_VERSION" | sed 's/\./[.]/g')
+LC_ALL=C sed "s/$CUR_RE/0.0.9/g" "$BIN" >/tmp/agent-old && chmod 0755 /tmp/agent-old
 /tmp/agent-old --version | grep -q '0\.0\.9' || die "le binaire ancien ne dit pas 0.0.9 : $(/tmp/agent-old --version)"
 "$INSTALLED" uninstall --keep-data --yes >/dev/null 2>&1 || die "désinstallation avant la mise à niveau"
 run /tmp/agent-old install --yes || die "l'installation de la version 0.0.9 a échoué"
@@ -830,18 +834,18 @@ run "$BIN" install --yes || die "la mise à niveau a échoué"
 must_say "Mise à jour de l'agent Hearth"
 must_say "Mise à jour depuis la version 0.0.9..."
 must_say "Mise à jour réussie. Tes comptes et données sont conservés."
-"$INSTALLED" --version | grep -q '0\.1\.0' || die "la version installée n'est pas 0.1.0 après la mise à niveau"
+"$INSTALLED" --version | grep -qF "$CUR_VERSION" || die "la version installée n'est pas $CUR_VERSION après la mise à niveau"
 [ "$(systemctl show -p MainPID --value hearth-agent)" != "$OLD_PID" ] || die "le service aurait dû redémarrer sur le nouveau binaire"
 [ "$(printed_fingerprint)" = "$FIRST_FP" ] || die "l'empreinte a changé à la mise à niveau"
 [ "$(login)" = 201 ] || die "la connexion échoue après la mise à niveau"
-ok "mise à niveau 0.0.9 vers 0.1.0 : service redémarré sur le nouveau binaire, mêmes comptes, même empreinte"
+ok "mise à niveau 0.0.9 vers $CUR_VERSION : service redémarré sur le nouveau binaire, mêmes comptes, même empreinte"
 CUR_PID=$(systemctl show -p MainPID --value hearth-agent)
 if run /tmp/agent-old install --yes; then
     die "rétrograder devrait être refusé"
 fi
 must_say "plus récente"
 [ "$(systemctl show -p MainPID --value hearth-agent)" = "$CUR_PID" ] || die "le service a été touché par le refus"
-"$INSTALLED" --version | grep -q '0\.1\.0' || die "le binaire a été remplacé malgré le refus"
+"$INSTALLED" --version | grep -qF "$CUR_VERSION" || die "le binaire a été remplacé malgré le refus"
 ok "version plus récente déjà installée : refus, rien n'est touché"
 
 # --------------------------------------------------------------------------------------------

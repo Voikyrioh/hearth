@@ -2082,7 +2082,7 @@ dependencies = [
 
 [[package]]
 name = "hearth-agent"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2138,7 +2138,7 @@ dependencies = [
 
 [[package]]
 name = "hearth-desktop"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2178,7 +2178,7 @@ dependencies = [
 
 [[package]]
 name = "hearth-link"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2209,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "hearth-proto"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -7051,7 +7051,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "minisign",

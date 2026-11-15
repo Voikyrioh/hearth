@@ -7,6 +7,7 @@
 mod support;
 
 use hearth_agent::domain::accounts::Role;
+use hearth_agent::domain::install::Version;
 use hearth_proto::api::update::{UpdateOutcome, UpdateReason, UpdateStep};
 use hearth_proto::stream::{Topic, UpdateMessage};
 use serde_json::json;
@@ -26,11 +27,18 @@ async fn login(agent: &Agent, name: &str) -> String {
     reply.body["token"].as_str().unwrap().to_owned()
 }
 
+/// La version visée : toujours plus récente que celle de l'agent qui tourne (celle du dépôt change à chaque release).
+// FIX:01M7G9JGSR3FNA775EFAAV07KN — jamais la version courante du dépôt écrite en dur (docs/bugs/FIX-01M7G9JGSR3FNA775EFAAV07KN.md)
+const NEWER: &str = "99.0.0";
+
 #[tokio::test]
 async fn an_administrator_follows_every_step_and_a_read_only_account_sees_them_too() {
     let env = env().await;
     env.create("lucas", Role::ReadOnly).await;
     let rig = Rig::new(&env, true, true);
+    // Le binaire déposé annonce la version visée (sinon : binaire refusé à l'installation).
+    rig.host
+        .with(|state| state.announced = Some(Version::new(99, 0, 0)));
     let agent = support::https::start_updating(&env, metering(), Some(rig.updating())).await;
     let admin = agent.actor(&env, "marie", Role::Admin).await;
     let readonly = login(&agent, "lucas").await;
@@ -44,7 +52,7 @@ async fn an_administrator_follows_every_step_and_a_read_only_account_sees_them_t
             &admin,
             "POST",
             "/agent/update",
-            rig.request("0.2.0", BINARY),
+            rig.request_for(NEWER, BINARY),
         )
         .await
         .send()
@@ -56,7 +64,7 @@ async fn an_administrator_follows_every_step_and_a_read_only_account_sees_them_t
     let UpdateMessage::Update(first) = watcher.next_update().await;
     assert_eq!(
         (first.step, first.version.as_str()),
-        (UpdateStep::Download, "0.2.0")
+        (UpdateStep::Download, NEWER)
     );
     rig.release_gate();
     let mut steps = vec![first.step];
@@ -85,11 +93,14 @@ async fn an_administrator_follows_every_step_and_a_read_only_account_sees_them_t
 async fn a_client_that_subscribes_in_the_middle_gets_the_current_step_then_the_result() {
     let env = env().await;
     let rig = Rig::new(&env, true, true);
+    // Le binaire déposé annonce la version visée (sinon : binaire refusé à l'installation).
+    rig.host
+        .with(|state| state.announced = Some(Version::new(99, 0, 0)));
     let agent = support::https::start_updating(&env, metering(), Some(rig.updating())).await;
     let marie = agent.actor(&env, "marie", Role::Admin).await;
     let token = marie.token.clone();
     // Une somme fausse : la mise à jour échoue après le téléchargement.
-    let mut body = rig.request("0.2.0", BINARY);
+    let mut body = rig.request_for(NEWER, BINARY);
     body["sha256"] = json!("11".repeat(32));
     let accepted = agent
         .confirmed(&marie, "POST", "/agent/update", body)

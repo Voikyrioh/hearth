@@ -37,7 +37,7 @@ use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use hearth_link::domain::state::LinkState;
 use proxy::FaultProxy;
-use update_rig::{Rig, rig, sha256_hex};
+use update_rig::{NEWER, Rig, rig, sha256_hex};
 
 const GUARD: Duration = Duration::from_secs(60);
 const BINARY: &[u8] = b"nouvel agent";
@@ -186,7 +186,7 @@ fn target_for(rig: &Rig, version: &str, checksum: Option<String>) -> AgentTarget
         &AgentCandidate {
             version: version.into(),
             url: "https://exemple.org/hearth-agent-linux-x86_64".into(),
-            signature: rig.keys.sign(BINARY),
+            signature: rig.keys.sign_version(BINARY, version),
             sha256: checksum.unwrap_or_else(|| sha256_hex(BINARY)),
         },
         &DownloadPolicy::host_for_tests("exemple.org"),
@@ -244,12 +244,12 @@ async fn the_state_shows_the_version_of_the_agent_and_a_newer_version_from_the_f
     let world = world(true, false).await;
     for username in ["marie", "lucas"] {
         let client = client(&world.agent, username).await;
-        let newer = target_for(&world.rig, "0.2.0", None);
+        let newer = target_for(&world.rig, NEWER, None);
         let view = client.view(Some(&newer)).await;
         assert!(!view.current.is_empty());
         assert!(!view.managed && !view.in_progress);
         assert!(view.progress.is_none() && view.last.is_none());
-        assert_eq!(view.available.unwrap().version, "0.2.0");
+        assert_eq!(view.available.unwrap().version, NEWER);
         // Sans cible : rien n'est disponible.
         assert!(client.view(None).await.available.is_none());
         // Pas plus récente que l'agent (la même, ou plus ancienne) : jamais proposée.
@@ -264,12 +264,12 @@ async fn the_state_shows_the_version_of_the_agent_and_a_newer_version_from_the_f
 async fn an_administrator_starts_the_update_and_the_agent_gets_the_target_the_shell_holds() {
     let world = world(true, true).await;
     let client = client(&world.agent, "marie").await;
-    let target = target_for(&world.rig, "0.2.0", None);
-    let outcome = client.start(Some(&target), "0.2.0").await.unwrap();
+    let target = target_for(&world.rig, NEWER, None);
+    let outcome = client.start(Some(&target), NEWER).await.unwrap();
     assert_eq!(
         outcome,
         AgentUpdateOutcome::Accepted {
-            version: "0.2.0".into()
+            version: NEWER.into()
         }
     );
     // La progression arrive à l'interface, du téléchargement jusqu'au redémarrage.
@@ -284,7 +284,7 @@ async fn an_administrator_starts_the_update_and_the_agent_gets_the_target_the_sh
     );
     let last = client.ui.last_progress().unwrap();
     assert_eq!(last["serverId"], client.id.as_str());
-    assert_eq!(last["progress"]["version"], "0.2.0");
+    assert_eq!(last["progress"]["version"], NEWER);
     // Ce que l'agent a téléchargé : l'adresse de la cible retenue par la coquille, pas une autre.
     let fetched = world.rig.downloader.fetched.lock().unwrap().clone();
     assert_eq!(fetched, [target.url().to_string()]);
@@ -297,10 +297,10 @@ async fn an_administrator_starts_the_update_and_the_agent_gets_the_target_the_sh
 async fn a_second_request_while_one_runs_is_refused_by_the_agent() {
     let world = world(true, true).await;
     let client = client(&world.agent, "marie").await;
-    let target = target_for(&world.rig, "0.2.0", None);
-    client.start(Some(&target), "0.2.0").await.unwrap();
+    let target = target_for(&world.rig, NEWER, None);
+    client.start(Some(&target), NEWER).await.unwrap();
     // Porte fermée : la première est toujours en cours.
-    let second = refusal_of(client.start(Some(&target), "0.2.0").await);
+    let second = refusal_of(client.start(Some(&target), NEWER).await);
     assert_eq!(second, AgentUpdateRefusal::InProgress);
     let view = client.view(Some(&target)).await;
     assert!(view.in_progress);
@@ -311,8 +311,8 @@ async fn a_second_request_while_one_runs_is_refused_by_the_agent() {
 async fn a_read_only_account_is_refused_by_the_agent_with_the_typed_role_failure() {
     let world = world(true, false).await;
     let client = client(&world.agent, "lucas").await;
-    let target = target_for(&world.rig, "0.2.0", None);
-    let outcome = client.start(Some(&target), "0.2.0").await;
+    let target = target_for(&world.rig, NEWER, None);
+    let outcome = client.start(Some(&target), NEWER).await;
     assert_eq!(outcome.unwrap_err(), LinkFailure::Forbidden);
     // Rien n'a démarré chez l'agent.
     assert!(world.rig.downloader.fetched.lock().unwrap().is_empty());
@@ -323,7 +323,7 @@ async fn a_read_only_account_is_refused_by_the_agent_with_the_typed_role_failure
 async fn a_managed_installation_offers_no_update_and_the_agent_refuses_a_forced_request() {
     let world = world(false, false).await;
     let client = client(&world.agent, "marie").await;
-    let target = target_for(&world.rig, "0.2.0", None);
+    let target = target_for(&world.rig, NEWER, None);
     let view = client.view(Some(&target)).await;
     assert!(view.managed);
     assert!(
@@ -331,7 +331,7 @@ async fn a_managed_installation_offers_no_update_and_the_agent_refuses_a_forced_
         "installation gérée : aucun bouton à montrer"
     );
     assert_eq!(
-        refusal_of(client.start(Some(&target), "0.2.0").await),
+        refusal_of(client.start(Some(&target), NEWER).await),
         AgentUpdateRefusal::ManagedInstall
     );
     assert!(world.rig.downloader.fetched.lock().unwrap().is_empty());
@@ -344,13 +344,13 @@ async fn nothing_is_sent_without_a_target_for_another_version_or_for_a_downgrade
     let current = client.view(None).await.current;
     // Aucune cible dans le flux.
     assert_eq!(
-        refusal_of(client.start(None, "0.2.0").await),
+        refusal_of(client.start(None, NEWER).await),
         AgentUpdateRefusal::NoTarget
     );
     // L'utilisateur a vu 0.2.0, le client retient maintenant autre chose.
     let held = target_for(&world.rig, "0.3.0", None);
     assert_eq!(
-        refusal_of(client.start(Some(&held), "0.2.0").await),
+        refusal_of(client.start(Some(&held), NEWER).await),
         AgentUpdateRefusal::TargetChanged
     );
     assert_eq!(
@@ -380,9 +380,9 @@ async fn the_agent_stays_the_arbiter_of_a_target_with_a_wrong_checksum() {
     let client = client(&world.agent, "marie").await;
     // Le client ne peut pas savoir que la somme est fausse : il l'envoie, l'agent refuse après
     // téléchargement, rien n'est installé.
-    let wrong = target_for(&world.rig, "0.2.0", Some("11".repeat(32)));
+    let wrong = target_for(&world.rig, NEWER, Some("11".repeat(32)));
     assert!(matches!(
-        client.start(Some(&wrong), "0.2.0").await.unwrap(),
+        client.start(Some(&wrong), NEWER).await.unwrap(),
         AgentUpdateOutcome::Accepted { .. }
     ));
     eventually("la fin de la mise à jour relayée", || {
@@ -410,7 +410,7 @@ async fn the_agent_stays_the_arbiter_of_a_target_with_a_wrong_checksum() {
     assert_eq!(last.outcome, AgentUpdateOutcomeDto::Failed);
     assert_eq!(last.reason, Some(AgentUpdateReasonDto::BadChecksum));
     assert!(last.recent);
-    assert_eq!(last.version.as_deref(), Some("0.2.0"));
+    assert_eq!(last.version.as_deref(), Some(NEWER));
     assert!(matches!(
         AgentUpdateStepDto::from(hearth_proto::api::update::UpdateStep::Done),
         AgentUpdateStepDto::Done
@@ -446,8 +446,8 @@ async fn a_result_never_seen_on_the_stream_is_read_as_not_announced_until_it_is_
     let world = world(true, false).await;
     let client = client(&world.agent, "marie").await;
     // La mise à jour se termine chez l'agent sans que le client soit là pour voir `done` sur le flux.
-    let wrong = target_for(&world.rig, "0.2.0", Some("11".repeat(32)));
-    client.start(Some(&wrong), "0.2.0").await.unwrap();
+    let wrong = target_for(&world.rig, NEWER, Some("11".repeat(32)));
+    client.start(Some(&wrong), NEWER).await.unwrap();
     eventually("la fin chez l'agent", || {
         world.rig.host.with(|state| state.last.is_some())
     })
@@ -483,7 +483,7 @@ async fn an_update_request_cut_before_its_answer_is_unknown_and_never_replayed()
     let world = world(true, false).await;
     let proxy = FaultProxy::start(world.agent.addr).await;
     let client = client_via(proxy.port(), "marie").await;
-    let target = target_for(&world.rig, "0.2.0", None);
+    let target = target_for(&world.rig, NEWER, None);
     // L'agent retient la vérification du mot de passe de confirmation : la demande reste sans réponse
     // (le défi et la preuve sont déjà passés) ; on la coupe une fois son suivi écrit.
     world.agent.hold_actions();

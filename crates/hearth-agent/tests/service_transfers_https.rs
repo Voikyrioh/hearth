@@ -1129,3 +1129,38 @@ fn the_chunk_arithmetic_of_the_test_matches_the_protocol() {
     assert_eq!(chunk_len(size, 3), 1);
     let _ = Value::Null;
 }
+
+// FIX:01M7G6V7E6DY5PHJ6TQ848YJ7A — `pack-check` cherchait le dépôt sous le NOM du compte, la zone le range sous son identifiant (docs/bugs/FIX-01M7G6V7E6DY5PHJ6TQ848YJ7A.md)
+/// Le parcours réel d'un pack : dépôt envoyé par la vraie zone d'attente, puis lu par `POST /deployments/pack-check`
+/// avec la vraie zone (aucun faux `PackDeposits`). Les tests de `pack_install_https.rs` rangent leurs dépôts sous le
+/// nom du compte : c'est ce qui avait caché l'écart entre ce nom et l'identifiant sous lequel la zone range.
+#[tokio::test]
+async fn a_pack_sent_through_the_real_zone_is_read_by_pack_check_for_its_owner_only() {
+    let b = bench().await;
+    b.env.grant_services("bob").await;
+    let bytes = support::fake_pack_deposits::zip_of(&[
+        ("mods/a.jar", b"jar-a"),
+        ("config/a.toml", b"x = 1"),
+        ("start.sh", b"#!/bin/sh"),
+    ]);
+    let id = b.deposit(bytes.len() as u64).await;
+    let (mut socket, _) = b.attach(&id).await;
+    send_chunks(&mut socket, &bytes, 0..1).await;
+    assert!(matches!(
+        finish(&mut socket, tree_of(&bytes)).await,
+        UploadServerMessage::Done { .. }
+    ));
+    let check = |who: &Actor| {
+        b.agent
+            .request("POST", "/deployments/pack-check")
+            .token(&who.token)
+            .json(&json!({ "deposit": id }))
+            .send()
+    };
+    // Un autre compte (même droit) ne voit pas ce dépôt.
+    let other = check(&b.bob).await;
+    assert_eq!(other.status, 404, "{}", other.text);
+    let reply = check(&b.ada).await;
+    assert_eq!(reply.status, 200, "{}", reply.text);
+    assert_eq!(reply.body["genre"], "server_pack");
+}

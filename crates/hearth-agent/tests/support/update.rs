@@ -452,6 +452,13 @@ impl Rig {
     }
 
     /// Le corps d'une demande valable pour ces octets (somme et signature de la clé du banc).
+    /// Comme `request`, signé pour CETTE version (le commentaire signé doit dire la version demandée).
+    pub fn request_for(&self, version: &str, bytes: &[u8]) -> serde_json::Value {
+        let mut body = self.request(version, bytes);
+        body["signature"] = serde_json::json!(self.keys.sign_version(bytes, version));
+        body
+    }
+
     pub fn request(&self, version: &str, bytes: &[u8]) -> serde_json::Value {
         serde_json::json!({
             "version": version,
