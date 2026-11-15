@@ -21,7 +21,7 @@ use hearth_agent::domain::catalog::{Origin, load};
 use hearth_agent::domain::services::{RunState, ServiceKey};
 use hearth_proto::api::deploy::DeployAccepted;
 use hearth_proto::api::service_ops::{OperationCause, OperationStatus, OperationView};
-use serde_json::json;
+use serde_json::{Value, json};
 use support::device::Actor;
 use support::engine::{fast_timings, parts_supervised};
 use support::fake_engine::{Call, FakeEngine, PullScript, StdinReaction};
@@ -877,6 +877,88 @@ async fn the_game_view_tells_the_fiche_the_stop_the_real_ports_and_a_password_ye
         .await;
     assert_eq!(unknown.status, 404);
     assert_eq!(unknown.body["error"]["code"], "NOT_A_GAME_SERVICE");
+}
+
+/// `GET /services/{key}/game` pour ce jeton : statut, corps et texte.
+async fn game_view(agent: &Agent, token: &str, key: &str) -> (u16, Value, String) {
+    let reply = agent
+        .request("GET", &format!("/services/{key}/game"))
+        .token(token)
+        .send()
+        .await;
+    (reply.status, reply.body, reply.text)
+}
+
+#[tokio::test]
+async fn the_public_address_is_kept_with_the_service_shown_by_the_game_view_and_changed_without_recreating()
+ {
+    // HRT-215, BR-JEU-022 : l'adresse que le propriétaire donne à ses joueurs vit dans la description durable, se lit
+    // dans la vue du jeu et se change par la modification du service (une modification qui ne recrée rien).
+    let b = bench().await;
+    let server = b.install().await;
+    let key = server.key.as_str().to_owned();
+    // Rien n'est renseigné à l'installation : la vue ne dit rien (jamais une adresse inventée).
+    let first = game_view(&b.agent, &b.ada.token, &key).await;
+    assert_eq!(first.0, 200, "{}", first.2);
+    assert!(first.1.get("public_address").is_none(), "{}", first.2);
+    let spec = b
+        .agent
+        .request("GET", &format!("/services/{key}/spec"))
+        .token(&b.ada.token)
+        .send()
+        .await;
+    assert_eq!(spec.status, 200, "{}", spec.text);
+    let rev = spec.body["rev"].as_u64().expect("révision");
+    let containers_before = b.engine.container_ids();
+    let put = b
+        .agent
+        .confirmed(
+            &b.ada,
+            "PUT",
+            &format!("/services/{key}/spec"),
+            json!({ "base_rev": rev, "public_address": "jeu.example.org" }),
+        )
+        .await
+        .send()
+        .await;
+    assert_eq!(put.status, 202, "{}", put.text);
+    // La modification est une opération courte ; la vue montre l'adresse dès qu'elle est écrite.
+    let mut shown = None;
+    for _ in 0..200 {
+        let read = game_view(&b.agent, &b.dan.token, &key).await;
+        shown = read.1["public_address"].as_str().map(str::to_owned);
+        if shown.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert_eq!(shown.as_deref(), Some("jeu.example.org"));
+    // Rien n'a été recréé : le même conteneur.
+    assert_eq!(b.engine.container_ids(), containers_before);
+    // Une adresse avec un espace n'est pas une adresse : refusée sans rien changer (le client refuse en plus un protocole
+    // et un port, que l'agent laisse passer : il ne juge que la forme de ce qu'il garde).
+    let spec = b
+        .agent
+        .request("GET", &format!("/services/{key}/spec"))
+        .token(&b.ada.token)
+        .send()
+        .await;
+    let rev = spec.body["rev"].as_u64().expect("révision");
+    for bad in ["a b", "jeu	example.org"] {
+        let refused = b
+            .agent
+            .confirmed(
+                &b.ada,
+                "PUT",
+                &format!("/services/{key}/spec"),
+                json!({ "base_rev": rev, "public_address": bad }),
+            )
+            .await
+            .send()
+            .await;
+        assert_eq!(refused.status, 422, "{bad}: {}", refused.text);
+        assert_eq!(refused.body["error"]["details"]["field"], "public_address");
+    }
 }
 
 #[tokio::test]
