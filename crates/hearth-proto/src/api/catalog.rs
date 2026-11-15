@@ -435,6 +435,10 @@ pub struct FicheDetail {
     /// Les voies de mods que la fiche offre (HRT-124, BR-MOD-001) ; absent : aucune (BR-MOD-014).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mods: Option<ModsView>,
+    /// Ce que la fiche dit d'un monde repris (HRT-106, BR-MONDE-014, 039) ; absent d'une fiche qui ne déclare pas de
+    /// monde et d'un agent plus ancien.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world_import: Option<WorldImportView>,
 }
 
 /// Les voies de mods d'une fiche, dans l'ordre où l'écran les montre.
@@ -462,6 +466,16 @@ pub struct PackGenreView {
     pub kind: String,
     /// Les variantes de la fiche permises avec ce genre.
     pub variants: Items<String>,
+}
+
+/// Les réglages que la reprise d'un monde touche : le client ne pose aucune réponse pour eux (BR-MONDE-014).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldImportView {
+    /// Le réglage que l'agent remplit avec le nom du monde repris ; une réponse différente est refusée.
+    pub names_setting: String,
+    /// Les réglages que le monde porte : ni posés ni écrits par Hearth.
+    #[serde(default)]
+    pub carried_by_world: Vec<String>,
 }
 
 #[cfg(test)]
