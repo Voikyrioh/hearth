@@ -182,6 +182,7 @@ const install = {
   agreements: ["eula"],
   ports: [{ id: "game", hostPort: 7778 }],
   optionalPorts: [],
+  world: null,
   resources: { memoryBytes: 2 * 1024 ** 3, cpuMillis: 1000 },
   accept: { reservedPorts: false, lowDisk: true },
 };

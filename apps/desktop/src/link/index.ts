@@ -45,8 +45,10 @@ export { SimulatedReauth } from "./simulated-reauth";
 export { SimulatedSecurity } from "./simulated-security";
 export { SimulatedServiceOps } from "./simulated-service-ops";
 export { SimulatedServices } from "./simulated-services";
+export { SimulatedWorlds } from "./simulated-worlds";
 export { TauriLinkBridge } from "./tauri";
 export * from "./types";
+export * from "./worlds";
 
 let current: LinkBridge | null = null;
 

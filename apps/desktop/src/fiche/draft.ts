@@ -3,6 +3,14 @@ import type { FicheDetail, FicheInstallRequest, FichePort } from "@/link";
 import type { Resources } from "@/resources";
 import { answersToSend, extraAnswersToSend, extraSettings, visibleQuestions } from "./answers";
 import { publishedPorts, readableHostPorts, startingHostPort } from "./ports";
+import {
+  hiddenByWorld,
+  newWorldDraft,
+  type WorldDraft,
+  wipeWorldDraft,
+  worldMissing,
+  worldPickOf,
+} from "./world";
 
 /**
  * La saisie de l'installation d'un serveur de jeu (HRT-102, BR-FICHE-034) et la demande qu'on en tire, des fonctions pures
@@ -25,6 +33,8 @@ export interface FicheDraft {
   hostPorts: Record<string, string>;
   /** Les identifiants des ports facultatifs que l'utilisateur publie. */
   optionalPorts: string[];
+  /** La carte « Monde » (HRT-106) : un monde neuf, ou la reprise d'un monde existant. */
+  world: WorldDraft;
   /** `null` tant que les bornes de la machine ne sont pas lues : les curseurs prennent alors leur valeur de départ. */
   resources: Resources | null;
   /** L'utilisateur a touché au moins un champ : fermer demande « Abandonnez-vous votre saisie ? ». */
@@ -47,6 +57,7 @@ export function newFicheDraft(detail: FicheDetail, name: string): FicheDraft {
     answers: {},
     hostPorts: {},
     optionalPorts: [],
+    world: newWorldDraft(),
     resources: null,
     edited: false,
   };
@@ -62,6 +73,7 @@ export function wipeFicheDraft(draft: FicheDraft): void {
   for (const id of Object.keys(draft.answers)) delete draft.answers[id];
   for (const id of Object.keys(draft.hostPorts)) delete draft.hostPorts[id];
   draft.optionalPorts.splice(0);
+  wipeWorldDraft(draft.world);
   draft.name = "";
   draft.variant = null;
   draft.resources = null;
@@ -72,6 +84,8 @@ export function wipeFicheDraft(draft: FicheDraft): void {
 export interface InstallChoices {
   accept: { reservedPorts: boolean; lowDisk: boolean };
   agreements: readonly string[];
+  /** Le geste « Je comprends » du récapitulatif, quand une reprise de monde le demande (BR-MONDE-016). */
+  worldVersionUnderstood?: boolean;
 }
 
 /**
@@ -85,6 +99,9 @@ export function toInstallRequest(
   choices: InstallChoices,
 ): FicheInstallRequest | null {
   if (nameIssue(draft.name) !== null) return null;
+  // Reprendre un monde sans l'avoir choisi : la demande ne part pas (BR-MONDE-002).
+  if (worldMissing(draft.world)) return null;
+  const hidden = hiddenByWorld(detail, draft.world);
   const resources = draft.resources;
   if (resources === null || resources.memoryBytes === null || resources.cpuMillis === null) {
     return null;
@@ -98,13 +115,15 @@ export function toInstallRequest(
     version: draft.version,
     digest: draft.digest,
     variant: draft.variant,
+    // Le monde repris porte son nom et ses réglages figés : aucune réponse du client pour eux (BR-MONDE-014).
     answers: [
       ...answersToSend(visibleQuestions(detail, draft.variant), draft.answers),
       ...extraAnswersToSend(extraSettings(detail, draft.variant), draft.answers),
-    ],
+    ].filter((answer) => !hidden.has(answer.id)),
     agreements: [...choices.agreements],
     ports: readable.map(({ port, deploy }) => ({ id: port.id, hostPort: deploy.hostPort })),
     optionalPorts: published.filter((port) => port.publish === "optional").map((port) => port.id),
+    world: worldPickOf(draft.world, choices.worldVersionUnderstood === true),
     resources: { memoryBytes: resources.memoryBytes, cpuMillis: resources.cpuMillis },
     accept: { ...choices.accept },
   };

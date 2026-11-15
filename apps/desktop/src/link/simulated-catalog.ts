@@ -4,6 +4,7 @@ import type { DeployOutcome, DeployRefusal, DeployStep } from "./deploy";
 import type { SimulatedDeploys } from "./simulated-deploy";
 import { rich, terraria } from "./simulated-fiches";
 import { judgeValue } from "./simulated-judge";
+import type { SimulatedWorlds } from "./simulated-worlds";
 
 /**
  * Le Catalogue et l'installation depuis une fiche du pont SIMULÉ (navigateur de développement, Vitest, Playwright) :
@@ -49,6 +50,8 @@ export class SimulatedCatalog {
         answers: readonly { id: string; value: string }[],
       ) => void)
     | null = null;
+  /** L'agent de la reprise d'un monde (HRT-106) : posé par le pont ; `null` : un agent d'avant HRT-105. */
+  worlds: SimulatedWorlds | null = null;
   private readonly fiches = new Map<string, FicheDetail>();
 
   constructor(private readonly deploys: SimulatedDeploys) {
@@ -199,6 +202,30 @@ export class SimulatedCatalog {
       return refused({ kind: "other" });
     }
 
+    // Reprendre un monde (HRT-105) : les refus synchrones de l'agent, dans son ordre.
+    const world = request.world ?? null;
+    if (world !== null) {
+      const worlds = this.worlds;
+      if (!worlds || worlds.unavailable || detail.worldImport === null) {
+        return refused({ kind: "invalid", field: "source", reason: "world_import_unavailable" });
+      }
+      if (!world.versionUnderstood) {
+        return refused({ kind: "invalid", field: "world", reason: "version_not_understood" });
+      }
+      const why = worlds.judge(serverId, request.fiche, world);
+      if (why !== null) return refused({ kind: "invalid", field: "world", reason: why });
+      const free = this.deploys.freeDiskBytes(serverId);
+      const measured = worlds.measured(serverId, request.fiche, world, free);
+      if (measured !== null && measured.bytes > free) {
+        return refused({
+          kind: "no_space_to_install",
+          neededBytes: measured.bytes,
+          freeBytes: free,
+          missingBytes: measured.bytes - free,
+        });
+      }
+    }
+
     // Les limites sont obligatoires, puis la machine et l'espace : seul un minimum MESURÉ est opposable.
     const limits = this.deploys.limitsRefusal(serverId, request.resources);
     if (limits) return refused(limits);
@@ -259,6 +286,7 @@ export class SimulatedCatalog {
           protocol: port.protocol,
         })),
         accept: request.accept,
+        world: world !== null,
       },
       by,
       () => this.received.push({ serverId, request: structuredClone(request) }),

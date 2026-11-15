@@ -150,6 +150,13 @@ import {
   type ServerInfo,
   type Unsubscribe,
 } from "./types";
+import {
+  toWorldInspectRead,
+  toWorldsRead,
+  type WorldInspectRead,
+  type WorldRef,
+  type WorldsRead,
+} from "./worlds";
 
 /** Noms des événements de la coquille (conception technique, section 9). */
 /** Période du battement de vie des lectures de journaux (`KEEP_ALIVE_PERIOD` de la coquille : dix secondes). */
@@ -788,6 +795,22 @@ export class TauriLinkBridge implements LinkBridge {
   ): Promise<SaveOutcome> {
     return toSaveOutcome(
       unwrap(await commands.saveGameSettings(serverId, key, request, adminPassword)),
+    );
+  }
+
+  async readWorlds(serverId: string, ficheId: string): Promise<WorldsRead> {
+    return toWorldsRead(unwrap(await commands.readWorlds(serverId, ficheId)));
+  }
+
+  async inspectWorld(
+    serverId: string,
+    ficheId: string,
+    world: WorldRef,
+  ): Promise<WorldInspectRead> {
+    return toWorldInspectRead(
+      unwrap(
+        await commands.inspectWorld(serverId, ficheId, { folder: world.folder, path: world.path }),
+      ),
     );
   }
 

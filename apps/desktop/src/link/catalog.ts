@@ -8,6 +8,7 @@ import type {
   FicheSettingDto,
   FicheThemeDto,
 } from "@/bindings";
+import { toWorldPickDto, type WorldPick } from "./worlds";
 
 export type { FicheLinkKind };
 
@@ -210,6 +211,12 @@ export interface FicheDetail {
   themes: FicheTheme[];
   /** Le catalogue complet de réglages, imposés compris ; vide d'un agent plus ancien (HRT-109). */
   settings: FicheSetting[];
+  /**
+   * Ce que la fiche dit d'un monde repris (HRT-106, BR-MONDE-014) : le réglage que l'agent remplit avec le nom du monde
+   * et ceux que le monde porte ; le client ne pose aucune réponse pour eux. `null` : la fiche ne reprend pas de monde,
+   * ou un agent plus ancien ne le dit pas.
+   */
+  worldImport: { namesSetting: string; carriedByWorld: string[] } | null;
   /** Réglages ou thèmes d'une version plus récente que ce client, illisibles : l'onglet le dit, l'installation continue. */
   settingsUnreadable: number;
   /** Des éléments d'une version plus récente que ce client, illisibles : la fiche ne s'installe pas à l'aveugle. */
@@ -233,6 +240,8 @@ export interface FicheInstallRequest {
   agreements: string[];
   ports: { id: string; hostPort: number }[];
   optionalPorts: string[];
+  /** Reprendre un monde existant (HRT-106) : le monde choisi et ses deux gestes ; `null` : un monde neuf. */
+  world?: WorldPick | null;
   /** Mémoire en octets et processeur en millicœurs : obligatoires (BR-RES-013). */
   resources: { memoryBytes: number; cpuMillis: number };
   /** Les cases de l'agent : le port réservé, le manque de place annoncé par l'éditeur. */
@@ -328,6 +337,12 @@ function toFicheDetail(dto: FicheDetailDto): FicheDetail {
     imposed: dto.imposed.map((setting) => ({ ...setting })),
     themes: dto.themes.map(toTheme),
     settings: dto.settings.map(toSetting),
+    worldImport: dto.worldImport
+      ? {
+          namesSetting: dto.worldImport.namesSetting,
+          carriedByWorld: [...dto.worldImport.carriedByWorld],
+        }
+      : null,
     settingsUnreadable: dto.settingsUnreadable,
     unreadable: dto.unreadable,
   };
@@ -351,6 +366,7 @@ export function toFicheInstallRequestDto(request: FicheInstallRequest): FicheIns
     agreements: [...request.agreements],
     ports: request.ports.map((port) => ({ id: port.id, hostPort: port.hostPort })),
     optionalPorts: [...request.optionalPorts],
+    world: request.world ? toWorldPickDto(request.world) : null,
     resources: {
       memoryBytes: request.resources.memoryBytes,
       cpuMillis: request.resources.cpuMillis,

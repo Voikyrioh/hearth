@@ -315,6 +315,7 @@ describe("hors ligne (HRT-12)", () => {
       "audit",
       "catalogue",
       "dashboard",
+      "existing-server-help",
       "fiche",
       "fiche-install",
       "security",

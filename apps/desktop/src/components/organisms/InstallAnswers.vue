@@ -7,6 +7,7 @@ import FichePortField from "@/components/molecules/FichePortField.vue";
 import QuestionField from "@/components/molecules/QuestionField.vue";
 import VariantChoice from "@/components/molecules/VariantChoice.vue";
 import InstallSettings from "@/components/organisms/InstallSettings.vue";
+import WorldCard from "@/components/organisms/WorldCard.vue";
 import type { FicheInstallState } from "@/composables/useFicheInstall";
 import { nameTakenText, nameText, portVerdict } from "@/deploy/messages";
 import { currentAnswer } from "@/fiche/answers";
@@ -107,6 +108,9 @@ defineExpose({
         @blur="install.touch('name')"
       />
     </DashCard>
+
+    <!-- Le monde : neuf, ou repris d'un monde existant (HRT-106) -->
+    <WorldCard :install="install" />
 
     <DashCard v-if="install.questions.value.length > 0" :title="t('fiche.cardQuestionsAsk')">
       <QuestionField

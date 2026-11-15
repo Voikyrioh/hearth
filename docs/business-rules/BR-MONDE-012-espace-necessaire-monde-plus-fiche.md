@@ -5,7 +5,7 @@ titre: L'espace libre doit couvrir le monde à copier plus ce que la fiche exige
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-reprendre-un-monde-existant.md (BR-MONDE-012), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md (section 9.9), HRT-105
-maj: 2026-11-14
+maj: 2026-11-15
 ---
 
 # BR-MONDE-012 — L'espace libre doit couvrir le monde à copier plus ce que la fiche exige pour s'installer, sans case pour passer outre
@@ -15,9 +15,11 @@ La taille du monde (mesurée en 60 secondes au plus) s'ajoute au besoin mesuré 
 
 ## Application (code)
 - `crates/hearth-agent/src/application/fiche_install.rs::FicheInstaller::prepare`
+- `apps/desktop/src/fiche/world.ts::notEnoughRoom` et `apps/desktop/src/pages/InstallFromFiche.vue` (la page ne continue pas faute de place, sans case pour passer outre)
 
 ## Vérification
 - `crates/hearth-agent/tests/world_import_https.rs::the_room_for_the_copy_is_asked_on_top_of_the_room_the_game_needs`
+- `apps/desktop/src/pages/InstallWorld.test.ts` (« bloque Continuer »)
 
 ## Cas limites
 - L'espace est lu sur le disque du moteur (images) comme pour l'installation ordinaire.
@@ -27,3 +29,4 @@ La taille du monde (mesurée en 60 secondes au plus) s'ajoute au besoin mesuré 
 
 ## Historique
 - 2026-11-14 — création (HRT-105, côté agent).
+- 2026-11-15 — côté client (HRT-106).

@@ -115,6 +115,11 @@ export function terraria(): FicheDetail {
     ],
     themes: structuredClone(TERRARIA_THEMES),
     settings: structuredClone(TERRARIA_SETTINGS),
+    // La fiche réelle : `names_setting` et `carried_by_world` de `[worlds]` (HRT-106).
+    worldImport: {
+      namesSetting: "world_name",
+      carriedByWorld: ["world_size", "difficulty", "seed"],
+    },
     settingsUnreadable: 0,
     unreadable: 0,
   };
@@ -238,6 +243,8 @@ export function rich(): FicheDetail {
       },
     ],
     ...richSettings(),
+    // La fiche d'essai ne dit pas ce qu'est un monde : la carte « Monde » n'existe pas pour elle (HRT-106).
+    worldImport: null,
     unreadable: 0,
   };
 }

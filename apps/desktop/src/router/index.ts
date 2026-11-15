@@ -16,6 +16,7 @@ import Audit from "@/pages/Audit.vue";
 import Catalogue from "@/pages/Catalogue.vue";
 import Dashboard from "@/pages/Dashboard.vue";
 import DeployService from "@/pages/DeployService.vue";
+import ExistingServerHelp from "@/pages/ExistingServerHelp.vue";
 import FicheDetail from "@/pages/FicheDetail.vue";
 import InstallFromFiche from "@/pages/InstallFromFiche.vue";
 import Security from "@/pages/Security.vue";
@@ -39,7 +40,7 @@ declare module "vue-router" {
 
 /**
  * Routes : `/welcome` (aucun serveur), `/servers/new` (assistant d'ajout), `/servers` (carnet),
- * `/servers/:id/{dashboard,services,services/deployer,catalogue,catalogue/:fiche,catalogue/:fiche/installer,accounts,audit,security}` dans le gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
+ * `/servers/:id/{dashboard,services,services/deployer,catalogue,catalogue/serveur-existant,catalogue/:fiche,catalogue/:fiche/installer,accounts,audit,security}` dans le gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
  * serveur ou l'accueil. Historique par hachage (l'application est servie depuis des fichiers).
  */
 export function createAppRouter(history: RouterHistory = createWebHashHistory()): Router {
@@ -83,6 +84,13 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
             name: "catalogue",
             component: Catalogue,
             meta: { title: "pages.catalogue" },
+          },
+          {
+            // L'aide « J'ai déjà un serveur de jeu » (HRT-106) : une page de lecture, ouverte à tous les profils.
+            path: "catalogue/serveur-existant",
+            name: "existing-server-help",
+            component: ExistingServerHelp,
+            meta: { title: "pages.existingServerHelp" },
           },
           {
             path: "catalogue/:fiche",

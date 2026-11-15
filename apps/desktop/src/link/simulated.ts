@@ -81,6 +81,7 @@ import { SimulatedReauth, simulatedPasswordNeed } from "./simulated-reauth";
 import { SimulatedSecurity } from "./simulated-security";
 import { SimulatedServiceOps } from "./simulated-service-ops";
 import { SimulatedServices } from "./simulated-services";
+import { SimulatedWorlds } from "./simulated-worlds";
 import {
   type AccountInputCheck,
   type AccountList,
@@ -101,6 +102,7 @@ import {
   type ServerInfo,
   type Unsubscribe,
 } from "./types";
+import type { WorldInspectRead, WorldRef, WorldsRead } from "./worlds";
 
 /** Serveurs d'exemple du pont simulé (navigateur de développement, tests). */
 export const SAMPLE_SERVERS: ServerInfo[] = [
@@ -263,6 +265,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly backups: SimulatedBackups;
   /** Le Catalogue et l'installation depuis une fiche (HRT-102) : l'agent simulé propose Terraria (`catalog.addRich()` en ajoute une plus riche). */
   readonly catalog: SimulatedCatalog;
+  /** Les mondes que l'agent simulé reconnaît (HRT-106) : l'agent juge comme le vrai ; la copie est une étape du déploiement, pilotée par le test. */
+  readonly worlds: SimulatedWorlds;
   /** Les réglages des services de jeu (HRT-109). */
   readonly gameSettings: SimulatedGameSettings;
   readonly games = new SimulatedGames();
@@ -304,6 +308,8 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.deletes = new SimulatedDeletes(this.services, this.serviceOps, this.deploys);
     this.backups = new SimulatedBackups(this.services, this.serviceOps);
     this.catalog = new SimulatedCatalog(this.deploys);
+    this.worlds = new SimulatedWorlds((ficheId) => this.catalog.get(ficheId)?.worldImport != null);
+    this.catalog.worlds = this.worlds;
     this.gameSettings = new SimulatedGameSettings(this.catalog);
     // Un service installé depuis une fiche a ses réglages dès que l'agent l'accepte.
     this.catalog.onInstalled = (serverId, key, detail, answers) => {
@@ -954,6 +960,43 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.calls.push("fiche");
     if (this.catalog.failRead) throw this.fail({ kind: "unreachable" });
     return this.catalog.read(ficheId);
+  }
+
+  // --- Reprendre un monde existant (HRT-106) ---
+
+  async readWorlds(serverId: string, ficheId: string): Promise<WorldsRead> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("worlds");
+    // Le niveau `Services` de l'agent : sans le droit, la lecture est refusée. Un agent d'avant la reprise d'un monde ne
+    // connaît pas la route.
+    if (!this.accounts.ownRights(server).granted) {
+      throw this.fail({ kind: "missing_services_right" });
+    }
+    if (this.worlds.unavailable) throw this.fail({ kind: "unreachable" });
+    if (this.worlds.failList) throw this.fail({ kind: "unreachable" });
+    return this.worlds.read(serverId, ficheId);
+  }
+
+  async inspectWorld(
+    serverId: string,
+    ficheId: string,
+    world: WorldRef,
+  ): Promise<WorldInspectRead> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("world inspect");
+    if (!this.accounts.ownRights(server).granted) {
+      throw this.fail({ kind: "missing_services_right" });
+    }
+    if (this.worlds.failInspect) throw this.fail({ kind: "unreachable" });
+    return this.worlds.inspect(serverId, ficheId, world, this.deploys.freeDiskBytes(serverId));
   }
 
   /** Les adresses qu'une fiche a fait ouvrir, dans l'ordre (de quoi vérifier ce qui s'ouvre). */

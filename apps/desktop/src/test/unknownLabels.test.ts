@@ -5,6 +5,7 @@ import { OUTCOME_KEYS, originOf } from "@/audit/format";
 import bindings from "@/bindings.ts?raw";
 import { portVerdict } from "@/deploy/messages";
 import { kindText, stopTexts } from "@/fiche/messages";
+import { refusalText as worldRefusalText } from "@/fiche/world";
 import { type MessageKey, t } from "@/i18n";
 import type {
   AuditEntry,
@@ -122,6 +123,12 @@ const SAYS: Record<string, (value: string) => void> = {
     // Un repère inconnu est écarté, jamais affiché tel quel (HRT-98) ; les autres ont un libellé.
     const labels = flagLabels({ flags: [value as never] });
     expect(labels).toHaveLength(value === "unknown" ? 0 : 1);
+  },
+  WorldRefusalDto: (value) => {
+    // Pourquoi l'agent refuse un monde (HRT-106) : un code plus récent que ce client dit le refus général.
+    const said = worldRefusalText(value as never);
+    key(said);
+    expect(said).not.toMatch(/^fiche\.world\./);
   },
   FicheQuestionKindDto: (value) => {
     // Le genre d'une question se dit par `kindText` ; un genre inconnu devient « Valeur » et un champ de texte (HRT-102).

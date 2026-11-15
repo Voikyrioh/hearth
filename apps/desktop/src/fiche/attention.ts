@@ -21,7 +21,9 @@ export type AttentionPoint =
   /** La limite choisie est sous le minimum de la fiche (BR-FICHE-022). */
   | { key: "below_minimum"; chosen: number; minimum: number }
   /** Le minimum annoncé par l'éditeur dépasse la machine (BR-FICHE-021). */
-  | { key: "publisher_minimum"; lack: Lack; needed: number; has: number };
+  | { key: "publisher_minimum"; lack: Lack; needed: number; has: number }
+  /** Reprendre un monde : Hearth ne sait pas avec quelle version du jeu il a été enregistré (BR-MONDE-016). */
+  | { key: "world_version" };
 
 export type AttentionKey = AttentionPoint["key"];
 
@@ -32,9 +34,12 @@ export function attentionPoints(input: {
   resources: Resources | null;
   /** Le serveur vient de refuser faute de place (`freeBytes` : `null` s'il ne dit pas combien). */
   forceLowDisk: { freeBytes: number | null } | null;
+  /** Un monde existant est repris : son geste « Je comprends » est un point d'attention (BR-MONDE-016). */
+  resumesWorld?: boolean;
 }): AttentionPoint[] {
   const { detail, capacity, check, resources, forceLowDisk } = input;
   const points: AttentionPoint[] = [];
+  if (input.resumesWorld === true) points.push({ key: "world_version" });
 
   const minimums = publisherAbove(minimumVerdicts(detail, capacity));
   for (const verdict of minimums) {

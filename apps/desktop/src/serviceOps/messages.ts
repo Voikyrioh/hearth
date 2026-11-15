@@ -47,6 +47,7 @@ const SUBJECT_KEYS: Record<OperationKind, MessageKey> = {
 const STEP_KEYS: Record<string, MessageKey> = {
   check: "serviceOps.steps.check",
   pull: "serviceOps.steps.pull",
+  world: "serviceOps.steps.world",
   create: "serviceOps.steps.create",
   watch: "serviceOps.steps.watch",
   stop: "serviceOps.steps.stop",
