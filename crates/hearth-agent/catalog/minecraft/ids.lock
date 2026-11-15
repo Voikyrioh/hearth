@@ -1,0 +1,18 @@
+# Registre des identifiants de réglage de la fiche `minecraft` (HRT-116, conception technique 12.4).
+# Un identifiant publié ne disparaît pas par oubli : retiré de la fiche, il passe en [[retired]] avec sa raison,
+# et son état ici devient `retired` (avec `retired_in`). `cargo xtask catalog-check` le vérifie.
+
+ids = [
+  { id = "version", key = "VERSION", channel = "env", state = "active", since = 1 },
+  { id = "motd", key = "MOTD", channel = "env", state = "active", since = 1 },
+  { id = "difficulty", key = "DIFFICULTY", channel = "env", state = "active", since = 1 },
+  { id = "mode", key = "MODE", channel = "env", state = "active", since = 1 },
+  { id = "max_players", key = "MAX_PLAYERS", channel = "env", state = "active", since = 1 },
+  { id = "pvp", key = "PVP", channel = "env", state = "active", since = 1 },
+  { id = "allow_flight", key = "ALLOW_FLIGHT", channel = "env", state = "active", since = 1 },
+  { id = "level_name", key = "LEVEL", channel = "env", state = "active", since = 1 },
+  { id = "seed", key = "SEED", channel = "env", state = "active", since = 1 },
+  { id = "view_distance", key = "VIEW_DISTANCE", channel = "env", state = "active", since = 1 },
+  { id = "simulation_distance", key = "SIMULATION_DISTANCE", channel = "env", state = "active", since = 1 },
+  { id = "online_mode", key = "ONLINE_MODE", channel = "env", state = "active", since = 1 },
+]

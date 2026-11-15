@@ -763,7 +763,16 @@ fn every_accepted_fiche_is_accepted_by_the_ordinary_deployment_validator() {
     let validator: &dyn DeploymentValidator = &crate::domain::services::deploy::OrdinaryDeployment;
     for embedded in EMBEDDED {
         let fiche = embedded.load().expect("chargée");
-        let draft = translate(&fiche, &Inputs::new().request(None, false)).expect("valide");
+        // Une fiche qui demande un contrat ou un secret tiré par l'agent (Minecraft) est traduite avec ce que l'agent
+        // lui donne : le contrat accepté par un geste, le secret tiré à la longueur déclarée.
+        let mut inputs = Inputs::new();
+        for agreement in &fiche.file.agreement {
+            inputs = inputs.accept(&agreement.id);
+        }
+        for secret in &fiche.file.secret {
+            inputs = inputs.generated(&secret.id, &"a".repeat(secret.length as usize));
+        }
+        let draft = translate(&fiche, &inputs.request(None, false)).expect("valide");
         validator
             .validate(&draft)
             .unwrap_or_else(|why| panic!("{} : {why}", embedded.dir));
