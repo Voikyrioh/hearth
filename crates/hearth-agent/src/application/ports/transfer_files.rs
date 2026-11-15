@@ -52,6 +52,17 @@ pub trait TransferFiles: Send + Sync {
         max_digests: u64,
     ) -> Result<Loaded, BackupFsError>;
 
+    /// Relit un fichier DÉJÀ publié (`<id>.bin`) dont la ligne du registre n'est pas encore `complete` (coupure entre
+    /// la publication et l'écriture de la ligne) : c'est bien le fichier de l'inode `expect`, de la taille `size`, et
+    /// au plus `max_digests` empreintes entières de la liste. Rend son identité complète et ses empreintes.
+    fn load_complete(
+        &self,
+        id: &TransferId,
+        expect: FileIdent,
+        size: u64,
+        max_digests: u64,
+    ) -> Result<(FileStamp, Vec<[u8; DIGEST_LEN]>), BackupFsError>;
+
     /// Écrit le morceau de rang `index` à l'octet `offset` de la partie (qui est tronquée à `offset` d'abord : un
     /// morceau à moitié écrit par un arrêt est écrasé, jamais conservé), le rend durable (`fdatasync`), puis range
     /// son empreinte au rang `index` de la liste. Le morceau est accusé APRÈS cet appel.

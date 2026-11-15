@@ -256,6 +256,38 @@ impl TransferFiles for FakeTransferFiles {
         })
     }
 
+    fn load_complete(
+        &self,
+        id: &TransferId,
+        expect: FileIdent,
+        size: u64,
+        max_digests: u64,
+    ) -> Result<(FileStamp, Vec<[u8; 32]>), BackupFsError> {
+        let state = self.lock();
+        let file = state
+            .files
+            .get(&id.complete_name())
+            .ok_or(BackupFsError::NotFound)?;
+        if ident(file) != expect || file.len != size {
+            return Err(BackupFsError::Unsafe);
+        }
+        let list = state
+            .files
+            .get(&id.digests_name())
+            .ok_or(BackupFsError::NotFound)?;
+        let take = usize::try_from(max_digests)
+            .unwrap_or(usize::MAX)
+            .min(list.bytes.len() / 32);
+        let digests = (0..take)
+            .map(|i| {
+                let mut d = [0u8; 32];
+                d.copy_from_slice(&list.bytes[i * 32..(i + 1) * 32]);
+                d
+            })
+            .collect();
+        Ok((stamp(file), digests))
+    }
+
     fn append(
         &self,
         id: &TransferId,

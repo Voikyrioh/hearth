@@ -185,8 +185,9 @@ pub trait DepositZone: Send + Sync {
     /// complet (un autre compte ne consomme jamais le dépôt de celui-ci). `Expired` : plus rien.
     async fn take(&self, id: &TransferId, account: &str) -> Result<CompleteDeposit, TransferError>;
 
-    /// Le consommateur a fini (rangé ou refusé) : retire le fichier et sa ligne.
-    async fn release(&self, id: &TransferId) -> Result<(), TransferError>;
+    /// Le consommateur a fini (rangé ou refusé) : retire le fichier et sa ligne. Le dépôt doit être à ce compte (un autre
+    /// compte : `NotFound`, rien n'est retiré) ; un dépôt déjà parti n'est pas une erreur.
+    async fn release(&self, id: &TransferId, account: &str) -> Result<(), TransferError>;
 }
 
 /// Qui tient un socket, et la place qu'il prend. Rendue à la chute.
@@ -320,7 +321,12 @@ impl Transfers {
         let space = self.space()?;
         judge_space(space.free, space.total, size).map_err(TransferError::NoSpace)?;
         let id = TransferId::parse(&self.ids.new_id()).ok_or(TransferError::Storage)?;
-        let ident = self.files.create(&id).map_err(disk)?;
+        let files = self.files.clone();
+        let created = id.clone();
+        let ident = tokio::task::spawn_blocking(move || files.create(&created))
+            .await
+            .map_err(|_| TransferError::Storage)?
+            .map_err(disk)?;
         let now = self.clock.now();
         if let Err(error) = self
             .repo
@@ -402,6 +408,39 @@ impl Transfers {
         Ok(true)
     }
 
+    /// La partie manque : si `<id>.bin` est le fichier du registre, de la taille annoncée, avec toutes ses empreintes,
+    /// l'envoi était fini ; la ligne passe `complete`. Sinon il n'y a plus rien : la ligne et ses restes partent.
+    async fn recover_published(
+        self: &Arc<Self>,
+        row: &TransferRow,
+    ) -> Result<Attached, TransferError> {
+        let files = self.files.clone();
+        let (id, ident, size) = (row.id.clone(), (row.dev, row.ino), row.size);
+        let found = tokio::task::spawn_blocking(move || {
+            files.load_complete(&id, ident, size, chunk_count(size))
+        })
+        .await
+        .map_err(|_| TransferError::Storage)?;
+        let Ok((stamp, digests)) = found else {
+            self.discard(row).await;
+            return Err(TransferError::NotFound);
+        };
+        let Some(tree_digest) = Receiver::resume(size, digests).and_then(|r| r.tree_digest())
+        else {
+            self.discard(row).await;
+            return Err(TransferError::NotFound);
+        };
+        if !self
+            .repo
+            .complete(&row.id, &tree_digest, stamp.mtime_ns, self.clock.now())
+            .await?
+        {
+            return Err(TransferError::NotFound);
+        }
+        tracing::info!("zone d'attente : un envoi publié avant une coupure est terminé");
+        Ok(Attached::Complete { size, tree_digest })
+    }
+
     /// Retire les fichiers d'une ligne (par inode) puis la ligne. Un fichier qui n'est pas celui du registre n'est
     /// pas touché ; la ligne part quand même (elle ne désigne plus rien qui soit à Hearth).
     async fn discard(&self, row: &TransferRow) {
@@ -470,15 +509,20 @@ impl Transfers {
             if rows.is_empty() {
                 return removed;
             }
+            let mut gone = 0;
             for row in &rows {
                 // Un socket qui tient ce transfert l'a rafraîchi : s'il est encore ici, c'est qu'il est mort.
                 let lock = self.lock_of(&row.id);
                 lock.generation.fetch_add(1, Ordering::SeqCst);
                 let _writing = lock.mutex.lock().await;
                 self.discard(row).await;
-                removed += 1;
+                // Une ligne qui ne part pas (base en lecture seule) ne fait pas tourner la purge en boucle.
+                if matches!(self.repo.get(&row.id).await, Ok(None)) {
+                    gone += 1;
+                }
             }
-            if rows.len() < 100 {
+            removed += gone;
+            if rows.len() < 100 || gone == 0 {
                 return removed;
             }
         }
@@ -504,6 +548,28 @@ impl Transfers {
             });
         }
         let guard = self.take_place(account, 0).map_err(TransferError::Limit)?;
+        let attached = self.attach_locked(id, account, guard).await;
+        if attached.is_err() {
+            // Le verrou pris pour cet essai ne reste pas dans la table si rien n'a été attaché.
+            let free = self
+                .locks
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(id.as_str())
+                .is_some_and(|lock| Arc::strong_count(lock) == 1);
+            if free {
+                self.forget_lock(id);
+            }
+        }
+        attached
+    }
+
+    async fn attach_locked(
+        self: &Arc<Self>,
+        id: &TransferId,
+        account: &str,
+        guard: ActiveGuard,
+    ) -> Result<Attached, TransferError> {
         // Le plus récent gagne : l'ancien socket est écarté, et son morceau en cours finit d'abord.
         let lock = self.lock_of(id);
         let generation = lock.generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -525,8 +591,11 @@ impl Transfers {
                 .map_err(|_| TransferError::Storage)?;
         let loaded = match loaded {
             Ok(loaded) => loaded,
-            // La partie a disparu ou n'est plus le fichier du registre : il n'y a plus rien à reprendre.
-            Err(BackupFsError::NotFound | BackupFsError::Unsafe) => {
+            // La partie n'est plus là : l'agent a pu s'arrêter ENTRE la publication de `<id>.bin` et l'écriture de la
+            // ligne `complete`. Un fichier complet, vérifié, du registre et de la bonne taille n'est jamais jeté.
+            Err(BackupFsError::NotFound) => return self.recover_published(&row).await,
+            // Ce n'est plus le fichier du registre : il n'y a plus rien à reprendre.
+            Err(BackupFsError::Unsafe) => {
                 self.discard(&row).await;
                 return Err(TransferError::NotFound);
             }
@@ -737,9 +806,13 @@ impl DepositZone for Transfers {
         })
     }
 
-    async fn release(&self, id: &TransferId) -> Result<(), TransferError> {
+    async fn release(&self, id: &TransferId, account: &str) -> Result<(), TransferError> {
         if let Some(row) = self.repo.get(id).await? {
+            if row.account != account {
+                return Err(TransferError::NotFound);
+            }
             let lock = self.lock_of(id);
+            lock.generation.fetch_add(1, Ordering::SeqCst);
             let _writing = lock.mutex.lock().await;
             self.discard(&row).await;
         }

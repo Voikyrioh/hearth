@@ -151,7 +151,7 @@ async fn serve(
         return None;
     }
 
-    let idle = sleep(settings.idle_timeout);
+    let idle = sleep(settings.transfer_idle_timeout);
     tokio::pin!(idle);
     let mut check = interval_at(
         Instant::now() + settings.session_check_period,
@@ -169,11 +169,14 @@ async fn serve(
                     Some(Err(_)) => break policy("message refusé"),
                     None => break None,
                 };
-                idle.as_mut().reset(Instant::now() + settings.idle_timeout);
                 match message {
                     Message::Close(_) => break None,
+                    // Ni un `ping` ni un battement ne prouvent un envoi : seul un morceau remet le silence à zéro, sinon
+                    // un client qui ne fait que pinger garderait une place de transfert indéfiniment.
                     Message::Ping(_) | Message::Pong(_) => {}
                     Message::Binary(bytes) => {
+                        idle.as_mut()
+                            .reset(Instant::now() + settings.transfer_idle_timeout);
                         let Ok(frame) = decode_frame(&bytes) else {
                             send(socket, &settings, &error(TransferErrorCode::BadRequest)).await;
                             break normal();

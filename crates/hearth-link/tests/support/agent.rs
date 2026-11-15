@@ -192,6 +192,7 @@ fn metering() -> Metering {
         stream: StreamSettings {
             auth_timeout: Duration::from_millis(800),
             idle_timeout: Duration::from_secs(10),
+            transfer_idle_timeout: Duration::from_secs(10),
             session_check_period: Duration::from_millis(50),
             send_timeout: Duration::from_secs(5),
             max_pending_total: 32,

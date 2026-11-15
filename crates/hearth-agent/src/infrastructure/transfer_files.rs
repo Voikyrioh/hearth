@@ -88,6 +88,31 @@ mod open {
 }
 
 impl StdTransferFiles {
+    /// Les empreintes entières de la liste, au plus `max_digests`. Une empreinte à zéro est un trou laissé par un
+    /// système de fichiers qui a étendu la liste sans l'écrire : elle n'est jamais reprise comme une empreinte (le
+    /// morceau est renvoyé), et la liste s'arrête là.
+    fn read_digests(
+        &self,
+        id: &TransferId,
+        max_digests: u64,
+    ) -> Result<Vec<[u8; DIGEST_LEN]>, BackupFsError> {
+        let file = sys::open_regular(&self.path(&id.digests_name()))?;
+        let limit = max_digests.saturating_mul(DIGEST_LEN as u64);
+        let mut reader = BufReader::new(file.take(limit));
+        let mut digests = Vec::new();
+        loop {
+            let mut digest = [0u8; DIGEST_LEN];
+            match reader.read_exact(&mut digest) {
+                Ok(()) if digest == [0u8; DIGEST_LEN] => break,
+                Ok(()) => digests.push(digest),
+                // Fin de liste, ou dernière empreinte à moitié écrite : elle ne compte pas.
+                Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => break,
+                Err(error) => return Err(io_error(&error)),
+            }
+        }
+        Ok(digests)
+    }
+
     /// La partie, rouverte et REVÉRIFIÉE : c'est le fichier de l'inode attendu.
     fn part_for_write(
         &self,
@@ -185,20 +210,25 @@ impl TransferFiles for StdTransferFiles {
             return Err(BackupFsError::Unsafe);
         }
         let part_len = meta.len();
-        let digests_file = sys::open_regular(&self.path(&id.digests_name()))?;
-        let limit = max_digests.saturating_mul(DIGEST_LEN as u64);
-        let mut reader = BufReader::new(digests_file.take(limit));
-        let mut digests = Vec::new();
-        loop {
-            let mut digest = [0u8; DIGEST_LEN];
-            match reader.read_exact(&mut digest) {
-                Ok(()) => digests.push(digest),
-                // Fin de liste, ou dernière empreinte à moitié écrite : elle ne compte pas.
-                Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => break,
-                Err(error) => return Err(io_error(&error)),
-            }
-        }
+        let digests = self.read_digests(id, max_digests)?;
         Ok(Loaded { part_len, digests })
+    }
+
+    fn load_complete(
+        &self,
+        id: &TransferId,
+        expect: FileIdent,
+        size: u64,
+        max_digests: u64,
+    ) -> Result<(FileStamp, Vec<[u8; DIGEST_LEN]>), BackupFsError> {
+        sys::trusted_dir(&self.root)?;
+        let file = sys::open_regular(&self.path(&id.complete_name()))?;
+        let meta = file.metadata().map_err(|e| io_error(&e))?;
+        if sys::ident(&meta) != expect || meta.len() != size {
+            return Err(BackupFsError::Unsafe);
+        }
+        let digests = self.read_digests(id, max_digests)?;
+        Ok((sys::stamp(&meta), digests))
     }
 
     fn append(

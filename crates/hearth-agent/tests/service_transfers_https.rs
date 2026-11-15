@@ -800,7 +800,7 @@ async fn the_agent_holds_at_most_two_transfers_per_account_and_four_in_all() {
 #[tokio::test]
 async fn a_silent_client_loses_its_socket_but_the_upload_stays_resumable() {
     let b = bench_streamed(StreamSettings {
-        idle_timeout: Duration::from_secs(1),
+        transfer_idle_timeout: Duration::from_secs(1),
         ..fast_stream()
     })
     .await;
@@ -939,14 +939,21 @@ async fn the_consumer_reads_the_complete_deposit_then_releases_it() {
     assert_eq!(tail, bytes[bytes.len() - 10..]);
     drop(taken);
     // Un fichier remplacé à la main entre-temps n'est jamais lu comme le dépôt.
-    transfers.release(&parsed).await.expect("libéré");
+    // Un autre compte ne libère pas ce dépôt : il n'existe pas pour lui, rien n'est retiré.
+    let dan = b.account("dan").await;
+    assert_eq!(
+        transfers.release(&parsed, &dan).await.err(),
+        Some(TransferError::NotFound)
+    );
+    assert!(b.files.exists(&complete_name(&id)));
+    transfers.release(&parsed, &ada).await.expect("libéré");
     assert!(b.files.names().is_empty(), "{:?}", b.files.names());
     assert_eq!(
         transfers.take(&parsed, &ada).await.err(),
         Some(TransferError::NotFound)
     );
     // Libérer deux fois n'est pas une erreur.
-    transfers.release(&parsed).await.expect("déjà libéré");
+    transfers.release(&parsed, &ada).await.expect("déjà libéré");
 }
 
 #[tokio::test]
@@ -969,11 +976,83 @@ async fn a_complete_deposit_replaced_by_hand_is_never_handed_to_the_consumer() {
         Some(TransferError::NotFound)
     );
     // Et la purge ne retire pas non plus un fichier qui n'est plus celui du registre.
-    b.agent.transfers().release(&parsed).await.expect("libéré");
+    b.agent
+        .transfers()
+        .release(&parsed, &ada)
+        .await
+        .expect("libéré");
     assert!(
         b.files.exists(&complete_name(&id)),
         "le fichier étranger reste"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Coupure entre la publication et l'écriture de la ligne ; silence mesuré aux morceaux
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_file_published_just_before_a_crash_is_completed_at_the_next_attach_never_thrown_away() {
+    let b = bench().await;
+    let bytes = data(CHUNK_BYTES as usize + 11, 14);
+    let id = b.deposit(bytes.len() as u64).await;
+    let (mut socket, _) = b.attach(&id).await;
+    send_chunks(&mut socket, &bytes, 0..2).await;
+    assert!(matches!(
+        finish(&mut socket, tree_of(&bytes)).await,
+        UploadServerMessage::Done { .. }
+    ));
+    // L'agent est tombé après la publication de `<id>.bin` et avant l'écriture de la ligne : elle est encore
+    // « en cours », sans empreinte d'ensemble.
+    sqlx::query(
+        "UPDATE transfers SET state = 'receiving', tree_digest = '', complete_mtime_ns = 0 WHERE id = ?",
+    )
+    .bind(&id)
+    .execute(b.env.db.pool())
+    .await
+    .unwrap();
+    let (_second, first) = b.attach_as(&b.ada, &id).await;
+    let UploadServerMessage::Done {
+        size,
+        verified,
+        tree_digest,
+    } = first
+    else {
+        panic!("`done` attendu : {first:?}");
+    };
+    assert_eq!((size, verified), (bytes.len() as u64, true));
+    assert_eq!(tree_digest, hex_of(&tree_of(&bytes)));
+    // Le fichier complet est toujours là, intact, et le consommateur peut le prendre.
+    assert_eq!(b.files.bytes_of(&complete_name(&id)).unwrap(), bytes);
+    let parsed = TransferId::parse(&id).unwrap();
+    let ada = b.account("ada").await;
+    assert!(b.agent.transfers().take(&parsed, &ada).await.is_ok());
+}
+
+#[tokio::test]
+async fn a_ping_never_keeps_a_transfer_place_only_a_chunk_does() {
+    let b = bench_streamed(StreamSettings {
+        transfer_idle_timeout: Duration::from_millis(800),
+        ..fast_stream()
+    })
+    .await;
+    let id = b.deposit(1000).await;
+    let (mut socket, _) = b.attach(&id).await;
+    // Un client qui ne fait que pinger : le silence se mesure aux morceaux, le socket se ferme.
+    let started = std::time::Instant::now();
+    let mut n = 0u64;
+    loop {
+        n += 1;
+        socket.send_value(&UploadClientMessage::Ping { n }).await;
+        match socket.try_next_upload(Duration::from_millis(100)).await {
+            Some(Err(End::Closed(_) | End::Dropped)) => break,
+            Some(Ok(_)) | None => {}
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(8),
+            "un client qui ne fait que pinger garde sa place"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

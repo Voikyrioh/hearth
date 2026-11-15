@@ -52,6 +52,9 @@ pub struct StreamSettings {
     pub max_per_account: usize,
     /// Délai minimal entre deux `subscribe` d'une connexion.
     pub min_subscribe_interval: Duration,
+    /// Silence d'un socket d'envoi au bout duquel il est fermé (60 s, HRT-95). Remis à zéro par un morceau reçu, jamais
+    /// par un `ping` : un morceau de 4 Mio doit arriver en entier avant ce délai (plancher : environ 0,56 Mbit/s).
+    pub transfer_idle_timeout: Duration,
 }
 
 impl Default for StreamSettings {
@@ -66,6 +69,7 @@ impl Default for StreamSettings {
             max_total: MAX_STREAMS_TOTAL,
             max_per_account: MAX_STREAMS_PER_ACCOUNT,
             min_subscribe_interval: MIN_SUBSCRIBE_INTERVAL,
+            transfer_idle_timeout: Duration::from_secs(hearth_proto::api::transfers::SOCKET_IDLE_S),
         }
     }
 }

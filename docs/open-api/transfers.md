@@ -17,8 +17,9 @@ pub trait DepositZone: Send + Sync {
     /// `NotFound` : inconnu, d'un autre compte, pas encore complet, ou plus le fichier que Hearth a posé.
     /// `Expired` : plus rien (24 heures sans activité).
     async fn take(&self, id: &TransferId, account: &str) -> Result<CompleteDeposit, TransferError>;
-    /// Le consommateur a fini (rangé ou refusé) : retire le fichier et sa ligne. Sans erreur si déjà parti.
-    async fn release(&self, id: &TransferId) -> Result<(), TransferError>;
+    /// Le consommateur a fini (rangé ou refusé) : retire le fichier et sa ligne. Le dépôt doit être à ce compte
+    /// (un autre compte : `NotFound`, rien n'est retiré) ; sans erreur si déjà parti.
+    async fn release(&self, id: &TransferId, account: &str) -> Result<(), TransferError>;
 }
 
 pub struct CompleteDeposit {
@@ -47,7 +48,7 @@ Ouvre un dépôt. Acte d'administration confirmé, **couvert** par l'élévation
 
 Un socket par envoi, jamais le flux commun. Même mise à niveau que `/stream` et que les journaux (`X-Hearth-Api`, quota des connexions en attente d'authentification). Une requête qui n'est pas une mise à niveau reçoit `422` ; un identifiant qui n'est pas un ULID est refusé avant d'accepter la mise à niveau (`404`).
 
-**Bornes** : un message de texte (JSON) fait 4 096 octets au plus ; une trame binaire fait un morceau de données plus 64 octets au plus (4 194 368) ; une trame plus grande ferme le socket. 60 secondes de silence ferment le socket ; l'envoi reste reprenable 24 heures.
+**Bornes** : un message de texte (JSON) fait 4 096 octets au plus ; une trame binaire fait un morceau de données plus 64 octets au plus (4 194 368) ; une trame plus grande ferme le socket. 60 secondes sans MORCEAU reçu ferment le socket (un `ping` ne remet pas ce délai à zéro ; un morceau de 4 Mio doit donc arriver en entier en 60 secondes, soit environ 0,56 Mbit/s de montée au moins) ; l'envoi reste reprenable 24 heures.
 
 **Déroulement**
 
@@ -59,7 +60,7 @@ Un socket par envoi, jamais le flux commun. Même mise à niveau que `/stream` e
 6. Client : `{"type":"finish","tree_digest":"<64 chiffres hexadécimaux>"}` : le SHA-256 de la suite des empreintes de morceaux, concaténées dans l'ordre (`hearth_proto::api::transfers::chunk_digest`).
 7. Agent : `{"type":"done","size":S,"verified":true,"tree_digest":"…"}` : le fichier est dans la zone d'attente, sous son nom définitif. Le socket se ferme (code 1000).
 
-Un dépôt déjà complet qu'on rouvre répond `done` tout de suite. `{"type":"ping","n":1}` répond `{"type":"pong","n":1}`.
+Un dépôt déjà complet qu'on rouvre répond `done` tout de suite. Si l'agent s'est arrêté entre la publication du fichier et l'écriture de sa ligne, le prochain `open` retrouve le fichier complet (inode et taille du registre, toutes les empreintes) et répond `done` : un fichier vérifié n'est jamais jeté. `{"type":"ping","n":1}` répond `{"type":"pong","n":1}`.
 
 **Erreurs** (`{"type":"error","code":"…"}`, puis fermeture 1000, sauf mention) :
 

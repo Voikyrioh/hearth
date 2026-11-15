@@ -151,6 +151,7 @@ pub fn fast_stream() -> StreamSettings {
         max_total: 32,
         max_per_account: 4,
         min_subscribe_interval: Duration::from_millis(50),
+        transfer_idle_timeout: Duration::from_secs(10),
     }
 }
 
