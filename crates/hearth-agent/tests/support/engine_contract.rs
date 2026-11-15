@@ -995,4 +995,47 @@ async fn deploys(harness: &dyn Harness, engine: &Arc<dyn ContainerEngine>, prefi
         .remove_keeping_volumes(&keep)
         .await
         .expect("déjà supprimé");
+
+    // Renommer (HRT-87) : l'ancien conteneur d'un service qu'on modifie est mis de côté sous un autre nom, garde son
+    // identifiant et son état, et libère son nom pour le nouveau. Un nom déjà porté est refusé, un absent est inconnu.
+    let old_name = format!("{prefix}-d-old");
+    let old = engine
+        .create(&plan_for(harness, &old_name, &image, 18_095, &other))
+        .await
+        .expect("créer l'ancien");
+    engine.start(&old).await.expect("démarrer l'ancien");
+    let parked = format!("{old_name}.hearth-prev-1");
+    engine.rename(&old, &parked).await.expect("mettre de côté");
+    let moved = engine
+        .inspect(&old)
+        .await
+        .expect("inspection")
+        .expect("existe encore");
+    assert_eq!(moved.name, parked);
+    assert_eq!(moved.run_state, RunState::Running, "renommé, pas arrêté");
+    assert!(find(engine, &old_name).await.is_none(), "le nom est libre");
+    let fresh = engine
+        .create(&plan_for(harness, &old_name, &image, 18_096, &other))
+        .await
+        .expect("le nouveau prend le nom");
+    assert_eq!(
+        engine.rename(&old, &old_name).await,
+        Err(EngineError::NameTaken),
+        "un nom porté par un autre est refusé"
+    );
+    assert_eq!(
+        engine.rename("0000000000000000", "nobody").await,
+        Err(EngineError::NotFound)
+    );
+    engine.remove(&fresh).await.expect("retirer le nouveau");
+    engine.rename(&old, &old_name).await.expect("remettre");
+    assert_eq!(
+        engine
+            .inspect(&old)
+            .await
+            .expect("inspection")
+            .map(|c| c.name),
+        Some(old_name.clone())
+    );
+    engine.remove(&old).await.expect("nettoyer");
 }

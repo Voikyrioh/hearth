@@ -23,6 +23,7 @@ pub mod service_delete;
 pub mod service_logs;
 pub mod service_ops;
 pub mod service_spec;
+pub mod service_update;
 pub mod services;
 pub mod sessions;
 pub mod update;

@@ -174,6 +174,17 @@ mod tests {
             ),
             (AdminAct::OperationCancel { target: "01OP" }, true),
             (
+                AdminAct::ServiceUpdate {
+                    target: "c_a".into(),
+                    base_rev: 1,
+                    digest: [0; 32],
+                    env_set: 0,
+                    env_removed: 0,
+                    command: false,
+                },
+                false,
+            ),
+            (
                 AdminAct::ServiceDelete {
                     target: "c_a".into(),
                     data: false,

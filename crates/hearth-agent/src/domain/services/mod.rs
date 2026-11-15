@@ -26,6 +26,7 @@ pub mod pull;
 pub mod spec;
 pub mod state;
 pub mod unit;
+pub mod update;
 pub mod visibility;
 
 pub use engine::{

@@ -175,6 +175,7 @@ async fn hello_announces_the_services_capability() {
             "game-settings",
             "game-services",
             "service-delete",
+            "service-update",
             "service-backups"
         ])
     );

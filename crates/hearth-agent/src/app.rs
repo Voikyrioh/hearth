@@ -48,6 +48,7 @@ use crate::application::service_logs::{LogSettings, ServiceLogs};
 use crate::application::service_op_access::ServiceOpAccess;
 use crate::application::service_ops::{InterruptedAction, OpLocks, RecoverySummary, ServiceOps};
 use crate::application::service_specs::ServiceSpecs;
+use crate::application::service_update::{ServiceUpdates, UpdateContext, UpdateTimings};
 use crate::application::services::{EngineTimings, ServicesRegistry};
 use crate::application::services_right::ServicesRightService;
 use crate::application::sessions::SessionService;
@@ -1081,20 +1082,38 @@ pub async fn start_engined(
         container_engine.clone(),
         engine.host_ports,
         engine.free_space,
-        safe_fs,
+        safe_fs.clone(),
         service_repo.clone(),
         adapters.ids.clone(),
         adapters.clock.clone(),
         DeployContext {
             install_id: identity.install_id.to_string(),
             agent_port: config.port,
-            services_root,
+            services_root: services_root.clone(),
             folders,
             timings: engine.deploy,
         },
         catalog.clone(),
         engine.catalog.random.clone(),
         phases,
+    );
+    // Modifier un service par recréation (HRT-87) : l'ancien est mis de côté, le nouveau créé depuis la description,
+    // l'ancien remis si le nouveau échoue.
+    let service_updates = ServiceUpdates::new(
+        registry.clone(),
+        foundations.ops.clone(),
+        foundations.specs.clone(),
+        container_engine.clone(),
+        service_repo.clone(),
+        service_repo.clone(),
+        safe_fs,
+        deployments.clone(),
+        adapters.clock.clone(),
+        UpdateContext {
+            install_id: identity.install_id.to_string(),
+            services_root,
+            timings: UpdateTimings::derived(engine.deploy, engine.delete),
+        },
     );
     let service_logs = Arc::new(ServiceLogs::new(
         registry.clone(),
@@ -1119,6 +1138,7 @@ pub async fn start_engined(
         adapters.clock.clone(),
         services.trail.clone(),
     ));
+    service_ops.set_effects(service_updates.clone());
     let deletion_for_shutdown = service_deletion.clone();
     let backups_for_shutdown = backups.clone();
     let router = http::router(AppState {
@@ -1138,6 +1158,7 @@ pub async fn start_engined(
         service_lifecycle,
         deployments,
         service_deletion,
+        service_updates,
         backups,
         catalog,
         game_settings,

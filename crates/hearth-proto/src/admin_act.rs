@@ -55,6 +55,8 @@ pub enum ActKind {
     ServiceDeploy,
     /// Annuler une opération de service avant son point de non-retour (HRT-144, ADR-0045).
     OperationCancel,
+    /// Modifier un service par recréation (HRT-87).
+    ServiceUpdate,
     /// Supprimer un service (HRT-85).
     ServiceDelete,
     /// Sauvegarder un service (HRT-97).
@@ -71,7 +73,7 @@ pub enum ActKind {
 
 impl ActKind {
     /// Tous les actes `0x05`, dans l'ordre des codes.
-    pub const ALL: [ActKind; 23] = [
+    pub const ALL: [ActKind; 24] = [
         Self::AccountCreate,
         Self::AccountRole,
         Self::AccountPassword,
@@ -89,6 +91,7 @@ impl ActKind {
         Self::OperationCancel,
         Self::ServicesAdopt,
         Self::ServiceRelease,
+        Self::ServiceUpdate,
         Self::ServiceDelete,
         Self::BackupCreate,
         Self::BackupDelete,
@@ -99,9 +102,8 @@ impl ActKind {
 
     /// Les actes DÉCLARÉS dont la route n'existe pas encore : leur lot l'ajoute à `ROUTES` et à `ENDPOINTS`
     /// en la retirant d'ici. Tant qu'un acte est ici, aucune route ne le porte, aucune requête ne peut le
-    /// produire, et le test de `ROUTES` le sait. `0x13` (`ServiceUpdate`), `0x15` à `0x18` et `0x1A`
-    /// sont réservés par la conception et ne sont pas encore déclarés. Aucun acte n'est plus déclaré sans route
-    /// depuis HRT-97.
+    /// produire, et le test de `ROUTES` le sait. `0x15` à `0x18` et `0x1A` sont réservés par la conception et ne
+    /// sont pas encore déclarés. Aucun acte n'est plus déclaré sans route depuis HRT-97.
     pub const DECLARED_WITHOUT_ROUTE: [ActKind; 0] = [];
 
     /// L'octet du code de l'acte dans le message signé. `0x09` est réservé (jamais utilisé : le retrait
@@ -125,6 +127,7 @@ impl ActKind {
             Self::OperationCancel => 0x10,
             Self::ServicesAdopt => 0x11,
             Self::ServiceRelease => 0x12,
+            Self::ServiceUpdate => 0x13,
             Self::ServiceDelete => 0x14,
             Self::BackupCreate => 0x19,
             Self::BackupDelete => 0x1B,
@@ -157,6 +160,7 @@ impl ActKind {
             // leur route (le genre de l'opération n'est pas connu avant de l'avoir lue) ; la réussite se
             // consigne sous l'action du GENRE de l'opération (`service.start`, `service.deploy`, …).
             Self::OperationCancel => action::OPERATION_CANCEL,
+            Self::ServiceUpdate => action::SERVICE_UPDATE,
             Self::ServiceDelete => action::SERVICE_DELETE,
             Self::BackupCreate => action::SERVICE_BACKUP_CREATE,
             Self::BackupDelete => action::SERVICE_BACKUP_DELETE,
@@ -243,6 +247,17 @@ pub enum AdminAct<'a> {
     },
     /// Annuler l'opération `target` (son identifiant).
     OperationCancel { target: &'a str },
+    /// Modifier le service `target` par recréation (HRT-87) : la révision de base, l'empreinte de la partie non
+    /// secrète de la demande (voir [`AdminAct::service_update`]), le NOMBRE de variables posées et retirées et si
+    /// la commande change. Jamais un nom ni une valeur de variable, jamais la commande.
+    ServiceUpdate {
+        target: Cow<'a, str>,
+        base_rev: u32,
+        digest: [u8; FINGERPRINT_LEN],
+        env_set: u32,
+        env_removed: u32,
+        command: bool,
+    },
     /// Supprimer le service `target` ; `data` et `backups` : les données et les sauvegardes partent aussi.
     ServiceDelete {
         target: Cow<'a, str>,
@@ -327,6 +342,26 @@ impl AdminAct<'_> {
         }
     }
 
+    /// L'acte d'une modification (HRT-87, `0x13`) : la clé du service (cible), la révision de base, l'empreinte de la
+    /// partie non secrète ([`crate::api::service_update::update_digest`]), le NOMBRE de variables posées et retirées
+    /// et si la commande change. Ni valeur, ni nom de variable, ni commande. Source unique pour l'agent (qui
+    /// reconstruit l'acte depuis le corps) et la liaison cliente (qui le signe).
+    pub fn service_update<'a>(
+        target: Cow<'a, str>,
+        change: &crate::api::service_update::SpecChange,
+    ) -> AdminAct<'a> {
+        use crate::api::service_update::{command_changes, env_counts, update_digest};
+        let (env_set, env_removed) = env_counts(change);
+        AdminAct::ServiceUpdate {
+            target,
+            base_rev: change.base_rev,
+            digest: update_digest(change),
+            env_set,
+            env_removed,
+            command: command_changes(change),
+        }
+    }
+
     /// L'acte d'adoption de ces clés (dans n'importe quel ordre) : leur nombre et l'empreinte SHA-256 de
     /// leurs clés triées (ordre des octets), chacune précédée de sa longueur sur deux octets. Source unique
     /// pour l'agent (qui reconstruit l'acte depuis le corps) et la liaison cliente (qui le signe).
@@ -390,6 +425,7 @@ impl AdminAct<'_> {
             Self::ServiceRestart { .. } => ActKind::ServiceRestart,
             Self::ServiceDeploy { .. } => ActKind::ServiceDeploy,
             Self::OperationCancel { .. } => ActKind::OperationCancel,
+            Self::ServiceUpdate { .. } => ActKind::ServiceUpdate,
             Self::ServiceDelete { .. } => ActKind::ServiceDelete,
             Self::BackupCreate { .. } => ActKind::BackupCreate,
             Self::BackupDelete { .. } => ActKind::BackupDelete,
@@ -415,6 +451,7 @@ impl AdminAct<'_> {
             | Self::ServiceStart { target }
             | Self::ServiceStop { target }
             | Self::ServiceRestart { target }
+            | Self::ServiceUpdate { target, .. }
             | Self::ServiceDelete { target, .. }
             | Self::BackupCreate { target, .. }
             | Self::BackupSettings { target, .. }
@@ -455,6 +492,20 @@ impl AdminAct<'_> {
                 image.as_bytes().to_vec(),
                 hex(digest).into_bytes(),
                 env_count.to_string().into_bytes(),
+                flag(*command),
+            ],
+            Self::ServiceUpdate {
+                base_rev,
+                digest,
+                env_set,
+                env_removed,
+                command,
+                ..
+            } => vec![
+                base_rev.to_string().into_bytes(),
+                hex(digest).into_bytes(),
+                env_set.to_string().into_bytes(),
+                env_removed.to_string().into_bytes(),
                 flag(*command),
             ],
             Self::ServiceDelete { data, backups, .. } => vec![flag(*data), flag(*backups)],
@@ -551,6 +602,7 @@ pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
         | AdminAct::GameSettingsSave { .. } => true,
         AdminAct::OperationDecide { .. }
         | AdminAct::ServiceDeploy { .. }
+        | AdminAct::ServiceUpdate { .. }
         | AdminAct::ServiceDelete { .. }
         | AdminAct::BackupDelete { .. } => false,
     }
@@ -607,6 +659,7 @@ pub const fn is_piloting(kind: ActKind) -> bool {
         | ActKind::ServiceRelease
         | ActKind::ServiceDeploy
         | ActKind::OperationCancel
+        | ActKind::ServiceUpdate
         | ActKind::ServiceDelete
         | ActKind::BackupCreate
         | ActKind::BackupDelete
@@ -805,6 +858,14 @@ pub const ROUTES: &[RouteAct] = &[
         kinds: &[ActKind::ServiceRestart],
         contract: Contract::Reauth,
     },
+    // Modifier un service (HRT-87, BR-EDIT-017) : la clé du service est la cible signée ; jamais couvert par
+    // l'élévation (il relit des secrets, coupe un service et peut le défaire).
+    RouteAct {
+        method: "PUT",
+        pattern: "/services/{key}/spec",
+        kinds: &[ActKind::ServiceUpdate],
+        contract: Contract::Reauth,
+    },
     // Supprimer un service (HRT-85, BR-DEL-012) : la clé du service est la cible signée, les deux cases
     // (`data`, `backups`) sont les paramètres signés ; jamais couvert par l'élévation, même sans case cochée.
     RouteAct {
@@ -909,7 +970,7 @@ mod tests {
             codes,
             vec![
                 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-                0x10, 0x11, 0x12, 0x14, 0x19, 0x1B, 0x1C, 0x1D, 0x1E
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x19, 0x1B, 0x1C, 0x1D, 0x1E
             ]
         );
         let mut sorted = codes.clone();
@@ -934,14 +995,14 @@ mod tests {
             // Une route ET une seule, ou « déclaré, route à venir » : jamais les deux, jamais aucun.
             assert_eq!(routed + waiting, 1, "{kind:?}");
         }
-        // Vingt-trois actes en 0x05 : tous ont leur route (dont deux pour le mode attaque), aucun n'est plus
-        // déclaré sans route (HRT-97) ; vingt-deux routes d'acte (dont le retrait d'un poste, sous son contrat)
+        // Vingt-quatre actes en 0x05 : tous ont leur route (dont deux pour le mode attaque), aucun n'est plus
+        // déclaré sans route (HRT-97) ; vingt-trois routes d'acte (dont le retrait d'un poste, sous son contrat)
         // en plus du réglage de fréquence.
-        assert_eq!(in_routes.len(), 23);
+        assert_eq!(in_routes.len(), 24);
         assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 0);
         assert_eq!(
             ROUTES.iter().filter(|r| r.pattern != "/me/reauth").count(),
-            22
+            23
         );
     }
 
@@ -1348,6 +1409,14 @@ mod tests {
                 command: false,
             },
             ActKind::OperationCancel => AdminAct::OperationCancel { target: "01OP" },
+            ActKind::ServiceUpdate => AdminAct::ServiceUpdate {
+                target: target.into(),
+                base_rev: 1,
+                digest: [0; FINGERPRINT_LEN],
+                env_set: 0,
+                env_removed: 0,
+                command: false,
+            },
             ActKind::ServiceDelete => AdminAct::ServiceDelete {
                 target: target.into(),
                 data: false,
@@ -1437,6 +1506,7 @@ mod tests {
     #[test]
     fn what_is_not_piloting_keeps_its_password_in_every_state() {
         for kind in [
+            ActKind::ServiceUpdate,
             ActKind::ServiceDelete,
             ActKind::ServiceDeploy,
             ActKind::BackupDelete,

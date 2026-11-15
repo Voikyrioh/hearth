@@ -273,6 +273,12 @@ impl ServiceSpecs {
         Ok(self.repo.discard_before(key, rev).await?)
     }
 
+    /// Abandonne la révision courante `rev` (la candidate d'une modification qui échoue) et remet la précédente
+    /// comme courante (HRT-87, BR-EDIT-020). `false` : rien n'a été touché.
+    pub async fn abandon(&self, key: &ServiceKey, rev: u32) -> Result<bool, SpecServiceError> {
+        Ok(self.repo.abandon_current(key, rev).await?)
+    }
+
     /// Efface toute la description d'un service supprimé : ses scellés partent avec (BR-DEL-004).
     pub async fn forget(&self, key: &ServiceKey) -> Result<u64, SpecServiceError> {
         Ok(self.repo.forget(key).await?)

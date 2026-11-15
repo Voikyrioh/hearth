@@ -1,0 +1,34 @@
+# Modifier un service (HRT-87)
+
+Capacité `service-update` annoncée par [`GET /hello`](./hello.md). Trois routes, toutes au niveau « gérer les services » (`Access::Services`, quel que soit le rôle). Règles `BR-EDIT-002` à `008`, `010`, `011`, `013` à `023`, `025`, `026`, `028`, `029`, `031`, `032`, `033`, `034`, `035`, `036`, `037` ; décisions ADR-0044 (description durable), ADR-0045 (opérations). Types : `hearth_proto::api::service_update`.
+
+**Modifier, c'est recréer** : l'agent récupère l'image service en marche, met l'ancien conteneur de côté, crée le nouveau depuis la description, le surveille 10 secondes, puis supprime l'ancien. Si le nouveau échoue, il est retiré et l'ancien remis, sans rien demander.
+
+## `GET /api/v1/services/{key}/spec`
+
+La description du service, **sans valeur ni commande** : `rev` (renvoyée à l'enregistrement), `name`, `image` (`repository`, `tag`, `digest?`), `env[]` (`name` sous `Concealed`, `set_by` : `hearth` ou `image`), `ports`, `mounts`, `command_set`, `stop_grace_s`, `stdin_open`, `resources`, `public_address`, `fiche` (id, version, réponses ; la valeur d'une réponse secrète n'est jamais rendue), `drift` (`none`, `modified_outside`, `container_missing`). Une consultation : rien n'est écrit ni journalisé (seul un refus faute de droit l'est). Lisible même si le moteur n'est pas prêt (l'écart vaut alors `none`).
+
+- Les variables « de l'image » sont les noms que le conteneur porte et que la description ne contient pas.
+- L'écart est calculé par `domain::services::drift::compare` : image, version, ports, montages, redémarrage, limites, et la consignation de l'identifiant du conteneur (la preuve qu'il est à Hearth). `container_missing` : la description existe, le conteneur non.
+- **Erreurs** : `403` sans le droit ; `404 SERVICE_NOT_FOUND`.
+
+## `PUT /api/v1/services/{key}/spec` (acte `ServiceUpdate` `0x13`)
+
+Un acte d'administration du socle, **jamais couvert par l'élévation** (`BR-EDIT-017`). Cible signée : la clé du service. Paramètres signés : `base_rev`, l'empreinte de la partie non secrète de la demande (`update_digest`), le nombre de variables posées, le nombre retirées, `cmd:0|1`. Jamais un nom, une valeur ni la commande.
+
+- **Corps** (`SpecChange`, avec le membre `reauth` à côté) : `base_rev` (obligatoire), `seen_drift`, `tag`, `repull`, `env[]` (`{ name, op: keep|set|remove, value? }` ; une variable absente est gardée), `ports`, `mounts`, `command` (`{ op: keep|set|clear, value? }`), `public_address`, `accept` (`reserved_ports`, `low_disk`). **Le plan reste fermé** : tout autre membre est refusé `PLAN_SETTING_REFUSED` (`BR-EDIT-028`).
+- **Réponses** : `202 { applied: true, operation_id }` ; `200 { applied: false }` quand rien ne change (`BR-EDIT-013` : aucune opération, aucune entrée au journal). Un changement vide est permis (« Recréer le service ») seulement quand le conteneur a disparu ou diffère de la description (`BR-EDIT-036`) : il recrée sans nouvelle révision et laisse le service arrêté.
+- **Refus synchrones**, avant tout arrêt : `404 SERVICE_NOT_FOUND` ; `409 SERVICE_ADOPTED` (`BR-EDIT-002`, journalisé) ; `409 ENGINE_UNAVAILABLE` ; `409 SERVICE_BUSY` (`details.by`, `details.kind`, `BR-EDIT-025`) ; `409 SERVICE_NOT_DRIVABLE` (`BR-EDIT-003`) ; `409 SPEC_CONFLICT` (`details.current_rev`, `details.outside`) quand `base_rev` n'est pas la révision courante, ou que le service a été changé hors de Hearth depuis l'ouverture du formulaire (`seen_drift` ne le disait pas) : **jamais le nom d'un compte** (`BR-EDIT-024`) ; `422 PLAN_SETTING_REFUSED` (`details.reason` : `unknown_member`, `frozen`, `fiche`) ; `422 VALIDATION_ERROR` (`details.field`, `details.reason`, mêmes codes que le déploiement) ; `422 LIMITS_REQUIRED` ; `422 FOLDER_REFUSED` ; `409 PORT_IN_USE` (port nouveau seulement, `BR-EDIT-008`) ; `426` client trop ancien.
+- **Déroulé** (`BR-EDIT-018`, étapes de l'opération `update`) : `check`, `pull` (service en marche, annulable, un échec ne touche à rien), `stop_old` (si le service tournait : arrêt voulu écrit avant l'ordre, délai de grâce du service), `rename_old` (**point de non-retour** de l'annulation), `create_new` (révision candidate écrite, secrets scellés, conteneur créé depuis la description relue en base, consigné), `start_new` + `watch` (si le service tournait), `remove_old` (sans volume ni force, après le succès ; les révisions antérieures de la description partent avec lui). Un service arrêté reste arrêté, un conteneur disparu est recréé sans démarrage.
+- **Issues** : `succeeded` ; `rolled_back` (cause `stopped_right_after_start`, `port_in_use`, `engine_refused`, `step_failed`... : le nouveau est retiré, la révision candidate abandonnée, l'ancien remis et relancé s'il tournait) ; `interrupted` + `step_failed` quand le retour échoue aussi (l'ancien n'est pas supprimé, rien ne repart seul, `BR-EDIT-022`) ; `failed` avant tout geste (récupération, vérification : « le service n'a pas été modifié ») ; `cancelled` avant le point de non-retour ; `interrupted` + `timeout` si le moteur n'a pas répondu.
+- **Redémarrage de l'agent** (`BR-EDIT-031`) : l'état cohérent est dit (`interrupted`, `runs_with_previous` ou `runs_with_new`) ; l'état ambigu est `needs_attention` avec les décisions `revert` (« Revenir à l'état d'avant ») et `keep` (« Garder la nouvelle configuration »), exécutées par l'agent après la décision : `revert` retire le nouveau conteneur, abandonne la révision candidate, rend son nom à l'ancien et le relance s'il tournait ; `keep` supprime l'ancien conteneur mis de côté. Rien n'est jamais rejoué seul.
+- **Service de fiche** (`BR-EDIT-037`) : seule `public_address` se change (sans recréer : plan `check` seul) ; une réponse figée est refusée `frozen`, tout autre changement `fiche`. Les réponses non figées (réécriture du fichier produit par la fiche) ne sont pas encore branchées.
+- **Journal d'activité** (`BR-EDIT-033`) : `service.update`, cible « service {nom} : version…, ports, dossiers, commande modifiée, variables (n posées, m retirées), adresse des joueurs, ports du serveur…, retour arrière effectué », issue et cause typée. Jamais un nom, une valeur, la commande ni un chemin.
+
+## `GET /api/v1/operations/services/{id}/tail`
+
+Les 20 dernières lignes du nouveau service qui n'a pas démarré (`BR-EDIT-020`), gardées **24 heures en mémoire de l'agent**, jamais sur un disque ni au journal : `{ "lines": [...] }`. Du contenu sensible : réservé au droit. `404 OPERATION_NOT_FOUND` si l'opération n'en a pas (ou plus).
+
+## Code
+
+`entrypoint/http/service_spec.rs`, `application/service_update.rs` (`ServiceUpdates::{view, update, tail}`, `DecisionEffects`), `domain/services/update.rs` (`apply`, `observed_container`), `domain/ops/update.rs` (plan), `application/ports/container_engine.rs` (`rename`), `application/service_specs.rs` (`abandon`).

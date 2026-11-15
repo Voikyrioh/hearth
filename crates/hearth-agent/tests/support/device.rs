@@ -335,6 +335,13 @@ pub fn act_of<'a>(
                 &serde_json::from_value(body.clone()).expect("corps des réglages"),
             )
         }
+        // Modifier un service (HRT-87) : la clé du chemin et les parties non secrètes du corps, jamais une valeur.
+        ("PUT", ["services", key, "spec"]) => hearth_proto::admin_act::AdminAct::service_update(
+            hearth_proto::admin_act::decode_segment(key)
+                .unwrap_or_else(|| (*key).to_owned())
+                .into(),
+            &serde_json::from_value(body.clone()).expect("corps de la modification"),
+        ),
         // Supprimer un service (HRT-85) : la clé du chemin et les deux cases du corps, jamais le nom retapé.
         ("DELETE", ["services", key]) => AdminAct::ServiceDelete {
             target: hearth_proto::admin_act::decode_segment(key)

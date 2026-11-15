@@ -158,6 +158,7 @@ async fn the_bollard_adapter_honours_the_engine_contract_against_a_fake_daemon()
                 .iter()
                 .any(|verb| request.ends_with(verb))
                 && request.contains("/containers/")
+                || request.ends_with("/rename")
                 || request.ends_with("/containers/create")
                 || request.ends_with("/images/create")))
             || (request.starts_with("DELETE ") && request.contains("/containers/"));
@@ -310,6 +311,43 @@ async fn removing_for_a_deletion_keeps_the_volumes_and_never_forces() {
     assert!(
         last.contains("v=true") && last.contains("force=true"),
         "{last}"
+    );
+}
+
+/// HRT-87 : l'adaptateur renomme par `POST /containers/{id}/rename?name=…` ; le conteneur garde son identifiant et son
+/// état, un nom déjà porté est refusé sans texte du moteur.
+#[tokio::test]
+async fn renaming_keeps_the_container_and_refuses_a_name_that_is_taken() {
+    let daemon = FakeDaemon::start().await;
+    let old = DaemonContainer::new("web", "running");
+    let old_id = old.id.clone();
+    daemon.put(old);
+    let other = DaemonContainer::new("db", "exited");
+    daemon.put(other);
+    let engine = engine_of(&daemon);
+    engine
+        .rename(&old_id, "web.hearth-prev-2")
+        .await
+        .expect("renommé");
+    let moved = engine
+        .inspect(&old_id)
+        .await
+        .expect("inspection")
+        .expect("existe");
+    assert_eq!(moved.name, "web.hearth-prev-2");
+    assert_eq!(
+        moved.run_state,
+        hearth_agent::domain::services::RunState::Running
+    );
+    let taken = engine.rename(&old_id, "db").await.expect_err("nom pris");
+    assert_eq!(
+        taken,
+        hearth_agent::application::ports::EngineError::NameTaken
+    );
+    assert!(!format!("{taken} {taken:?}").contains("db"));
+    assert_eq!(
+        engine.rename("nobody", "x").await,
+        Err(hearth_agent::application::ports::EngineError::NotFound)
     );
 }
 

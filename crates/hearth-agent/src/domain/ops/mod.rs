@@ -30,6 +30,7 @@ pub mod locks;
 pub mod observe;
 pub mod plan;
 pub mod recover;
+pub mod update;
 
 pub use access::{ServiceOrigin, may_see, origin_of};
 pub use decision::{

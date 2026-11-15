@@ -523,6 +523,13 @@ impl ServiceOps {
             .await
     }
 
+    /// `running` → `rolling_back` : le nouveau a échoué, l'ancien est remis (HRT-87, BR-EDIT-020). Le verrou reste
+    /// tenu ; `rolled_back` n'est dit qu'une fois le retour fait (`finish`).
+    pub async fn begin_rollback(&self, id: &str) -> Result<(), OpError> {
+        self.move_to(id, OpStatus::Running, OpStatus::RollingBack, None)
+            .await
+    }
+
     /// Écrit l'`intent` d'un geste, validé sur le disque, AVANT le geste. Pour une étape destructive,
     /// l'opération doit être en cours.
     pub async fn intent(&self, id: &str, step: &str, undo: &UndoInfo) -> Result<u32, OpError> {

@@ -81,6 +81,11 @@ pub trait ServiceSpecRepo: Send + Sync {
     /// supprimé). Ne touche jamais la révision courante. Rend le nombre de révisions effacées.
     async fn discard_before(&self, key: &ServiceKey, rev: u32) -> Result<u64, StoreError>;
 
+    /// Retire la révision COURANTE `rev` (la candidate d'une modification qui échoue, ses scellés compris) et
+    /// remet la révision précédente comme courante (HRT-87, BR-EDIT-020). `false` : `rev` n'est plus la révision
+    /// courante, ou il n'y a pas de précédente : rien n'est touché.
+    async fn abandon_current(&self, key: &ServiceKey, rev: u32) -> Result<bool, StoreError>;
+
     /// Efface toutes les révisions du service et leurs secrets (suppression du service). Rend leur nombre.
     async fn forget(&self, key: &ServiceKey) -> Result<u64, StoreError>;
 }

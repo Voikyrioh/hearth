@@ -820,13 +820,25 @@ impl Deployments {
 
     /// Les ports demandés sont libres, ou réservés par un service arrêté et la case est cochée (`BR-DEPLOY-008`).
     async fn check_ports_for(&self, valid: &ValidDeploy) -> Result<(), DeployError> {
-        if valid.ports.is_empty() {
+        self.check_ports(valid.ports.clone(), valid.accept.reserved_ports)
+            .await
+    }
+
+    /// Les ports donnés sont libres, ou réservés par un service arrêté et la case est cochée. Aussi le jugement des
+    /// ports NOUVEAUX d'une modification (HRT-87, BR-EDIT-008) : l'appelant n'envoie pas ceux que le service tient
+    /// déjà, qui ne sont pas un conflit avec lui-même.
+    pub(crate) async fn check_ports(
+        &self,
+        ports: Vec<hearth_proto::api::deploy::DeployPort>,
+        reserved_accepted: bool,
+    ) -> Result<(), DeployError> {
+        if ports.is_empty() {
             return Ok(());
         }
-        for check in self.judge_ports(valid.ports.clone()).await? {
+        for check in self.judge_ports(ports).await? {
             let blocks = match check.status {
                 PortStatus::Free => false,
-                PortStatus::ReservedByStopped => !valid.accept.reserved_ports,
+                PortStatus::ReservedByStopped => !reserved_accepted,
                 _ => true,
             };
             if blocks {

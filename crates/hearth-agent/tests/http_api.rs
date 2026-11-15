@@ -1415,6 +1415,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     }
     // L'image du déploiement est déjà sur le serveur (HRT-68) : rien à récupérer, le déploiement réussit.
     engine.have_image("nginx:latest");
+    // L'image du serveur de jeu aussi (HRT-87) : sa modification la récupère avant de recréer le service.
+    engine.have_image("ryshe/terraria:vanilla-1.4.5.8");
     let deploy_rig = support::api::DeployRig::new();
     let state = support::api::state_with_deploy(
         &env,
@@ -1435,6 +1437,7 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     // Un second service, dont la description existe mais dont le conteneur n'existe pas : supprimable par sa
     // description (HRT-85, BR-DEL-018), sans case cochée.
     let delete_key = support::game::terraria_service(&env, &deploy_rig.safe_fs, 2).await;
+    let game_rev = state.service_updates.view(&game_key).await.unwrap().rev;
     // Un troisième, dont on sauvegarde les données (HRT-97) : sa description a un dossier géré, pas de conteneur.
     let backup_key = support::game::terraria_service(&env, &deploy_rig.safe_fs, 3).await;
     // Deux opérations de service dans le journal (HRT-144) : une qu'on annulera, une qui attend une décision.
@@ -1768,6 +1771,17 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                 )
                 .await
             }
+            // Modifier un service (HRT-87) : changer l'adresse donnée aux joueurs d'un serveur de jeu ne recrée rien ;
+            // `202`, et UNE entrée réussie, écrite à la fin de l'opération.
+            ("PUT", "/services/{key}/spec") => {
+                api.act(
+                    &marie,
+                    Method::PUT,
+                    &format!("/services/{}/spec", game_key.as_str()),
+                    json!({ "base_rev": game_rev, "public_address": "jeu.exemple.fr" }),
+                )
+                .await
+            }
             // Sauvegarder les données d'un service (HRT-97) : `202`, et UNE entrée réussie, écrite à la fin de la
             // copie à l'arrière-plan (attendue plus bas).
             ("POST", "/services/{key}/backups") => {
@@ -1898,6 +1912,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             "/stream" => continue, // le flux se teste en WebSocket (stream_https.rs)
             // Le socket d'une lecture de journaux (HRT-66) : WebSocket aussi (service_logs_ws.rs).
             "/services/{key}/logs" => continue,
+            // Lire la description d'un service (HRT-87) : une lecture, aucune entrée de journal.
+            "/services/{key}/spec" => format!("/services/{}/spec", game_key.as_str()),
             // Un POST sans effet : testé à part (device_proof.rs).
             "/sessions/challenge" => continue,
             other => panic!("route de lecture sans scénario : {other}"),

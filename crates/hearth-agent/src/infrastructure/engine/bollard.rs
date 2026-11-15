@@ -29,7 +29,8 @@ use bollard::models::{
 use bollard::query_parameters::{
     AttachContainerOptionsBuilder, CreateContainerOptionsBuilder, CreateImageOptionsBuilder,
     EventsOptionsBuilder, InspectContainerOptionsBuilder, ListContainersOptionsBuilder,
-    RemoveContainerOptionsBuilder, RestartContainerOptionsBuilder, StopContainerOptionsBuilder,
+    RemoveContainerOptionsBuilder, RenameContainerOptionsBuilder, RestartContainerOptionsBuilder,
+    StopContainerOptionsBuilder,
 };
 use bollard::{API_DEFAULT_VERSION, ClientVersion, Docker};
 use futures_util::{StreamExt, stream};
@@ -699,6 +700,18 @@ impl ContainerEngine for BollardEngine {
                 other => Err(other),
             },
         }
+    }
+
+    async fn rename(&self, id: &str, new_name: &str) -> Result<(), EngineError> {
+        let docker = self.inner.docker().await?;
+        let options = RenameContainerOptionsBuilder::default()
+            .name(new_name)
+            .build();
+        // Le même texte du moteur que pour une création : « is already in use » est un nom pris.
+        docker
+            .rename_container(id, options)
+            .await
+            .map_err(|error| translate_create(&error))
     }
 
     async fn info(&self) -> Result<EngineInfo, EngineError> {

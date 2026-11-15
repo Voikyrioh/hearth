@@ -101,6 +101,13 @@ enum Spec {
         erase_data: bool,
         erase_backups: bool,
     },
+    /// Modifier ce service (HRT-87) : la clé du service, la révision de base, l'empreinte de la partie non secrète, les
+    /// nombres de variables posées et retirées et la présence d'une commande sont signés ; jamais un nom, une valeur
+    /// ni la commande.
+    UpdateService {
+        key: String,
+        body: Value,
+    },
     /// Sauvegarder ce service (HRT-97) : la clé du service, le mode et le nombre d'éléments ignorés pour cette fois
     /// sont signés ; ni la note ni un chemin.
     BackupCreate {
@@ -184,6 +191,10 @@ impl Spec {
                 data: *erase_data,
                 backups: *erase_backups,
             },
+            Self::UpdateService { key, body } => AdminAct::service_update(
+                key.as_str().into(),
+                &serde_json::from_value(body.clone()).expect("corps de la modification"),
+            ),
             Self::BackupCreate { key, body } => {
                 let items: Vec<hearth_proto::api::backups::IgnoredItem> =
                     serde_json::from_value(body["ignore_once"].clone()).unwrap_or_default();
@@ -293,6 +304,9 @@ impl Spec {
                 format!("/services/{key}"),
                 json!({ "erase_data": erase_data, "erase_backups": erase_backups }),
             ),
+            Self::UpdateService { key, body } => {
+                (Method::PUT, format!("/services/{key}/spec"), body.clone())
+            }
             Self::BackupCreate { key, body } => (
                 Method::POST,
                 format!("/services/{key}/backups"),
@@ -434,6 +448,35 @@ impl Spec {
                     }),
                     changed(&|b| b["origin"] = json!("import")),
                     changed(&|b| b["effect"] = json!("none")),
+                ]
+            }
+            // La clé du service, la révision de base, la partie non secrète (par son empreinte), les nombres de
+            // variables et la commande sont signés ; une valeur ou un nom de variable ne l'est jamais.
+            Self::UpdateService { key, body } => {
+                let changed = |edit: &dyn Fn(&mut Value)| {
+                    let mut body = body.clone();
+                    edit(&mut body);
+                    Self::UpdateService {
+                        key: key.clone(),
+                        body,
+                    }
+                };
+                vec![
+                    Self::UpdateService {
+                        key: "h_01JZ0000000000000000000097".into(),
+                        body: body.clone(),
+                    },
+                    changed(&|b| b["base_rev"] = json!(b["base_rev"].as_u64().unwrap_or(1) + 1)),
+                    changed(&|b| b["tag"] = json!("autre-version")),
+                    changed(&|b| b["repull"] = json!(true)),
+                    changed(&|b| {
+                        b["env"] = json!([
+                            { "name": "A", "op": "set", "value": "x" },
+                            { "name": "B", "op": "remove" }
+                        ]);
+                    }),
+                    changed(&|b| b["command"] = json!({ "op": "clear" })),
+                    changed(&|b| b["accept"] = json!({ "reserved_ports": true })),
                 ]
             }
             // La clé du service et chacune des deux cases sont signées ; le nom retapé ne l'est pas.
@@ -720,60 +763,21 @@ impl Bench {
             }
             ActKind::ServiceDelete => {
                 // Un service créé par Hearth, déployé puis arrivé en marche ; sans case cochée, rien à retaper.
-                self.env.grant_services("marie").await;
-                self.engine.have_image("nginx:latest");
-                let n = self
-                    .services
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                let deployed = self
-                    .act(
-                        &self.marie,
-                        &Spec::Deploy {
-                            body: json!({
-                                "name": format!("a-supprimer-{n}"), "image": "nginx",
-                                "resources": { "cpu_millis": 500, "memory_bytes": 134_217_728_u64 }
-                            }),
-                        },
-                        PASSWORD,
-                    )
-                    .await;
-                let key = deployed.body["service_key"]
-                    .as_str()
-                    .expect("clé du service déployé")
-                    .to_owned();
-                let parsed = hearth_agent::domain::services::ServiceKey::parse(&key).unwrap();
-                let started = std::time::Instant::now();
-                loop {
-                    let running = self
-                        .state
-                        .services
-                        .lifecycle_target(&parsed)
-                        .is_some_and(|t| {
-                            t.state == hearth_agent::domain::services::ServiceStateKind::Running
-                        });
-                    // Le déploiement est FINI dans le journal (la surveillance de fin comprise), pas seulement en marche.
-                    let unfinished: i64 = sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM service_ops
-                         WHERE service_key = ?
-                           AND status NOT IN ('succeeded', 'failed', 'cancelled', 'rolled_back', 'interrupted')",
-                    )
-                    .bind(&key)
-                    .fetch_one(self.env.db.pool())
-                    .await
-                    .unwrap();
-                    if running && unfinished == 0 {
-                        break;
-                    }
-                    assert!(
-                        started.elapsed() < std::time::Duration::from_secs(10),
-                        "le service à supprimer n'arrive pas en marche"
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                }
+                let key = self.deployed_service("a-supprimer").await;
                 Spec::DeleteService {
                     key,
                     erase_data: false,
                     erase_backups: false,
+                }
+            }
+            ActKind::ServiceUpdate => {
+                // Un service créé par Hearth, déployé puis arrivé en marche, que l'on passe à une autre version
+                // (l'image est déjà sur le serveur) : la révision lue est la première.
+                let key = self.deployed_service("a-modifier").await;
+                self.engine.have_image("nginx:1.27");
+                Spec::UpdateService {
+                    key,
+                    body: json!({ "base_rev": 1, "tag": "1.27" }),
                 }
             }
             ActKind::BackupCreate => {
@@ -913,6 +917,61 @@ impl Bench {
             );
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
+    }
+
+    /// Un service créé par Hearth, déployé puis arrivé en marche, son déploiement fini dans le journal (la
+    /// surveillance de fin comprise). Le droit de gérer les services est donné à `marie`.
+    async fn deployed_service(&self, prefix: &str) -> String {
+        self.env.grant_services("marie").await;
+        self.engine.have_image("nginx:latest");
+        let n = self
+            .services
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let deployed = self
+            .act(
+                &self.marie,
+                &Spec::Deploy {
+                    body: json!({
+                        "name": format!("{prefix}-{n}"), "image": "nginx",
+                        "resources": { "cpu_millis": 500, "memory_bytes": 134_217_728_u64 }
+                    }),
+                },
+                PASSWORD,
+            )
+            .await;
+        let key = deployed.body["service_key"]
+            .as_str()
+            .expect("clé du service déployé")
+            .to_owned();
+        let parsed = hearth_agent::domain::services::ServiceKey::parse(&key).unwrap();
+        let started = std::time::Instant::now();
+        loop {
+            let running = self
+                .state
+                .services
+                .lifecycle_target(&parsed)
+                .is_some_and(|t| {
+                    t.state == hearth_agent::domain::services::ServiceStateKind::Running
+                });
+            let unfinished: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM service_ops
+                 WHERE service_key = ?
+                   AND status NOT IN ('succeeded', 'failed', 'cancelled', 'rolled_back', 'interrupted')",
+            )
+            .bind(&key)
+            .fetch_one(self.env.db.pool())
+            .await
+            .unwrap();
+            if running && unfinished == 0 {
+                break;
+            }
+            assert!(
+                started.elapsed() < std::time::Duration::from_secs(10),
+                "le service déployé n'arrive pas en marche"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        key
     }
 
     /// Un serveur de jeu installé depuis la fiche de Terraria, avec son fichier de réglages vide (HRT-108).
@@ -1129,6 +1188,7 @@ async fn every_admin_act_with_a_valid_confirmation_succeeds_and_leaves_one_succe
                 | ActKind::ServiceStop
                 | ActKind::ServiceRestart
                 | ActKind::ServiceDeploy
+                | ActKind::ServiceUpdate
                 | ActKind::ServiceDelete
                 | ActKind::BackupCreate
         ) {
@@ -1231,8 +1291,12 @@ async fn a_proof_for_another_act_target_account_session_or_replayed_is_refused_a
         let member = b.member(who, &spec, PASSWORD).await;
         let first = b.send(who, &spec, Some(member.clone()), current).await;
         assert!(first.status.is_success(), "{kind:?} : {:?}", first.body);
-        // Une suppression répond `202` et finit à l'arrière-plan : la base de comparaison est prise une fois finie.
-        if matches!(kind, ActKind::ServiceDelete | ActKind::BackupCreate) {
+        // Une suppression, une modification ou une sauvegarde répond `202` et finit à l'arrière-plan : la base de
+        // comparaison est prise une fois finie.
+        if matches!(
+            kind,
+            ActKind::ServiceDelete | ActKind::ServiceUpdate | ActKind::BackupCreate
+        ) {
             let started = std::time::Instant::now();
             loop {
                 let unfinished: i64 = sqlx::query_scalar(
