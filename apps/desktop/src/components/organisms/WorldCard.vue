@@ -247,7 +247,7 @@ const maxEntries = computed(() => formatCount(view.value?.maxEntries ?? 0));
 
 .world__card--off {
   cursor: not-allowed;
-  opacity: 0.7;
+  opacity: var(--opacity-disabled);
 }
 
 .world__card:focus-within {
