@@ -281,8 +281,25 @@ impl TransferFiles for StdTransferFiles {
         }
         part.sync_all().map_err(|e| io_error(&e))?;
         drop(part);
+        // La liste des empreintes est durable AVANT le nom définitif : une coupure juste après la publication ne
+        // laisse pas un fichier complet dont la liste a perdu sa fin.
+        open::write_existing(&self.path(&id.digests_name()))?
+            .sync_all()
+            .map_err(|e| io_error(&e))?;
         // Jamais par-dessus un fichier, même posé à l'instant : le noyau refuse de remplacer.
-        sys::rename_noreplace(&self.path(&id.part_name()), &self.path(&id.complete_name()))?;
+        match sys::rename_noreplace(&self.path(&id.part_name()), &self.path(&id.complete_name())) {
+            Ok(()) => {}
+            // Une coupure entre le lien dur du repli et le retrait de l'ancien nom laisse la partie ET le fichier sur le
+            // MÊME inode : c'est la même publication, il ne reste qu'à retirer l'ancien nom.
+            Err(BackupFsError::Exists) => {
+                let published = sys::open_regular(&self.path(&id.complete_name()))?;
+                if sys::ident(&published.metadata().map_err(|e| io_error(&e))?) != expect {
+                    return Err(BackupFsError::Exists);
+                }
+                std::fs::remove_file(self.path(&id.part_name())).map_err(|e| io_error(&e))?;
+            }
+            Err(error) => return Err(error),
+        }
         sync_dir(&self.root)?;
         let published = sys::open_regular(&self.path(&id.complete_name()))?;
         Ok(sys::stamp(&published.metadata().map_err(|e| io_error(&e))?))
@@ -489,5 +506,33 @@ mod tests {
         assert_eq!(files.publish(&id, ident, 4), Err(BackupFsError::Exists));
         assert_eq!(std::fs::read(&taken).expect("lu"), b"mine");
         assert!(dir.path().join("transfers").join(id.part_name()).exists());
+    }
+    #[test]
+    fn a_part_and_a_file_left_on_the_same_inode_by_a_cut_are_one_publication() {
+        let dir = private_tempdir();
+        let files = files(&dir);
+        let id = id();
+        let ident = files.create(&id).expect("créé");
+        files
+            .append(&id, ident, 0, 0, b"abcd", &[1; 32])
+            .expect("a");
+        let root = dir.path().join("transfers");
+        // Coupure entre le lien dur du repli et le retrait de l'ancien nom.
+        std::fs::hard_link(root.join(id.part_name()), root.join(id.complete_name())).expect("lien");
+        let stamp = files.publish(&id, ident, 4).expect("terminé");
+        assert!(!root.join(id.part_name()).exists());
+        assert_eq!(stamp.size, 4);
+        // Un AUTRE fichier sous le nom définitif n'est jamais pris pour la publication.
+        let other = TransferId::parse("01J9ZY0G3Q8M2K6W4T7V5N1B9E").expect("ulid");
+        let other_ident = files.create(&other).expect("créé");
+        files
+            .append(&other, other_ident, 0, 0, b"abcd", &[1; 32])
+            .expect("a");
+        std::fs::write(root.join(other.complete_name()), b"mine").expect("posé à la main");
+        assert_eq!(
+            files.publish(&other, other_ident, 4),
+            Err(BackupFsError::Exists)
+        );
+        assert!(root.join(other.part_name()).exists());
     }
 }

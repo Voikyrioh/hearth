@@ -36,8 +36,8 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::ports::{
-    BackupFsError, BackupRemoved, Clock, DiskSpace, Expected, FileIdent, FileStamp, IdGen,
-    NewTransfer, ReadSeek, StoreError, TransferFiles, TransferRepo, TransferRow, TransferState,
+    BackupFsError, BackupRemoved, Clock, Expected, FileIdent, FileStamp, IdGen, NewTransfer,
+    ReadSeek, StoreError, TransferFiles, TransferRepo, TransferRow, TransferState,
 };
 use crate::domain::transfers::{
     ChunkRefusal, FinishRefusal, Limit, Receiver, Shortfall, TransferId, admit, judge_name,
@@ -294,10 +294,6 @@ impl Transfers {
         })
     }
 
-    fn space(&self) -> Result<DiskSpace, TransferError> {
-        self.files.space().map_err(disk)
-    }
-
     /// Ouvre un dépôt de `size` octets (au moins 1). `name` est jugé (BR-FILES-005) puis oublié : l'agent ne garde
     /// aucun nom de fichier du client.
     pub async fn open_deposit(
@@ -316,17 +312,28 @@ impl Transfers {
         // Les dépôts non terminés d'un compte sont bornés (la zone d'attente n'est pas un entrepôt) ; les places de
         // socket se prennent à l'attache, un dépôt s'ouvre pendant qu'un autre s'envoie.
         admit(0, 0, open).map_err(TransferError::Limit)?;
-        // L'espace pour TOUTE la taille, avant de créer quoi que ce soit (BR-FILES-013).
-        self.files.ensure_root().map_err(disk)?;
-        let space = self.space()?;
-        judge_space(space.free, space.total, size).map_err(TransferError::NoSpace)?;
+        // L'espace pour TOUTE la taille, avant de créer quoi que ce soit (BR-FILES-013). Le disque se touche sur un fil
+        // bloquant, jamais sur un worker de l'exécuteur.
         let id = TransferId::parse(&self.ids.new_id()).ok_or(TransferError::Storage)?;
         let files = self.files.clone();
         let created = id.clone();
-        let ident = tokio::task::spawn_blocking(move || files.create(&created))
-            .await
-            .map_err(|_| TransferError::Storage)?
-            .map_err(disk)?;
+        let (space, ident) = tokio::task::spawn_blocking(move || {
+            files.ensure_root()?;
+            let space = files.space()?;
+            // Pas la place : rien n'est créé.
+            if judge_space(space.free, space.total, size).is_err() {
+                return Ok((space, None));
+            }
+            files.create(&created).map(|ident| (space, Some(ident)))
+        })
+        .await
+        .map_err(|_| TransferError::Storage)?
+        .map_err(disk)?;
+        let Some(ident) = ident else {
+            return Err(judge_space(space.free, space.total, size)
+                .err()
+                .map_or(TransferError::Storage, TransferError::NoSpace));
+        };
         let now = self.clock.now();
         if let Err(error) = self
             .repo
@@ -341,8 +348,13 @@ impl Transfers {
             .await
         {
             // Rien n'est resté : les fichiers neufs sont retirés (ils sont à nous, d'inode connu).
-            let _ = self.files.remove_part(&id, Some(ident));
-            let _ = self.files.remove_digests(&id);
+            let files = self.files.clone();
+            let created = id.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = files.remove_part(&created, Some(ident));
+                let _ = files.remove_digests(&created);
+            })
+            .await;
             return Err(error.into());
         }
         Ok(Opened {
@@ -421,9 +433,15 @@ impl Transfers {
         })
         .await
         .map_err(|_| TransferError::Storage)?;
-        let Ok((stamp, digests)) = found else {
-            self.discard(row).await;
-            return Err(TransferError::NotFound);
+        let (stamp, digests) = match found {
+            Ok(found) => found,
+            // Le fichier n'est plus là, ou n'est plus celui du registre : il n'y a plus rien à terminer.
+            Err(BackupFsError::NotFound | BackupFsError::Unsafe) => {
+                self.discard(row).await;
+                return Err(TransferError::NotFound);
+            }
+            // Une erreur d'entrée-sortie passagère ne jette jamais un fichier complet : l'essai suivant relira.
+            Err(error) => return Err(disk(error)),
         };
         let Some(tree_digest) = Receiver::resume(size, digests).and_then(|r| r.tree_digest())
         else {
@@ -550,15 +568,14 @@ impl Transfers {
         let guard = self.take_place(account, 0).map_err(TransferError::Limit)?;
         let attached = self.attach_locked(id, account, guard).await;
         if attached.is_err() {
-            // Le verrou pris pour cet essai ne reste pas dans la table si rien n'a été attaché.
-            let free = self
-                .locks
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
+            // Le verrou pris pour cet essai ne reste pas dans la table si rien n'a été attaché : vérifié ET retiré
+            // sous la MÊME prise de la table (sinon un attach concurrent pourrait en voir un autre recréé).
+            let mut locks = self.locks.lock().unwrap_or_else(PoisonError::into_inner);
+            if locks
                 .get(id.as_str())
-                .is_some_and(|lock| Arc::strong_count(lock) == 1);
-            if free {
-                self.forget_lock(id);
+                .is_some_and(|lock| Arc::strong_count(lock) == 1)
+            {
+                locks.remove(id.as_str());
             }
         }
         attached
