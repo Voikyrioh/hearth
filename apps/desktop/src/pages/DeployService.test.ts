@@ -126,7 +126,14 @@ describe("la garde et les bornes de la machine", () => {
     expect(router.currentRoute.value.params.id).toBe("salon");
     await fillMinimum(wrapper);
     // La réponse tardive de « forge » dit « pris » : elle n'a rien à faire dans le formulaire de « salon ».
-    release({ name: "taken", invalidFields: [], ports: [], disk: null, imagePresent: false });
+    release({
+      name: "taken",
+      nameHolder: null,
+      invalidFields: [],
+      ports: [],
+      disk: null,
+      imagePresent: false,
+    });
     await settle();
     expect(wrapper.text()).not.toContain("Ce nom est déjà pris");
     expect(submit(wrapper).attributes("aria-disabled")).toBeUndefined();
@@ -301,13 +308,14 @@ describe("le formulaire (BR-DEPLOY-002 à 007, 014)", () => {
     wrapper.unmount();
   });
 
-  it("dit « Ce nom est déjà pris » sans dire par qui, sans tenir compte de la casse (BR-DEPLOY-004)", async () => {
+  it("dit quel conteneur créé hors de Hearth tient le nom, sans tenir compte de la casse (BR-DEPLOY-004, BR-ADOPT-022)", async () => {
     const { wrapper } = await boot((bridge) =>
       bridge.services.seed("forge", [{ key: "c_x", name: "Base", origin: "external" }]),
     );
     await type(wrapper, "name", "base");
-    expect(wrapper.get('[data-field="name"] [role="alert"]').text()).toBe("Ce nom est déjà pris");
-    expect(wrapper.text()).not.toContain("créé hors de Hearth");
+    expect(wrapper.get('[data-field="name"] [role="alert"]').text()).toBe(
+      "Ce nom est tenu par « Base », un conteneur créé hors de Hearth. Choisissez un autre nom.",
+    );
     await type(wrapper, "image", "nginx");
     expect(reason(wrapper)).toBe("Corrigez les champs signalés pour continuer.");
     wrapper.unmount();
@@ -486,7 +494,7 @@ describe("les ports (BR-DEPLOY-007 à 009, 031)", () => {
     wrapper.unmount();
   });
 
-  it("un conteneur hors Hearth n'est jamais nommé ; le port de Hearth lui-même est refusé", async () => {
+  it("un conteneur hors Hearth est nommé ; le port de Hearth lui-même est refusé", async () => {
     const { wrapper } = await boot((bridge) => {
       bridge.services.seed("forge", [
         {
@@ -498,8 +506,9 @@ describe("les ports (BR-DEPLOY-007 à 009, 031)", () => {
       ]);
     });
     const row = await addPort(wrapper, "9000");
-    expect(row?.text()).toContain("Ce port est tenu par un conteneur créé hors de Hearth.");
-    expect(wrapper.text()).not.toContain("conteneur-secret");
+    expect(row?.text()).toContain(
+      "Ce port est tenu par « conteneur-secret », un conteneur créé hors de Hearth.",
+    );
     const agent = await addPort(wrapper, "7443");
     expect(agent?.text()).toContain("Ce port est utilisé par Hearth lui-même.");
     wrapper.unmount();

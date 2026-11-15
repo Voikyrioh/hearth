@@ -217,23 +217,23 @@ describe("valider comme l'agent (ordre : forme, deux au plus, nom, ports, disque
     expect(await refused(sim, { name: "trois" })).toEqual({ kind: "deploy_limit" });
   });
 
-  it("un nom pris, sans tenir compte de la casse, par un service ou un déploiement en cours, sans dire par qui (BR-DEPLOY-004)", async () => {
+  it("un nom pris, sans tenir compte de la casse, par un service ou un déploiement en cours ; un conteneur hors Hearth est nommé (BR-DEPLOY-004, BR-ADOPT-022)", async () => {
     const sim = bridge();
     sim.services.seed("forge", [
       { key: "c_ext", name: "Autre", origin: "external" },
       { key: "h_mine", name: "base", origin: "hearth" },
     ]);
-    expect(await refused(sim, { name: "autre" })).toEqual({ kind: "name_taken" });
-    expect(await refused(sim, { name: "BASE" })).toEqual({ kind: "name_taken" });
+    expect(await refused(sim, { name: "autre" })).toEqual({ kind: "name_taken", holder: "Autre" });
+    expect(await refused(sim, { name: "BASE" })).toEqual({ kind: "name_taken", holder: null });
     expect((await sim.deployService("forge", request({ name: "web" }), PASSWORD)).kind).toBe(
       "accepted",
     );
-    expect(await refused(sim, { name: "WEB" })).toEqual({ kind: "name_taken" });
+    expect(await refused(sim, { name: "WEB" })).toEqual({ kind: "name_taken", holder: null });
     sim.deploys.markDeleting("forge", "ancien");
     expect(await refused(sim, { name: "Ancien" })).toEqual({ kind: "name_being_deleted" });
   });
 
-  it("les ports : service en marche, conteneur hors Hearth jamais nommé, programme, agent (BR-DEPLOY-007, 008)", async () => {
+  it("les ports : service en marche, conteneur hors Hearth nommé, programme, agent (BR-DEPLOY-007, 008)", async () => {
     const sim = bridge();
     sim.services.seed("forge", [
       {
@@ -262,7 +262,7 @@ describe("valider comme l'agent (ordre : forme, deux au plus, nom, ports, disque
     expect(await refused(sim, port(9000))).toMatchObject({
       kind: "port_in_use",
       status: "held_by_unmanaged",
-      holder: null,
+      holder: "dehors",
       suggested: 9001,
     });
     expect(await refused(sim, port(5432))).toMatchObject({
@@ -367,6 +367,7 @@ describe("la consultation (POST /deployments/check)", () => {
     });
     expect(answer).toEqual({
       name: "ok",
+      nameHolder: null,
       invalidFields: [],
       ports: [],
       disk: { freeBytes: 590 * GIB, low: false },

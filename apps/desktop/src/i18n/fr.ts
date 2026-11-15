@@ -2247,6 +2247,8 @@ export const fr = {
     nameFirst: "Le nom doit commencer par une lettre ou un chiffre",
     nameChars: "Le nom ne peut contenir que lettres, chiffres, tirets et points",
     nameTaken: "Ce nom est déjà pris",
+    nameTakenNamed:
+      "Ce nom est tenu par « {name} », un conteneur créé hors de Hearth. Choisissez un autre nom.",
     nameBeingDeleted:
       "Ce service est en cours de suppression. Attendez la fin de l'effacement de ses données.",
     imageLabel: "Image",
@@ -2299,6 +2301,7 @@ export const fr = {
     portAgent: "Ce port est utilisé par Hearth lui-même.",
     portService: "Ce port est pris par le service « {name} »",
     portUnmanaged: "Ce port est tenu par un conteneur créé hors de Hearth.",
+    portUnmanagedNamed: "Ce port est tenu par « {name} », un conteneur créé hors de Hearth.",
     portProgram: "Ce port est occupé sur le serveur",
     portProgramBy: "Ce port est occupé sur le serveur par « {program} »",
     portReserved:
@@ -2330,6 +2333,7 @@ export const fr = {
     // Revalidation au clic (BR-DEPLOY-032)
     refusedPort: "Le port {port} vient d'être pris par {occupant}. Rien n'a été créé.",
     occupantUnmanaged: "un conteneur créé hors de Hearth",
+    occupantUnmanagedNamed: "« {name} », un conteneur créé hors de Hearth",
     occupantProgram: "un programme du serveur",
     occupantService: "le service « {name} »",
     occupantUnknown: "un autre programme",

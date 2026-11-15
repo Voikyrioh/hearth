@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use hearth_agent::application::ports::{EngineError, EngineInfo};
 use hearth_agent::domain::accounts::Role;
-use hearth_agent::domain::services::RunState;
+use hearth_agent::domain::services::{Hidden, RunState};
 use hearth_agent::infrastructure::logging::{self, LogFormat};
 use hearth_proto::api::deploy::{DeployAccepted, DeployCheck, EngineCapacity};
 use hearth_proto::api::service_ops::{OperationCause, OperationStatus, OperationView};
@@ -601,27 +601,39 @@ async fn an_engine_that_is_not_ready_refuses_before_anything() {
 // ---------------------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn a_name_taken_by_anyone_is_refused_without_saying_by_whom() {
+async fn a_name_taken_by_an_unmanaged_container_names_it_and_never_what_it_holds() {
     let b = bench().await;
-    // Un conteneur hors Hearth, non adopté, de ce nom (à la casse près).
-    b.engine.put_silently(container("Cache", RunState::Running));
+    // Un conteneur hors Hearth, non adopté, de ce nom (à la casse près), avec des secrets.
+    let mut other = container("Cache", RunState::Running);
+    other.env_names = vec![Hidden::new("SENTINEL_ENV_NAME_91")];
+    other.command = Some(vec![Hidden::new("--token=SENTINEL-CMD-62")]);
+    b.engine.put_silently(other);
     b.agent.services().resync().await.expect("liste");
     let refused = b.deploy(spec("cache")).await;
     assert_eq!(refused.status, 409);
     assert_eq!(code(&refused), "NAME_TAKEN");
     assert_eq!(refused.body["error"]["message"], "Ce nom est déjà pris.");
+    // HRT-214 : le conteneur est nommé (avec la casse du moteur), rien d'autre.
+    assert_eq!(refused.body["error"]["details"]["holder"], "Cache");
+    for secret in ["SENTINEL_ENV_NAME_91", "SENTINEL-CMD-62", "busybox"] {
+        assert!(!refused.text.contains(secret), "{}", refused.text);
+    }
+    // Le journal d'activité garde le refus, jamais le conteneur ni ce qu'il porte.
+    let entries = b.journal().await;
     assert!(
-        refused.body["error"]["details"]
-            .as_object()
-            .is_none_or(|details| details.is_empty()),
-        "{}",
-        refused.text
+        entries.iter().any(|(outcome, ..)| outcome != "ok"),
+        "le refus doit être journalisé : {entries:?}"
     );
-    // Un service créé par Hearth, puis le même nom redemandé.
+    let journal = format!("{entries:?}").to_lowercase();
+    for kept_out in ["sentinel_env_name_91", "sentinel-cmd-62", "busybox"] {
+        assert!(!journal.contains(kept_out), "{kept_out} dans {journal}");
+    }
+    // Un service créé par Hearth, puis le même nom redemandé : son nom est dans la liste, rien à dire.
     let accepted = b.accepted(spec("web")).await;
     b.finished(&accepted.operation_id).await;
     let refused = b.deploy(spec("WEB")).await;
     assert_eq!(code(&refused), "NAME_TAKEN");
+    assert!(refused.body["error"]["details"]["holder"].is_null());
     // Rien d'autre n'a été créé.
     assert_eq!(b.engine.created().len(), 1);
     b.agent.shutdown().await;
@@ -662,8 +674,10 @@ fn with_port(host: u16) -> Value {
 #[tokio::test]
 async fn a_port_held_by_a_container_a_program_or_the_agent_is_refused_with_a_suggestion() {
     let b = bench().await;
-    // Un conteneur hors Hearth qui tourne : jamais nommé, plus petit port libre au-dessus proposé.
+    // Un conteneur hors Hearth qui tourne : nommé (HRT-214), plus petit port libre au-dessus proposé.
     let mut hidden = container("autre", RunState::Running);
+    hidden.env_names = vec![Hidden::new("SENTINEL_ENV_NAME_17")];
+    hidden.command = Some(vec![Hidden::new("--token=SENTINEL-CMD-40")]);
     hidden.ports = vec![hearth_agent::domain::services::PortBinding {
         host_port: 8080,
         container_port: 80,
@@ -678,12 +692,33 @@ async fn a_port_held_by_a_container_a_program_or_the_agent_is_refused_with_a_sug
     let details = &refused.body["error"]["details"];
     assert_eq!(details["port"], 8080);
     assert_eq!(details["suggested"], 8081);
-    assert!(details["holder"].is_null());
+    assert_eq!(details["holder"], "autre");
+    assert_eq!(details["status"], "held_by_unmanaged");
     assert_eq!(
         refused.body["error"]["message"],
         "Port tenu par un conteneur créé hors de Hearth."
     );
-    assert!(!refused.text.contains("autre"));
+    for secret in ["SENTINEL_ENV_NAME_17", "SENTINEL-CMD-40"] {
+        assert!(!refused.text.contains(secret), "{}", refused.text);
+    }
+    // Sans nom : l'image prend sa place.
+    let mut nameless = container("", RunState::Running);
+    nameless.image =
+        hearth_agent::domain::services::image_name("registry:5000/ns/app:2", "sha256:0");
+    nameless.ports = vec![hearth_agent::domain::services::PortBinding {
+        host_port: 8200,
+        container_port: 80,
+        protocol: hearth_agent::domain::services::PortProtocol::Tcp,
+        scope: hearth_agent::domain::services::PortScope::All,
+    }];
+    b.engine.put_silently(nameless);
+    b.agent.services().resync().await.expect("liste");
+    let refused = b.deploy(with_port(8200)).await;
+    assert_eq!(code(&refused), "PORT_IN_USE");
+    assert_eq!(
+        refused.body["error"]["details"]["holder"],
+        "registry:5000/ns/app:2"
+    );
     // Un programme du serveur, nommé.
     b.host_ports
         .listen(2222, hearth_proto::api::deploy::DeployProtocol::Tcp, "sshd");
@@ -756,6 +791,7 @@ async fn the_check_reports_each_field_writes_nothing_and_is_not_journaled() {
     assert_eq!(reply.status, 200, "{}", reply.text);
     let check: DeployCheck = serde_json::from_value(reply.body).unwrap();
     assert_eq!(check.name, hearth_proto::api::deploy::NameStatus::Taken);
+    assert_eq!(check.name_holder.as_deref(), Some("pris"), "HRT-214");
     assert!(check.image_present);
     assert!(check.invalid_fields.contains(&"mounts".to_owned()));
     let ports: Vec<_> = check

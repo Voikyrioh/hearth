@@ -461,6 +461,7 @@ describe("le brouillon et la demande (BR-FICHE-013, BR-FICHE-034)", () => {
 describe("les points d'attention (BR-FICHE-026)", () => {
   const reservedCheck = {
     name: "ok" as const,
+    nameHolder: null,
     invalidFields: [],
     ports: [
       {
@@ -665,6 +666,6 @@ describe("les refus de l'agent propres aux fiches", () => {
       )?.text,
     ).toContain("Libérez");
     expect(ficheFormRefusal({ kind: "agreement_required", ids: ["licence"] }, fiche)).toBeNull();
-    expect(ficheFormRefusal({ kind: "name_taken" }, fiche)).toBeNull();
+    expect(ficheFormRefusal({ kind: "name_taken", holder: null }, fiche)).toBeNull();
   });
 });

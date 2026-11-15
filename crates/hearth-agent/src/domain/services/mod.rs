@@ -58,6 +58,6 @@ pub use unit::{
 };
 pub use visibility::{
     Adoption, CONFIRMATION_TTL, Holder, UNIT_GONE_READS, Visibility, confirmation_expired,
-    gone_long_enough, lapsed, may_read_details, unit_answered, unit_is_gone, unread_unit_adoptions,
-    visibility_of,
+    conflict_label, gone_long_enough, lapsed, may_read_details, unit_answered, unit_is_gone,
+    unread_unit_adoptions, visibility_of,
 };
