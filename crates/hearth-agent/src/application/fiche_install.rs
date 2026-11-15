@@ -22,6 +22,7 @@ use hearth_proto::api::deploy::{DeploySource, DeploySpec};
 
 use super::catalog::CatalogService;
 use super::deployments::DeployError;
+use super::pack_intake::PackError;
 use super::ports::{Clock, SecretRandom};
 use crate::domain::audit::Actor;
 use crate::domain::catalog::generate::draw_secret;
@@ -29,6 +30,7 @@ use crate::domain::catalog::loading::schema::fiche::PackGenre;
 use crate::domain::catalog::readiness::ReadyRule;
 use crate::domain::catalog::settings_state::Reason as SettingReason;
 use crate::domain::catalog::translate::{Request, TranslateError, translate};
+use crate::domain::mods::pack::{PackRefusal, PackReport};
 use crate::domain::secret::Secret;
 use crate::domain::services::deploy::{
     Invalid, Limits, Machine, Refusal, check_limits, validate_name,
@@ -77,6 +79,44 @@ pub struct FicheInstaller {
     catalog: Arc<CatalogService>,
     random: Arc<dyn SecretRandom>,
     clock: Arc<dyn Clock>,
+}
+
+/// Le réglage de la fiche qui porte la version du jeu : celui qui s'appelle `version` et lit la variable `VERSION`.
+const VERSION_SETTING: &str = "version";
+
+/// Un pack serveur dit (ou ne dit pas) sa version de Minecraft et son moteur : la demande est complétée ou refusée,
+/// jamais lancée avec « LATEST » devant un pack qui demande une version précise (HRT-225).
+// FIX:01M7GSNNTE0GP22STY1VRJ56YG : la version et le moteur du pack serveur remplacent « LATEST » ou refusent (BR-MOD-019).
+fn apply_pack_game(
+    report: &PackReport,
+    variant: Option<&str>,
+    fiche: &crate::domain::catalog::loading::model::Fiche,
+    answers: &mut BTreeMap<String, String>,
+) -> Result<(), DeployError> {
+    if report.genre != PackGenre::ServerPack || fiche.setting(VERSION_SETTING).is_none() {
+        return Ok(());
+    }
+    let refuse = |refusal: PackRefusal| DeployError::Pack(PackError::Refused(refusal));
+    if let Some(loader) = report.game.loader
+        && variant != Some(loader.variant_id())
+    {
+        return Err(refuse(PackRefusal::LoaderMismatch));
+    }
+    let asked = answers
+        .get(VERSION_SETTING)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("latest"));
+    match (&report.game.minecraft, asked) {
+        (Some(said), None) => {
+            answers.insert(VERSION_SETTING.to_owned(), said.clone());
+        }
+        (Some(said), Some(asked)) if asked != *said => {
+            return Err(refuse(PackRefusal::VersionMismatch));
+        }
+        (None, None) => return Err(refuse(PackRefusal::VersionUnreadable)),
+        _ => {}
+    }
+    Ok(())
 }
 
 fn invalid(field: &'static str, reason: &'static str) -> DeployError {
@@ -142,7 +182,7 @@ impl FicheInstaller {
         machine: Option<Machine>,
         free_disk: Option<u64>,
         world_prep: Option<&WorldPrep<'_>>,
-        pack: Option<PackGenre>,
+        pack: Option<&PackReport>,
     ) -> Result<Prepared, DeployError> {
         let Some(DeploySource::Fiche {
             id,
@@ -222,6 +262,10 @@ impl FicheInstaller {
             }
             answer_map.insert(prep.names_setting.to_owned(), prep.name.to_owned());
         }
+        // Le jeu et le moteur que dit un pack serveur (HRT-225, BR-MOD-019) : appliqués à la place de « LATEST », ou refusés.
+        if let Some(report) = pack {
+            apply_pack_game(report, variant.as_deref(), fiche, &mut answer_map)?;
+        }
         let agreed: BTreeSet<String> = agreements.iter().cloned().collect();
         let mut host_ports: BTreeMap<String, u16> = BTreeMap::new();
         for port in ports {
@@ -258,7 +302,7 @@ impl FicheInstaller {
                 optional_ports: &optional,
                 generated: &generated,
                 world_imported: world_prep.is_some(),
-                pack,
+                pack: pack.map(|report| report.genre),
             },
         )
         .map_err(|error| match error {

@@ -155,6 +155,9 @@ const REASONS: Record<string, MessageKey> = {
   PACK_INDEX_INVALID: "pack.refusedIndex",
   PACK_WRAPPED_IN_FOLDER: "pack.refusedWrapped",
   PACK_UNRECOGNIZED: "pack.refusedUnrecognized",
+  PACK_VERSION_UNREADABLE: "pack.refusedVersionUnreadable",
+  PACK_VERSION_MISMATCH: "pack.refusedVersionMismatch",
+  PACK_LOADER_MISMATCH: "pack.refusedLoaderMismatch",
 };
 
 /**

@@ -268,7 +268,7 @@ async fn a_fabric_server_pack_like_prominence_ii_installs_with_a_big_memory_and_
 #[tokio::test]
 async fn without_the_contract_gesture_nothing_is_created_and_the_pack_stays_for_the_next_try() {
     let b = bench().await;
-    b.deposits.put("ada", "p", prominence_like_pack());
+    b.deposits.put("ada", "p", fabric_1_20_1_pack());
     let reply = b
         .install(b.request("sans-contrat", Some("fabric"), Some("p"), false))
         .await;
@@ -304,5 +304,113 @@ async fn the_default_install_is_the_official_server_with_java_25_and_no_pack() {
     assert_eq!(value("TYPE").as_deref(), Some("VANILLA"));
     assert_eq!(value("VERSION").as_deref(), Some("LATEST"));
     assert!(value("GENERIC_PACK").is_none());
+    b.agent.shutdown().await;
+}
+
+/// Un pack serveur Fabric 1.20.1 minimal : les dossiers que laisse l'installateur Fabric disent le jeu et le moteur.
+fn fabric_1_20_1_pack() -> Vec<u8> {
+    zip_of(&[
+        ("mods/a.jar", b"jar-a"),
+        ("config/a.toml", b"x = 1"),
+        (
+            "libraries/net/fabricmc/intermediary/1.20.1/intermediary-1.20.1.jar",
+            b"i",
+        ),
+        (
+            "libraries/net/fabricmc/fabric-loader/0.14.21/fabric-loader-0.14.21.jar",
+            b"l",
+        ),
+        ("fabric-server-launch.jar", b"launch"),
+    ])
+}
+
+fn refused_reason(reply: &Wire) -> (u16, String, String) {
+    (
+        reply.status,
+        reply.body["error"]["code"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned(),
+        reply.body["error"]["details"]["reason"]
+            .as_str()
+            .unwrap_or("")
+            .to_owned(),
+    )
+}
+
+/// HRT-225 : la version laissée à « LATEST » (26.x, Java 25) ne démarre pas un pack Fabric 1.20.1. L'agent lit le jeu
+/// dans le pack et l'applique à la place.
+#[tokio::test]
+async fn a_fabric_1_20_1_pack_installs_with_the_game_version_it_says_not_latest() {
+    let b = bench().await;
+    let image = reference(&b.fiche, "fabric");
+    b.engine.publish_image(&image, PullScript::two_layers());
+    b.deposits.put("ada", "fab", fabric_1_20_1_pack());
+    let check = b
+        .agent
+        .request("POST", "/deployments/pack-check")
+        .token(&b.ada.token)
+        .json(&json!({ "deposit": "fab" }))
+        .send()
+        .await;
+    assert_eq!(check.status, 200, "{}", check.text);
+    // Aucune réponse « version » : le défaut est LATEST.
+    let reply = b
+        .install(b.request("fabric-pack", Some("fabric"), Some("fab"), true))
+        .await;
+    assert_eq!(reply.status, 202, "{}", reply.text);
+    let accepted: DeployAccepted = serde_json::from_value(reply.body).unwrap();
+    let operation = b.finished(&accepted.operation_id).await;
+    assert_eq!(
+        operation.status,
+        OperationStatus::Succeeded,
+        "{operation:?}"
+    );
+    let plan = &b.engine.created()[0];
+    let value = |name: &str| {
+        plan.env
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.clone())
+    };
+    assert_eq!(value("VERSION").as_deref(), Some("1.20.1"));
+    assert_eq!(value("TYPE").as_deref(), Some("FABRIC"));
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_version_that_contradicts_the_pack_or_an_unreadable_one_left_on_latest_is_refused_and_the_pack_stays()
+ {
+    let b = bench().await;
+    // La version choisie contredit le pack.
+    b.deposits.put("ada", "fab", fabric_1_20_1_pack());
+    let mut body = b.request("contredit", Some("fabric"), Some("fab"), true);
+    body["source"]["answers"] = json!([{ "id": "version", "value": "1.21.1" }]);
+    let reply = b.install(body).await;
+    assert_eq!(
+        refused_reason(&reply),
+        (422, "PACK_REFUSED".into(), "PACK_VERSION_MISMATCH".into()),
+        "{}",
+        reply.text
+    );
+    // Le moteur choisi n'est pas celui du pack.
+    let reply = b
+        .install(b.request("mauvais-moteur", Some("vanilla"), Some("fab"), true))
+        .await;
+    assert_eq!(
+        refused_reason(&reply),
+        (422, "PACK_REFUSED".into(), "PACK_LOADER_MISMATCH".into())
+    );
+    // Un pack qui ne dit pas sa version, version laissée à LATEST : on demande de la choisir.
+    b.deposits.put("ada", "muet", prominence_like_pack());
+    let reply = b
+        .install(b.request("muet", Some("fabric"), Some("muet"), true))
+        .await;
+    assert_eq!(
+        refused_reason(&reply),
+        (422, "PACK_REFUSED".into(), "PACK_VERSION_UNREADABLE".into())
+    );
+    b.assert_nothing_created().await;
+    assert!(b.deposits.has("ada", "fab") && b.deposits.has("ada", "muet"));
     b.agent.shutdown().await;
 }

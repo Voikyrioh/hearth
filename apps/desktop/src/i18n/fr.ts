@@ -2522,6 +2522,12 @@ export const fr = {
     refusedWrapped:
       "Ce pack range tout dans un dossier. Refaites l'archive avec son contenu à la racine : les dossiers « mods » et « config » doivent être au premier niveau.",
     refusedUnrecognized: "Hearth ne reconnaît pas ce pack.",
+    refusedVersionUnreadable:
+      "Ce pack ne dit pas pour quelle version de Minecraft il est fait. Choisissez la version que la page du pack annonce, par exemple 1.20.1, puis relancez l'installation.",
+    refusedVersionMismatch:
+      "La version de Minecraft choisie n'est pas celle de ce pack. Corrigez-la avec celle de la page du pack, ou laissez « LATEST » : Hearth prendra celle que le pack annonce.",
+    refusedLoaderMismatch:
+      "Le type de serveur choisi n'est pas celui de ce pack (Fabric, Forge, Quilt ou NeoForge). Choisissez le type que la page du pack annonce.",
     refusedHost:
       "Ce pack demande de télécharger depuis {host}, qui n'est pas permis par le format des packs Modrinth.",
     refusedHostUnknown:
