@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import type { Level } from "@/link";
 
-// Jauge linéaire (SVG pur) : occupation d'un disque. La couleur suit le niveau ; le libellé et
+// FIX:01M7GQRC6QSEZH39F7M4DD04B4
+// Jauge linéaire (HTML, jamais un SVG étiré : un `rx` sous `preserveAspectRatio="none"` donne des bouts en fuseau, HRT-220) : occupation d'un disque. La couleur suit le niveau ; le libellé et
 // le pictogramme sont portés par le composant qui l'emploie.
 // `indeterminate` (HRT-69) : la progression n'est pas connue (`ratio` à `null`) ; une barre glisse au lieu d'une
 // jauge vide, et reste immobile, rayée par sa seule position, si le mouvement est réduit.
@@ -17,50 +18,49 @@ const props = withDefaults(
 const width = computed(() =>
   props.ratio === null ? 0 : Math.min(100, Math.max(0, props.ratio * 100)),
 );
+
+// Le remplissage passe par une propriété CSS posée depuis le script (jamais `style=` dans le gabarit).
+const root = ref<HTMLElement | null>(null);
+function fill() {
+  root.value?.style.setProperty("--meter-fill", `${width.value}%`);
+}
+onMounted(fill);
+watch(width, fill, { flush: "post" });
 </script>
 
 <template>
-  <svg class="meter" viewBox="0 0 100 6" preserveAspectRatio="none" role="img" :aria-label="label">
-    <rect class="meter__track" x="0" y="0" width="100" height="6" rx="3" />
-    <rect
-      v-if="ratio === null && indeterminate"
-      class="meter__slide"
-      x="0"
-      y="0"
-      width="40"
-      height="6"
-      rx="3"
-    />
-    <rect
-      v-if="ratio !== null"
-      :class="['meter__value', `meter__value--${level}`]"
-      x="0"
-      y="0"
-      :width="width"
-      height="6"
-      rx="3"
-    />
-  </svg>
+  <div ref="root" class="meter" role="img" :aria-label="label">
+    <div v-if="ratio === null && indeterminate" class="meter__slide" />
+    <div v-if="ratio !== null" :class="['meter__value', `meter__value--${level}`]" />
+  </div>
 </template>
 
 <style scoped>
 .meter {
   display: block;
+  position: relative;
   width: 100%;
   height: var(--space-2);
-}
-
-.meter__track {
-  fill: var(--bd);
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--bd);
 }
 
 .meter__value {
+  width: var(--meter-fill, 0%);
+  height: 100%;
+  border-radius: var(--radius-pill);
   transition: width var(--motion-base) var(--ease);
 }
 
 .meter__slide {
-  fill: var(--ac);
-  transform-box: fill-box;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40%;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--ac);
   animation: meter-slide var(--motion-pulse) linear infinite;
 }
 
@@ -82,14 +82,14 @@ const width = computed(() =>
 }
 
 .meter__value--normal {
-  fill: var(--ac);
+  background: var(--ac);
 }
 
 .meter__value--attention {
-  fill: var(--warn);
+  background: var(--warn);
 }
 
 .meter__value--critical {
-  fill: var(--crit);
+  background: var(--crit);
 }
 </style>

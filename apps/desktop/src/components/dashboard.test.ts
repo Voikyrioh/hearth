@@ -82,7 +82,7 @@ describe("bars and meter", () => {
 
   it("fills the meter with its ratio and colors it by level", () => {
     const wrapper = mount(HMeter, { props: { ratio: 0.42, level: "critical", label: "disque" } });
-    expect(wrapper.get(".meter__value").attributes("width")).toBe("42");
+    expect((wrapper.element as HTMLElement).style.getPropertyValue("--meter-fill")).toBe("42%");
     expect(wrapper.find(".meter__value--critical").exists()).toBe(true);
     expect(
       mount(HMeter, { props: { ratio: null, label: "d" } })

@@ -4,6 +4,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 
 | Fiche | Titre | Date |
 |---|---|---|
+| [FIX-01M7GQRC6QSEZH39F7M4DD04B4](./FIX-01M7GQRC6QSEZH39F7M4DD04B4.md) | Les barres de progression étaient en fuseau effilé au lieu d'une barre arrondie (HRT-220) | 2026-11-16 |
 | [FIX-01M5PYVP4V48YGH36AYS43Q31V](./FIX-01M5PYVP4V48YGH36AYS43Q31V.md) | Le message d'un caractère refusé s'arrêtait sur deux points quand le caractère était une espace (HRT-102) | 2026-10-24 |
 | [FIX-01M5PYVP4WFPG3YMVV68T041R4](./FIX-01M5PYVP4WFPG3YMVV68T041R4.md) | Le récapitulatif « Vérifiez avant de lancer » s'ouvrait défilé tout en bas (HRT-69, HRT-102) | 2026-10-24 |
 | [FIX-01M5PYVP4WVBS6H4Q6M1QW4DQG](./FIX-01M5PYVP4WVBS6H4Q6M1QW4DQG.md) | Le simulateur donnait deux machines : 16 cœurs et 64 Go au tableau de bord, 4 cœurs et 16 Go aux curseurs et à la fiche (HRT-69) | 2026-10-24 |
