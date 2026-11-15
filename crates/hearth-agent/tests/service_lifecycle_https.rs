@@ -18,13 +18,15 @@ use hearth_agent::application::ports::{Clock, ServiceSupervisor};
 use hearth_agent::domain::accounts::Role;
 use hearth_agent::domain::services::{RunState, ServiceStateKind, UnitActivity, UnitLookup};
 use hearth_proto::api::service_ops::{OperationCause, OperationStatus, OperationView};
-use hearth_proto::api::services::{ActionAccepted, LastAction, ServicesState};
+use hearth_proto::api::services::{ActionAccepted, BusyInfo, LastAction, ServicesState};
+use hearth_proto::stream::{ServicesMessage, Topic};
 use serde_json::json;
 use support::device::Actor;
 use support::engine::{fast_timings, parts_supervised};
 use support::fake_engine::{Call, FakeEngine, container};
 use support::fake_supervisor::{FakeSupervisor, Order, running_unit, unit_named};
 use support::https::{self, Agent, Wire};
+use support::ws;
 use support::{Env, env};
 
 struct Bench {
@@ -1014,4 +1016,43 @@ async fn an_action_cut_by_an_agent_restart_is_interrupted_frees_the_service_and_
             Some("ada")
         )
     );
+}
+
+/// FIX:01M7GQRDE4VBF9CMCJJMM6MK93 : le verrou « une action est en cours » d'un service ne reste pas affiché chez un
+/// abonné de la liste une fois l'action close, même quand le service n'a pas changé d'état après elle
+/// (conteneur en boucle de plantage, déjà arrêté : l'arrêt dure quelques millisecondes et le moteur ne dit plus rien).
+/// Sans lot après la clôture, la projection `busy` lue à l'envoi restait celle d'avant (HRT-219).
+#[tokio::test]
+async fn the_lock_shown_in_the_list_falls_when_the_action_closes_even_if_the_service_did_not_change()
+ {
+    let b = bench().await;
+    let (key, id) = publish(&b, "prominence", RunState::Running).await;
+    let mut client = ws::open(&b.agent).await;
+    client.auth(&b.dan.token).await;
+    client.subscribe(&[Topic::Services]).await;
+    let ServicesMessage::ServicesSnapshot(snapshot) = client.next_services().await else {
+        panic!("un instantané est attendu en premier");
+    };
+    let mut shown: Option<BusyInfo> = snapshot
+        .services
+        .iter()
+        .find(|item| item.key == key)
+        .and_then(|item| item.busy.clone());
+    // Le conteneur est déjà arrêté pour le moteur quand l'ordre part : l'ordre ne change plus rien.
+    b.engine.update(&id, |web| {
+        web.run_state = RunState::Exited;
+        web.exit_code = Some(1);
+    });
+    let stop = b.accepted("stop", &key).await;
+    let operation = b.finished(&stop.action_id).await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+    // Tout ce que l'abonné reçoit jusqu'au silence : le dernier mot sur le service est le sien.
+    while let Some(message) = client.try_next_services(Duration::from_millis(600)).await {
+        if let ServicesMessage::ServicesDelta(delta) = message
+            && let Some(item) = delta.upserts.iter().find(|item| item.key == key)
+        {
+            shown = item.busy.clone();
+        }
+    }
+    assert_eq!(shown, None, "le verrou d'une action close reste affiché");
 }

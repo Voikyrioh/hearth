@@ -390,6 +390,8 @@ pub struct RunningAgent {
     pub foundations: ServiceFoundations,
     /// Décisions expirées et opérations de service purgées : arrêtée avec l'agent.
     pub service_ops_sweep: BackgroundTask,
+    /// Re-publie le service dont une opération se clôt, pour que `busy` retombe chez les abonnés (HRT-219).
+    pub busy_projection: BackgroundTask,
     /// Dépôts de la zone d'attente sans activité depuis 24 heures : retirés, arrêtée avec l'agent (HRT-95).
     pub transfers_purge: BackgroundTask,
     /// La zone d'attente des transferts (HRT-95) : les tests y lisent l'état et la consomment comme le ferait le
@@ -416,6 +418,7 @@ impl RunningAgent {
             attack_sweep: _attack_sweep,
             services_task: _services_task,
             service_ops_sweep: _service_ops_sweep,
+            busy_projection: _busy_projection,
             transfers_purge: _transfers_purge,
             audit_recorder,
             security,
@@ -1275,6 +1278,7 @@ pub async fn start_engined(
     let purge = tasks::spawn_purge(services.maintenance, tasks::PURGE_PERIOD);
     let sampler = tasks::spawn_sampler(metrics, metering.period);
     let services_task = tasks::spawn_services(registry.clone());
+    let busy_projection = tasks::spawn_busy_projection(foundations.ops.clone(), registry.clone());
     let audit_flush =
         tasks::spawn_audit_flush(services.audit_recorder.clone(), tasks::AUDIT_FLUSH_PERIOD);
     let alert_sweep =
@@ -1294,6 +1298,7 @@ pub async fn start_engined(
         services: registry,
         foundations,
         service_ops_sweep,
+        busy_projection,
         transfers_purge,
         transfers: transfers_for_state,
         sessions,
