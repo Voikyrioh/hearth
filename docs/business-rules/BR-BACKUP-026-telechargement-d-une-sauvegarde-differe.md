@@ -11,7 +11,7 @@ maj: 2026-11-14
 # BR-BACKUP-026 : Télécharger une sauvegarde transmet l'archive entière avec reprise (DIFFÉRÉ : transferts, HRT-95)
 
 ## Règle
-Cette tranche livre la sauvegarde sans le téléchargement : aucune route ne le porte, `BackupDownload` n'est pas déclaré. L'archive reste lisible par les outils courants (BR-BACKUP-014). Statut `différée` : cette fiche est à compléter par HRT-95.
+Cette tranche livre la sauvegarde sans le téléchargement : aucune route ne le porte, `BackupDownload` n'est pas déclaré. L'archive reste lisible par les outils courants (BR-BACKUP-014). Statut `différée` : HRT-95 a posé l'envoi vers la zone d'attente (ADR-0048, BR-FILES-019) ; le téléchargement, qui prendra le même socket et la même trame dans le sens inverse, reste à faire avec le client (HRT-96) ou une tranche dédiée.
 
 ## Application (code)
 - (aucun code dans cette tranche)
