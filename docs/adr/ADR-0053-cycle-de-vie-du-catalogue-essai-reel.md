@@ -26,6 +26,87 @@ Une fiche (ADR-0050) est écrite d'après un inventaire de documentation et d'un
 ## Résultat du premier essai (14/11/2026, `ryshe/terraria:vanilla-1.4.5.8`)
 Point B6 levé : Terraria lit son entrée sans terminal. `save` réécrit le monde ; `exit` fait sortir le jeu de lui-même (code 0, moins d'une seconde) ; le service reste arrêté ; le monde survit au redémarrage. Signe « Server started » vu 21 s après le lancement (petit monde). Mémoire au repos 564 Mio, espace installé 53 014 364 octets (image 50 068 911 + dossiers gérés après un premier démarrage) ; empreinte `sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677`.
 
+## Résultat de l'essai de la fiche Minecraft Java (15/11/2026, forge, HRT-116)
+Banc : `crates/hearth-agent/tests/fiche_live_minecraft.rs`, lancé SUR LA FORGE (Linux, Docker natif, 32 Go ; aucun `workflow_dispatch`), binaire de test statique construit dans `rust:1.95-alpine`. Chaque scénario passe par le chemin de l'agent (traduction, jugement du déploiement ordinaire, plan fermé, création par `BollardEngine`) sur la vraie image épinglée de la fiche, sans joueur : signe « prêt », port, réglage pris en compte (`MOTD` dans `server.properties`), arrêt par le SIGNAL de l'image (code 0, `level.dat` réécrit, avant le délai), service qui reste arrêté, redémarrage sur le même monde (jeu officiel), mémoire (cgroupe : pic au démarrage, repos 60 s après le signe) et disque.
+
+**Défaut trouvé et corrigé par l'essai** : « LATEST » prend la version 26.3 du jeu, compilée pour Java 25 : elle ne démarrait pas sur l'image `java21` de la fiche (`UnsupportedClassVersionError`, classe version 69). La fiche passe à l'étiquette `java25` (`sha256:52a530ef...`) pour le jeu officiel, Paper et Purpur ; NeoForge reste sur `java21`, Fabric, Quilt et Forge sur `java17` (packs de la 1.20). Version de la fiche : 2.
+
+| Scénario | Limite | Signe « prêt » | Repos (compteur du moteur) | Pic de démarrage (cgroupe, cache compris) | Arrêt |
+|---|---|---|---|---|---|
+| Jeu officiel 26.3 | 2 Gio | 10 s | 552 Mio | 696 Mio | 0 s, code 0, monde enregistré |
+| Jeu officiel 26.3 | 4 Gio | 12 s | 698 Mio | 872 Mio | 0 s, code 0, monde enregistré |
+| Fabric 1.20.1 + Prominence II 4.1.8 (377 mods) | 10 Gio | 95 s | 7,6 Gio | 9,4 Gio | 3 s, code 0, monde enregistré |
+
+Disque : 1 497 623 985 octets pour le jeu officiel (image 1 363 527 826 + dossiers gérés), 5 248 719 852 avec le pack (fichier de 1 577 339 200 octets). Le redémarrage du jeu officiel retrouve son monde.
+Promotion : `ready` passe à `tested` ; mémoire `measured` avec `min_bytes` = 2 Gio et `recommended_bytes` = 4 Gio (les LIMITES essayées : aucun plancher plus bas n'a été essayé, donc aucun n'est affirmé), cran « Ultra » à 10 Gio (le gros pack, essayé) ; `status = "published"`. Le processeur reste non mesuré (non exigé pour publier). `catalog-check --release` ne reproche plus rien à Minecraft (il reproche encore Terraria, `preview`). Limite : aucun joueur, donc aucune charge de jeu ; les chiffres sont ceux d'un serveur vide.
+
+Relevé brut (`evidence.toml`, engendré par le banc) :
+```
+# Relevé du banc d'essai réel (HRT-116). Engendré par `tests/fiche_live_minecraft.rs`, jamais écrit à la main.
+fiche = "minecraft"
+fiche_version = 2
+vanilla_min.memory_limit_bytes = 2147483648
+vanilla_min.image = "itzg/minecraft-server:java25@sha256:52a530ef9f3af25c0536c21e5b7c6bad7c1e1e7777fc186c4196c3d1f7635113"
+vanilla_min.image_digest = "itzg/minecraft-server@sha256:52a530ef9f3af25c0536c21e5b7c6bad7c1e1e7777fc186c4196c3d1f7635113"
+vanilla_min.disk_image_bytes = 1363527826
+vanilla_min.ready = true
+vanilla_min.ready_after_s = 10
+vanilla_min.memory_peak_startup_bytes = 696377344
+vanilla_min.tcp_accepts = true
+vanilla_min.setting_taken = true
+vanilla_min.memory_usage_raw = "552.4MiB / 2GiB"
+vanilla_min.memory_idle_bytes = 719118336
+vanilla_min.memory_peak_bytes = 722309120
+vanilla_min.disk_install_bytes = 1497603780
+vanilla_min.stop_took_s = 0
+vanilla_min.stop_exit_code = "0"
+vanilla_min.world_saved_on_stop = true
+vanilla_min.world_saved_in_logs = true
+vanilla_min.stop_clean = true
+vanilla_min.no_auto_restart = true
+vanilla_min.restart_ready = true
+vanilla_min.restart_keeps_world = true
+vanilla_rec.memory_limit_bytes = 4294967296
+vanilla_rec.image = "itzg/minecraft-server:java25@sha256:52a530ef9f3af25c0536c21e5b7c6bad7c1e1e7777fc186c4196c3d1f7635113"
+vanilla_rec.image_digest = "itzg/minecraft-server@sha256:52a530ef9f3af25c0536c21e5b7c6bad7c1e1e7777fc186c4196c3d1f7635113"
+vanilla_rec.disk_image_bytes = 1363531922
+vanilla_rec.ready = true
+vanilla_rec.ready_after_s = 12
+vanilla_rec.memory_peak_startup_bytes = 872296448
+vanilla_rec.tcp_accepts = true
+vanilla_rec.setting_taken = true
+vanilla_rec.memory_usage_raw = "698.5MiB / 4GiB"
+vanilla_rec.memory_idle_bytes = 872181760
+vanilla_rec.memory_peak_bytes = 875819008
+vanilla_rec.disk_install_bytes = 1497623985
+vanilla_rec.stop_took_s = 0
+vanilla_rec.stop_exit_code = "0"
+vanilla_rec.world_saved_on_stop = true
+vanilla_rec.world_saved_in_logs = true
+vanilla_rec.stop_clean = true
+vanilla_rec.no_auto_restart = true
+pack.memory_limit_bytes = 10737418240
+pack.image = "itzg/minecraft-server:java17@sha256:94b3e70f40c9ddc8ded7de2a7e7d6725254f08abaa63950d8402e4b107ccc4e2"
+pack.image_digest = "itzg/minecraft-server@sha256:94b3e70f40c9ddc8ded7de2a7e7d6725254f08abaa63950d8402e4b107ccc4e2"
+pack.disk_image_bytes = 1239052980
+pack.pack_bytes = 1577339200
+pack.ready = true
+pack.ready_after_s = 95
+pack.memory_peak_startup_bytes = 9407426560
+pack.tcp_accepts = true
+pack.setting_taken = true
+pack.memory_usage_raw = "7.635GiB / 10GiB"
+pack.memory_idle_bytes = 10582118400
+pack.memory_peak_bytes = 10585022464
+pack.disk_install_bytes = 5248719852
+pack.stop_took_s = 3
+pack.stop_exit_code = "0"
+pack.world_saved_on_stop = true
+pack.world_saved_in_logs = true
+pack.stop_clean = true
+pack.no_auto_restart = true
+```
+
 ## Limites
 - Un petit monde et aucun joueur : ni charge, ni grand monde, ni reprise d'un monde modifié par un joueur (cela reste à la forge).
 - Le fichier du monde est relu par sa taille et sa date, pas par un client de jeu. L'effet de `save` est jugé sur un relevé pris AVANT `exit` (qui enregistre aussi).

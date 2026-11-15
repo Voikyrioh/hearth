@@ -283,7 +283,7 @@ async fn without_the_contract_gesture_nothing_is_created_and_the_pack_stays_for_
 async fn the_default_install_is_the_official_server_with_java_21_and_no_pack() {
     let b = bench().await;
     let image = reference(&b.fiche, "vanilla");
-    assert!(image.contains(":java21@sha256:"), "{image}");
+    assert!(image.contains(":java25@sha256:"), "{image}");
     b.engine.publish_image(&image, PullScript::two_layers());
     let reply = b.install(b.request("officiel", None, None, true)).await;
     assert_eq!(reply.status, 202, "{}", reply.text);

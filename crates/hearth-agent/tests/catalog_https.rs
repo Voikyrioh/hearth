@@ -54,7 +54,10 @@ async fn a_published_agent_lists_no_preview_fiche_and_a_trial_agent_lists_terrar
         .await;
     assert_eq!(reply.status, 200, "{}", reply.text);
     let view: CatalogView = serde_json::from_value(reply.body).unwrap();
-    assert!(view.fiches.is_empty(), "aucune fiche publiée aujourd'hui");
+    // Seule la fiche Minecraft est publiée (HRT-116) : Terraria reste `preview`, absente d'un agent publié.
+    let ids: Vec<&str> = view.fiches.iter().map(|f| f.id.as_str()).collect();
+    assert_eq!(ids, ["minecraft"], "seule Minecraft est publiée");
+    assert_eq!(view.fiches[0].status, FicheStatus::Published);
     assert!(view.refused.is_empty());
     // Une fiche d'essai n'existe pas pour un agent publié : même réponse qu'une fiche inconnue.
     for id in ["terraria", "nope"] {
