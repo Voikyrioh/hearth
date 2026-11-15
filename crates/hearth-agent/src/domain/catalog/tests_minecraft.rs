@@ -258,7 +258,10 @@ fn a_game_setting_goes_to_the_image_by_its_variable_and_a_bad_value_is_refused()
         ("level_name", "../monde"),
     ] {
         assert!(
-            Ask::new().answer(id, value).translate(&fiche).is_err(),
+            matches!(
+                Ask::new().answer(id, value).translate(&fiche),
+                Err(TranslateError::Setting(_))
+            ),
             "{id} = {value:?} doit être refusé"
         );
     }

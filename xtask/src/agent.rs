@@ -436,7 +436,7 @@ pub fn write_build_record(
 /// Les variables d'une construction d'essai : `--preview-fiches` ouvre le catalogue aux fiches `preview` (HRT-101,
 /// ADR-0050 : variable de construction `HEARTH_PREVIEW_FICHES`), ce qu'il faut pour proposer une fiche qui n'a pas
 /// encore passé son banc d'essai. Jamais avec `--release` : une construction de publication n'embarque aucune fiche
-/// d'essai. Le binaire ainsi construit n'est ni à signer ni à publier (l'enregistrement de construction le dit).
+/// d'essai. Le binaire ainsi construit (`target/dist/hearth-agent-preview`) n'est ni à signer ni à publier : il n'a aucun enregistrement de construction, donc release-stage le refuse.
 pub fn preview_build_env(args: &[String]) -> Result<Vec<(String, String)>, String> {
     let preview = args.iter().any(|arg| arg == "--preview-fiches");
     let release = args.iter().any(|arg| arg == "--release");
@@ -457,12 +457,25 @@ pub fn run(args: &[String]) -> Result<PathBuf, String> {
     let version = workspace_version(&root)?;
     let binary = root.join("target").join("dist").join("hearth-agent");
     let host = System::new();
+    let env = preview_build_env(args)?;
+    let trial = !env.is_empty();
+    // Une construction d'essai porte des notes de test et n'a pas la clé de publication à vérifier : elle sort sous un
+    // autre nom, sans enregistrement de construction (release-stage la refusera faute d'enregistrement).
     let spec = Build {
         dist: root.join("target").join("dist"),
-        out_name: "hearth-agent".to_owned(),
-        env: preview_build_env(args)?,
+        out_name: if trial {
+            "hearth-agent-preview"
+        } else {
+            "hearth-agent"
+        }
+        .to_owned(),
+        expect_key: if trial {
+            None
+        } else {
+            Some(repo_key_line(&root)?)
+        },
+        env,
         expect_version: version.clone(),
-        expect_key: Some(repo_key_line(&root)?),
     };
     if !spec.env.is_empty() {
         println!(
@@ -484,6 +497,10 @@ pub fn run(args: &[String]) -> Result<PathBuf, String> {
     remove_record(&binary, &mut |line| println!("{line}"));
     let before = report_tree(&host, &root, &mut |line| println!("{line}"));
     let path = build(&spec)?;
+    if trial {
+        remove_record(&path, &mut |line| println!("{line}"));
+        return Ok(path);
+    }
     let after = Survey::take(&host, &root);
     match write_build_record(&path, &before, &after, &version) {
         Ok(line) => println!("{line}"),

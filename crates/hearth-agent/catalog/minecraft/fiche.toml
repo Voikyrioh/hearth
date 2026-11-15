@@ -145,7 +145,7 @@ publish = "always"
 default_host = 25565
 mapping = "nat"                           # le port du jeu dans le conteneur reste 25565 ; les joueurs se connectent au port choisi sur le serveur
 
-# La console interne de l'image (RCON), jamais publiée : l'image s'en sert pour l'arrêt propre.
+# La console interne de l'image (RCON), jamais publiée : outils de l'image (rcon-cli, sonde). Son rôle dans l'arrêt n'est pas vérifié par un essai réel.
 [[port]]
 id = "rcon"
 container = 25575
@@ -223,7 +223,7 @@ folder = "packs"
 [[mods.pack.genre]]
 kind = "server_pack"
 env = "GENERIC_PACK"
-variants = ["vanilla", "paper", "purpur", "fabric", "quilt", "forge", "neoforge"]
+variants = ["paper", "purpur", "fabric", "quilt", "forge", "neoforge"]
 
 # Un pack Modrinth (`.mrpack`) : `MODRINTH_MODPACK`, le moteur vient du pack.
 [[mods.pack.genre]]
