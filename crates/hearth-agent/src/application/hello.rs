@@ -9,7 +9,9 @@ use hearth_proto::api::game_settings::CAPABILITY_GAME_SETTINGS;
 use hearth_proto::api::service_delete::CAPABILITY_SERVICE_DELETE;
 use hearth_proto::api::service_logs::CAPABILITY_SERVICE_LOGS;
 use hearth_proto::api::service_ops::CAPABILITY_SERVICE_OPS;
-use hearth_proto::api::service_ops::{CAPABILITY_CATALOG, CAPABILITY_GAME_SERVICES};
+use hearth_proto::api::service_ops::{
+    CAPABILITY_CATALOG, CAPABILITY_GAME_PACKS, CAPABILITY_GAME_SERVICES,
+};
 use hearth_proto::api::service_update::CAPABILITY_SERVICE_UPDATE;
 use hearth_proto::api::services::{
     CAPABILITY_SERVICE_ADOPTION, CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES,
@@ -85,6 +87,9 @@ impl HelloService {
                     // Déposer un fichier par transfert reprenable (HRT-95) : `POST /deposits`, `GET /deposits/{id}`,
                     // `GET /transfers/{id}` (socket) et `DELETE /transfers/{id}`.
                     CAPABILITY_SERVICE_TRANSFERS,
+                    // Un pack de mods déposé (HRT-124) : `POST /deployments/pack-check` et `source.pack` de
+                    // `POST /deployments`, sur la zone d'attente des transferts.
+                    CAPABILITY_GAME_PACKS,
                 ],
             },
         }
@@ -146,7 +151,8 @@ mod tests {
                 "service-update",
                 "service-backups",
                 "world-import",
-                "service-transfers"
+                "service-transfers",
+                "game-packs"
             ]
         );
     }

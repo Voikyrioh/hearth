@@ -23,6 +23,7 @@ pub mod ids;
 pub mod install;
 pub mod logging;
 pub mod ops_observer;
+pub mod pack_deposits;
 pub mod random;
 pub mod sealer;
 pub mod security_feed;
