@@ -122,6 +122,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | [FIX-01M47N6Z485TWN2H770KQ5H80R](./FIX-01M47N6Z485TWN2H770KQ5H80R.md) | Une version posée à la main par-dessus une mise à jour laissée en cours était défaite au démarrage (ancien binaire et copie périmée de la base remis) | 2026-10-06 |
 | [FIX-01M7G6V7E6DY5PHJ6TQ848YJ7A](./FIX-01M7G6V7E6DY5PHJ6TQ848YJ7A.md) | Un pack de mods envoyé n'est jamais retrouvé par l'agent (dépôt cherché sous le nom du compte, rangé sous son identifiant) (HRT-124) | 2026-11-15 |
 | [FIX-01M7G757NC6ZK02PVR6KY2C7N2](./FIX-01M7G757NC6ZK02PVR6KY2C7N2.md) | Toute installation depuis une fiche refusée par le moteur : image épinglée `@sha256` mal découpée au téléchargement | 2026-11-15 |
+| [FIX-01M7G9JGSR3FNA775EFAAV07KN](./FIX-01M7G9JGSR3FNA775EFAAV07KN.md) | La CI rouge à chaque bump de version : tests et scénario e2e qui écrivent la version courante en dur | 2026-11-15 |
 
 À créer lors de tout bugfix conformément à `skills/bugfix/SKILL.md` et `docs/code-rules.md`.
 
