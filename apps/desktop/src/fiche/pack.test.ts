@@ -4,6 +4,7 @@ import { rich } from "@/link/simulated-fiches";
 import {
   allowedVariants,
   genreLabel,
+  type PackDraft,
   packFacts,
   packGenres,
   packIssue,
@@ -67,11 +68,15 @@ describe("ce que la fiche offre", () => {
 });
 
 describe("ce qui empêche de continuer", () => {
-  const read = (pack: PackInspect) => ({
+  const draftOf = (overrides: Partial<PackDraft> = {}): PackDraft => ({
+    path: "C:p.zip",
     deposit: "d1",
     fileName: "p.zip",
-    check: { kind: "read" as const, pack },
+    delivered: true,
+    check: null,
+    ...overrides,
   });
+  const read = (pack: PackInspect) => draftOf({ check: { kind: "read" as const, pack } });
 
   it("n'a aucun défaut sans la case cochée", () => {
     expect(packIssue(fiche(), false, null, "vanilla")).toBeNull();
@@ -79,17 +84,17 @@ describe("ce qui empêche de continuer", () => {
 
   it("demande un fichier, puis sa lecture", () => {
     expect(packIssue(fiche(), true, null, "modded")).toBe("no_file");
-    expect(
-      packIssue(fiche(), true, { deposit: "d1", fileName: "p.zip", check: null }, "modded"),
-    ).toBe("unread");
+    expect(packIssue(fiche(), true, draftOf({ deposit: null, delivered: false }), "modded")).toBe(
+      "unsent",
+    );
+    expect(packIssue(fiche(), true, draftOf({ delivered: false }), "modded")).toBe("sending");
+    expect(packIssue(fiche(), true, draftOf(), "modded")).toBe("unread");
   });
 
   it("refuse un pack que l'agent a refusé", () => {
-    const refused = {
-      deposit: "d1",
-      fileName: "p.zip",
+    const refused = draftOf({
       check: { kind: "refused" as const, refusal: { kind: "unknown" as const } },
-    };
+    });
     expect(packIssue(fiche(), true, refused, "modded")).toBe("refused");
   });
 

@@ -21,7 +21,7 @@ import type {
 } from "./gameSettings";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
-import type { PackCheck, PackDeposit } from "./packs";
+import type { PackCheck } from "./packs";
 import type {
   AdminActKind,
   PasswordNeed,
@@ -780,7 +780,10 @@ export class SimulatedLinkBridge implements LinkBridge {
             : { kind: refusal.kind },
       };
     }
-    return this.transfers.start(serverId, path);
+    const outcome = await this.transfers.start(serverId, path);
+    // Ce que l'agent d'essai lira dans le fichier une fois livré (`packs.willRead`).
+    if (outcome.kind === "started") this.packs.attach(outcome.transfer.id);
+    return outcome;
   }
 
   async readTransfers(): Promise<Transfer[]> {
@@ -1093,13 +1096,6 @@ export class SimulatedLinkBridge implements LinkBridge {
       throw this.fail({ kind: "missing_services_right" });
     }
     return this.packs.inspect(deposit);
-  }
-
-  async depositPack(serverId: string): Promise<PackDeposit> {
-    this.requireServer(serverId);
-    await this.delay();
-    this.calls.push("pack deposit");
-    return this.packs.nextDeposit();
   }
 
   async installFiche(

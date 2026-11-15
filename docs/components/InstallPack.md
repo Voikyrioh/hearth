@@ -6,4 +6,4 @@ Le pack de mods de l'installation d'un serveur de jeu (HRT-125, BR-MOD-006 à 00
 
 - Props : `install` (`FicheInstallState`, le résultat de `useFicheInstall`)
 - Événements et slots : aucun
-- Notes : l'envoi du fichier dans la zone d'attente de l'agent (transferts reprenables, HRT-95 et HRT-96) n'est pas encore livré dans ce client : `depositPack` répond `unavailable` et la carte le dit. Tests : `pages/InstallPack.test.ts`, règles pures `fiche/pack.test.ts`.
+- Envoi : « Choisir un fichier » ouvre la boîte « Ouvrir » du système (`useTransfersStore().pick()`), puis la fenêtre d'acte d'écriture « Envoyer le pack au serveur » (`AdminActDialog`, mot de passe selon la règle de l'agent) lance l'envoi par transfert reprenable (`start`, HRT-95 et HRT-96). L'identifiant du transfert est celui du dépôt : quand le transfert est fini, la carte fait lire le pack (`inspectPack`). Un envoi arrêté ou annulé retire le fichier choisi.

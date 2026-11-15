@@ -6,8 +6,8 @@ import type { ModrinthPackDto, PackCheckOutcome, PackInspectDto } from "@/bindin
  * l'agent plus, selon lui, un nombre ou un nom d'hôte : jamais un nom d'entrée de l'archive, jamais un texte de l'agent.
  *
  * - `inspectPack` est une CONSULTATION (ni acte, ni journal) : rien n'est rangé, le dépôt reste en attente ;
- * - `depositPack` ouvre le choix du fichier et l'envoie dans la zone d'attente de l'agent (transfert reprenable,
- *   HRT-95 et HRT-96) ; tant que le transfert n'est pas livré dans cette version, la coquille répond `unavailable`.
+ * - le fichier arrive par les transferts reprenables (HRT-95, HRT-96 : `startDeposit`, `readTransfers`) ; l'identifiant
+ *   du transfert terminé est l'identifiant du dépôt que `inspectPack` lit.
  */
 
 /** Le genre d'un pack, tel que l'agent l'a reconnu. `unknown` : un genre plus récent que ce client. */
@@ -49,12 +49,6 @@ export type PackRefusal =
 export type PackCheck =
   | { kind: "read"; pack: PackInspect }
   | { kind: "refused"; refusal: PackRefusal };
-
-/** L'issue du dépôt d'un fichier : déposé (l'identifiant de l'agent), annulé par l'utilisateur, ou pas encore possible. */
-export type PackDeposit =
-  | { kind: "deposited"; deposit: string; fileName: string }
-  | { kind: "cancelled" }
-  | { kind: "unavailable" };
 
 function toModrinth(dto: ModrinthPackDto): ModrinthPack {
   return {

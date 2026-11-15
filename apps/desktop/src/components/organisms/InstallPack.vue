@@ -6,6 +6,7 @@ import HCheckbox from "@/components/atoms/HCheckbox.vue";
 import HTag from "@/components/atoms/HTag.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import DashCard from "@/components/molecules/DashCard.vue";
+import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import type { FicheInstallState } from "@/composables/useFicheInstall";
 import {
   genreLabel,
@@ -16,6 +17,7 @@ import {
   readPack,
 } from "@/fiche/pack";
 import { t } from "@/i18n";
+import { progressText } from "@/transfers/messages";
 
 // Le pack de mods de l'installation (HRT-125, BR-MOD-006 à 009, 016) : la case « Installer avec un pack de mods », le choix
 // du fichier, et ce que l'agent a LU dans le contenu (le genre n'est jamais un champ à remplir). Le moteur de serveur et la
@@ -35,6 +37,7 @@ const issue = computed(() => props.install.packProblem.value);
 const issueText = computed(() => {
   const current = issue.value;
   if (current === null || current === "refused") return null;
+  // « Envoyer » et « en route » se disent sans attendre : ce n'est pas un oubli, c'est l'état du fichier.
   if ((current === "no_file" || current === "unread") && !props.install.shown("pack")) return null;
   return packIssueText(current);
 });
@@ -66,8 +69,17 @@ const issueText = computed(() => {
         <span v-if="install.packBusy.value" class="pack__note" role="status">
           {{ t("pack.reading") }}
         </span>
-        <Callout v-if="install.packUnavailable.value" tone="warn" role="alert" data-pack-unavailable>
-          {{ t("pack.unavailable") }}
+        <div v-if="draft.pack && draft.pack.deposit === null" class="pack__choose">
+          <HButton variant="primary" data-pack-send @click="install.openPackSend()">
+            {{ t("pack.send") }}
+          </HButton>
+          <span class="pack__note">{{ t("pack.sendNote") }}</span>
+        </div>
+        <span v-if="install.packTransfer.value && !draft.pack?.delivered" class="pack__note" role="status" data-pack-progress>
+          {{ t("pack.sending", { progress: progressText(install.packTransfer.value) }) }}
+        </span>
+        <Callout v-if="install.packSendFailed.value" tone="error" role="alert" data-pack-send-failed>
+          {{ t("pack.sendFailed") }}
         </Callout>
         <Callout v-if="install.packReadFailed.value" tone="error" role="alert" data-pack-failed>
           {{ t("pack.readFailed") }}
@@ -101,6 +113,21 @@ const issueText = computed(() => {
           {{ issueText }}
         </Callout>
       </template>
+      <AdminActDialog
+        :open="install.packSendOpen.value"
+        :server-id="install.serverId()"
+        kind="file_write"
+        :title="t('pack.sendTitle')"
+        :submit-label="t('pack.sendSubmit')"
+        :cancel-label="t('pack.sendLater')"
+        :perform="install.sendPack"
+        :refusal-text="() => install.packSendRefusalText()"
+        @close="install.closePackSend()"
+      >
+        <p class="pack__help" data-pack-send-help>
+          {{ t("pack.sendHelp", { name: safeText(draft.pack?.fileName ?? "") }) }}
+        </p>
+      </AdminActDialog>
     </div>
   </DashCard>
 </template>

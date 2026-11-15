@@ -223,9 +223,6 @@ export class NullLinkBridge implements LinkBridge {
   async inspectPack(): Promise<never> {
     return this.unavailable();
   }
-  async depositPack(): Promise<never> {
-    return this.unavailable();
-  }
   async readGameSettings(): Promise<never> {
     return this.unavailable();
   }

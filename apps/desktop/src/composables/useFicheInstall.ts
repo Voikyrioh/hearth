@@ -1,8 +1,10 @@
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useDeployCheck } from "@/composables/useDeployCheck";
 import type { DeployFlowSource } from "@/composables/useDeployFlow";
 import { useEngineCapacity } from "@/composables/useEngineCapacity";
 import { useFicheDetail } from "@/composables/useFicheDetail";
+import type { ActReport } from "@/composables/useReauth";
+import { useServerAction } from "@/composables/useServerAction";
 import { useWorldImport } from "@/composables/useWorldImport";
 import type { PortVerdict } from "@/deploy/messages";
 import { portVerdict } from "@/deploy/messages";
@@ -13,7 +15,7 @@ import { toInstallRequest } from "@/fiche/draft";
 import { diskVerdict, memoryNotices, minimumVerdicts, placement, tooSmall } from "@/fiche/fit";
 import { ficheFormRefusal } from "@/fiche/messages";
 import { proposedName } from "@/fiche/name";
-import { allowedVariants, packGenres, packIssue, readPack } from "@/fiche/pack";
+import { allowedVariants, fileNameOf, packGenres, packIssue, readPack } from "@/fiche/pack";
 import {
   duplicateHostPorts,
   type HostPortIssue,
@@ -23,11 +25,19 @@ import {
   startingHostPort,
 } from "@/fiche/ports";
 import { ficheKnowsWorlds, hiddenByWorld, worldMissing } from "@/fiche/world";
-import { type DeployCheckInput, type DeployRefusal, getLinkBridge, type ServiceInfo } from "@/link";
+import {
+  type DeployCheckInput,
+  type DeployRefusal,
+  type DepositRefusal,
+  getLinkBridge,
+  type ServiceInfo,
+} from "@/link";
 import type { Resources } from "@/resources";
 import { problemText } from "@/settings/messages";
 import { useFicheInstallStore } from "@/stores/ficheInstall";
 import { useServicesStore } from "@/stores/services";
+import { useTransfersStore } from "@/stores/transfers";
+import { depositRefusalText } from "@/transfers/messages";
 
 /**
  * L'installation d'un serveur de jeu depuis une fiche (HRT-102) : la fiche lue, le brouillon en mémoire, les défauts de
@@ -154,8 +164,49 @@ export function useFicheInstall(
       : null,
   );
   const packBusy = ref(false);
-  /** L'envoi d'un fichier n'est pas encore possible depuis ce client. */
-  const packUnavailable = ref(false);
+  const transfers = useTransfersStore();
+  const sendAction = useServerAction(() => serverId());
+  /** La fenêtre « Envoyer le pack au serveur » (acte d'écriture : confirmation de l'agent) est ouverte. */
+  const packSendOpen = ref(false);
+  /** L'envoi du fichier s'est arrêté pour de bon (échec ou annulation) : le fichier est à choisir de nouveau. */
+  const packSendFailed = ref(false);
+  /** Le dernier refus à l'ouverture du dépôt (ce que la fenêtre dit sous le champ). */
+  const packSendRefusal = ref<DepositRefusal | null>(null);
+  /** L'envoi du pack choisi, tel que la liste des transferts le tient ; `null` : rien n'est parti. */
+  const packTransfer = computed(() => {
+    const deposit = draft.value?.pack?.deposit;
+    return deposit ? (transfers.of(serverId()).find((item) => item.id === deposit) ?? null) : null;
+  });
+  let stopWatching: (() => void) | undefined;
+  let stopped = false;
+  onMounted(async () => {
+    const stop = await transfers.watch();
+    if (stopped) stop();
+    else stopWatching = stop;
+  });
+  onBeforeUnmount(() => {
+    stopped = true;
+    stopWatching?.();
+  });
+  watch(
+    () => packTransfer.value?.status,
+    (status) => {
+      const current = draft.value?.pack;
+      if (!current || current.deposit === null || status === undefined) return;
+      if (status === "done" && !current.delivered) {
+        const deposit = current.deposit;
+        edit((value) => {
+          if (value.pack?.deposit === deposit) value.pack.delivered = true;
+        });
+        void readDeposit(deposit);
+      } else if (status === "failed" || status === "cancelled") {
+        packSendFailed.value = true;
+        edit((value) => {
+          value.pack = null;
+        });
+      }
+    },
+  );
   /** La lecture du pack a échoué (lien, droit) : le fichier est à choisir de nouveau. */
   const packReadFailed = ref(false);
   /** Au plus UN moteur permis pour ce genre de pack : il est choisi d'office (un pack Modrinth). */
@@ -174,7 +225,8 @@ export function useFicheInstall(
       current.packWanted = on;
       if (!on) current.pack = null;
     });
-    packUnavailable.value = false;
+    packSendFailed.value = false;
+    packSendOpen.value = false;
     packReadFailed.value = false;
   }
   /** Demande à l'agent ce qu'est le pack déposé (une consultation, rien n'est rangé). */
@@ -196,30 +248,66 @@ export function useFicheInstall(
       packBusy.value = false;
     }
   }
-  /** Choisit un fichier, l'envoie dans la zone d'attente de l'agent puis le fait lire. */
+  /** Choisit le fichier dans la boîte « Ouvrir » du système, puis ouvre la fenêtre qui l'envoie au serveur. */
   async function choosePack(): Promise<void> {
     if (packBusy.value) return;
-    packBusy.value = true;
-    packUnavailable.value = false;
+    packSendFailed.value = false;
     packReadFailed.value = false;
+    let path: string | null;
     try {
-      const deposited = await getLinkBridge().depositPack(serverId());
-      if (deposited.kind === "unavailable") {
-        packUnavailable.value = true;
-        return;
-      }
-      if (deposited.kind === "cancelled") return;
-      edit((current) => {
-        current.pack = { deposit: deposited.deposit, fileName: deposited.fileName, check: null };
-      });
+      path = await transfers.pick();
     } catch {
       packReadFailed.value = true;
       return;
-    } finally {
-      packBusy.value = false;
     }
-    const current = draft.value?.pack;
-    if (current) await readDeposit(current.deposit);
+    if (path === null) return;
+    edit((current) => {
+      current.pack = {
+        path,
+        deposit: null,
+        fileName: fileNameOf(path),
+        delivered: false,
+        check: null,
+      };
+    });
+    packSendOpen.value = true;
+  }
+  /** Rouvre la fenêtre d'envoi (le compte l'avait fermée sans envoyer). */
+  function openPackSend(): void {
+    packSendOpen.value = true;
+  }
+  function closePackSend(): void {
+    packSendOpen.value = false;
+  }
+  /** Ouvre l'envoi du fichier choisi (acte d'écriture, confirmé par l'agent) ; le fichier arrive par un transfert reprenable. */
+  async function sendPack(adminPassword: string | null): Promise<ActReport> {
+    const path = draft.value?.pack?.path;
+    if (!path) return { kind: "failed" };
+    packSendRefusal.value = null;
+    const outcome = await sendAction.run(() => transfers.start(serverId(), path, adminPassword));
+    if (outcome === null) return sendAction.failedReport();
+    if (outcome.kind === "started") {
+      const id = outcome.transfer.id;
+      edit((current) => {
+        if (current.pack?.path === path) current.pack.deposit = id;
+      });
+      return { kind: "done" };
+    }
+    if (outcome.kind === "unknown") return { kind: "unknown" };
+    packSendRefusal.value = outcome.refusal;
+    const refusal = outcome.refusal;
+    return {
+      kind: "refused",
+      refusal:
+        refusal.kind === "too_many_attempts"
+          ? { kind: refusal.kind, retry_after_s: refusal.waitS }
+          : { kind: refusal.kind },
+    };
+  }
+  /** Ce que la fenêtre d'envoi dit d'un refus qui n'est pas celui de la confirmation. */
+  function packSendRefusalText(): string | undefined {
+    const refusal = packSendRefusal.value;
+    return refusal === null ? undefined : depositRefusalText(refusal);
   }
 
   /** Au moins un défaut de forme sur la page « Réponses ». */
@@ -464,7 +552,14 @@ export function useFicheInstall(
     packWay,
     packProblem,
     packBusy,
-    packUnavailable,
+    serverId,
+    packSendOpen,
+    packSendFailed,
+    packTransfer,
+    openPackSend,
+    closePackSend,
+    sendPack,
+    packSendRefusalText,
     packReadFailed,
     setPackWanted,
     choosePack,

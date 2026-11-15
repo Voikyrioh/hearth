@@ -1,17 +1,17 @@
 import type { FicheDetail } from "./catalog";
 import type { DeployRefusal } from "./deploy";
-import type { PackCheck, PackDeposit } from "./packs";
+import type { PackCheck } from "./packs";
 
 /**
  * La zone d'attente des packs de mods du pont SIMULÉ (HRT-124) : un agent d'essai qui juge un pack COMME LE VRAI
  * (`crates/hearth-agent/src/application/pack_intake.rs`, `deployments.rs`) : un dépôt inconnu se dit `PACK_UNKNOWN`, un pack
  * refusé est retiré AUSSITÔT (BR-MOD-016), la fiche doit offrir le genre lu avec la variante choisie. Un test dit à l'avance
- * ce que le « choix du fichier » dépose (`willDeposit`) : le contenu d'un fichier n'existe pas dans un navigateur d'essai,
- * seulement ce que l'agent en aurait lu. Jamais livré (derrière `import.meta.env.DEV`).
+ * ce que l'agent lira dans le prochain fichier envoyé (`willRead`, rattaché au transfert que `startDeposit` ouvre) : le
+ * contenu d'un fichier n'existe pas dans un navigateur d'essai, seulement ce que l'agent en aurait lu. Jamais livré (derrière `import.meta.env.DEV`).
  */
 export class SimulatedPacks {
   private readonly deposits = new Map<string, PackCheck>();
-  private readonly upcoming: PackDeposit[] = [];
+  private readonly upcoming: PackCheck[] = [];
   /** Les dépôts que l'agent d'essai a retirés (pack refusé), dans l'ordre. */
   readonly removed: string[] = [];
 
@@ -20,19 +20,15 @@ export class SimulatedPacks {
     this.deposits.set(deposit, check);
   }
 
-  /** Le prochain « choix du fichier » dépose ce fichier. */
-  willDeposit(deposit: string, fileName: string, check: PackCheck): void {
-    this.put(deposit, check);
-    this.upcoming.push({ kind: "deposited", deposit, fileName });
+  /** Le prochain fichier envoyé sera lu ainsi par l'agent d'essai. */
+  willRead(check: PackCheck): void {
+    this.upcoming.push(check);
   }
 
-  /** Le prochain « choix du fichier » est annulé par l'utilisateur. */
-  willCancel(): void {
-    this.upcoming.push({ kind: "cancelled" });
-  }
-
-  nextDeposit(): PackDeposit {
-    return this.upcoming.shift() ?? { kind: "unavailable" };
+  /** Le transfert que l'agent d'essai vient d'ouvrir porte le prochain fichier annoncé (sinon : un pack serveur banal). */
+  attach(deposit: string): void {
+    const check = this.upcoming.shift();
+    if (check !== undefined) this.put(deposit, check);
   }
 
   /** `POST /deployments/pack-check` : une consultation ; un refus retire le dépôt. */

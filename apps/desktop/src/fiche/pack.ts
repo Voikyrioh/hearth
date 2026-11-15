@@ -9,12 +9,27 @@ import { formatSize } from "@/serviceOps/messages";
  * fiche dit quels genres elle prend et avec quels moteurs de serveur (variantes) ; l'agent est l'arbitre au lancement.
  */
 
-/** Le pack déposé que la saisie garde : l'identifiant de l'agent, le nom choisi (pour l'écran) et ce que l'agent en a lu. */
+/**
+ * Le pack que la saisie garde : le fichier choisi sur ce PC, l'identifiant du transfert que l'agent a ouvert (le dépôt),
+ * le fait que le fichier est entièrement arrivé dans la zone d'attente, et ce que l'agent en a lu. Jamais gardé hors de la
+ * mémoire.
+ */
 export interface PackDraft {
-  deposit: string;
+  /** Le chemin choisi dans la boîte « Ouvrir » du système : il ne quitte jamais ce PC (la coquille lit le fichier). */
+  path: string;
+  /** L'identifiant du dépôt (le transfert) une fois l'envoi ouvert ; `null` : rien n'est encore parti. */
+  deposit: string | null;
   /** Le nom du fichier choisi, tel que l'utilisateur le connaît ; jamais envoyé à l'agent. */
   fileName: string;
+  /** Le fichier est entièrement dans la zone d'attente de l'agent. */
+  delivered: boolean;
   check: PackCheck | null;
+}
+
+/** Le dernier nom d'un chemin, avec ses deux séparateurs. */
+export function fileNameOf(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
 }
 
 /** La voie « pack déposé » de la fiche : ses genres, ou `null` quand la fiche n'offre pas le dépôt d'un pack. */
@@ -38,6 +53,10 @@ export function readPack(draft: PackDraft | null): PackInspect | null {
 export type PackIssue =
   /** La case est cochée mais aucun fichier n'est choisi. */
   | "no_file"
+  /** Le fichier est choisi mais pas encore envoyé au serveur. */
+  | "unsent"
+  /** Le fichier est en route vers le serveur. */
+  | "sending"
   /** L'agent n'a pas encore dit ce qu'est ce pack. */
   | "unread"
   /** L'agent a refusé le pack : il n'est pas installable. */
@@ -56,6 +75,8 @@ export function packIssue(
 ): PackIssue | null {
   if (!wanted) return null;
   if (draft === null) return "no_file";
+  if (draft.deposit === null) return "unsent";
+  if (!draft.delivered) return "sending";
   if (draft.check === null) return "unread";
   if (draft.check.kind === "refused") return "refused";
   const allowed = allowedVariants(detail, draft.check.pack);
@@ -165,6 +186,10 @@ export function packIssueText(issue: PackIssue): string {
   switch (issue) {
     case "no_file":
       return t("pack.issueNoFile");
+    case "unsent":
+      return t("pack.issueUnsent");
+    case "sending":
+      return t("pack.issueSending");
     case "unread":
       return t("pack.issueUnread");
     case "refused":
