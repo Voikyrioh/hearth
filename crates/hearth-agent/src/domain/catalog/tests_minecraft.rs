@@ -87,10 +87,27 @@ fn env(draft: &ServiceSpecDraft, name: &str) -> Option<String> {
 }
 
 #[test]
-fn the_fiche_is_a_preview_with_a_pinned_image_per_java_and_no_world_or_mods_it_cannot_prove() {
+fn the_fiche_is_published_with_a_pinned_image_per_java_a_tested_ready_sign_and_a_measured_memory() {
     let fiche = minecraft();
     let file = &fiche.file;
-    assert_eq!(file.status, super::loading::schema::fiche::Status::Preview);
+    // Publiée par le banc d'essai réel du 15/11/2026 (ADR-0053) : signe « prêt » essayé, mémoire mesurée.
+    assert_eq!(
+        file.status,
+        super::loading::schema::fiche::Status::Published
+    );
+    assert_eq!(
+        file.ready.as_ref().map(|r| r.status),
+        Some(super::loading::schema::fiche::Proof::Tested)
+    );
+    assert_eq!(
+        file.resources.memory.min_bytes,
+        Some(2 * 1024 * 1024 * 1024)
+    );
+    assert_eq!(
+        file.resources.memory.recommended_bytes,
+        Some(4 * 1024 * 1024 * 1024)
+    );
+    assert!(super::loading::memory::recommended_gap(file).is_none());
     assert_eq!(file.image.repository, "itzg/minecraft-server");
     assert!(
         file.image
@@ -98,7 +115,7 @@ fn the_fiche_is_a_preview_with_a_pinned_image_per_java_and_no_world_or_mods_it_c
             .as_deref()
             .is_some_and(|d| d.starts_with("sha256:"))
     );
-    // Les moteurs à mods de la 1.20 tournent avec Java 17 ; les autres avec Java 21.
+    // Les moteurs à mods de la 1.20 tournent avec Java 17, NeoForge avec Java 21, les autres avec Java 25.
     let tag = |id: &str| {
         file.variant
             .iter()
@@ -106,6 +123,7 @@ fn the_fiche_is_a_preview_with_a_pinned_image_per_java_and_no_world_or_mods_it_c
             .and_then(|v| v.image_tag.clone())
     };
     assert_eq!(tag("fabric").as_deref(), Some("java17"));
+    assert_eq!(tag("neoforge").as_deref(), Some("java21"));
     assert_eq!(tag("vanilla"), None);
     // Spigot n'est pas proposé (l'image dit que son téléchargement n'est plus pris en charge).
     assert!(file.variant.iter().all(|v| v.id != "spigot"));
@@ -183,7 +201,7 @@ fn the_default_install_is_the_official_server_with_the_latest_version_and_no_pac
     assert_eq!(env(&draft, "TYPE").as_deref(), Some("VANILLA"));
     assert_eq!(env(&draft, "VERSION").as_deref(), Some("LATEST"));
     assert!(env(&draft, "GENERIC_PACK").is_none() && env(&draft, "MODRINTH_MODPACK").is_none());
-    assert_eq!(draft.image_tag, "java21");
+    assert_eq!(draft.image_tag, "java25");
 }
 
 #[test]

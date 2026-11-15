@@ -1,10 +1,9 @@
 # Minecraft Java, serveur officiel, Paper, Purpur, Fabric, Quilt, Forge, NeoForge, ou avec un pack de mods.
-# Fiche en `preview` (HRT-116, ADR-0050 version 2, ADR-0054).
+# Fiche publiée (HRT-116, ADR-0050 version 2, ADR-0053, ADR-0054) : essayée sur ses vraies images par le banc d'essai réel
+# `tests/fiche_live_minecraft.rs`, sur la forge, le 15/11/2026 (relevé dans l'ADR-0053).
 #
 # Construite depuis la documentation de l'image `itzg/minecraft-server` (https://docker-minecraft-server.readthedocs.io)
-# et l'inventaire des jeux (section 3.1). Tout ce qui est marqué « non vérifié » ne l'a pas été par un essai réel :
-# rien n'a été ajouté de mémoire. Elle n'est publiable qu'avec le passage du banc d'essai (ADR-0053, HRT-114) et une
-# mémoire recommandée mesurée.
+# et l'inventaire des jeux (section 3.1), puis essayée sur ses vraies images : rien n'a été ajouté de mémoire.
 #
 # Ce que cette fiche NE fait pas, par décision (BR-MOD-016, BR-MOD-017) : aucune variable `CF_*`, aucun type
 # `AUTO_CURSEFORGE`, aucune liste de téléchargements. Un pack CurseForge se dépose sous sa forme « pack serveur »
@@ -12,17 +11,17 @@
 
 format = 2
 id = "minecraft"
-version = 1
+version = 2
 family = "minecraft"
 name = "Minecraft Java"
 summary = "Le serveur de Minecraft Java : officiel, Paper, Purpur, Fabric, Quilt, Forge ou NeoForge, avec ou sans pack de mods."
-status = "preview"
+status = "published"
 platform = "linux"
 
 [image]
 repository = "itzg/minecraft-server"
-tag = "java21"                            # versions récentes du jeu (1.20.5 et suivantes demandent Java 21)
-digest = "sha256:498b79ce639cff2792206c23d6bd89c6fb43a2e446a4d97ff78ef1a784428caa"
+tag = "java25"                            # dernières versions du jeu : la 26.x demande Java 25 (essai réel du 15/11/2026 : « LATEST » = 26.3 ne démarre pas sur java21)
+digest = "sha256:52a530ef9f3af25c0536c21e5b7c6bad7c1e1e7777fc186c4196c3d1f7635113"
 game_updates = "every_start"              # VERSION=LATEST : l'image prend la dernière version à chaque démarrage ; une version précise reste telle quelle
 
 [owner]
@@ -104,6 +103,8 @@ id = "neoforge"
 label = "NeoForge"
 help = "Le successeur de Forge, avec Java 21."
 default = false
+image_tag = "java21"
+image_digest = "sha256:498b79ce639cff2792206c23d6bd89c6fb43a2e446a4d97ff78ef1a784428caa"
 
 [[variant.env]]
 name = "TYPE"
@@ -169,7 +170,8 @@ owner = "gid"
 # Le tas de la JVM suit la limite de mémoire du service : `MEMORY` vide laisse la JVM calculer son tas, et
 # `MaxRAMPercentage` le fixe à 75 % de la limite (le reste sert aux mémoires hors tas). Documentation de l'image :
 # « To let the JVM calculate heap size automatically, unset MEMORY with an empty value ». C'est donc le curseur de
-# mémoire de l'installation qui règle Minecraft, jamais un chiffre de la fiche. Non vérifié par un essai réel.
+# mémoire de l'installation qui règle Minecraft, jamais un chiffre de la fiche. Vérifié par le banc d'essai réel : avec
+# 10 Gio, le serveur du pack occupe 7,6 Gio (tas de 7,5 Gio au plus).
 [[env]]
 name = "MEMORY"
 value = ""
@@ -241,12 +243,13 @@ source_label = "Mojang et l'éditeur du moteur"
 evidence = "unmeasured"
 
 [ready]
-log_contains = "For help, type"           # fin de la ligne « Done (…s)! For help, type "help" » de Minecraft ; vu sur l'image java17 avec Prominence II (15/11, Done (47,5 s)! For help, type "help") ; banc d'essai Hearth non lancé
-status = "untested"
+log_contains = "For help, type"           # fin de la ligne « Done (…s)! For help, type "help" » de Minecraft ; vu par le banc d'essai réel (forge, 15/11/2026) : jeu officiel après 10 s, Fabric + Prominence II après 95 s
+status = "tested"
 
 # L'image intercepte le signal d'arrêt, envoie « stop » au jeu par sa console interne (le jeu enregistre le monde) et
-# attend la fin du processus (`STOP_DURATION`). Le délai du moteur est plus long que cette attente. Non vérifié par un
-# essai réel.
+# attend la fin du processus (`STOP_DURATION`). Le délai du moteur est plus long que cette attente. Vérifié par le banc
+# d'essai réel (forge, 15/11/2026) : code de sortie 0, monde enregistré (`level.dat` réécrit), 0 s pour le jeu officiel et
+# 3 s pour Fabric + Prominence II, bien avant le délai.
 [stop]
 grace_s = 210
 signal = "SIGTERM"
@@ -254,8 +257,21 @@ world_saved = "by_image_on_signal"
 
 [resources]
 cpu = { evidence = "unmeasured" }
-memory = { evidence = "unmeasured" }
-disk = { evidence = "unmeasured" }
+# Banc d'essai réel, forge, 15/11/2026, sans joueur : ce sont les LIMITES essayées, chacune démarre, répond, enregistre et
+# s'arrête proprement. Jeu officiel (26.3) avec 2 Gio : 552 Mio au repos 60 s après le signe « prêt » (compteur du moteur,
+# sans le cache de fichiers). Avec 4 Gio : 698 Mio. Fabric 1.20.1 + pack serveur Prominence II 4.1.8 avec 10 Gio : 7,6 Gio
+# au repos, pic de 9,4 Go (décimal) au démarrage (cache de fichiers compris), signe « prêt » après 95 s. Un plancher plus bas n'a pas
+# été essayé : il n'est pas affirmé.
+memory = { min_bytes = 2147483648, recommended_bytes = 4294967296, evidence = "measured" }
+# Jeu officiel : image (1 363 527 826 octets) + dossiers gérés après un premier démarrage. Avec le pack Prominence II :
+# 5 248 719 852 octets (image Fabric, fichier du pack de 1,58 Go et son contenu ouvert).
+disk = { install_bytes = 1497623985, evidence = "measured_idle" }
+
+# Le cran « Ultra » est celui d'un gros pack de mods (essayé avec 10 Gio : Prominence II, 377 mods).
+[[resources.memory_tier]]
+id = "ultra"
+from_bytes = 10737418240
+evidence = "measured"
 
 [[not_exposed]]
 key = "OPS"

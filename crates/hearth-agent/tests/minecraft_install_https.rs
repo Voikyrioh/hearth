@@ -1,7 +1,7 @@
 //! Installer Minecraft Java depuis SA fiche embarquée, de bout en bout (HRT-116, ADR-0050, ADR-0054) : vrai agent en
 //! HTTPS, vraie base, faux moteur, faux dossiers de données, fausse zone d'attente. Le scénario qui compte est celui
 //! de Prominence II : un pack serveur Fabric 1.20.1 déposé, une grosse mémoire, le contrat accepté par un geste.
-//! Rien ici ne lance un vrai serveur : la fiche reste `preview` tant que le banc d'essai réel ne l'a pas passée.
+//! Rien ici ne lance un vrai serveur : la fiche a été essayée sur ses vraies images par `tests/fiche_live_minecraft.rs`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -280,10 +280,10 @@ async fn without_the_contract_gesture_nothing_is_created_and_the_pack_stays_for_
 }
 
 #[tokio::test]
-async fn the_default_install_is_the_official_server_with_java_21_and_no_pack() {
+async fn the_default_install_is_the_official_server_with_java_25_and_no_pack() {
     let b = bench().await;
     let image = reference(&b.fiche, "vanilla");
-    assert!(image.contains(":java21@sha256:"), "{image}");
+    assert!(image.contains(":java25@sha256:"), "{image}");
     b.engine.publish_image(&image, PullScript::two_layers());
     let reply = b.install(b.request("officiel", None, None, true)).await;
     assert_eq!(reply.status, 202, "{}", reply.text);
