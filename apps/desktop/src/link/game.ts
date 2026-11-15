@@ -1,5 +1,6 @@
-import type { GameReadDto, GameSecretDto } from "@/bindings";
+import type { PublicAddressOutcome as BoundOutcome, GameReadDto, GameSecretDto } from "@/bindings";
 import type { FicheStop } from "./catalog";
+import type { AdminActKind } from "./reauth";
 
 /**
  * Le quotidien d'un serveur de jeu (HRT-104, `BR-JEU-017` à `BR-JEU-021`, `BR-JEU-025` à `BR-JEU-027`) : types de
@@ -32,6 +33,8 @@ export interface GameView {
   stop: FicheStop;
   ports: GamePort[];
   hasPassword: boolean;
+  /** L'adresse que le propriétaire donne à ses joueurs (HRT-215, BR-JEU-022) ; `null` : pas renseignée. */
+  publicAddress: string | null;
 }
 
 export type GameRead = { kind: "found"; view: GameView } | { kind: "absent" };
@@ -53,10 +56,26 @@ export function toGameRead(dto: GameReadDto): GameRead {
       stop: { ...view.stop },
       ports: view.ports.map((port) => ({ ...port })),
       hasPassword: view.hasPassword,
+      publicAddress: view.publicAddress ?? null,
     },
   };
 }
 
 export function toGameSecret(dto: GameSecretDto): GameSecret {
   return { password: dto.password ?? null };
+}
+
+// ── L'adresse des joueurs (HRT-215, BR-JEU-022) ─────────────────────────────────────────────────────
+
+/** Changer l'adresse est la modification d'un service : un acte confirmé, jamais couvert par l'élévation (BR-EDIT-017). */
+export const PUBLIC_ADDRESS_ACT_KIND: AdminActKind = "service_update";
+
+/** Pourquoi l'agent a refusé le changement (rien n'a été modifié) : des CODES, jamais un texte. */
+export type PublicAddressRefusal = Extract<BoundOutcome, { kind: "refused" }>["refusal"];
+
+/** Ce que l'envoi a donné : enregistrée, refusée, ou résultat inconnu (le lien est tombé avant la réponse : jamais rejoué). */
+export type PublicAddressOutcome = BoundOutcome;
+
+export function toPublicAddressOutcome(dto: BoundOutcome): PublicAddressOutcome {
+  return dto;
 }

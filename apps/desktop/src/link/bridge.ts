@@ -10,7 +10,7 @@ import type {
   DeployRequest,
 } from "./deploy";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
-import type { GameRead, GameSecret } from "./game";
+import type { GameRead, GameSecret, PublicAddressOutcome } from "./game";
 import type {
   AnalyzeOutcome,
   GameSettingsRead,
@@ -517,6 +517,17 @@ export interface LinkBridge {
    * `password: null` : le serveur n'en a pas (BR-JEU-027). La valeur n'est ni gardée ni tracée par la coquille :
    * l'appelant la tient en mémoire le temps de l'affichage et l'efface au remasquage.
    */
+  /**
+   * Change l'adresse que le propriétaire donne à ses joueurs (HRT-215, BR-JEU-022) ; `""` l'efface. La modification d'un
+   * service qui ne change que cette adresse : un acte confirmé, JAMAIS couvert par l'élévation (`adminPassword` redemandé
+   * à chaque fois, jamais gardé), jamais rejoué, sans recréer le conteneur. Sans le droit : échec `missing_services_right`.
+   */
+  setPublicAddress(
+    serverId: string,
+    key: string,
+    address: string,
+    adminPassword: string | null,
+  ): Promise<PublicAddressOutcome>;
   revealGamePassword(serverId: string, key: string): Promise<GameSecret>;
   /**
    * Lit un texte collé et dit, réglage par réglage, ce qu'il apporterait (`POST /services/{key}/settings/analyze`) :

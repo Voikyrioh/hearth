@@ -12,7 +12,7 @@ import type {
   DeployRequest,
 } from "./deploy";
 import type { DeviceRemovalOutcome, TrustedDevices } from "./devices";
-import type { GameRead, GameSecret } from "./game";
+import type { GameRead, GameSecret, PublicAddressOutcome } from "./game";
 import type {
   AnalyzeOutcome,
   GameSettingsRead,
@@ -1084,6 +1084,43 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.calls.push("game view read");
     if (this.games.failRead) throw this.fail({ kind: "unreachable" });
     return this.games.read(serverId, key);
+  }
+
+  async setPublicAddress(
+    serverId: string,
+    key: string,
+    address: string,
+    adminPassword: string | null,
+  ): Promise<PublicAddressOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("public address");
+    // Les contrôles dans l'ordre de l'agent : droit, confirmation (jamais couverte par l'élévation), puis la demande.
+    if (!this.accounts.ownRights(server).granted) {
+      throw this.fail({ kind: "missing_services_right" });
+    }
+    const confirmation = this.reauth.confirm(
+      serverId,
+      "service_update",
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    const accept = () =>
+      this.games.setPublicAddress(serverId, key, address, server.username ?? "marie");
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) accept();
+      this.publish(serverId, "reconnecting");
+      const opId = `sim-op-${this.nextOperation++}`;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return accept();
   }
 
   async revealGamePassword(serverId: string, key: string): Promise<GameSecret> {

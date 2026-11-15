@@ -205,6 +205,9 @@ export class NullLinkBridge implements LinkBridge {
   async readGameSettings(): Promise<never> {
     return this.unavailable();
   }
+  async setPublicAddress(): Promise<never> {
+    return this.unavailable();
+  }
   async readGameView(): Promise<never> {
     return this.unavailable();
   }

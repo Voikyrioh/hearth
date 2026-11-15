@@ -8,6 +8,8 @@ import {
   portRows,
   portsChanged,
   portsListText,
+  publicAddressIssue,
+  publicAddressRefusalText,
   roleText,
   sequenceSteps,
   stagesOf,
@@ -27,6 +29,7 @@ const view = (patch: Partial<FicheStop> = {}): GameView => ({
   fiche: "terraria",
   name: "Terraria",
   ficheVersion: 1,
+  publicAddress: null,
   stop: stop(patch),
   ports: [],
   hasPassword: false,
@@ -163,6 +166,7 @@ describe("l'adresse pour les joueurs (BR-JEU-020)", () => {
   it("prend le port de base du jeu et dit quand d'autres ports servent aussi", () => {
     expect(addressOf("192.168.1.20", [port(7777)])).toEqual({
       text: "192.168.1.20:7777",
+      public: false,
       others: false,
     });
     expect(
@@ -171,7 +175,7 @@ describe("l'adresse pour les joueurs (BR-JEU-020)", () => {
         port(27015),
         port(27015, { protocol: "udp" }),
       ]),
-    ).toEqual({ text: "forge.local:27015", others: true });
+    ).toEqual({ text: "forge.local:27015", public: false, others: true });
   });
 
   it("préfère le port de rôle « jeu », sinon le plus petit", () => {
@@ -248,5 +252,43 @@ describe("la décision d'un arrêt (BR-JEU-006, BR-JEU-007)", () => {
     expect(isStopOperation(operation({ kind: "stop" }))).toBe(true);
     expect(isStopOperation(operation({ kind: "restart" }))).toBe(true);
     expect(isStopOperation(operation({ kind: "update" }))).toBe(false);
+  });
+});
+
+describe("l'adresse publique (HRT-215, BR-JEU-022)", () => {
+  const ports = [{ hostPort: 7777, protocol: "tcp", role: "game", changed: false }];
+
+  it("préfère l'adresse publique à celle du client, avec le port de base du jeu", () => {
+    expect(addressOf("192.168.1.10", ports, "jeu.example.org")).toMatchObject({
+      text: "jeu.example.org:7777",
+      public: true,
+    });
+    expect(addressOf("192.168.1.10", ports, null)).toMatchObject({
+      text: "192.168.1.10:7777",
+      public: false,
+    });
+    expect(addressOf("192.168.1.10", ports, "  ")).toMatchObject({ public: false });
+    expect(addressOf("h", [], "jeu.example.org")).toBeNull();
+  });
+
+  it("met une adresse IPv6 entre crochets", () => {
+    expect(addressOf("h", ports, "2001:db8::1")?.text).toBe("[2001:db8::1]:7777");
+  });
+
+  it("accepte vide, un domaine et une IP, refuse protocole, port, espace et plus de 253 caractères", () => {
+    for (const ok of ["", "  ", "jeu.example.org", "203.0.113.9", "2001:db8::1"]) {
+      expect(publicAddressIssue(ok), ok).toBeNull();
+    }
+    expect(publicAddressIssue("https://jeu.example.org")).toBe("scheme");
+    expect(publicAddressIssue("jeu.example.org:7777")).toBe("port");
+    expect(publicAddressIssue("[2001:db8::1]:7777")).toBe("port");
+    expect(publicAddressIssue("jeu example.org")).toBe("space");
+    expect(publicAddressIssue("a".repeat(253))).toBeNull();
+    expect(publicAddressIssue("a".repeat(254))).toBe("too_long");
+  });
+
+  it("dit un refus de l'agent par son code, un code inconnu par le refus général", () => {
+    expect(publicAddressRefusalText({ kind: "conflict" })).toContain("a changé entre-temps");
+    expect(publicAddressRefusalText({ kind: "from_the_future" })).toContain("n'a pas enregistré");
   });
 });

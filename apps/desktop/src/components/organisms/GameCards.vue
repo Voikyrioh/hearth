@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import GameAddressCard from "@/components/molecules/GameAddressCard.vue";
 import GamePasswordCard from "@/components/molecules/GamePasswordCard.vue";
 import GamePortsCard from "@/components/molecules/GamePortsCard.vue";
 import GameStopCard from "@/components/molecules/GameStopCard.vue";
+import PublicAddressDialog from "@/components/organisms/PublicAddressDialog.vue";
 import { useGameView } from "@/composables/useGameView";
-import type { ServiceInfo } from "@/link";
+import type { ActReport } from "@/composables/useReauth";
+import { useServerAction } from "@/composables/useServerAction";
+import { t } from "@/i18n";
+import { getLinkBridge, type ServiceInfo } from "@/link";
 import { addressOf, mayBeGame } from "@/services/game";
-import type { RightsGate } from "@/services/rights";
+import { canAct, type RightsGate } from "@/services/rights";
 import { useServersStore } from "@/stores/servers";
+import { useToastsStore } from "@/stores/toasts";
 
 // Les quatre cartes de plus d'un serveur de jeu, AU-DESSUS de « Général » (HRT-104, design lots suivants 1.6) : l'adresse
 // à donner aux joueurs, les ports à ouvrir, le mot de passe du serveur et la façon dont le jeu s'arrête. Elles n'existent
@@ -47,8 +52,48 @@ const game = useGameView(
 );
 
 const view = game.view;
+const toasts = useToastsStore();
+const action = useServerAction(() => props.serverId);
+
+// ── L'adresse des joueurs (HRT-215, BR-JEU-022) ─────────────────────────────────────────────────
+// La modification d'un service qui ne change que cette adresse : un acte confirmé, jamais couvert par l'élévation, jamais
+// rejoué ; l'agent ne recrée rien. La carte relit la vue à la réussite (et au résultat inconnu : la vue dit ce qui s'est passé).
+const addressOpen = ref(false);
+const canEditAddress = computed(
+  () => canAct(props.gate) && props.connected && props.engineReady && !props.gone,
+);
+
+async function performAddress(address: string, adminPassword: string | null): Promise<ActReport> {
+  const id = props.serverId;
+  const key = props.service.key;
+  const outcome = await action.run(
+    () => getLinkBridge().setPublicAddress(id, key, address, adminPassword),
+    { unknownMessage: "game.address.unknown", passwordMissingIsRefusal: true },
+  );
+  if (!outcome) {
+    if (action.passwordMissing.value) {
+      return { kind: "refused", refusal: { kind: "password_required" } };
+    }
+    return action.failedReport();
+  }
+  if (outcome.kind === "saved") {
+    toasts.push({
+      kind: "success",
+      message: t(address === "" ? "game.address.cleared" : "game.address.saved"),
+    });
+    void game.reload();
+    return { kind: "done" };
+  }
+  if (outcome.kind === "unknown") {
+    void game.reload();
+    return { kind: "unknown" };
+  }
+  return { kind: "refused", refusal: outcome.refusal };
+}
 const host = computed(() => servers.byId(props.serverId)?.host ?? "");
-const address = computed(() => (view.value ? addressOf(host.value, view.value.ports) : null));
+const address = computed(() =>
+  view.value ? addressOf(host.value, view.value.ports, view.value.publicAddress) : null,
+);
 const stopped = computed(
   () => props.service.state === "stopped" || props.service.state === "error",
 );
@@ -56,7 +101,19 @@ const stopped = computed(
 
 <template>
   <template v-if="view">
-    <GameAddressCard :address="address" :stopped="stopped" />
+    <GameAddressCard
+      :address="address"
+      :stopped="stopped"
+      :can-edit="canEditAddress"
+      @edit="addressOpen = true"
+    />
+    <PublicAddressDialog
+      :open="addressOpen"
+      :server-id="serverId"
+      :current="view.publicAddress"
+      :perform="performAddress"
+      @close="addressOpen = false"
+    />
     <GamePortsCard :ports="view.ports" />
     <GamePasswordCard
       :server-id="serverId"

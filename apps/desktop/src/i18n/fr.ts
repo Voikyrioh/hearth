@@ -1267,7 +1267,36 @@ export const fr = {
       toast: "Adresse copiée.",
       copyFailed: "Impossible de copier. Sélectionnez le texte et copiez-le à la main.",
       others: "Ce jeu utilise d'autres ports : ils sont listés dans la carte « Ports à ouvrir ».",
-      localOnly: "Cette adresse ne marche que depuis votre réseau.",
+      localOnly:
+        "Cette adresse ne marche que depuis votre réseau. Renseignez l'adresse publique de votre serveur pour afficher celle de vos joueurs.",
+      publicNote: "C'est l'adresse que vous avez renseignée pour vos joueurs.",
+      edit: "Modifier l'adresse",
+      editTitle: "Adresse pour vos joueurs",
+      editSubmit: "Enregistrer l'adresse",
+      editLabel: "Adresse à donner aux joueurs (facultatif)",
+      editHelp:
+        "Le nom de domaine ou l'adresse IP par lesquels vos joueurs vous joignent depuis Internet. Hearth ne peut pas la deviner ni vérifier qu'elle est joignable. Laissez vide pour l'effacer.",
+      editPlaceholder: "jeu.exemple.org",
+      issue: {
+        tooLong: "L'adresse fait 253 caractères au plus.",
+        scheme: "Écrivez seulement le nom de domaine ou l'adresse IP, sans « https:// ».",
+        port: "Écrivez l'adresse sans le port : le port du jeu est ajouté tout seul.",
+        space: "L'adresse ne peut pas contenir d'espace.",
+      },
+      refused: {
+        conflict:
+          "Le service a changé entre-temps. Fermez cette fenêtre, relisez la carte et réessayez.",
+        busy: "Une action est déjà en cours sur ce service. Réessayez à sa fin.",
+        busyBy: "Une action est déjà en cours sur ce service. Lancée par {account}.",
+        gone: "Ce service n'existe plus ou n'est pas géré par Hearth.",
+        engine: "Le moteur de conteneurs n'est pas accessible. Rien n'a été modifié.",
+        invalid: "Le serveur n'accepte pas cette adresse.",
+        other: "Le serveur n'a pas enregistré l'adresse. Rien n'a été modifié.",
+      },
+      saved: "L'adresse de vos joueurs est enregistrée.",
+      cleared: "L'adresse de vos joueurs est effacée.",
+      unknown:
+        "Le résultat n'est pas connu. Relisez la carte avant de réessayer : rien n'est relancé.",
       unverified: "Hearth ne peut pas vérifier que cette adresse est joignable.",
       stopped: "Le service est arrêté : personne ne peut se connecter.",
       noPort: "Ce service ne publie aucun port : il n'y a pas d'adresse à donner à vos joueurs.",
