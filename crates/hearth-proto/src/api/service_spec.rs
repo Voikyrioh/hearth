@@ -142,6 +142,7 @@ pub fn deploy_digest(spec: &DeploySpec) -> [u8; 32] {
         optional_ports,
         world_imported,
         world,
+        pack,
     }) = &spec.source
     {
         put(&mut hasher, b"fiche/1");
@@ -198,6 +199,12 @@ pub fn deploy_digest(spec: &DeploySpec) -> [u8; 32] {
                 u8::from(pick.version_understood),
                 u8::from(pick.keep_if_changed),
             ]);
+        }
+        // Un pack déposé change ce que l'acte fait : son identifiant est signé. Rien n'est ajouté sans pack, donc la
+        // signature d'une installation sans pack ne change pas.
+        if let Some(pack) = pack {
+            put(&mut hasher, b"fiche-pack/1");
+            put(&mut hasher, pack.deposit.as_bytes());
         }
     }
     hasher.finalize().into()

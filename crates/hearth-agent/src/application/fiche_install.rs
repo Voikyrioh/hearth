@@ -25,6 +25,7 @@ use super::deployments::DeployError;
 use super::ports::{Clock, SecretRandom};
 use crate::domain::audit::Actor;
 use crate::domain::catalog::generate::draw_secret;
+use crate::domain::catalog::loading::schema::fiche::PackGenre;
 use crate::domain::catalog::readiness::ReadyRule;
 use crate::domain::catalog::settings_state::Reason as SettingReason;
 use crate::domain::catalog::translate::{Request, TranslateError, translate};
@@ -33,7 +34,8 @@ use crate::domain::services::deploy::{
     Invalid, Limits, Machine, Refusal, check_limits, validate_name,
 };
 use crate::domain::services::from_fiche::{
-    Fit, FitWarning, InstallInputs, Lack, ProducedFile, body_and_secrets_from, fit, fit_warnings,
+    Fit, FitWarning, InstallInputs, Lack, PackPlacement, ProducedFile, body_and_secrets_from, fit,
+    fit_warnings,
 };
 use crate::domain::services::plan::image_reference;
 
@@ -66,6 +68,8 @@ pub struct WorldPrep<'a> {
 pub struct Prepared {
     pub valid: crate::domain::services::deploy::ValidDeploy,
     pub files: Vec<ProducedFile>,
+    /// Où ranger le pack déposé, s'il y en a un (HRT-124).
+    pub pack: Option<PackPlacement>,
     pub audit: InstallAudit,
 }
 
@@ -111,6 +115,8 @@ fn translate_code(error: &TranslateError) -> &'static str {
         TranslateError::DeriveSourceMissing(_) => "derive_source_missing",
         TranslateError::ArgumentRefused { .. } => "argument_refused",
         TranslateError::FileValueRefused { .. } => "file_value_refused",
+        TranslateError::PackNotOffered => "pack_not_offered",
+        TranslateError::PackVariantMismatch => "pack_variant_mismatch",
     }
 }
 
@@ -136,6 +142,7 @@ impl FicheInstaller {
         machine: Option<Machine>,
         free_disk: Option<u64>,
         world_prep: Option<&WorldPrep<'_>>,
+        pack: Option<PackGenre>,
     ) -> Result<Prepared, DeployError> {
         let Some(DeploySource::Fiche {
             id,
@@ -148,6 +155,7 @@ impl FicheInstaller {
             optional_ports,
             world_imported,
             world,
+            pack: _,
         }) = &spec.source
         else {
             return Err(DeployError::SettingNotAllowed);
@@ -250,6 +258,7 @@ impl FicheInstaller {
                 optional_ports: &optional,
                 generated: &generated,
                 world_imported: world_prep.is_some(),
+                pack,
             },
         )
         .map_err(|error| match error {
@@ -264,6 +273,8 @@ impl FicheInstaller {
             TranslateError::UnknownVariant(_) => invalid("source.variant", "unknown"),
             TranslateError::PlatformUnavailable => invalid("source", "platform_unavailable"),
             TranslateError::PortRefused { .. } => invalid("source.ports", "refused"),
+            TranslateError::PackNotOffered => invalid("source.pack", "not_offered"),
+            TranslateError::PackVariantMismatch => invalid("source.pack", "variant_mismatch"),
             // Jamais `{error:?}` : une erreur de traduction peut porter un nom de variable de la fiche. Le message ne
             // dit que la fiche, la trace de l'erreur interne est écrite par la route.
             other => DeployError::Internal(format!(
@@ -374,6 +385,7 @@ impl FicheInstaller {
         Ok(Prepared {
             valid: built.valid,
             files: built.files,
+            pack: built.pack,
             audit,
         })
     }

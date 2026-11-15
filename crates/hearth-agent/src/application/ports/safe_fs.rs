@@ -189,6 +189,21 @@ pub trait ServiceRoot: Send + Sync {
     /// fichier ordinaire à un seul nom ; refuse un lien, un fichier spécial, un fichier à plusieurs noms.
     fn write_atomic(&self, rel: &RelPath, bytes: &[u8], perms: Perms) -> Result<(), FsError>;
 
+    /// Écrit EN FLUX le contenu de `source` dans le fichier `rel` (jamais en mémoire entière : un pack pèse des
+    /// gigaoctets), sous un nom d'attente puis par renommage SANS REMPLACEMENT dans le MÊME dossier (ce qui existe déjà sous ce
+    /// nom est refusé, `Io(AlreadyExists)`), comme `write_atomic` sinon, avec un
+    /// propriétaire et des droits posés avant la première donnée. Refuse (`TooLarge`) au-delà de `max_bytes`, et si
+    /// l'empreinte SHA-256 de ce qui a été lu n'est pas `expect_sha256` (`Io(InvalidData)`) : dans les deux cas le
+    /// fichier d'attente est retiré et `rel` reste ce qu'il était. Rend le nombre d'octets écrits (HRT-124).
+    fn write_stream(
+        &self,
+        rel: &RelPath,
+        source: &mut dyn std::io::Read,
+        perms: Perms,
+        max_bytes: u64,
+        expect_sha256: &[u8; 32],
+    ) -> Result<u64, FsError>;
+
     /// Lit un fichier ordinaire de `max` octets au plus (`TooLarge` sinon).
     fn read_bounded(&self, rel: &RelPath, max: u64) -> Result<Vec<u8>, FsError>;
 

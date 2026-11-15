@@ -406,6 +406,36 @@ impl ServiceRoot for FakeRoot {
         })
     }
 
+    fn write_stream(
+        &self,
+        rel: &RelPath,
+        source: &mut dyn std::io::Read,
+        perms: Perms,
+        max_bytes: u64,
+        expect_sha256: &[u8; 32],
+    ) -> Result<u64, FsError> {
+        use sha2::{Digest, Sha256};
+        use std::io::Read as _;
+        let mut bytes = Vec::new();
+        source
+            .take(max_bytes + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| FsError::Io(e.kind()))?;
+        if bytes.len() as u64 > max_bytes {
+            return Err(FsError::TooLarge);
+        }
+        let digest: [u8; 32] = Sha256::digest(&bytes).into();
+        if &digest != expect_sha256 {
+            return Err(FsError::Io(std::io::ErrorKind::InvalidData));
+        }
+        if self.stat(rel).is_ok() {
+            return Err(FsError::Io(std::io::ErrorKind::AlreadyExists));
+        }
+        let written = bytes.len() as u64;
+        self.write_atomic(rel, &bytes, perms)?;
+        Ok(written)
+    }
+
     fn read_bounded(&self, rel: &RelPath, max: u64) -> Result<Vec<u8>, FsError> {
         self.with(|tree| {
             if rel.is_root() {

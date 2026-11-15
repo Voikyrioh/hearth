@@ -19,8 +19,8 @@ use crate::domain::secret::Secret;
 use super::formats::{Refused, format_for};
 use super::loading::model::Fiche;
 use super::loading::schema::fiche::{
-    ChannelKind, FileMode, FolderRole, GameUpdates, OwnerKind, Platform, PortRole, Protocol,
-    Publish, When,
+    ChannelKind, FileMode, FolderRole, GameUpdates, OwnerKind, PackGenre, Platform, PortRole,
+    Protocol, Publish, When,
 };
 use super::loading::schema::settings::ArgForm;
 use super::loading::value::{Charset, first_refused_char};
@@ -109,6 +109,8 @@ pub struct ServiceSpecDraft {
     /// Secrets à sceller : `gen:<id>` pour les secrets générés, `setting:<id>` pour les secrets saisis.
     pub sealed: Vec<String>,
     pub settings: SettingsState,
+    /// Le genre du pack déposé qui accompagne cette installation (HRT-124), s'il y en a un.
+    pub pack: Option<PackGenre>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +137,10 @@ pub enum TranslateError {
     FileValueRefused {
         channel: String,
     },
+    /// Un pack est joint, mais la fiche n'offre pas ce genre de pack (HRT-124).
+    PackNotOffered,
+    /// Le genre du pack n'est pas permis avec la variante choisie (le moteur de serveur ne convient pas).
+    PackVariantMismatch,
 }
 
 impl From<Refusal> for TranslateError {
@@ -156,6 +162,17 @@ pub struct Request<'a> {
     /// Secrets générés par l'appelant, déjà tirés.
     pub generated: &'a BTreeMap<String, Secret>,
     pub world_imported: bool,
+    /// Le genre du pack déposé et jugé (HRT-124) : l'agent l'a lu dans le contenu, jamais le client.
+    pub pack: Option<PackGenre>,
+}
+
+/// Nom du pack rangé dans le dossier des packs : FIXE, choisi par Hearth. Le nom envoyé par le client ne sert
+/// jamais (ni dans un chemin, ni dans une variable).
+pub fn pack_file_name(genre: PackGenre) -> &'static str {
+    match genre {
+        PackGenre::ServerPack => "pack.zip",
+        PackGenre::ModrinthPack => "pack.mrpack",
+    }
 }
 
 fn variant_of<'a>(
@@ -347,6 +364,28 @@ pub fn translate(fiche: &Fiche, request: &Request<'_>) -> Result<ServiceSpecDraf
             )?;
         }
     }
+    // Le pack déposé (HRT-124) : le chemin FIXE du pack, dans le dossier des packs, passé par la variable que la
+    // fiche nomme pour son genre.
+    if let Some(genre) = request.pack {
+        let way = file.mods.as_ref().and_then(|m| m.pack.as_ref());
+        let declared = way.and_then(|w| w.genre.iter().find(|g| g.kind == genre));
+        let (Some(way), Some(declared)) = (way, declared) else {
+            return Err(TranslateError::PackNotOffered);
+        };
+        if !variant.is_some_and(|v| declared.variants.iter().any(|allowed| allowed == v)) {
+            return Err(TranslateError::PackVariantMismatch);
+        }
+        let target = file
+            .folder
+            .iter()
+            .find(|d| d.id == way.folder)
+            .map(|d| d.target.trim_end_matches('/'))
+            .ok_or(TranslateError::PackNotOffered)?;
+        push_env(
+            &declared.env,
+            EnvValue::Plain(format!("{target}/{}", pack_file_name(genre))),
+        )?;
+    }
     let mut command: Vec<String> = Vec::new();
     for r in &resolved {
         let Some(setting) = fiche.setting(&r.id) else {
@@ -496,6 +535,7 @@ pub fn translate(fiche: &Fiche, request: &Request<'_>) -> Result<ServiceSpecDraf
         agreements: file.agreement.iter().map(|a| a.id.clone()).collect(),
         sealed,
         settings,
+        pack: request.pack,
     })
 }
 

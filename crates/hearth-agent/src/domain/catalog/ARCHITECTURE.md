@@ -26,6 +26,8 @@ catalog/
 └── embedded.rs       → la table des fiches embarquées, engendrée par `build.rs` (`include!` de `OUT_DIR`) ; `keep_offered(fiches, include_preview)` (la seule porte, appelée par `CatalogService`) : les fiches `published`, plus les `preview` dans une construction d'essai (`HEARTH_PREVIEW_FICHES`, HRT-101)
 ```
 
-Tests : `test_support.rs` (une fiche minimale et une fiche riche, dont les fiches piégées sont dérivées d'UNE modification), `tests_fiches.rs` (format fermé, I1 à I9, cohérence, Terraria, `ids.lock`), `tests_state.rs` (réglages, écart, arrêt), `tests_io.rs` (enregistrement et import : rien d'inconnu ne se perd, écart, secret absent des traces), `tests_translate.rs` (traduction et test de propriété à graine fixe), `architecture_guard.rs`.
+Mods (HRT-124) : `schema/fiche.rs` porte `Mods` (`ways` : liste fermée `drop_files`, `drop_pack` ; `pack` : dossier de rôle `packs`, genres `server_pack` et `modrinth_pack` avec la variable de l'image et les variantes permises) ; `invariants.rs::check_mods` (cohérence) et `check_no_curseforge` (aucune variable `CF_*`, aucun `AUTO_CURSEFORGE`, BR-MOD-017) ; `translate.rs` passe le chemin FIXE du pack (`pack_file_name`) par la variable du genre. Le jugement d'un pack est dans `domain/mods/`.
+
+Tests : `test_support.rs` (une fiche minimale et une fiche riche, dont les fiches piégées sont dérivées d'UNE modification), `tests_fiches.rs` (format fermé, I1 à I9, cohérence, Terraria, `ids.lock`), `tests_mods.rs` (bloc `[mods]`, aucune voie CurseForge), `tests_state.rs` (réglages, écart, arrêt), `tests_io.rs` (enregistrement et import : rien d'inconnu ne se perd, écart, secret absent des traces), `tests_translate.rs` (traduction et test de propriété à graine fixe), `architecture_guard.rs`.
 
 Règles : BR-FICHE-005 à 011, 028, 037, 038, 046 à 049, 056 ; BR-RES-031 à 033, 038 ; BR-JEU-002, 038, 039, 040.

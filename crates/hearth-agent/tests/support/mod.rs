@@ -17,6 +17,7 @@ pub mod fake_backup_files;
 pub mod fake_daemon;
 pub mod fake_engine;
 pub mod fake_host;
+pub mod fake_pack_deposits;
 pub mod fake_random;
 pub mod fake_safe_fs;
 pub mod fake_supervisor;

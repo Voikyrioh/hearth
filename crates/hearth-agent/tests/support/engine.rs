@@ -77,6 +77,7 @@ pub fn parts_supervised(
             service: None,
             phases: None,
             world_fs: None,
+            pack_deposits: None,
         },
     }
 }

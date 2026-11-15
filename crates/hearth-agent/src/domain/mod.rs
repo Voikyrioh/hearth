@@ -19,6 +19,7 @@ pub mod lockout;
 pub mod login_policy;
 pub mod machine;
 pub mod metrics;
+pub mod mods;
 pub mod operations;
 pub mod ops;
 pub mod sealed;

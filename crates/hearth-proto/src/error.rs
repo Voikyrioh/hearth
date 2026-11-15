@@ -133,6 +133,12 @@ pub enum ErrorCode {
     AgreementRequired,
     /// La fiche n'est plus celle que le client a lue (`details.version`, `details.digest`).
     FicheChanged,
+    /// Aucun pack déposé de cet identifiant (HRT-124) : jamais reçu, déjà consommé ou périmé.
+    PackUnknown,
+    /// Le pack déposé est refusé (HRT-124, BR-MOD-008) : `details.reason` est un code fixe (`PACK_IS_A_DOWNLOAD_LIST`,
+    /// `PACK_HOST_FORBIDDEN`, `ARCHIVE_REFUSED`...), `details.mods?`, `details.host?`, `details.archive?` ; jamais un
+    /// nom d'entrée.
+    PackRefused,
     /// Une valeur de réglage est refusée (`details.id`, `details.reason`, `details.char?`).
     SettingRefused,
     /// Les réglages ont changé depuis la lecture (`details.by`, `details.at`).
@@ -165,6 +171,7 @@ impl ErrorCode {
             | Self::ServiceNotFound
             | Self::NotAGameService
             | Self::OperationNotFound
+            | Self::PackUnknown
             | Self::BackupNotFound => 404,
             Self::MethodNotAllowed => 405,
             Self::PayloadTooLarge => 413,
@@ -212,6 +219,7 @@ impl ErrorCode {
             | Self::FolderRefused
             | Self::LimitsRequired
             | Self::AgreementRequired
+            | Self::PackRefused
             | Self::SettingsFileUnreadable
             | Self::SettingRefused => 422,
             Self::Busy | Self::EngineUnavailable => 503,
@@ -389,7 +397,7 @@ mod tests {
         assert_eq!(ErrorCode::Unknown.or_from_status(200), ErrorCode::Unknown);
     }
 
-    const ALL: [(ErrorCode, &str, u16); 69] = [
+    const ALL: [(ErrorCode, &str, u16); 71] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -464,6 +472,8 @@ mod tests {
         (ErrorCode::DecisionNotOffered, "DECISION_NOT_OFFERED", 409),
         (ErrorCode::AgreementRequired, "AGREEMENT_REQUIRED", 422),
         (ErrorCode::FicheChanged, "FICHE_CHANGED", 409),
+        (ErrorCode::PackUnknown, "PACK_UNKNOWN", 404),
+        (ErrorCode::PackRefused, "PACK_REFUSED", 422),
         (ErrorCode::SettingRefused, "SETTING_REFUSED", 422),
         (ErrorCode::SettingsConflict, "SETTINGS_CONFLICT", 409),
         (ErrorCode::SettingsFileChanged, "SETTINGS_FILE_CHANGED", 409),

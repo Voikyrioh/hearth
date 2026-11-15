@@ -21,7 +21,7 @@ mod tar;
 mod zip;
 
 #[cfg(test)]
-mod testkit;
+pub(crate) mod testkit;
 #[cfg(test)]
 mod tests_extract;
 #[cfg(test)]

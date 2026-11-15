@@ -27,6 +27,7 @@ use hearth_proto::api::deploy::{
     DeployAccepted, DeployCheck, DeployCheckRequest, DeploySource, DeploySpec, EngineCapacity,
     PortStatus,
 };
+use hearth_proto::api::packs::{PackInspectRequest, PackInspectView};
 use hearth_proto::error::{ErrorBody, ErrorCode};
 
 use super::auth::Requester;
@@ -34,8 +35,10 @@ use super::error::TargetMark;
 use super::services::operation_key;
 use super::{ApiError, AppState};
 use crate::application::deployments::DeployError;
+use crate::application::pack_intake::PackError;
 use crate::application::sessions::Reauthenticated;
 use crate::domain::audit::{ClientName, Target};
+use crate::domain::mods::pack::PackRefusal;
 use crate::entrypoint::services_wire;
 
 pub(super) fn deploy_error(error: DeployError) -> ApiError {
@@ -131,6 +134,40 @@ pub(super) fn deploy_error(error: DeployError) -> ApiError {
             ErrorCode::FicheChanged,
             "Cette fiche a changé depuis son affichage. Relis-la avant d'installer.",
         ),
+        // Un pack déposé (HRT-124) : un code fixe par cause, jamais un nom d'entrée ni une valeur du pack.
+        DeployError::PackBusy => ApiError::new(
+            ErrorCode::Busy,
+            "Un autre pack est en cours de lecture. Réessayez dans un instant.",
+        ),
+        DeployError::Pack(PackError::Unknown) => ApiError::new(
+            ErrorCode::PackUnknown,
+            "Ce pack n'est plus là. Dépose-le de nouveau.",
+        ),
+        // Une erreur d'entrée-sortie sur un dépôt bien présent n'est pas un pack disparu : inutile de le redéposer.
+        DeployError::Pack(PackError::Io) => {
+            deploy_error(DeployError::Internal("dépôt de pack illisible".into()))
+        }
+        DeployError::Pack(PackError::Archive(refusal)) => ApiError(ErrorBody::with_details(
+            ErrorCode::PackRefused,
+            "Ce fichier n'est pas une archive que Hearth peut lire en sécurité.",
+            serde_json::json!({ "reason": "ARCHIVE_REFUSED", "archive": refusal.code() }),
+        )),
+        DeployError::Pack(PackError::Refused(refusal)) => {
+            let details = match &refusal {
+                PackRefusal::DownloadList { mods } => {
+                    serde_json::json!({ "reason": refusal.code(), "mods": mods })
+                }
+                PackRefusal::ModrinthHost { host } => {
+                    serde_json::json!({ "reason": refusal.code(), "host": host })
+                }
+                _ => serde_json::json!({ "reason": refusal.code() }),
+            };
+            ApiError(ErrorBody::with_details(
+                ErrorCode::PackRefused,
+                "Hearth ne peut pas installer ce pack.",
+                details,
+            ))
+        }
         DeployError::AgreementRequired(ids) => ApiError(ErrorBody::with_details(
             ErrorCode::AgreementRequired,
             "Ce serveur ne peut pas être installé sans que le contrat de licence soit accepté.",
@@ -180,6 +217,21 @@ pub async fn check(
     state
         .deployments
         .check(&request)
+        .await
+        .map(Json)
+        .map_err(deploy_error)
+}
+
+/// `POST /api/v1/deployments/pack-check` (HRT-124) : ce que l'agent lit dans un pack déposé par ce compte.
+pub async fn pack_check(
+    State(state): State<AppState>,
+    Requester(actor): Requester,
+    body: Result<Json<PackInspectRequest>, JsonRejection>,
+) -> Result<Json<PackInspectView>, ApiError> {
+    let Json(request) = body?;
+    state
+        .deployments
+        .inspect_pack(&request.deposit, &actor)
         .await
         .map(Json)
         .map_err(deploy_error)

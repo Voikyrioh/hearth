@@ -432,6 +432,36 @@ pub struct FicheDetail {
     /// Le catalogue complet de réglages de la fiche, imposés compris (HRT-109) ; vide d'un agent plus ancien.
     #[serde(default)]
     pub settings: Items<SettingView>,
+    /// Les voies de mods que la fiche offre (HRT-124, BR-MOD-001) ; absent : aucune (BR-MOD-014).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mods: Option<ModsView>,
+}
+
+/// Les voies de mods d'une fiche, dans l'ordre où l'écran les montre.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModsView {
+    /// `drop_files`, `drop_pack` ; une voie que ce client ne connaît pas est ignorée par `Items`.
+    pub ways: Items<String>,
+    /// Le dépôt d'un pack, si la fiche l'offre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<PackWayView>,
+    /// L'indication du dossier « Tes mods » (`drop_hint` du dossier de rôle `mods`), si la fiche en écrit une.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files_hint: Option<String>,
+}
+
+/// Les genres de pack que la fiche prend, et avec quelles variantes (moteurs de serveur).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackWayView {
+    pub genres: Items<PackGenreView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackGenreView {
+    /// `server_pack` ou `modrinth_pack`.
+    pub kind: String,
+    /// Les variantes de la fiche permises avec ce genre.
+    pub variants: Items<String>,
 }
 
 #[cfg(test)]

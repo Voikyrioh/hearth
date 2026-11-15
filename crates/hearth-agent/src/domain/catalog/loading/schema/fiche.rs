@@ -50,6 +50,8 @@ pub struct FicheFile {
     pub check: Vec<Check>,
     #[serde(default)]
     pub migration: Vec<Migration>,
+    /// Les voies de mods que la fiche offre (HRT-124, BR-MOD-001). Absent : le jeu n'offre aucune voie (BR-MOD-014).
+    pub mods: Option<Mods>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -132,6 +134,8 @@ pub enum FolderRole {
     Config,
     Logs,
     Mods,
+    /// Dossier des packs déposés (HRT-124) : toujours en lecture seule dans le conteneur, hors sauvegarde.
+    Packs,
     Data,
 }
 
@@ -664,4 +668,49 @@ pub enum MigrationOp {
 pub struct Migration {
     pub from_version: u32,
     pub ops: Vec<MigrationOp>,
+}
+
+/// Une voie de mods, liste FERMÉE (ADR-0054 point 4) : une fiche n'en ajoute aucune. `ids_by_game` et
+/// `fetch_by_agent` arrivent avec leurs tickets (HRT-126) ; une valeur inconnue est refusée au chargement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModWay {
+    /// Fichiers déposés dans le dossier de rôle `mods`.
+    DropFiles,
+    /// Un pack déposé (`[mods.pack]`).
+    DropPack,
+}
+
+/// Genre de pack, reconnu par le CONTENU de l'archive, jamais par son nom (BR-MOD-007). Aucun genre
+/// « export CurseForge » (BR-MOD-016, BR-MOD-017).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PackGenre {
+    ServerPack,
+    ModrinthPack,
+}
+
+/// Comment un genre de pack est passé à l'image : le NOM de la variable qui reçoit le chemin du pack, et les
+/// variantes (moteurs de serveur) avec lesquelles ce genre est permis.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackGenreWay {
+    pub kind: PackGenre,
+    pub env: String,
+    pub variants: Vec<String>,
+}
+
+/// Le dépôt d'un pack : le dossier géré (rôle `packs`, lecture seule) où l'agent le range sous un nom fixe.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PackWay {
+    pub folder: String,
+    pub genre: Vec<PackGenreWay>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Mods {
+    pub ways: Vec<ModWay>,
+    pub pack: Option<PackWay>,
 }

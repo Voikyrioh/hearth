@@ -40,6 +40,8 @@ mod tests_io;
 #[cfg(test)]
 mod tests_memory;
 #[cfg(test)]
+mod tests_mods;
+#[cfg(test)]
 mod tests_state;
 #[cfg(test)]
 mod tests_translate;

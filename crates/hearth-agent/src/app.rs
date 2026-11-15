@@ -31,12 +31,13 @@ use crate::application::hello::HelloService;
 use crate::application::maintenance::MaintenanceService;
 use crate::application::metrics::MetricsService;
 use crate::application::operations::OperationService;
+use crate::application::pack_intake::PackIntake;
 use crate::application::ports::{
     AuditFeed, AuditSink, BackupFiles, BootInfo, ChallengeCrypto, Clock, ContainerEngine,
     CryptoError, FingerprintSecretError, FingerprintSecretStore, FreeSpace, GpuProbe, HashError,
     HostEnvironment, HostPorts, IdGen, IdentityError, IdentityStore, InstallHost, MonotonicClock,
-    PasswordHasher, PublicIdentity, RequestFingerprinter, SafeFs, SecretRandom, SecurityFeed,
-    ServiceObserver, ServiceSupervisor, Store, StoreError, SystemProbe, TokenGen,
+    PackDeposits, PasswordHasher, PublicIdentity, RequestFingerprinter, SafeFs, SecretRandom,
+    SecurityFeed, ServiceObserver, ServiceSupervisor, Store, StoreError, SystemProbe, TokenGen,
 };
 use crate::application::secret_vault::{KeyStatus, SecretVault};
 use crate::application::security::SecurityService;
@@ -260,6 +261,9 @@ pub struct CatalogParts {
     /// La lecture des mondes à reprendre et leur copie (HRT-105). `None` : le vrai, sous le dossier de données de
     /// l'agent ; les tests y posent un faux en mémoire.
     pub world_fs: Option<Arc<dyn crate::application::ports::WorldFs>>,
+    /// La zone d'attente des packs de mods déposés (HRT-124). `None` : aucune, une installation qui porte un pack
+    /// est refusée. Les tests y posent la leur.
+    pub pack_deposits: Option<Arc<dyn PackDeposits>>,
 }
 
 impl CatalogParts {
@@ -271,6 +275,7 @@ impl CatalogParts {
             service: None,
             phases: None,
             world_fs: None,
+            pack_deposits: None,
         }
     }
 }
@@ -1115,6 +1120,9 @@ pub async fn start_engined(
         phases,
         Some(world_import.clone()),
     );
+    if let Some(deposits) = engine.catalog.pack_deposits.clone() {
+        deployments.set_pack_intake(Arc::new(PackIntake::new(deposits)));
+    }
     // Modifier un service par recréation (HRT-87) : l'ancien est mis de côté, le nouveau créé depuis la description,
     // l'ancien remis si le nouveau échoue.
     let service_updates = ServiceUpdates::new(
