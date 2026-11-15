@@ -14,6 +14,7 @@ use hearth_proto::api::service_update::CAPABILITY_SERVICE_UPDATE;
 use hearth_proto::api::services::{
     CAPABILITY_SERVICE_ADOPTION, CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES,
 };
+use hearth_proto::api::worlds::CAPABILITY_WORLD_IMPORT;
 use hearth_proto::product::PRODUCT_NAME;
 use hearth_proto::version::{API_MIN_SUPPORTED, API_VERSION};
 
@@ -77,6 +78,9 @@ impl HelloService {
                     CAPABILITY_SERVICE_UPDATE,
                     // Sauvegarder les données d'un service (HRT-97) : lister, estimer, créer, vérifier, supprimer.
                     CAPABILITY_SERVICE_BACKUPS,
+                    // Reprendre un monde existant (HRT-105) : `GET /catalog/{id}/worlds`, son inspection et
+                    // `source.world` de `POST /deployments`.
+                    CAPABILITY_WORLD_IMPORT,
                 ],
             },
         }
@@ -136,7 +140,8 @@ mod tests {
                 "game-services",
                 "service-delete",
                 "service-update",
-                "service-backups"
+                "service-backups",
+                "world-import"
             ]
         );
     }

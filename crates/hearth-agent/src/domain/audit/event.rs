@@ -247,6 +247,8 @@ pub enum Target {
         cpu_millis: u32,
         memory_bytes: u64,
         agreements: Vec<ClientName>,
+        /// Un monde existant repris (HRT-105, BR-MONDE-023).
+        world: Option<WorldNote>,
     },
     /// Des réglages de serveur de jeu enregistrés (HRT-108, BR-FICHE-053) : le service, le NOMBRE de réglages
     /// changés, les noms techniques de ceux qui ne sont pas des secrets, et si un mot de passe a changé.
@@ -357,6 +359,57 @@ fn size_text(bytes: u64) -> String {
         "moins de 1 Mio".to_owned()
     } else {
         format!("{mebibytes} Mio")
+    }
+}
+
+/// Comment s'est terminée la copie d'un monde repris (HRT-105, BR-MONDE-023).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorldResult {
+    /// Copiée, relue, aucun fichier modifié pendant la copie.
+    Copied,
+    /// Gardée malgré des fichiers modifiés pendant la copie (« Garder cette copie », BR-MONDE-009).
+    KeptChanged,
+    /// Des fichiers ont changé pendant la copie et la copie a été retirée (« Recommencer »).
+    ChangedDiscarded,
+    /// « Monde repris incomplet » : un fichier copié est absent ou différent (BR-MONDE-010).
+    Incomplete,
+    Cancelled,
+    /// L'opération s'est arrêtée avant la copie (image introuvable, annulation pendant la récupération...).
+    NotReached,
+    /// La copie n'a pas pu se faire (source illisible, destination, plafond de six heures).
+    Failed,
+}
+
+/// Ce que la reprise d'un monde a fait, pour le journal d'activité (BR-MONDE-023) : le dossier ouvert TEL QU'IL EST
+/// ÉCRIT dans la configuration de l'agent, des nombres, l'issue. **Jamais le sous-chemin, un nom de monde ni un nom
+/// de fichier** : le type n'a pas de champ pour eux.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorldNote {
+    pub folder: ClientName,
+    pub files: u64,
+    pub bytes: u64,
+    pub not_copied: u64,
+    pub result: WorldResult,
+}
+
+impl WorldNote {
+    fn text(&self) -> String {
+        let outcome = match self.result {
+            WorldResult::Copied => "aucun fichier modifié pendant la copie",
+            WorldResult::KeptChanged => "fichiers modifiés pendant la copie, copie gardée",
+            WorldResult::ChangedDiscarded => "fichiers modifiés pendant la copie, copie retirée",
+            WorldResult::Incomplete => "monde repris incomplet",
+            WorldResult::Cancelled => "reprise annulée",
+            WorldResult::NotReached => "copie non commencée",
+            WorldResult::Failed => "copie impossible",
+        };
+        format!(
+            "monde existant repris depuis le dossier ouvert {} ({} fichier(s), {} octet(s), {} élément(s) non copié(s), {outcome})",
+            self.folder.as_str(),
+            self.files,
+            self.bytes,
+            self.not_copied
+        )
     }
 }
 
@@ -564,6 +617,7 @@ impl Target {
                 cpu_millis,
                 memory_bytes,
                 agreements,
+                world,
             } => {
                 let mut text = format!(
                     "service {} : fiche {} (version {version}), image {}",
@@ -587,6 +641,9 @@ impl Target {
                 if !agreements.is_empty() {
                     let titles: Vec<&str> = agreements.iter().map(ClientName::as_str).collect();
                     text.push_str(&format!(", contrats acceptés : {}", titles.join(", ")));
+                }
+                if let Some(world) = world {
+                    text.push_str(&format!(", {}", world.text()));
                 }
                 Some(text)
             }
@@ -1469,6 +1526,36 @@ mod tests {
     }
 
     #[test]
+    fn a_world_import_entry_names_the_open_folder_and_never_a_sub_path_or_a_world() {
+        let name = |text: &str| ClientName::parse(text).unwrap();
+        let entry = Target::GameInstall {
+            service: name("mon-terraria"),
+            fiche: name("terraria"),
+            version: 1,
+            image: name("ryshe/terraria:vanilla-1.4.5.8"),
+            host_ports: vec![7777],
+            answers: 1,
+            cpu_millis: 1000,
+            memory_bytes: 2 << 30,
+            agreements: vec![],
+            world: Some(WorldNote {
+                folder: name("/srv/jeux"),
+                files: 2,
+                bytes: 4096,
+                not_copied: 1,
+                result: WorldResult::Incomplete,
+            }),
+        };
+        let text = entry.text().unwrap();
+        assert!(
+            text.ends_with(
+                ", monde existant repris depuis le dossier ouvert /srv/jeux (2 fichier(s), 4096 octet(s), 1 élément(s) non copié(s), monde repris incomplet)"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn a_game_install_entry_carries_no_answer_value() {
         let name = |text: &str| ClientName::parse(text).unwrap();
         let entry = Target::GameInstall {
@@ -1481,6 +1568,7 @@ mod tests {
             cpu_millis: 1000,
             memory_bytes: 2 << 30,
             agreements: vec![name("Contrat de licence")],
+            world: None,
         };
         let text = entry.text().unwrap();
         assert_eq!(

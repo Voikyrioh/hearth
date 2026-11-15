@@ -264,6 +264,7 @@ fn state_over_rig(
         Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         Arc::new(super::fake_random::FakeRandom::counting_from(0)),
         phases,
+        None,
     );
     let service_updates = hearth_agent::application::service_update::ServiceUpdates::new(
         services.clone(),
@@ -318,6 +319,15 @@ fn state_over_rig(
         backups,
         game_settings,
         catalog: Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
+        world_import: hearth_agent::application::world_import::WorldImport::new(
+            Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
+            Arc::new(hearth_agent::infrastructure::world_fs::SystemWorldFs::new(
+                std::path::PathBuf::from("/var/lib/hearth"),
+            )),
+            Vec::new(),
+            rig.free_space.clone(),
+            std::path::PathBuf::from("/var/lib/hearth"),
+        ),
         hello: Arc::new(HelloService::new(
             InstallId::from_bytes([3; 16]),
             false,

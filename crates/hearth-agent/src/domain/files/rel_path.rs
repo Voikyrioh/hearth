@@ -91,6 +91,23 @@ impl RelPath {
         }
     }
 
+    /// Ce chemin suivi d'un composant (un nom, jamais un chemin), borné comme `parse`.
+    pub fn child(&self, name: &str) -> Result<Self, RelPathError> {
+        Self::check_component(name)?;
+        if self.0.len() + 1 > MAX_DEPTH {
+            return Err(RelPathError::TooDeep);
+        }
+        let mut parts = self.0.clone();
+        parts.push(name.to_owned());
+        Ok(Self(parts))
+    }
+
+    /// Le dossier qui contient ce chemin ; la racine pour un chemin à un composant ; `None` pour la racine.
+    pub fn parent(&self) -> Option<Self> {
+        let (_, rest) = self.0.split_last()?;
+        Some(Self(rest.to_vec()))
+    }
+
     pub fn is_root(&self) -> bool {
         self.0.is_empty()
     }

@@ -937,6 +937,8 @@ impl FicheInstallRequestDto {
                     .collect(),
                 optional_ports: self.optional_ports,
                 world_imported: false,
+                // Reprendre un monde (HRT-105) : le client ne le demande pas encore.
+                world: None,
             }),
             extra: std::collections::BTreeMap::new(),
         })

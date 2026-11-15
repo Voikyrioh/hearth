@@ -141,6 +141,7 @@ pub fn deploy_digest(spec: &DeploySpec) -> [u8; 32] {
         ports,
         optional_ports,
         world_imported,
+        world,
     }) = &spec.source
     {
         put(&mut hasher, b"fiche/1");
@@ -187,6 +188,17 @@ pub fn deploy_digest(spec: &DeploySpec) -> [u8; 32] {
             put(&mut hasher, id.as_bytes());
         }
         hasher.update([u8::from(*world_imported)]);
+        // Le monde repris (HRT-105) : le dossier ouvert, le chemin et les deux gestes sont signés avec le reste.
+        // Rien n'est ajouté sans monde : la signature d'une fiche ordinaire ne change pas.
+        if let Some(pick) = world {
+            put(&mut hasher, b"world/1");
+            put(&mut hasher, pick.world.folder.as_bytes());
+            put(&mut hasher, pick.world.path.as_bytes());
+            hasher.update([
+                u8::from(pick.version_understood),
+                u8::from(pick.keep_if_changed),
+            ]);
+        }
     }
     hasher.finalize().into()
 }

@@ -63,6 +63,7 @@ use crate::application::service_op_access::ServiceOpAccess;
 use crate::application::services::ServicesRegistry;
 use crate::application::sessions::SessionService;
 use crate::application::update::UpdateService;
+use crate::application::world_import::WorldImport;
 use crate::domain::audit::AuditAction;
 use crate::entrypoint::ws::{self, StreamContext};
 
@@ -107,6 +108,8 @@ pub struct AppState {
     pub backups: Arc<Backups>,
     /// Les fiches de serveurs de jeu que cet agent propose (HRT-101, ADR-0050).
     pub catalog: Arc<crate::application::catalog::CatalogService>,
+    /// Reprendre un monde existant : lister les mondes des dossiers ouverts et les inspecter (HRT-105).
+    pub world_import: Arc<WorldImport>,
     /// Les réglages d'un serveur de jeu : lire, analyser un texte collé, enregistrer (HRT-108, ADR-0051).
     pub game_settings: Arc<GameSettings>,
     pub stream: StreamContext,
@@ -164,6 +167,7 @@ const READ_ONLY_POSTS: &[&str] = &[
     // l'état d'intégrité d'une sauvegarde.
     "/services/{key}/backups/preview",
     "/backups/{id}/verify",
+    "/catalog/{id}/worlds/inspect",
 ];
 
 impl Endpoint {
@@ -551,6 +555,28 @@ pub static ENDPOINTS: &[Endpoint] = &[
         audit: None,
         route: || get(catalog::detail),
     },
+    // Reprendre un monde existant (HRT-105, BR-MONDE-002 à 026) : la liste des mondes des dossiers ouverts aux
+    // services et l'inspection d'un monde sont des consultations (ni diffusées ni journalisées, BR-MONDE-003),
+    // réservées au droit « gérer les services » (BR-MONDE-024 : refus consigné). Installer avec un monde passe par
+    // `POST /deployments` (`source.world`).
+    Endpoint {
+        method: Method::GET,
+        path: "/catalog/{id}/worlds",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::ServiceWorldImport),
+        route: || get(catalog::worlds),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/catalog/{id}/worlds/inspect",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::ServiceWorldImport),
+        route: || post(catalog::inspect_world),
+    },
     Endpoint {
         method: Method::GET,
         path: "/engine/capacity",
@@ -933,6 +959,7 @@ mod tests {
                         | "/services/{key}/settings/analyze"
                         | "/services/{key}/backups/preview"
                         | "/backups/{id}/verify"
+                        | "/catalog/{id}/worlds/inspect"
                 ),
                 "{}",
                 endpoint.path
@@ -1083,6 +1110,9 @@ mod tests {
         // Le catalogue des fiches (HRT-101) : ouvert à tout compte authentifié, aucune écriture.
         ("GET", "/catalog", OpenRead),
         ("GET", "/catalog/{id}", OpenRead),
+        // Reprendre un monde (HRT-105) : le droit est exigé par le niveau ; deux consultations.
+        ("GET", "/catalog/{id}/worlds", Service),
+        ("POST", "/catalog/{id}/worlds/inspect", ServiceCheck),
         // Journaux en direct (HRT-66, HRT-79) : le droit et l'adoption sont jugés par `may_read`, pas par
         // le niveau d'accès de la route (voir `Class::ServiceStream`).
         ("GET", "/services/{key}/logs", ServiceStream),
@@ -1311,6 +1341,7 @@ mod tests {
                 ("DELETE", "/backups/{id}"),
                 ("DELETE", "/operations/services/{id}"),
                 ("DELETE", "/services/{key}"),
+                ("GET", "/catalog/{id}/worlds"),
                 ("GET", "/operations/services/{id}/tail"),
                 ("GET", "/services/external"),
                 ("GET", "/services/{key}/delete-preview"),
