@@ -76,7 +76,7 @@ pub enum ActKind {
 
 impl ActKind {
     /// Tous les actes `0x05`, dans l'ordre des codes.
-    pub const ALL: [ActKind; 24] = [
+    pub const ALL: [ActKind; 25] = [
         Self::AccountCreate,
         Self::AccountRole,
         Self::AccountPassword,
@@ -1052,14 +1052,14 @@ mod tests {
             // Une route ET une seule, ou « déclaré, route à venir » : jamais les deux, jamais aucun.
             assert_eq!(routed + waiting, 1, "{kind:?}");
         }
-        // Vingt-quatre actes en 0x05 : tous ont leur route (dont deux pour le mode attaque), aucun n'est plus
-        // déclaré sans route (HRT-97) ; vingt-trois routes d'acte (dont le retrait d'un poste, sous son contrat)
+        // Vingt-cinq actes en 0x05 : tous ont leur route (dont deux pour le mode attaque), aucun n'est plus
+        // déclaré sans route (HRT-97) ; vingt-quatre routes d'acte (dont le retrait d'un poste, sous son contrat)
         // en plus du réglage de fréquence.
-        assert_eq!(in_routes.len(), 24);
+        assert_eq!(in_routes.len(), 25);
         assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 0);
         assert_eq!(
             ROUTES.iter().filter(|r| r.pattern != "/me/reauth").count(),
-            23
+            24
         );
     }
 
