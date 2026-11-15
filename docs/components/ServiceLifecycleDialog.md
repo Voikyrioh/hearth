@@ -7,3 +7,5 @@ La fenêtre de démarrage, d'arrêt et de redémarrage d'un service (HRT-65) : u
 - Props : `open`, `serverId`, `gesture`, `service` (à l'ouverture), `current` (dans la liste vivante, `null` : disparu), `locked`, `perform`
 - Événements : `close`
 - Notes : tenue par la page Services (`composables/useServiceLifecycle.ts`). Tests : `pages/ServicesLifecycle.test.ts`.
+
+- HRT-104 : prop `game` (ce que l'agent dit du jeu) : pour un serveur de jeu, la phrase de la fiche (`services/game.ts::gameEffectText`) remplace la phrase générale « Hearth ne peut pas encore envoyer d'ordre de sauvegarde au service » (BR-JEU-004).

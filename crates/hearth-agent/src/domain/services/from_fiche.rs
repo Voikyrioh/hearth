@@ -23,7 +23,7 @@ use super::spec::{
     SpecMountKind, SpecPort, SpecProtocol, SpecRestart, SpecSecrets, SpecSettings,
 };
 use crate::domain::catalog::loading::model::Fiche;
-use crate::domain::catalog::loading::schema::fiche::{Evidence, PlainEvidence, Protocol};
+use crate::domain::catalog::loading::schema::fiche::{Evidence, PlainEvidence, PortRole, Protocol};
 use crate::domain::catalog::loading::schema::settings::ChangeWhen;
 use crate::domain::catalog::settings_state::{SettingsState, Slot};
 use crate::domain::catalog::translate::{DeploymentValidator, ServiceSpecDraft};
@@ -470,6 +470,45 @@ pub fn fit_warnings(fiche: &Fiche, machine: Machine, free_disk_bytes: u64) -> Ve
     out
 }
 
+/// Un port publié d'un service de jeu, rapproché de ce que la fiche en dit (BR-JEU-017, BR-JEU-019).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GamePortFact {
+    pub host_port: u16,
+    pub protocol: SpecProtocol,
+    /// Le rôle que la fiche donne à ce port ; `None` : la fiche ne reconnaît plus ce port.
+    pub role: Option<PortRole>,
+    /// Le numéro du serveur diffère de celui que propose la fiche : le rappel « mettez à jour votre box » (BR-JEU-019).
+    pub changed: bool,
+}
+
+/// Les ports publiés d'un service, rapprochés de ceux de la fiche par numéro de service et protocole. Un protocole que
+/// la fiche ne sait pas dire (`sctp`) n'est rapproché de rien.
+pub fn game_ports(fiche: &Fiche, ports: &[SpecPort]) -> Vec<GamePortFact> {
+    ports
+        .iter()
+        .map(|port| {
+            let wanted = match port.protocol {
+                SpecProtocol::Tcp => Some(Protocol::Tcp),
+                SpecProtocol::Udp => Some(Protocol::Udp),
+                SpecProtocol::Sctp => None,
+            };
+            let declared = wanted.and_then(|protocol| {
+                fiche.file.port.iter().find(|candidate| {
+                    candidate.container == port.container_port && candidate.protocol == protocol
+                })
+            });
+            GamePortFact {
+                host_port: port.host_port,
+                protocol: port.protocol,
+                role: declared.map(|declared| declared.role),
+                changed: declared
+                    .and_then(|declared| declared.default_host)
+                    .is_some_and(|default| default != port.host_port),
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
@@ -809,5 +848,56 @@ disk = { evidence = \"unmeasured\" }",
             "le dossier du fichier est monté en entier"
         );
         assert!(file.content.expose().contains("maxplayers=8"));
+    }
+
+    #[test]
+    fn a_published_port_is_matched_to_the_fiche_and_flags_a_changed_number() {
+        let fiche = terraria();
+        let declared = fiche.file.port.first().expect("un port");
+        let default_host = declared.default_host.expect("un port proposé");
+        let (container, protocol) = (declared.container, declared.protocol);
+        let spec_protocol = match protocol {
+            Protocol::Tcp => SpecProtocol::Tcp,
+            Protocol::Udp => SpecProtocol::Udp,
+        };
+        let same = SpecPort {
+            host_port: default_host,
+            container_port: container,
+            protocol: spec_protocol,
+        };
+        let moved = SpecPort {
+            host_port: default_host.wrapping_add(1),
+            ..same
+        };
+        let facts = game_ports(&fiche, &[same, moved]);
+        assert_eq!(facts[0].role, Some(declared.role));
+        assert!(
+            !facts[0].changed,
+            "le numéro proposé n'est pas un changement"
+        );
+        assert!(
+            facts[1].changed,
+            "un autre numéro appelle le rappel de la box"
+        );
+    }
+
+    #[test]
+    fn an_unknown_port_or_sctp_is_matched_to_nothing() {
+        let fiche = terraria();
+        let declared = fiche.file.port.first().expect("un port");
+        let unknown = SpecPort {
+            host_port: 40000,
+            container_port: declared.container.wrapping_add(1000),
+            protocol: SpecProtocol::Tcp,
+        };
+        let sctp = SpecPort {
+            host_port: 40001,
+            container_port: declared.container,
+            protocol: SpecProtocol::Sctp,
+        };
+        for fact in game_ports(&fiche, &[unknown, sctp]) {
+            assert_eq!(fact.role, None);
+            assert!(!fact.changed);
+        }
     }
 }

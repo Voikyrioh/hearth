@@ -29,13 +29,14 @@ use hearth_proto::api::game_settings::{
     SaveSettingsRequest, SaveSettingsResponse, SettingEffect, SettingValue, SettingsView,
     ValueState,
 };
+use hearth_proto::api::game_view::{GamePort, GameView};
 use ring::digest;
 use thiserror::Error;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use zeroize::Zeroizing;
 
-use super::catalog::CatalogService;
+use super::catalog::{CatalogService, port_role_name, stop_view};
 use super::fiche_install::reason_code;
 use super::ports::{
     Clock, FsError, GameSettingsRepo, NewSettings, Ownership, Perms, SafeFs, SettingsStoreError,
@@ -62,10 +63,12 @@ use crate::domain::files::RelPath;
 use crate::domain::sealed::{AnswerId, SealContext, SecretField};
 use crate::domain::secret::Secret;
 use crate::domain::services::deploy::{flatten_target, normalize_target};
+use crate::domain::services::from_fiche::game_ports;
 use crate::domain::services::from_fiche::{
     generated_secret_id, produced_file_perms, state_of_answers,
 };
 use crate::domain::services::key::ServiceKey;
+use crate::domain::services::spec::SpecProtocol;
 use crate::domain::services::spec::{SecretsAccess, SpecBody};
 
 /// Le scellé d'un secret de réglage n'est pas numéroté comme la description (dont les révisions commencent à 1) :
@@ -228,6 +231,21 @@ enum FileRead {
     Unsafe,
 }
 
+/// Le réglage qui porte le mot de passe du serveur de jeu : un seul, de genre `game_password` et non imposé par la fiche
+/// (BR-JEU-039, BR-JEU-040). La vue et la révélation s'accordent sur lui.
+fn game_password_setting(fiche: &Fiche) -> Option<&Setting> {
+    fiche.settings.iter().find(|setting| {
+        setting.imposed.is_none()
+            && matches!(
+                setting.spec,
+                ValueSpec::Secret {
+                    kind: SecretKind::GamePassword,
+                    ..
+                }
+            )
+    })
+}
+
 /// Tout ce qu'il faut savoir d'un service pour lire ou enregistrer ses réglages.
 struct Loaded<'a> {
     key: ServiceKey,
@@ -240,8 +258,9 @@ struct Loaded<'a> {
     state: SettingsState,
     fingerprint: Option<String>,
     stored: Option<crate::application::ports::StoredSettings>,
-    /// Les secrets de la description, descellés UNE fois par chargement.
-    access: SecretsAccess,
+    /// Les secrets de la description, descellés UNE fois par chargement ; `None` : chargé pour une lecture qui n'en
+    /// a pas besoin (`load_plain`), rien n'a été descellé.
+    access: Option<SecretsAccess>,
 }
 
 /// Le fichier d'un canal tel qu'il est lu.
@@ -455,7 +474,24 @@ impl GameSettings {
         let Some((revision, access)) = self.specs.read(key, None).await? else {
             return Err(SettingsError::NotAGameService);
         };
-        let body = revision.body;
+        self.loaded(key, revision.body, Some(access)).await
+    }
+
+    /// Comme `load`, sans desceller le moindre secret : pour une lecture ouverte à tout compte (`game_view`), qui ne
+    /// montre aucune valeur secrète (`ServiceSpecs::body`).
+    async fn load_plain(&self, key: &ServiceKey) -> Result<Loaded<'_>, SettingsError> {
+        let Some(body) = self.specs.body(key).await? else {
+            return Err(SettingsError::NotAGameService);
+        };
+        self.loaded(key, body, None).await
+    }
+
+    async fn loaded(
+        &self,
+        key: &ServiceKey,
+        body: SpecBody,
+        access: Option<SecretsAccess>,
+    ) -> Result<Loaded<'_>, SettingsError> {
         let Some(spec_fiche) = &body.fiche else {
             return Err(SettingsError::NotAGameService);
         };
@@ -1190,6 +1226,50 @@ impl GameSettings {
     }
 
     // -------------------------------------------------------------------------------------------------
+    // Ce que le détail d'un serveur de jeu montre (HRT-104, BR-JEU-017 à BR-JEU-021, BR-JEU-027)
+    // -------------------------------------------------------------------------------------------------
+
+    /// La vue d'un service de jeu : sa fiche, la façon dont son monde est enregistré à l'arrêt, ses ports publiés et
+    /// s'il a un mot de passe. Aucune valeur secrète n'est lue ni descellée (`has_password` vient de l'état des
+    /// réglages). Un service sans fiche (adopté, ordinaire) ou dont la fiche n'est plus connue de cette
+    /// construction : `NotAGameService` (BR-JEU-001).
+    pub async fn game_view(&self, key: &ServiceKey) -> Result<GameView, SettingsError> {
+        let loaded = self.load_plain(key).await?;
+        let fiche = loaded.fiche;
+        let ports = game_ports(fiche, &loaded.body.ports)
+            .into_iter()
+            .map(|fact| GamePort {
+                host_port: fact.host_port,
+                protocol: match fact.protocol {
+                    SpecProtocol::Tcp => "tcp",
+                    SpecProtocol::Udp => "udp",
+                    SpecProtocol::Sctp => "sctp",
+                }
+                .to_owned(),
+                role: fact
+                    .role
+                    .map(|role| port_role_name(role).to_owned())
+                    .unwrap_or_default(),
+                changed: fact.changed,
+            })
+            .collect();
+        let has_password = game_password_setting(fiche)
+            .is_some_and(|setting| matches!(loaded.state.slot(&setting.id), Some(Slot::Secret)));
+        Ok(GameView {
+            fiche: fiche.id().to_owned(),
+            name: fiche.file.name.clone(),
+            fiche_version: loaded
+                .body
+                .fiche
+                .as_ref()
+                .map_or(0, |origin| origin.version),
+            stop: stop_view(fiche),
+            ports,
+            has_password,
+        })
+    }
+
+    // -------------------------------------------------------------------------------------------------
     // Révéler le mot de passe du serveur de jeu (HRT-103, BR-JEU-025 à BR-JEU-027)
     // -------------------------------------------------------------------------------------------------
 
@@ -1207,16 +1287,7 @@ impl GameSettings {
         let loaded = self.load(key).await?;
         // Une fiche sans réglage `game_password` n'a pas de mot de passe de jeu : 200 sans `password` (BR-JEU-027),
         // pas un service inconnu.
-        let setting = loaded.fiche.settings.iter().find(|setting| {
-            setting.imposed.is_none()
-                && matches!(
-                    setting.spec,
-                    ValueSpec::Secret {
-                        kind: SecretKind::GamePassword,
-                        ..
-                    }
-                )
-        });
+        let setting = game_password_setting(loaded.fiche);
         let value = if let Some(setting) = setting
             && matches!(loaded.state.slot(&setting.id), Some(Slot::Secret))
         {
@@ -1375,7 +1446,7 @@ impl GameSettings {
         let mut settings: BTreeMap<String, Secret> = BTreeMap::new();
         let mut generated: BTreeMap<String, Secret> = BTreeMap::new();
         match &loaded.access {
-            SecretsAccess::Opened(secrets) => {
+            Some(SecretsAccess::Opened(secrets)) => {
                 for entry in &secrets.answers {
                     let value = Secret::new(entry.value.expose().to_owned());
                     match generated_secret_id(entry.id.as_str()) {
@@ -1388,7 +1459,15 @@ impl GameSettings {
                     }
                 }
             }
-            SecretsAccess::Unreadable(_) | SecretsAccess::Tampered => {
+            Some(SecretsAccess::Unreadable(_) | SecretsAccess::Tampered) => {
+                return Err(SettingsError::SecretsUnreadable);
+            }
+            None => {
+                // Une erreur de branchement, pas une clé qui ne sert plus : `load_plain` ne descelle rien.
+                tracing::error!(
+                    operation = "spec_secrets",
+                    "chargé sans secrets (load_plain)"
+                );
                 return Err(SettingsError::SecretsUnreadable);
             }
         }

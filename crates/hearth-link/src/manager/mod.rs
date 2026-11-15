@@ -13,6 +13,8 @@ mod catalog;
 mod device;
 mod events;
 mod game_settings;
+mod game_view;
+mod parse;
 mod persist;
 mod reauth;
 mod rights;

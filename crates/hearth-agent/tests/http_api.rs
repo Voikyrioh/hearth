@@ -1861,6 +1861,8 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             // Le détail d'une fiche (HRT-101) : une lecture ; ce banc ne propose aucune fiche d'essai, donc
             // `404 FICHE_UNKNOWN` ; rien n'est écrit au journal.
             "/catalog/{id}" => "/catalog/terraria".to_owned(),
+            // La vue d'un serveur de jeu (HRT-104) : une lecture ; ce banc n'a pas de service de ce nom, donc `404`.
+            "/services/{key}/game" => "/services/h_inconnu/game".to_owned(),
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),
             // La liste des sauvegardes d'un service (HRT-97) : une lecture, aucune entrée de journal.
             "/services/{key}/backups" => format!("/services/{}/backups", backup_key.as_str()),

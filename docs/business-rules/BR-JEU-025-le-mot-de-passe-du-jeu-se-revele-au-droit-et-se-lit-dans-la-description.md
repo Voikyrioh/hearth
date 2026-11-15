@@ -16,6 +16,7 @@ maj: 2026-10-24
 ## Application (code)
 - `crates/hearth-agent/src/application/game_settings.rs::GameSettings::reveal_game_password`
 - `crates/hearth-agent/src/entrypoint/http/game_settings.rs::game_secret`
+- `apps/desktop/src/components/molecules/GamePasswordCard.vue` et `apps/desktop/src/stores/gamePassword.ts` (HRT-104 : « Révéler le mot de passe », remasqué à la fermeture)
 
 ## Vérification
 - `crates/hearth-agent/tests/game_stop_https.rs::the_password_is_revealed_to_the_right_only_from_the_description_and_journaled_without_it`
@@ -29,3 +30,4 @@ maj: 2026-10-24
 
 ## Historique
 - 2026-10-24 — création (HRT-103, côté agent).
+- 2026-11-14 : côté client (HRT-104), la carte « Mot de passe du serveur ».

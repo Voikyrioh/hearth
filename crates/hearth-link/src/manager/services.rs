@@ -15,6 +15,7 @@ use hearth_proto::api::services::{
 };
 use serde::de::DeserializeOwned;
 
+use super::parse::parse;
 use super::{ActionOutcome, ActionRequest, LinkManager};
 use crate::domain::pending_ops::OperationId;
 use crate::domain::secret::Secret;
@@ -38,12 +39,6 @@ pub enum Acted<T> {
     ResultUnknown {
         id: OperationId,
     },
-}
-
-/// Lit une réponse typée. L'erreur de lecture ne recopie JAMAIS celle de `serde` : une erreur de type cite la
-/// valeur fautive, qui peut être le nom ou l'image d'un conteneur que le compte n'a pas adopté.
-fn parse<T: DeserializeOwned>(body: serde_json::Value, what: &str) -> Result<T, LinkError> {
-    serde_json::from_value(body).map_err(|_| LinkError::Protocol(format!("{what} illisible")))
 }
 
 fn acted<T: DeserializeOwned>(outcome: ActionOutcome, what: &str) -> Result<Acted<T>, LinkError> {
