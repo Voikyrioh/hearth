@@ -51,6 +51,8 @@ mod session_repo;
 mod store_error;
 mod system_probe;
 mod token_gen;
+mod transfer_files;
+mod transfer_repo;
 mod unit_of_work;
 mod update;
 mod world_fs;
@@ -124,6 +126,8 @@ pub use session_repo::{SessionRepo, SessionTx};
 pub use store_error::StoreError;
 pub use system_probe::{ProbeError, SystemProbe};
 pub use token_gen::{TokenGen, TokenGenError};
+pub use transfer_files::{Loaded, ReadSeek, TransferFiles};
+pub use transfer_repo::{NewTransfer, TransferRepo, TransferRow, TransferState};
 pub use unit_of_work::{Store, UnitOfWork};
 pub use update::{
     Downloader, FetchError, FreeSpace, Greeting, HelloProbe, SignatureError, SignatureVerifier,

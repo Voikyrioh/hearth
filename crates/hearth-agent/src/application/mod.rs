@@ -34,6 +34,7 @@ pub mod service_update;
 pub mod services;
 pub mod services_right;
 pub mod sessions;
+pub mod transfers;
 pub mod trust;
 pub mod update;
 pub mod update_supervisor;

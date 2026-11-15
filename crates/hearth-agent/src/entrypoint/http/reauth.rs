@@ -41,6 +41,7 @@ use hearth_proto::api::service_ops::{OperationChoice, OperationDecision};
 use hearth_proto::api::service_spec::DriftView;
 use hearth_proto::api::service_update::{CommandOp, EnvOp, SpecChange};
 use hearth_proto::api::services::AdoptRequest;
+use hearth_proto::api::transfers::DepositRequest;
 use hearth_proto::api::update::AgentUpdateRequest;
 use hearth_proto::error::{ErrorBody, ErrorCode, UpgradeTarget};
 use serde::Deserialize;
@@ -105,6 +106,9 @@ enum Parsed {
     /// Régler les éléments ignorés (HRT-97) : le nombre d'éléments et l'empreinte de la liste sont signés
     /// (`BackupSettings::act_digest`, la fonction de la liaison cliente) ; jamais un chemin.
     BackupSettings(BackupSettings),
+    /// Déposer un fichier dans la zone d'attente (HRT-95) : le dernier nom et la taille sont signés
+    /// (`AdminAct::file_deposit`, la fonction de la liaison cliente) ; jamais un chemin.
+    Deposit(DepositRequest),
     /// Acte dont la cible est dans le chemin et dont aucun paramètre ne vient du corps.
     TargetOnly,
 }
@@ -221,6 +225,7 @@ impl Parsed {
                 .filter(|request: &BackupRequest| request.mode != BackupMode::Unknown)
                 .map(Self::BackupCreate),
             ActKind::BackupSettings => serde_json::from_slice(bytes).ok().map(Self::BackupSettings),
+            ActKind::FileWrite => serde_json::from_slice(bytes).ok().map(Self::Deposit),
         }
     }
 
@@ -300,6 +305,7 @@ impl Parsed {
                     digest,
                 }
             }
+            (Self::Deposit(request), _) => AdminAct::file_deposit(request),
             (Self::Decide(request), _) => AdminAct::OperationDecide {
                 target: id,
                 choice: request.choice,
@@ -327,6 +333,7 @@ impl Parsed {
                 | ActKind::ServiceUpdate
                 | ActKind::BackupCreate
                 | ActKind::BackupSettings
+                | ActKind::FileWrite
                 | ActKind::GameSettingsSave,
             ) => return None,
         })

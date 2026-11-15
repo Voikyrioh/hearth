@@ -265,6 +265,13 @@ fn build<'a>(
                 digest,
             }
         }
+        // Déposer un fichier dans la zone d'attente de l'agent (HRT-95) : le dernier nom du fichier et sa taille se lisent
+        // du corps (une seule fonction, partagée avec l'agent : `AdminAct::file_deposit`). Jamais un chemin.
+        ActKind::FileWrite => {
+            let request: hearth_proto::api::transfers::DepositRequest =
+                serde_json::from_value(body.cloned().ok_or(Unreadable)?).map_err(|_| Unreadable)?;
+            AdminAct::file_deposit(&request)
+        }
         // Supprimer une sauvegarde : l'identifiant, lu du chemin ; aucun paramètre.
         ActKind::BackupDelete => AdminAct::BackupDelete { target: id_ref()? },
         // Régler les éléments ignorés : la clé du service est la cible ; le nombre d'éléments et l'empreinte de
@@ -336,6 +343,7 @@ mod tests {
                 "changes": [{ "id": "motd", "action": "set", "value": "Salut" }]
             }),
             "/services/{key}/spec" => json!({ "base_rev": 2, "tag": "1.2", "repull": false }),
+            "/deposits" => json!({ "name": "pack.zip", "size": 1_048_576 }),
             "/deployments" => {
                 json!({ "name": "web", "image": "nginx", "env": [{ "name": "A", "value": "v" }] })
             }

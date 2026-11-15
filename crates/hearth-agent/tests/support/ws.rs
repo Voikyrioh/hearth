@@ -68,6 +68,11 @@ pub async fn open_logs(agent: &Agent, key: &str) -> Result<WsClient, Refused> {
     .await
 }
 
+/// Ouvre le socket d'un transfert (HRT-95) avec la version d'interface courante.
+pub async fn open_transfer(agent: &Agent, id: &str) -> Result<WsClient, Refused> {
+    connect_path(agent, &format!("/api/v1/transfers/{id}"), Some("1"), None).await
+}
+
 /// Comme `open_logs`, avec un tampon de réception minuscule : un client qui ne lit pas bloque vite
 /// l'envoi de l'agent.
 pub async fn open_logs_small_buffer(agent: &Agent, key: &str) -> Result<WsClient, Refused> {
@@ -155,6 +160,15 @@ impl WsClient {
             .expect("envoi");
     }
 
+    /// Comme `send_binary`, mais l'échec de l'envoi (le serveur a déjà coupé) n'est pas une erreur du test.
+    pub async fn send_binary_lossy(&mut self, bytes: &[u8]) {
+        use futures_util::SinkExt as _;
+        let _ = self
+            .socket
+            .send(Message::Binary(bytes.to_vec().into()))
+            .await;
+    }
+
     pub async fn auth(&mut self, token: &str) {
         self.send(&ClientMessage::Auth {
             token: token.to_owned(),
@@ -199,6 +213,41 @@ impl WsClient {
                 Some(Message::Text(text)) => {
                     return Some(Ok(serde_json::from_str(text.as_str()).unwrap_or_else(
                         |error| panic!("message des journaux illisible ({error}) : {text}"),
+                    )));
+                }
+                Some(Message::Close(frame)) => {
+                    return Some(Err(End::Closed(frame.map_or(1005, |f| u16::from(f.code)))));
+                }
+                Some(_) => {}
+                None => return Some(Err(End::Dropped)),
+            }
+        }
+    }
+
+    /// Prochain message du socket d'un transfert, ou la fin de la connexion.
+    pub async fn next_upload(
+        &mut self,
+    ) -> Result<hearth_proto::api::transfers::UploadServerMessage, End> {
+        self.try_next_upload(WAIT)
+            .await
+            .expect("aucun message du transfert dans le délai")
+    }
+
+    /// Comme `next_upload`, mais `None` si rien ne vient dans ce délai.
+    pub async fn try_next_upload(
+        &mut self,
+        wait: Duration,
+    ) -> Option<Result<hearth_proto::api::transfers::UploadServerMessage, End>> {
+        let deadline = tokio::time::Instant::now() + wait;
+        loop {
+            let frame = match tokio::time::timeout_at(deadline, self.socket.next()).await {
+                Err(_) => return None,
+                Ok(frame) => frame.transpose().unwrap_or(None),
+            };
+            match frame {
+                Some(Message::Text(text)) => {
+                    return Some(Ok(serde_json::from_str(text.as_str()).unwrap_or_else(
+                        |error| panic!("message du transfert illisible ({error}) : {text}"),
                     )));
                 }
                 Some(Message::Close(frame)) => {

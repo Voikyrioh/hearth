@@ -192,6 +192,7 @@ fn metering() -> Metering {
         stream: StreamSettings {
             auth_timeout: Duration::from_millis(800),
             idle_timeout: Duration::from_secs(10),
+            transfer_idle_timeout: Duration::from_secs(10),
             session_check_period: Duration::from_millis(50),
             send_timeout: Duration::from_secs(5),
             max_pending_total: 32,
@@ -448,6 +449,7 @@ impl TestAgent {
                     host_paths: None,
                     catalog: hearth_agent::app::CatalogParts::production(),
                     backups: hearth_agent::app::BackupParts::production(),
+                    transfers: hearth_agent::app::TransferParts::production(),
                 },
             )
             .await

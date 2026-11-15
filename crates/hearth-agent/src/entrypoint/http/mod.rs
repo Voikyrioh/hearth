@@ -31,6 +31,7 @@ mod service_ops;
 mod service_spec;
 mod services;
 mod sessions;
+mod transfers;
 mod update;
 mod version;
 mod wire;
@@ -106,6 +107,8 @@ pub struct AppState {
     pub service_updates: Arc<crate::application::service_update::ServiceUpdates>,
     /// Sauvegarder les données d'un service (HRT-97, ADR-0047) : lister, estimer, créer, vérifier, supprimer.
     pub backups: Arc<Backups>,
+    /// La zone d'attente des fichiers déposés par transfert reprenable (HRT-95, ADR-0048).
+    pub transfers: Arc<crate::application::transfers::Transfers>,
     /// Les fiches de serveurs de jeu que cet agent propose (HRT-101, ADR-0050).
     pub catalog: Arc<crate::application::catalog::CatalogService>,
     /// Reprendre un monde existant : lister les mondes des dossiers ouverts et les inspecter (HRT-105).
@@ -547,6 +550,47 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: true,
         audit: Some(AuditAction::ServiceBackupSettings),
         route: || put(backups::settings),
+    },
+    // Déposer un fichier dans la zone d'attente de l'agent (HRT-95, ADR-0048, BR-FILES-019, BR-MOD-015) : ouvrir le
+    // dépôt est un acte `FileWrite` couvert par l'élévation ; l'envoi lui-même passe par le WebSocket du transfert
+    // (premier message, droit revérifié pendant l'envoi). Lire l'état d'un dépôt et l'abandonner ne demandent que le
+    // droit de gérer les services et ne touchent que le dépôt de CE compte ; l'abandon est une exception nommée
+    // (`NOT_AN_ACT`). Le refus faute de droit est consigné par la couche d'accès, la réussite par la fin de l'envoi.
+    Endpoint {
+        method: Method::POST,
+        path: "/deposits",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceFileWrite),
+        route: || post(transfers::open),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/deposits/{id}",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::ServiceFileWrite),
+        route: || get(transfers::view),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/transfers/{id}",
+        access: Access::FirstMessage,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(ws::transfer),
+    },
+    Endpoint {
+        method: Method::DELETE,
+        path: "/transfers/{id}",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceFileWrite),
+        route: || delete(transfers::abandon),
     },
     // Le catalogue des fiches de serveurs de jeu (HRT-101, ADR-0050) : une consultation ouverte à tout compte
     // authentifié, sans effet ni journal (BR-FICHE-001 à 004). Installer passe par `POST /deployments`.
@@ -1131,6 +1175,13 @@ mod tests {
         // Journaux en direct (HRT-66, HRT-79) : le droit et l'adoption sont jugés par `may_read`, pas par
         // le niveau d'accès de la route (voir `Class::ServiceStream`).
         ("GET", "/services/{key}/logs", ServiceStream),
+        // Déposer un fichier dans la zone d'attente (HRT-95) : ouvrir le dépôt est un acte confirmé (`0x16`) ; son état
+        // est une consultation du droit ; le socket d'envoi s'authentifie par son premier message et juge le droit à
+        // l'ouverture puis pendant l'envoi ; abandonner n'efface que la partie reçue de l'appelant (exception nommée).
+        ("POST", "/deposits", Service),
+        ("GET", "/deposits/{id}", ServiceCheck),
+        ("GET", "/transfers/{id}", ServiceStream),
+        ("DELETE", "/transfers/{id}", Service),
         ("GET", "/services/{key}/env", Service),
         // Ce que le détail d'un serveur de jeu montre (HRT-104) : ouvert à tout compte authentifié, aucun secret.
         ("GET", "/services/{key}/game", OpenRead),
@@ -1243,6 +1294,10 @@ mod tests {
         "/backups",
         // Le catalogue des fiches de serveurs de jeu (HRT-101) : ouvert à tous en lecture, jamais autre chose.
         "/catalog",
+        // La zone d'attente des fichiers (HRT-95) : le dépôt et son transfert, jamais autre chose que de niveau
+        // `Services` (le socket d'envoi juge le droit lui-même, à l'ouverture et pendant l'envoi).
+        "/deposits",
+        "/transfers",
     ];
 
     /// BR-GRANT-003 et BR-GRANT-005 : le classement est EXHAUSTIF par construction. Toute route déclarée
@@ -1356,6 +1411,7 @@ mod tests {
                 ("DELETE", "/backups/{id}"),
                 ("DELETE", "/operations/services/{id}"),
                 ("DELETE", "/services/{key}"),
+                ("DELETE", "/transfers/{id}"),
                 ("GET", "/catalog/{id}/worlds"),
                 ("GET", "/operations/services/{id}/tail"),
                 ("GET", "/services/external"),
@@ -1365,6 +1421,7 @@ mod tests {
                 ("GET", "/services/{key}/settings"),
                 ("GET", "/services/{key}/spec"),
                 ("POST", "/deployments"),
+                ("POST", "/deposits"),
                 ("POST", "/operations/services/{id}/decision"),
                 ("POST", "/services/adopt"),
                 ("POST", "/services/{key}/backups"),
@@ -1388,15 +1445,18 @@ mod tests {
     }
 
     #[test]
-    fn only_the_two_sockets_authenticate_by_their_first_message_and_both_are_version_checked() {
-        // Le flux commun et le socket d'une lecture de journaux (HRT-66) : deux WebSocket, deux lectures.
+    fn only_the_three_sockets_authenticate_by_their_first_message_and_all_are_version_checked() {
+        // Le flux commun, le socket d'une lecture de journaux (HRT-66) et le socket d'un envoi (HRT-95).
         let mut first_message: Vec<_> = ENDPOINTS
             .iter()
             .filter(|endpoint| endpoint.access == Access::FirstMessage)
             .map(|endpoint| endpoint.path)
             .collect();
         first_message.sort_unstable();
-        assert_eq!(first_message, ["/services/{key}/logs", "/stream"]);
+        assert_eq!(
+            first_message,
+            ["/services/{key}/logs", "/stream", "/transfers/{id}"]
+        );
         for endpoint in ENDPOINTS
             .iter()
             .filter(|endpoint| endpoint.access == Access::FirstMessage)

@@ -53,7 +53,7 @@ fn component(name: &str) -> Result<&str, BackupFsError> {
 }
 
 #[cfg(unix)]
-mod sys {
+pub(crate) mod sys {
     use super::*;
     use std::fs::{self, File, OpenOptions};
     use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
@@ -166,7 +166,7 @@ mod sys {
 }
 
 #[cfg(not(unix))]
-mod sys {
+pub(crate) mod sys {
     use super::*;
     use std::fs::{self, File};
 

@@ -96,6 +96,8 @@ pub mod action {
     pub const SERVICE_BACKUP_DELETE: &str = "service.backup.delete";
     /// Les éléments ignorés par les sauvegardes d'un service changent (HRT-97, BR-BACKUP-003).
     pub const SERVICE_BACKUP_SETTINGS: &str = "service.backup.settings";
+    /// Un fichier est écrit sur le serveur : un dépôt dans la zone d'attente de l'agent est complet (HRT-95).
+    pub const SERVICE_FILE_WRITE: &str = "service.file.write";
     /// Un monde est repris d'ailleurs (lot suivant). Genre d'opération `world_import`.
     pub const SERVICE_WORLD_IMPORT: &str = "service.world.import";
     /// Les réglages d'un serveur de jeu sont enregistrés (HRT-108).
@@ -121,7 +123,7 @@ pub mod action {
     pub const CATALOG_FICHE_REFUSED: &str = "catalog.fiche.refused";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 51] = [
+    pub const ALL: [&str; 52] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -165,6 +167,7 @@ pub mod action {
         SERVICE_BACKUP_RESTORE,
         SERVICE_BACKUP_DELETE,
         SERVICE_BACKUP_SETTINGS,
+        SERVICE_FILE_WRITE,
         SERVICE_WORLD_IMPORT,
         SERVICE_GAME_SETTINGS,
         SERVICE_GAME_PASSWORD_REVEAL,

@@ -80,6 +80,10 @@ expect_used = "deny"
 dbg_macro = "deny"
 todo = "warn"
 
+# Les empreintes de gros fichiers (transferts, HRT-95) se calculent à vitesse utile même dans les tests.
+[profile.dev.package.sha2]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

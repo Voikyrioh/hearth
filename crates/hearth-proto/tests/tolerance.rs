@@ -57,6 +57,9 @@ use hearth_proto::api::services::{
     ServiceDriver, ServiceOrigin, ServiceState,
 };
 use hearth_proto::api::sessions::{ChallengePurpose, DeviceStatus};
+use hearth_proto::api::transfers::{
+    DepositState, TransferErrorCode, UploadClientMessage, UploadServerMessage,
+};
 use hearth_proto::api::update::{UpdateOutcome, UpdateProgress, UpdateReason, UpdateStep};
 use hearth_proto::error::{ErrorBody, ErrorCode, UpgradeTarget};
 use hearth_proto::stream::{
@@ -173,6 +176,13 @@ fn enums() -> Vec<Entry> {
         entry!("api/backups.rs::BackupFlag", Tolerant, BackupFlag),
         entry!("api/backups.rs::BackupIntegrity", Tolerant, BackupIntegrity),
         entry!("api/backups.rs::IgnoredWhy", Tolerant, IgnoredWhy),
+        entry!("api/transfers.rs::DepositState", Tolerant, DepositState),
+        entry!(
+            "api/transfers.rs::TransferErrorCode",
+            Tolerant,
+            TransferErrorCode
+        ),
+        entry!("api/transfers.rs::UploadServerMessage", Tolerant, tagged UploadServerMessage),
         entry!("api/game_settings.rs::ChangeAction", Tolerant, ChangeAction),
         entry!(
             "api/game_settings.rs::DriftResolution",
@@ -240,6 +250,7 @@ fn enums() -> Vec<Entry> {
         entry!("stream.rs::ClientMessage", Strict, tagged ClientMessage),
         entry!("stream.rs::SignedAuth", Strict, tagged SignedAuth),
         entry!("api/service_logs.rs::LogsClientMessage", Strict, tagged LogsClientMessage),
+        entry!("api/transfers.rs::UploadClientMessage", Strict, tagged UploadClientMessage),
         // Enveloppes du flux lues après examen du `type` par `hearth-link::decode_frame`.
         entry!("stream.rs::UpdateMessage", Cascade, tagged UpdateMessage),
         entry!("stream.rs::SecurityMessage", Cascade, tagged SecurityMessage),

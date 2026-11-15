@@ -14,6 +14,7 @@ use hearth_proto::api::service_update::CAPABILITY_SERVICE_UPDATE;
 use hearth_proto::api::services::{
     CAPABILITY_SERVICE_ADOPTION, CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES,
 };
+use hearth_proto::api::transfers::CAPABILITY_SERVICE_TRANSFERS;
 use hearth_proto::api::worlds::CAPABILITY_WORLD_IMPORT;
 use hearth_proto::product::PRODUCT_NAME;
 use hearth_proto::version::{API_MIN_SUPPORTED, API_VERSION};
@@ -81,6 +82,9 @@ impl HelloService {
                     // Reprendre un monde existant (HRT-105) : `GET /catalog/{id}/worlds`, son inspection et
                     // `source.world` de `POST /deployments`.
                     CAPABILITY_WORLD_IMPORT,
+                    // Déposer un fichier par transfert reprenable (HRT-95) : `POST /deposits`, `GET /deposits/{id}`,
+                    // `GET /transfers/{id}` (socket) et `DELETE /transfers/{id}`.
+                    CAPABILITY_SERVICE_TRANSFERS,
                 ],
             },
         }
@@ -141,7 +145,8 @@ mod tests {
                 "service-delete",
                 "service-update",
                 "service-backups",
-                "world-import"
+                "world-import",
+                "service-transfers"
             ]
         );
     }

@@ -32,5 +32,6 @@ pub mod sqlite;
 pub mod supervisor;
 pub mod system;
 pub mod tls;
+pub mod transfer_files;
 pub mod update;
 pub mod world_fs;

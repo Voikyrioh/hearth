@@ -71,6 +71,12 @@ pub fn parts_supervised(
             timings: fast_backup(),
             files: Some(Arc::new(super::fake_backup_files::FakeBackupFiles::new())),
         },
+        transfers: hearth_agent::app::TransferParts {
+            timings: fast_transfers(),
+            files: Some(Arc::new(
+                super::fake_transfer_files::FakeTransferFiles::new(),
+            )),
+        },
         catalog: hearth_agent::app::CatalogParts {
             include_preview: false,
             random: Arc::new(super::fake_random::FakeRandom::counting_from(0)),
@@ -79,6 +85,15 @@ pub fn parts_supervised(
             world_fs: None,
             pack_deposits: None,
         },
+    }
+}
+
+/// Des transferts aux délais courts (HRT-95) : 24 heures de reprise deviennent 2 secondes, la purge repasse
+/// toutes les 100 ms.
+pub fn fast_transfers() -> hearth_agent::application::transfers::TransferTimings {
+    hearth_agent::application::transfers::TransferTimings {
+        resume_window: Duration::from_secs(2),
+        purge_period: Duration::from_millis(100),
     }
 }
 

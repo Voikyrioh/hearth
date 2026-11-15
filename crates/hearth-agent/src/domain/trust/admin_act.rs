@@ -203,6 +203,15 @@ mod tests {
             ),
             (AdminAct::BackupDelete { target: "01BK" }, false),
             (
+                AdminAct::FileWrite {
+                    target: "deposit".into(),
+                    gesture: "upload",
+                    name: "pack.zip".into(),
+                    size: 1,
+                },
+                true,
+            ),
+            (
                 AdminAct::BackupSettings {
                     target: "c_a".into(),
                     count: 0,

@@ -124,6 +124,11 @@ enum Spec {
         key: String,
         body: Value,
     },
+    /// Déposer un fichier dans la zone d'attente (HRT-95) : le geste, le dernier nom et la taille sont signés ; jamais
+    /// un octet du contenu.
+    Deposit {
+        body: Value,
+    },
 }
 
 fn role_wire(role: RoleName) -> &'static str {
@@ -207,6 +212,11 @@ impl Spec {
                 }
             }
             Self::BackupDelete { id } => AdminAct::BackupDelete { target: id },
+            Self::Deposit { body } => {
+                let request: hearth_proto::api::transfers::DepositRequest =
+                    serde_json::from_value(body.clone()).expect("corps du dépôt");
+                AdminAct::file_deposit(&request)
+            }
             Self::BackupSettings { key, body } => {
                 let settings: hearth_proto::api::backups::BackupSettings =
                     serde_json::from_value(body.clone()).expect("corps des éléments ignorés");
@@ -313,6 +323,7 @@ impl Spec {
                 body.clone(),
             ),
             Self::BackupDelete { id } => (Method::DELETE, format!("/backups/{id}"), json!({})),
+            Self::Deposit { body } => (Method::POST, "/deposits".to_owned(), body.clone()),
             Self::BackupSettings { key, body } => (
                 Method::PUT,
                 format!("/services/{key}/backup-settings"),
@@ -523,6 +534,18 @@ impl Spec {
             Self::BackupDelete { .. } => vec![Self::BackupDelete {
                 id: "01J9ZY0G3Q8M2K6W4T7V5N1B9X".into(),
             }],
+            // Le dernier nom du fichier et sa taille sont signés.
+            Self::Deposit { body } => {
+                let changed = |change: &dyn Fn(&mut Value)| {
+                    let mut other = body.clone();
+                    change(&mut other);
+                    Self::Deposit { body: other }
+                };
+                vec![
+                    changed(&|b| b["name"] = json!("autre.zip")),
+                    changed(&|b| b["size"] = json!(8192)),
+                ]
+            }
             // La clé, le nombre d'éléments et l'empreinte de leur liste sont signés.
             Self::BackupSettings { key, body } => {
                 let changed = |change: &dyn Fn(&mut Value)| {
@@ -808,6 +831,12 @@ impl Bench {
                     .to_owned();
                 self.wait_operations_done().await;
                 Spec::BackupDelete { id }
+            }
+            ActKind::FileWrite => {
+                self.env.grant_services("marie").await;
+                Spec::Deposit {
+                    body: json!({ "name": "pack.zip", "size": 4096 }),
+                }
             }
             ActKind::BackupSettings => {
                 let key = self.backup_service().await;
