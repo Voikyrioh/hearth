@@ -1,0 +1,218 @@
+# Réglages de Minecraft Java : thèmes et catalogue (HRT-116). Tous reçus par variable d'environnement de l'image
+# `itzg/minecraft-server` (canal `env`) : un changement recrée le service (BR-FICHE-042).
+#
+# Libellés et aides : vouvoiement, mots simples, sans jargon. Aucune valeur par défaut « non vérifiée » n'est inventée :
+# les valeurs proposées sont celles de la documentation de l'image et du jeu, marquées `partial` (aucun essai réel).
+# Ce que la liste ne dit pas n'est pas exposé : voir `[[not_exposed]]` de la fiche.
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "players"
+label = "Joueurs"
+order = 2
+
+[[theme]]
+id = "world"
+label = "Monde"
+order = 3
+
+[[theme]]
+id = "performance"
+label = "Performances"
+order = 4
+
+[[theme]]
+id = "security"
+label = "Sécurité"
+order = 5
+
+[[setting]]
+id = "version"
+key = "VERSION"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Version de Minecraft"
+help = "La version du jeu, par exemple 1.20.1. Pour un pack de mods, mettez celle que la page du pack annonce. « LATEST » prend la dernière version à chaque démarrage."
+type = "text"
+charset = "arg_safe"
+max_len = 16
+proposed = "LATEST"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "motd"
+key = "MOTD"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Message d'accueil"
+help = "Le message que les joueurs voient dans la liste des serveurs."
+type = "text"
+charset = "line"
+max_len = 59
+proposed = "Un serveur Minecraft géré par Hearth"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "difficulty"
+key = "DIFFICULTY"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Difficulté"
+help = "La difficulté du monde."
+type = "choice"
+choices = [
+  { value = "peaceful", label = "Paisible" },
+  { value = "easy", label = "Facile" },
+  { value = "normal", label = "Normale" },
+  { value = "hard", label = "Difficile" },
+]
+proposed = "easy"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "mode"
+key = "MODE"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Mode de jeu"
+help = "Le mode des joueurs qui arrivent."
+type = "choice"
+choices = [
+  { value = "survival", label = "Survie" },
+  { value = "creative", label = "Créatif" },
+  { value = "adventure", label = "Aventure" },
+  { value = "spectator", label = "Spectateur" },
+]
+proposed = "survival"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "max_players"
+key = "MAX_PLAYERS"
+channel = "env"
+theme = "players"
+level = "essential"
+label = "Nombre de joueurs"
+help = "Le nombre de joueurs qui peuvent être connectés en même temps."
+type = "int"
+min = 1
+max = 1000
+proposed = "20"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "pvp"
+key = "PVP"
+channel = "env"
+theme = "players"
+level = "common"
+label = "Combat entre joueurs"
+help = "Les joueurs peuvent-ils se faire du mal entre eux ?"
+type = "bool"
+on = "true"
+off = "false"
+proposed = "true"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "allow_flight"
+key = "ALLOW_FLIGHT"
+channel = "env"
+theme = "players"
+level = "common"
+label = "Vol autorisé"
+help = "Autorisez le vol si un mod le permet : sans cela, le serveur renvoie les joueurs qui volent."
+type = "bool"
+on = "true"
+off = "false"
+proposed = "false"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "level_name"
+key = "LEVEL"
+channel = "env"
+theme = "world"
+level = "common"
+label = "Nom du monde"
+help = "Le nom du dossier du monde."
+type = "text"
+charset = "file_stem"
+max_len = 32
+proposed = "world"
+change = "world_creation"
+source = "partial"
+
+[[setting]]
+id = "seed"
+key = "SEED"
+channel = "env"
+theme = "world"
+level = "common"
+label = "Graine du monde"
+help = "Le nombre ou le mot qui décide de la forme du monde. Laissez vide pour un monde au hasard."
+type = "text"
+charset = "line"
+max_len = 32
+change = "world_creation"
+source = "partial"
+
+[[setting]]
+id = "view_distance"
+key = "VIEW_DISTANCE"
+channel = "env"
+theme = "performance"
+level = "common"
+label = "Distance d'affichage"
+help = "Le nombre de zones que chaque joueur voit autour de lui. Plus c'est grand, plus le serveur travaille."
+type = "int"
+min = 3
+max = 32
+proposed = "10"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "simulation_distance"
+key = "SIMULATION_DISTANCE"
+channel = "env"
+theme = "performance"
+level = "advanced"
+label = "Distance de simulation"
+help = "Le nombre de zones autour de chaque joueur où le monde vit (animaux, cultures, machines)."
+type = "int"
+min = 3
+max = 32
+proposed = "10"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "online_mode"
+key = "ONLINE_MODE"
+channel = "env"
+theme = "security"
+level = "advanced"
+label = "Vérifier les comptes Minecraft"
+help = "Gardez cette case cochée : sans elle, n'importe qui peut se faire passer pour un autre joueur."
+type = "bool"
+on = "true"
+off = "false"
+proposed = "true"
+change = "anytime"
+source = "partial"

@@ -1,0 +1,268 @@
+# Minecraft Java, serveur officiel, Paper, Purpur, Fabric, Quilt, Forge, NeoForge, ou avec un pack de mods.
+# Fiche en `preview` (HRT-116, ADR-0050 version 2, ADR-0054).
+#
+# Construite depuis la documentation de l'image `itzg/minecraft-server` (https://docker-minecraft-server.readthedocs.io)
+# et l'inventaire des jeux (section 3.1). Tout ce qui est marqué « non vérifié » ne l'a pas été par un essai réel :
+# rien n'a été ajouté de mémoire. Elle n'est publiable qu'avec le passage du banc d'essai (ADR-0053, HRT-114) et une
+# mémoire recommandée mesurée.
+#
+# Ce que cette fiche NE fait pas, par décision (BR-MOD-016, BR-MOD-017) : aucune variable `CF_*`, aucun type
+# `AUTO_CURSEFORGE`, aucune liste de téléchargements. Un pack CurseForge se dépose sous sa forme « pack serveur »
+# (`.zip`, `mods` et `config` à la racine) : l'agent le range en lecture seule et le passe à l'image par `GENERIC_PACK`.
+
+format = 2
+id = "minecraft"
+version = 1
+family = "minecraft"
+name = "Minecraft Java"
+summary = "Le serveur de Minecraft Java : officiel, Paper, Purpur, Fabric, Quilt, Forge ou NeoForge, avec ou sans pack de mods."
+status = "preview"
+platform = "linux"
+
+[image]
+repository = "itzg/minecraft-server"
+tag = "java21"                            # versions récentes du jeu (1.20.5 et suivantes demandent Java 21)
+digest = "sha256:498b79ce639cff2792206c23d6bd89c6fb43a2e446a4d97ff78ef1a784428caa"
+game_updates = "every_start"              # VERSION=LATEST : l'image prend la dernière version à chaque démarrage ; une version précise reste telle quelle
+
+[owner]
+uid = 1000                                # l'image perd ses droits de root pour cet utilisateur (UID et GID ci-dessous)
+gid = 1000
+
+# Les variantes sont les moteurs de serveur relevés dans la documentation de l'image (la variable `TYPE`). Spigot n'est
+# pas proposé : l'image dit que son téléchargement n'est plus pris en charge (accord de Voiky). `modrinth` : le moteur
+# vient d'un pack Modrinth (`MODRINTH_MODPACK`). Java 17 pour les moteurs à mods : les packs de la version 1.20 en ont
+# besoin (Prominence II : Fabric, 1.20.1, Java 17).
+[[variant]]
+id = "vanilla"
+label = "Officiel"
+help = "Le serveur de Mojang, sans mod."
+default = true
+
+[[variant.env]]
+name = "TYPE"
+value = "VANILLA"
+
+[[variant]]
+id = "paper"
+label = "Paper"
+help = "Un serveur rapide qui accepte des extensions (plugins), sans changer le jeu."
+default = false
+
+[[variant.env]]
+name = "TYPE"
+value = "PAPER"
+
+[[variant]]
+id = "purpur"
+label = "Purpur"
+help = "Comme Paper, avec encore plus de réglages."
+default = false
+
+[[variant.env]]
+name = "TYPE"
+value = "PURPUR"
+
+[[variant]]
+id = "fabric"
+label = "Fabric"
+help = "Un moteur léger pour les mods Fabric, avec Java 17 : les versions du jeu jusqu'à 1.20.4."
+default = false
+image_tag = "java17"
+image_digest = "sha256:94b3e70f40c9ddc8ded7de2a7e7d6725254f08abaa63950d8402e4b107ccc4e2"
+
+[[variant.env]]
+name = "TYPE"
+value = "FABRIC"
+
+[[variant]]
+id = "quilt"
+label = "Quilt"
+help = "Un moteur pour les mods Quilt, avec Java 17 : les versions du jeu jusqu'à 1.20.4."
+default = false
+image_tag = "java17"
+image_digest = "sha256:94b3e70f40c9ddc8ded7de2a7e7d6725254f08abaa63950d8402e4b107ccc4e2"
+
+[[variant.env]]
+name = "TYPE"
+value = "QUILT"
+
+[[variant]]
+id = "forge"
+label = "Forge"
+help = "Le moteur historique des mods, avec Java 17 : les versions du jeu jusqu'à 1.20.4."
+default = false
+image_tag = "java17"
+image_digest = "sha256:94b3e70f40c9ddc8ded7de2a7e7d6725254f08abaa63950d8402e4b107ccc4e2"
+
+[[variant.env]]
+name = "TYPE"
+value = "FORGE"
+
+[[variant]]
+id = "neoforge"
+label = "NeoForge"
+help = "Le successeur de Forge, avec Java 21."
+default = false
+
+[[variant.env]]
+name = "TYPE"
+value = "NEOFORGE"
+
+[[variant]]
+id = "modrinth"
+label = "Selon le pack Modrinth"
+help = "Le moteur et la version du jeu viennent du pack Modrinth que vous déposez."
+default = false
+
+[[variant.env]]
+name = "TYPE"
+value = "MODRINTH"
+
+# Tout vit dans `/data` : le monde, les réglages du jeu, les mods installés par le pack.
+[[folder]]
+id = "data"
+role = "data"
+target = "/data"
+read_only = false
+backup = true
+
+# Le dossier des packs déposés (HRT-124) : l'agent y range le pack sous un nom fixe, le conteneur le lit sans pouvoir
+# l'écrire. Hors sauvegarde : le pack se redépose, le monde et les mods installés sont dans `/data`.
+[[folder]]
+id = "packs"
+role = "packs"
+target = "/packs"
+read_only = true
+backup = false
+
+[[port]]
+id = "game"
+container = 25565
+protocol = "tcp"
+role = "game"
+publish = "always"
+default_host = 25565
+mapping = "nat"                           # le port du jeu dans le conteneur reste 25565 ; les joueurs se connectent au port choisi sur le serveur
+
+# La console interne de l'image (RCON), jamais publiée : l'image s'en sert pour l'arrêt propre.
+[[port]]
+id = "rcon"
+container = 25575
+protocol = "tcp"
+role = "remote_console"
+publish = "never"
+mapping = "nat"
+
+[[channel]]
+id = "env"
+kind = "env"
+
+[[env]]
+name = "UID"
+owner = "uid"
+
+[[env]]
+name = "GID"
+owner = "gid"
+
+# Le tas de la JVM suit la limite de mémoire du service : `MEMORY` vide laisse la JVM calculer son tas, et
+# `MaxRAMPercentage` le fixe à 75 % de la limite (le reste sert aux mémoires hors tas). Documentation de l'image :
+# « To let the JVM calculate heap size automatically, unset MEMORY with an empty value ». C'est donc le curseur de
+# mémoire de l'installation qui règle Minecraft, jamais un chiffre de la fiche. Non vérifié par un essai réel.
+[[env]]
+name = "MEMORY"
+value = ""
+
+[[env]]
+name = "JVM_XX_OPTS"
+value = "-XX:MaxRAMPercentage=75"
+
+# Attente de l'enregistrement du monde à l'arrêt : un gros monde ou un gros pack demande du temps (60 s par défaut).
+[[env]]
+name = "STOP_DURATION"
+value = "180"
+
+[[env]]
+name = "ENABLE_RCON"
+value = "true"
+
+[[env]]
+name = "RCON_PASSWORD"
+secret = "rcon"
+
+[[secret]]
+id = "rcon"
+origin = "generated"
+length = 32
+alphabet = "alnum"
+
+[remote_console]
+protocol = "source_rcon"
+port = "rcon"
+password = "rcon"
+
+[[agreement]]
+id = "eula"
+title = "Contrat de licence de Minecraft (EULA)"
+url = "https://www.minecraft.net/eula"
+sentence = "J'ai lu le contrat de licence de Minecraft et je l'accepte."
+
+[agreement.binds]
+channel = "env"
+key = "EULA"
+accepted_value = "TRUE"
+
+[mods]
+ways = ["drop_pack"]
+
+[mods.pack]
+folder = "packs"
+
+# Un pack serveur (`.zip`, `mods` et `config` à la racine) : `GENERIC_PACK`, avec un moteur à mods.
+[[mods.pack.genre]]
+kind = "server_pack"
+env = "GENERIC_PACK"
+variants = ["vanilla", "paper", "purpur", "fabric", "quilt", "forge", "neoforge"]
+
+# Un pack Modrinth (`.mrpack`) : `MODRINTH_MODPACK`, le moteur vient du pack.
+[[mods.pack.genre]]
+kind = "modrinth_pack"
+env = "MODRINTH_MODPACK"
+variants = ["modrinth"]
+
+[first_start]
+ready_timeout_s = 3600                    # un gros pack (centaines de mods) se déballe, puis se charge : plusieurs minutes. Non mesuré.
+world_generation = true
+
+[[first_start.download]]
+what = "Le serveur du jeu et le moteur choisi"
+source_label = "Mojang et l'éditeur du moteur"
+evidence = "unmeasured"
+
+[ready]
+log_contains = "For help, type"           # fin de la ligne « Done (…s)! For help, type "help" » de Minecraft ; non vu sur l'image
+status = "untested"
+
+# L'image intercepte le signal d'arrêt, envoie « stop » au jeu par sa console interne (le jeu enregistre le monde) et
+# attend la fin du processus (`STOP_DURATION`). Le délai du moteur est plus long que cette attente. Non vérifié par un
+# essai réel.
+[stop]
+grace_s = 210
+signal = "SIGTERM"
+world_saved = "by_image_on_signal"
+
+[resources]
+cpu = { evidence = "unmeasured" }
+memory = { evidence = "unmeasured" }
+disk = { evidence = "unmeasured" }
+
+[[not_exposed]]
+key = "OPS"
+channel = "env"
+why = "Les opérateurs se nomment par leur compte Minecraft : Hearth ne garde aucun identifiant de compte (BR-FICHE-011). Le fichier des opérateurs se modifie dans l'onglet Fichiers."
+
+[[not_exposed]]
+key = "WHITELIST"
+channel = "env"
+why = "Les joueurs se nomment par leur compte Minecraft : Hearth ne garde aucun identifiant de compte (BR-FICHE-011). Le fichier de la liste blanche se modifie dans l'onglet Fichiers."
