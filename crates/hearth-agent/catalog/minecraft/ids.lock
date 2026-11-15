@@ -7,6 +7,7 @@ ids = [
   { id = "motd", key = "MOTD", channel = "env", state = "active", since = 1 },
   { id = "difficulty", key = "DIFFICULTY", channel = "env", state = "active", since = 1 },
   { id = "mode", key = "MODE", channel = "env", state = "active", since = 1 },
+  { id = "hardcore", key = "HARDCORE", channel = "env", state = "active", since = 3 },
   { id = "max_players", key = "MAX_PLAYERS", channel = "env", state = "active", since = 1 },
   { id = "pvp", key = "PVP", channel = "env", state = "active", since = 1 },
   { id = "allow_flight", key = "ALLOW_FLIGHT", channel = "env", state = "active", since = 1 },
@@ -15,4 +16,5 @@ ids = [
   { id = "view_distance", key = "VIEW_DISTANCE", channel = "env", state = "active", since = 1 },
   { id = "simulation_distance", key = "SIMULATION_DISTANCE", channel = "env", state = "active", since = 1 },
   { id = "online_mode", key = "ONLINE_MODE", channel = "env", state = "active", since = 1 },
+  { id = "whitelist", key = "ENABLE_WHITELIST", channel = "env", state = "active", since = 3 },
 ]

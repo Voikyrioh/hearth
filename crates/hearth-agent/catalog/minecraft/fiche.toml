@@ -11,7 +11,7 @@
 
 format = 2
 id = "minecraft"
-version = 2
+version = 3
 family = "minecraft"
 name = "Minecraft Java"
 summary = "Le serveur de Minecraft Java : officiel, Paper, Purpur, Fabric, Quilt, Forge ou NeoForge, avec ou sans pack de mods."
@@ -281,4 +281,4 @@ why = "Les opérateurs se nomment par leur compte Minecraft : Hearth ne garde au
 [[not_exposed]]
 key = "WHITELIST"
 channel = "env"
-why = "Les joueurs se nomment par leur compte Minecraft : Hearth ne garde aucun identifiant de compte (BR-FICHE-011). Le fichier de la liste blanche se modifie dans l'onglet Fichiers."
+why = "Seul le réglage « liste blanche » (ENABLE_WHITELIST) est exposé. Les joueurs se nomment par leur compte Minecraft : Hearth ne garde aucun identifiant de compte (BR-FICHE-011). Le fichier de la liste blanche se modifie dans l'onglet Fichiers."
