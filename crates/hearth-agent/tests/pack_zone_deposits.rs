@@ -1,14 +1,20 @@
 //! HRT-124 sur HRT-95 : l'adaptateur `ZonePackDeposits` lit un pack dans la zone d'attente des transferts, le range
 //! par le dossier géré du service (empreinte revérifiée) et libère le dépôt. Zone et disque sont des faux.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 mod support;
 
 use std::io::{Cursor, Read};
 use std::sync::{Arc, Mutex};
 
-use hearth_agent::application::ports::{DepositError, DepositId, PackDeposits};
+use hearth_agent::application::ports::{
+    AccountRepo, DepositError, DepositId, PackDeposits, StoreError,
+};
 use hearth_agent::application::transfers::{CompleteDeposit, DepositZone, TransferError};
+use hearth_agent::domain::accounts::{Account, AccountId, Role, ServicesRight, Username};
 use hearth_agent::domain::files::RelPath;
+use hearth_agent::domain::secret::Secret;
 use hearth_agent::domain::services::ServiceKey;
 use hearth_agent::domain::transfers::TransferId;
 use hearth_agent::infrastructure::pack_deposits::ZonePackDeposits;
@@ -16,6 +22,42 @@ use sha2::{Digest, Sha256};
 use support::fake_safe_fs::FakeSafeFs;
 
 const ID: &str = "01HZY3F8M2K9Q4V6T0R7N5X2PA";
+
+/// Les comptes `ana` et `bob`, d'identifiants techniques DIFFÉRENTS de leur nom : la zone range sous l'identifiant.
+struct Accounts;
+
+fn account(name: &str) -> Account {
+    let now = time::OffsetDateTime::UNIX_EPOCH;
+    Account {
+        id: AccountId::new(format!("ID-{name}")),
+        username: Username::parse(name).unwrap(),
+        role: Role::Admin,
+        services_right: ServicesRight::INITIAL,
+        password_hash: Secret::new("x".into()),
+        created_at: now,
+        password_changed_at: now,
+        last_login_at: None,
+    }
+}
+
+#[async_trait::async_trait]
+impl AccountRepo for Accounts {
+    async fn find_by_id(&self, _: &AccountId) -> Result<Option<Account>, StoreError> {
+        Ok(None)
+    }
+    async fn find_by_username(&self, username: &Username) -> Result<Option<Account>, StoreError> {
+        Ok(matches!(username.as_str(), "ana" | "bob").then(|| account(username.as_str())))
+    }
+    async fn list(&self) -> Result<Vec<Account>, StoreError> {
+        Ok(Vec::new())
+    }
+    async fn reauth_mode(
+        &self,
+        _: &AccountId,
+    ) -> Result<hearth_proto::api::reauth::ReauthMode, StoreError> {
+        Ok(hearth_proto::api::reauth::ReauthMode::Window)
+    }
+}
 
 struct Zone {
     bytes: Vec<u8>,
@@ -25,7 +67,7 @@ struct Zone {
 #[async_trait::async_trait]
 impl DepositZone for Zone {
     async fn take(&self, id: &TransferId, account: &str) -> Result<CompleteDeposit, TransferError> {
-        if account != "ana" {
+        if account != "ID-ana" {
             return Err(TransferError::NotFound);
         }
         Ok(CompleteDeposit {
@@ -52,6 +94,7 @@ fn adapter(bytes: &[u8]) -> (Arc<Zone>, Arc<FakeSafeFs>, Arc<ZonePackDeposits>) 
     let fs = Arc::new(FakeSafeFs::new());
     let deposits = Arc::new(ZonePackDeposits::new(
         zone.clone(),
+        Arc::new(Accounts),
         fs.clone(),
         tokio::runtime::Handle::current(),
     ));
@@ -85,8 +128,9 @@ async fn a_complete_deposit_is_read_placed_and_released() {
         zone.released
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .len(),
-        1
+            .clone(),
+        // Libéré sous l'IDENTIFIANT du compte (FIX:01M7G6V7E6DY5PHJ6TQ848YJ7A), jamais sous son nom.
+        vec![(ID.to_owned(), "ID-ana".to_owned())]
     );
 }
 

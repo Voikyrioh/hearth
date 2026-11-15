@@ -14,9 +14,11 @@ use tokio::runtime::Handle;
 
 use crate::application::pack_intake::MAX_PACK_BYTES;
 use crate::application::ports::{
-    DepositError, DepositFile, DepositId, FsError, Ownership, PackDeposits, Perms, ReadSeek, SafeFs,
+    AccountRepo, DepositError, DepositFile, DepositId, FsError, Ownership, PackDeposits, Perms,
+    ReadSeek, SafeFs,
 };
 use crate::application::transfers::{DepositZone, TransferError};
+use crate::domain::accounts::Username;
 use crate::domain::files::RelPath;
 use crate::domain::services::ServiceKey;
 use crate::domain::transfers::TransferId;
@@ -27,13 +29,39 @@ const PACK_MODE: u32 = 0o644;
 
 pub struct ZonePackDeposits {
     zone: Arc<dyn DepositZone>,
+    accounts: Arc<dyn AccountRepo>,
     fs: Arc<dyn SafeFs>,
     runtime: Handle,
 }
 
 impl ZonePackDeposits {
-    pub fn new(zone: Arc<dyn DepositZone>, fs: Arc<dyn SafeFs>, runtime: Handle) -> Self {
-        Self { zone, fs, runtime }
+    pub fn new(
+        zone: Arc<dyn DepositZone>,
+        accounts: Arc<dyn AccountRepo>,
+        fs: Arc<dyn SafeFs>,
+        runtime: Handle,
+    ) -> Self {
+        Self {
+            zone,
+            accounts,
+            fs,
+            runtime,
+        }
+    }
+
+    // FIX:01M7G6V7E6DY5PHJ6TQ848YJ7A — la zone range les dépôts sous l'IDENTIFIANT du compte, l'appelant donne son NOM (docs/bugs/FIX-01M7G6V7E6DY5PHJ6TQ848YJ7A.md)
+    /// L'identifiant technique du compte dont l'appelant donne le nom : la clé sous laquelle la zone d'attente range
+    /// ses dépôts (`POST /deposits` les ouvre au nom de `session.account.id`). Un nom inconnu : aucun dépôt.
+    fn owner(&self, account: &str) -> Result<String, DepositError> {
+        let username = Username::parse(account).map_err(|_| DepositError::NotFound)?;
+        match self
+            .runtime
+            .block_on(self.accounts.find_by_username(&username))
+        {
+            Ok(Some(found)) => Ok(found.id.as_str().to_owned()),
+            Ok(None) => Err(DepositError::NotFound),
+            Err(_) => Err(DepositError::Io),
+        }
     }
 
     fn take(
@@ -42,7 +70,8 @@ impl ZonePackDeposits {
         account: &str,
     ) -> Result<(TransferId, Box<dyn ReadSeek>), DepositError> {
         let transfer = TransferId::parse(id.as_str()).ok_or(DepositError::NotFound)?;
-        match self.runtime.block_on(self.zone.take(&transfer, account)) {
+        let owner = self.owner(account)?;
+        match self.runtime.block_on(self.zone.take(&transfer, &owner)) {
             Ok(deposit) => Ok((transfer, deposit.reader)),
             Err(TransferError::NotFound | TransferError::Expired) => Err(DepositError::NotFound),
             Err(_) => Err(DepositError::Io),
@@ -95,13 +124,17 @@ impl PackDeposits for ZonePackDeposits {
         }
         // Le pack est rangé : le dépôt est consommé. Un échec du retrait n'annule pas le rangement (la purge de
         // 24 heures de la zone d'attente le reprendra).
-        let _ = self.runtime.block_on(self.zone.release(&transfer, account));
+        if let Ok(owner) = self.owner(account) {
+            let _ = self.runtime.block_on(self.zone.release(&transfer, &owner));
+        }
         Ok(())
     }
 
     fn discard(&self, id: &DepositId, account: &str) {
-        if let Some(transfer) = TransferId::parse(id.as_str()) {
-            let _ = self.runtime.block_on(self.zone.release(&transfer, account));
+        if let Some(transfer) = TransferId::parse(id.as_str())
+            && let Ok(owner) = self.owner(account)
+        {
+            let _ = self.runtime.block_on(self.zone.release(&transfer, &owner));
         }
     }
 }

@@ -157,3 +157,5 @@ Code changé, commit hash, stratégie (patch, refactoring).
 ```
 
 Pointeur code : `// FIX:{ULID}` au-dessus de la ligne corrigée.
+| [FIX-01M7G6V7E6DY5PHJ6TQ848YJ7A](./FIX-01M7G6V7E6DY5PHJ6TQ848YJ7A.md) | Un pack de mods envoyé n'est jamais retrouvé par l'agent (dépôt cherché sous le nom du compte, rangé sous son identifiant) (HRT-124) | 2026-11-15 |
+| [FIX-01M7G757NC6ZK02PVR6KY2C7N2](./FIX-01M7G757NC6ZK02PVR6KY2C7N2.md) | Toute installation depuis une fiche refusée par le moteur : image épinglée `@sha256` mal découpée au téléchargement | 2026-11-15 |
