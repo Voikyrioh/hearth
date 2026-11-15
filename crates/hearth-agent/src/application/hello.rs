@@ -14,8 +14,8 @@ use hearth_proto::api::service_update::CAPABILITY_SERVICE_UPDATE;
 use hearth_proto::api::services::{
     CAPABILITY_SERVICE_ADOPTION, CAPABILITY_SERVICE_RIGHTS, CAPABILITY_SERVICES,
 };
-use hearth_proto::api::worlds::CAPABILITY_WORLD_IMPORT;
 use hearth_proto::api::transfers::CAPABILITY_SERVICE_TRANSFERS;
+use hearth_proto::api::worlds::CAPABILITY_WORLD_IMPORT;
 use hearth_proto::product::PRODUCT_NAME;
 use hearth_proto::version::{API_MIN_SUPPORTED, API_VERSION};
 

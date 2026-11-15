@@ -103,8 +103,8 @@ use crate::infrastructure::system::{
     ProcBootInfo, SysinfoProbe, SystemHostEnvironment, SystemMachineInfo,
 };
 use crate::infrastructure::tls::{self, FileIdentityStore, TlsError};
-use crate::infrastructure::world_fs::{STAGING_DIR, SystemWorldFs};
 use crate::infrastructure::transfer_files::StdTransferFiles;
+use crate::infrastructure::world_fs::{STAGING_DIR, SystemWorldFs};
 
 #[derive(Debug, Error)]
 pub enum AppError {

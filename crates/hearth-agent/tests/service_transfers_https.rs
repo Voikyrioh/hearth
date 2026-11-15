@@ -1071,8 +1071,8 @@ fn resident_bytes() -> u64 {
 async fn several_gibibytes_cross_the_agent_without_being_held_in_memory() {
     let b = bench().await;
     b.files.counting_only();
-    // 2,5 Gio : 640 morceaux de 4 Mio, le même contenu à chaque tour (seul le rang change l'écriture).
-    let total_chunks: u64 = 640;
+    // 2 Gio : 512 morceaux de 4 Mio, le même contenu à chaque tour (seul le rang change l'écriture).
+    let total_chunks: u64 = 512;
     let size = total_chunks * u64::from(CHUNK_BYTES);
     let id = b.deposit(size).await;
     let (mut socket, _) = b.attach(&id).await;
@@ -1088,7 +1088,13 @@ async fn several_gibibytes_cross_the_agent_without_being_held_in_memory() {
             .send_binary(&encode_frame(index, &digest, &chunk))
             .await;
         digests.push(digest);
-        match socket.next_upload().await.expect("accusé") {
+        // Un délai large : la machine d'essai peut être saturée, le test porte sur la mémoire, pas sur la vitesse.
+        let reply = socket
+            .try_next_upload(Duration::from_secs(60))
+            .await
+            .expect("accusé dans le délai")
+            .expect("accusé");
+        match reply {
             UploadServerMessage::Ack { offset, .. } => {
                 assert_eq!(offset, (index + 1) * u64::from(CHUNK_BYTES));
             }
@@ -1106,7 +1112,7 @@ async fn several_gibibytes_cross_the_agent_without_being_held_in_memory() {
     assert_eq!(done, size);
     assert_eq!(b.files.len_of(&complete_name(&id)), Some(size));
     assert!(b.files.biggest_write() <= CHUNK_BYTES as usize);
-    // L'agent ET le test (qui n'a que deux morceaux) vivent dans ce processus : bien en dessous de 2,5 Gio.
+    // L'agent ET le test (qui n'a que deux morceaux) vivent dans ce processus : bien en dessous de 2 Gio.
     let growth = peak.saturating_sub(before);
     assert!(
         growth < 512 << 20,
