@@ -6,7 +6,7 @@ members = ["crates/hearth-proto", "crates/hearth-agent", "crates/hearth-link", "
 default-members = ["crates/hearth-proto", "crates/hearth-agent", "crates/hearth-link", "xtask"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.95"
 license = "AGPL-3.0-or-later"
