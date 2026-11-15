@@ -382,6 +382,16 @@ const EXPECTED: &[(&str, &str)] = &[
     // l'élévation). La clé est un identifiant que la coquille valide (`is_service_key`) ; le nom retapé n'est jamais
     // écrit tel quel (l'agent le compare à celui qu'il connaît).
     ("deletePreview", "serverId: string, key: string"),
+    // Envoyer un fichier dans la zone d'attente de l'agent (HRT-96) : un chemin choisi par la boîte « Ouvrir » du système,
+    // jamais le contenu du fichier ; le mot de passe de confirmation seulement pour ouvrir le dépôt.
+    (
+        "startDeposit",
+        "serverId: string, source: DepositSourceDto, adminPassword: string | null",
+    ),
+    ("listTransfers", ""),
+    ("resumeTransfer", "transferId: string"),
+    ("cancelTransfer", "transferId: string"),
+    ("dismissTransfer", "transferId: string"),
     (
         "deleteService",
         "serverId: string, key: string, deletion: DeleteRequestDto, adminPassword: string | null",
@@ -474,6 +484,8 @@ const ADMIN_COMMANDS: &[(&str, &str)] = &[
     ("removeTrustedDevice", "password"),
     ("decideServiceOperation", "adminPassword"),
     ("serviceStart", "adminPassword"),
+    // Déposer un fichier dans la zone d'attente de l'agent (HRT-96) : l'acte `FileWrite`, couvert par l'élévation.
+    ("startDeposit", "adminPassword"),
     ("serviceStop", "adminPassword"),
     ("serviceRestart", "adminPassword"),
     ("deployService", "adminPassword"),
@@ -557,6 +569,13 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "analyzeGameSettings",
     "readGameView",
     "revealGamePassword",
+    // Les transferts (HRT-96) : la liste est locale ; reprendre n'ouvre qu'un socket du compte sur SON dépôt ; annuler
+    // et retirer ne touchent que le dépôt de CE compte (`DELETE /transfers/{id}` est une exception nommée de la liste
+    // des actes de `hearth-proto`, `NOT_AN_ACT`).
+    "listTransfers",
+    "resumeTransfer",
+    "cancelTransfer",
+    "dismissTransfer",
 ];
 
 /// Toute commande exposée est soit un acte d'administration de la liste fermée (avec son mot de passe de

@@ -139,6 +139,7 @@ import {
   toServiceRights,
   toServicesEvent,
 } from "./services";
+import { type DepositOutcome, type Transfer, toDepositOutcome, toTransfer } from "./transfers";
 import {
   type AccountInputCheck,
   type AccountList,
@@ -752,6 +753,35 @@ export class TauriLinkBridge implements LinkBridge {
     return toBackupSettingsOutcome(
       unwrap(await commands.saveBackupSettings(serverId, key, settings, adminPassword)),
     );
+  }
+
+  // Envoyer un fichier dans la zone d'attente de l'agent (HRT-96) : la coquille lit le fichier local.
+  async pickDepositFile(): Promise<string | null> {
+    return unwrap(await commands.pickDepositFile())?.path ?? null;
+  }
+
+  async startDeposit(
+    serverId: string,
+    path: string,
+    adminPassword: string | null,
+  ): Promise<DepositOutcome> {
+    return toDepositOutcome(unwrap(await commands.startDeposit(serverId, { path }, adminPassword)));
+  }
+
+  async readTransfers(): Promise<Transfer[]> {
+    return unwrap(await commands.listTransfers()).map(toTransfer);
+  }
+
+  async resumeTransfer(transferId: string): Promise<void> {
+    unwrap(await commands.resumeTransfer(transferId));
+  }
+
+  async cancelTransfer(transferId: string): Promise<void> {
+    unwrap(await commands.cancelTransfer(transferId));
+  }
+
+  async dismissTransfer(transferId: string): Promise<void> {
+    unwrap(await commands.dismissTransfer(transferId));
   }
 
   async readEngineCapacity(serverId: string): Promise<EngineCapacity | null> {

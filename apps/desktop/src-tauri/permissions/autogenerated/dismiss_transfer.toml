@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dismiss-transfer"
+description = "Enables the dismiss_transfer command without any pre-configured scope."
+commands.allow = ["dismiss_transfer"]
+
+[[permission]]
+identifier = "deny-dismiss-transfer"
+description = "Denies the dismiss_transfer command without any pre-configured scope."
+commands.deny = ["dismiss_transfer"]

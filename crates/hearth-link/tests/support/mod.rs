@@ -282,6 +282,8 @@ pub struct Options {
     pub extra_sink: Option<Arc<dyn hearth_link::ports::EventSink>>,
     /// Le superviseur de services de l'agent (clés `u_`) ; sans lui, aucun conteneur n'a d'unité.
     pub supervisor: Option<Arc<dyn hearth_agent::application::ports::ServiceSupervisor>>,
+    /// La zone d'attente des transferts de l'agent (HRT-96) : un faux en mémoire (il faut aussi `engine`).
+    pub transfers: Option<Arc<dyn hearth_agent::application::ports::TransferFiles>>,
     /// Les nombres du frein des journaux de l'agent (HRT-67) ; sans eux, aucune limite.
     pub brake: Option<hearth_agent::domain::services::BrakeSettings>,
 }
@@ -301,6 +303,7 @@ impl Default for Options {
             hide_capabilities: false,
             extra_sink: None,
             supervisor: None,
+            transfers: None,
             brake: None,
         }
     }
@@ -602,6 +605,17 @@ impl hearth_link::ports::Transport for SharedSpy {
     > {
         self.0.open_service_logs(target, key).await
     }
+
+    async fn open_transfer(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        id: &str,
+    ) -> Result<
+        Box<dyn hearth_link::ports::transport::UploadConn>,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.0.open_transfer(target, id).await
+    }
 }
 
 #[async_trait]
@@ -826,6 +840,17 @@ impl hearth_link::ports::Transport for Spy {
     > {
         self.inner.open_service_logs(target, key).await
     }
+
+    async fn open_transfer(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        id: &str,
+    ) -> Result<
+        Box<dyn hearth_link::ports::transport::UploadConn>,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.inner.open_transfer(target, id).await
+    }
 }
 
 /// Un flux qui note les sujets de chaque `subscribe` envoyé (HRT-62 : un agent sans la capacité `services`
@@ -885,13 +910,14 @@ pub fn short_transport() -> HttpTransport {
 impl World {
     /// Agent installé, compte « marie », mandataire, `LinkManager` connecté.
     pub async fn connected(options: Options) -> Self {
-        let agent = TestAgent::install_braked(
+        let agent = TestAgent::install_transferring(
             options.updating,
             options.engine,
             options.supervisor,
             options
                 .brake
                 .unwrap_or(hearth_agent::domain::services::BrakeSettings::relaxed()),
+            options.transfers,
         )
         .await;
         agent.create_account("marie", options.role).await;

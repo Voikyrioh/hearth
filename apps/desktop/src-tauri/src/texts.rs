@@ -16,6 +16,8 @@ pub const STARTUP_FAILED_TITLE: &str = "Hearth n'a pas pu démarrer";
 /// Boîte d'enregistrement de l'export du journal (HRT-14).
 pub const EXPORT_DIALOG_TITLE: &str = "Exporter le journal";
 pub const EXPORT_FILTER_NAME: &str = "Tableur (CSV)";
+/// Boîte « Ouvrir » du dépôt d'un fichier dans la zone d'attente de l'agent (HRT-96).
+pub const DEPOSIT_DIALOG_TITLE: &str = "Choisir un fichier à envoyer";
 /// Notification système du lien (BR-RESIL-015) : `{Nom} est hors ligne.` / `{Nom} est de nouveau
 /// connecté.` ; si des changements ont été absorbés par la limite d'une par minute, le nombre
 /// est ajouté (texte hors spec, BR-RESIL-018).

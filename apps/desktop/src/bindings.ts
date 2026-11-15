@@ -371,6 +371,27 @@ export const commands = {
 	 *  coquille ne la garde pas, ne la trace pas, ne la met pas dans un événement. Hors « Connecté » : `NotConnected`.
 	 */
 	revealGamePassword: (serverId: string, key: string) => typedError<GameSecretDto, LinkFailure>(__TAURI_INVOKE("reveal_game_password", { serverId, key })),
+	/**
+	 *  La boîte « Ouvrir » du système, rattachée à la fenêtre : le chemin du fichier choisi, ou rien si le compte annule
+	 *  (annuler la boîte ne produit aucun message). Le contenu du fichier ne passe jamais par la page.
+	 */
+	pickDepositFile: () => typedError<{
+	path: string,
+} | null, LinkFailure>(__TAURI_INVOKE("pick_deposit_file")),
+	/**
+	 *  Ouvre un dépôt dans la zone d'attente de l'agent (`POST /deposits`, acte `FileWrite`) puis envoie le fichier en
+	 *  tâche de fond. `admin_password` : le mot de passe de confirmation selon l'état de l'élévation. Jamais rejoué : un
+	 *  lien tombé avant la réponse donne `Unknown`. Sans le droit « gérer les services » : `MissingServicesRight`.
+	 */
+	startDeposit: (serverId: string, source: DepositSourceDto, adminPassword: string | null) => typedError<DepositOutcome, LinkFailure>(__TAURI_INVOKE("start_deposit", { serverId, source, adminPassword })),
+	/**  Les envois de cette session, sans lecture réseau : le panneau « Transferts » les relit tant que l'un envoie. */
+	listTransfers: () => typedError<TransferDto[], LinkFailure>(__TAURI_INVOKE("list_transfers")),
+	/**  Reprend un envoi interrompu : un geste du compte, jamais automatique. */
+	resumeTransfer: (transferId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("resume_transfer", { transferId })),
+	/**  Annule un envoi : ferme le socket puis retire la partie reçue du serveur. */
+	cancelTransfer: (transferId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("cancel_transfer", { transferId })),
+	/**  Retire de la liste un envoi fini (réussi, annulé ou échoué). Un envoi encore ouvert reste. */
+	dismissTransfer: (transferId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("dismiss_transfer", { transferId })),
 };
 
 /* Types */
@@ -508,7 +529,9 @@ export type AdminActKindDto = "account_create" | "account_role" | "account_passw
  *  Modifier un service, ici l'adresse de ses joueurs (HRT-215, HRT-87) : le mot de passe à chaque fois, jamais
  *  couvert par l'élévation (BR-EDIT-017).
  */
-"service_update";
+"service_update" | 
+/**  Déposer un fichier dans la zone d'attente de l'agent (HRT-96, BR-FILES-023) : couvert par l'élévation de cinq minutes. */
+"file_write";
 
 /**  Qui a adopté un service, et quand (HRT-79). */
 export type AdoptionDto = {
@@ -1147,6 +1170,31 @@ export type DeployRequestDto = {
 export type DeployResourcesDto = {
 	memoryBytes: number | null,
 	cpuMillis: number,
+};
+
+/**  L'issue de l'ouverture d'un dépôt. */
+export type DepositOutcome = 
+/**  Le dépôt est ouvert et l'envoi commence. */
+{ kind: "started"; transfer: TransferDto } | { kind: "refused"; refusal: DepositRefusal } | 
+/**  Le lien est tombé avant la réponse : on ne sait pas si le dépôt est ouvert. Jamais rejoué. */
+{ kind: "unknown" };
+
+/**  Pourquoi l'ouverture du dépôt est refusée. */
+export type DepositRefusal = { kind: "wrong_password" } | { kind: "password_required" } | { kind: "too_many_attempts"; wait: number | null } | { kind: "busy" } | 
+/**  Le disque du serveur n'a pas la place de tout le fichier (`BR-FILES-013`). */
+{ kind: "no_space"; missing: number | null; remaining: number | null } | 
+/**  Trop de dépôts en attente (huit) ou de transferts en cours. */
+{ kind: "too_many" } | 
+/**  Le nom du fichier n'est pas valable pour le serveur. */
+{ kind: "name_invalid" } | 
+/**  Le fichier est vide, illisible, ou n'est pas un fichier ordinaire (un dossier, par exemple). */
+{ kind: "source_unreadable" } | 
+/**  Un refus que ce client ne distingue pas. */
+{ kind: "other" };
+
+/**  Le fichier choisi, avant tout envoi. */
+export type DepositSourceDto = {
+	path: string,
 };
 
 /**  Issue d'un retrait de poste. */
@@ -2377,6 +2425,54 @@ export type TempDto = {
 	label: string,
 	celsius: number | null,
 };
+
+/**  Un transfert, tel que le panneau « Transferts » le montre. */
+export type TransferDto = {
+	/**  L'identifiant du dépôt sur le serveur (un ULID) : celui que le consommateur du dépôt reçoit. */
+	id: string,
+	serverId: string,
+	/**  Le dernier nom du fichier, tel que la page l'a choisi. */
+	name: string,
+	/**  La taille du fichier, en octets. */
+	size: number | null,
+	/**  Les octets reçus ET écrits sur le serveur (jamais en arrière). */
+	sent: number | null,
+	status: TransferStatusDto,
+	refusal: TransferRefusalDto | null,
+};
+
+/**  Pourquoi un transfert est coupé ou refusé. */
+export type TransferRefusalDto = 
+/**
+ *  Le disque du serveur n'a plus la place : il manque `missing` octets, il resterait `remaining` de libre
+ *  (`BR-FILES-013`).
+ */
+{ kind: "no_space"; missing: number | null; remaining: number | null } | 
+/**  Trop de transferts en cours sur le serveur ou pour ce compte. */
+{ kind: "too_many" } | 
+/**  Le compte n'a plus le droit de gérer les services. */
+{ kind: "missing_right" } | 
+/**  L'agent a refusé le fichier : recommencer. */
+{ kind: "rejected" } | 
+/**  Le fichier local n'est plus lisible. */
+{ kind: "source_unreadable" } | 
+/**  Le fichier local a changé pendant l'envoi. */
+{ kind: "source_changed" } | 
+/**  Plus rien à reprendre sur le serveur (abandonné, expiré : 24 heures). */
+{ kind: "gone" };
+
+/**  Où en est un transfert. */
+export type TransferStatusDto = 
+/**  Des morceaux partent. */
+"sending" | 
+/**  Le lien est coupé (ou le serveur manque de place) : « Reprendre l'envoi » est un geste, jamais automatique. */
+"interrupted" | 
+/**  Le fichier est dans la zone d'attente de l'agent, vérifié. */
+"done" | 
+/**  Annulé : la partie reçue est retirée du serveur. */
+"cancelled" | 
+/**  Fini sans reprise possible : la raison est dans `refusal`. */
+"failed";
 
 /**
  *  L'état de confiance du compte que l'agent annonce (HRT-194, BR-TRUST-052) : de lui dépend si piloter un

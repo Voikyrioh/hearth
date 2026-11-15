@@ -78,6 +78,8 @@ pub enum AdminActKindDto {
     /// Modifier un service, ici l'adresse de ses joueurs (HRT-215, HRT-87) : le mot de passe à chaque fois, jamais
     /// couvert par l'élévation (BR-EDIT-017).
     ServiceUpdate,
+    /// Déposer un fichier dans la zone d'attente de l'agent (HRT-96, BR-FILES-023) : couvert par l'élévation de cinq minutes.
+    FileWrite,
 }
 
 /// L'état de confiance du compte que l'agent annonce (HRT-194, BR-TRUST-052) : de lui dépend si piloter un

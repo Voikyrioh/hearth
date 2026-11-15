@@ -18,6 +18,9 @@ use hearth_proto::api::sessions::{
     ChallengeRequest, ChallengeResponse, DeviceLoginRequest, DeviceLoginResponse, LoginRequest,
     LoginResponse,
 };
+use hearth_proto::api::transfers::{
+    MAX_BINARY_FRAME_BYTES, UploadClientMessage, UploadServerMessage, encode_frame, hex_of,
+};
 use hearth_proto::error::ErrorBody;
 use hearth_proto::headers;
 use hearth_proto::stream::{
@@ -43,7 +46,7 @@ use crate::domain::pending_ops::OperationId;
 use crate::domain::secret::Secret;
 use crate::ports::transport::{
     ApiError, ApiRequest, ApiResponse, AuditExport, Frame, LogsConn, LogsFrame, Method, Pin,
-    Probed, StreamConn, Target, Transport, TransportError,
+    Probed, StreamConn, Target, Transport, TransportError, UploadConn, UploadFrame,
 };
 
 /// Taille maximale d'une réponse HTTP lue (un `GET /metrics/history` en tient largement).
@@ -401,7 +404,9 @@ impl Transport for HttpTransport {
     }
 
     async fn open_stream(&self, target: &Target) -> Result<Box<dyn StreamConn>, TransportError> {
-        let socket = self.connect_ws(target, "/api/v1/stream").await?;
+        let socket = self
+            .connect_ws(target, "/api/v1/stream", MAX_STREAM_MESSAGE_BYTES)
+            .await?;
         Ok(Box::new(WsConn {
             socket,
             send_timeout: self.config.send_timeout,
@@ -422,20 +427,44 @@ impl Transport for HttpTransport {
             return Err(TransportError::Protocol("clé de service invalide".into()));
         }
         let path = format!("/api/v1/services/{key}/logs");
-        let socket = self.connect_ws(target, &path).await?;
+        let socket = self
+            .connect_ws(target, &path, MAX_STREAM_MESSAGE_BYTES)
+            .await?;
         Ok(Box::new(WsLogs {
             socket,
             send_timeout: self.config.send_timeout,
         }))
     }
+
+    async fn open_transfer(
+        &self,
+        target: &Target,
+        id: &str,
+    ) -> Result<Box<dyn UploadConn>, TransportError> {
+        // Un identifiant de dépôt est un ULID : tout ce qui n'est pas alphanumérique est refusé avant de partir.
+        if id.len() != 26 || !id.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return Err(TransportError::Protocol("transfert invalide".into()));
+        }
+        let path = format!("/api/v1/transfers/{id}");
+        let socket = self
+            .connect_ws(target, &path, MAX_BINARY_FRAME_BYTES)
+            .await?;
+        Ok(Box::new(WsUpload {
+            socket,
+            // Un morceau de 4 Mio sur un lien lent : le délai d'un envoi est celui d'une requête entière.
+            send_timeout: self.config.request_timeout.max(self.config.send_timeout),
+        }))
+    }
 }
 
 impl HttpTransport {
-    /// Ouvre un WebSocket sur `path` (TLS épinglé, `X-Hearth-Api`). Partagé par le flux et les journaux.
+    /// Ouvre un WebSocket sur `path` (TLS épinglé, `X-Hearth-Api`). Partagé par le flux, les journaux et les
+    /// transferts ; `max_message` borne un message reçu ou envoyé.
     async fn connect_ws(
         &self,
         target: &Target,
         path: &str,
+        max_message: usize,
     ) -> Result<WebSocketStream<TlsStream<TcpStream>>, TransportError> {
         require_pinned(target)?;
         let (tls_config, state) =
@@ -478,8 +507,8 @@ impl HttpTransport {
             request.headers_mut().insert(headers::CLIENT, value);
         }
         let ws_config = WebSocketConfig::default()
-            .max_message_size(Some(MAX_STREAM_MESSAGE_BYTES))
-            .max_frame_size(Some(MAX_STREAM_MESSAGE_BYTES));
+            .max_message_size(Some(max_message))
+            .max_frame_size(Some(max_message));
         let (socket, _response) = timeout(
             connect_timeout,
             client_async_with_config(request, tls, Some(ws_config)),
@@ -552,6 +581,78 @@ impl LogsConn for WsLogs {
                 )
             }
             Some(Ok(_)) => Ok(LogsFrame::Other),
+        }
+    }
+}
+
+/// Le socket d'un envoi (HRT-96). Aucun octet du fichier ni de réponse illisible n'est tracé.
+struct WsUpload {
+    socket: WebSocketStream<TlsStream<TcpStream>>,
+    send_timeout: Duration,
+}
+
+impl WsUpload {
+    async fn send(&mut self, message: Message) -> Result<(), TransportError> {
+        match timeout(self.send_timeout, self.socket.send(message)).await {
+            Err(_) => Err(TransportError::Timeout),
+            Ok(Err(error)) => Err(map_ws_error(error)),
+            Ok(Ok(())) => Ok(()),
+        }
+    }
+
+    async fn send_json(&mut self, message: &UploadClientMessage) -> Result<(), TransportError> {
+        let text =
+            serde_json::to_string(message).map_err(|e| TransportError::Protocol(e.to_string()))?;
+        self.send(Message::Text(text.into())).await
+    }
+}
+
+#[async_trait]
+impl UploadConn for WsUpload {
+    async fn send_auth(&mut self, auth: &SignedAuth) -> Result<(), TransportError> {
+        let text =
+            serde_json::to_string(auth).map_err(|e| TransportError::Protocol(e.to_string()))?;
+        self.send(Message::Text(text.into())).await
+    }
+
+    async fn send_open(&mut self) -> Result<(), TransportError> {
+        self.send_json(&UploadClientMessage::Open {}).await
+    }
+
+    async fn send_chunk(
+        &mut self,
+        index: u64,
+        digest: &[u8; 32],
+        data: &[u8],
+    ) -> Result<(), TransportError> {
+        self.send(Message::Binary(encode_frame(index, digest, data).into()))
+            .await
+    }
+
+    async fn send_finish(&mut self, tree_digest: &[u8; 32]) -> Result<(), TransportError> {
+        self.send_json(&UploadClientMessage::Finish {
+            tree_digest: hex_of(tree_digest),
+        })
+        .await
+    }
+
+    async fn recv(&mut self) -> Result<UploadFrame, TransportError> {
+        match self.socket.next().await {
+            None => Err(TransportError::Closed(None)),
+            Some(Err(error)) => Err(map_ws_error(error)),
+            Some(Ok(Message::Close(frame))) => {
+                Err(TransportError::Closed(frame.map(|f| u16::from(f.code))))
+            }
+            Some(Ok(Message::Text(text))) => {
+                Ok(
+                    match serde_json::from_str::<UploadServerMessage>(text.as_str()) {
+                        Ok(message) => UploadFrame::Message(Box::new(message)),
+                        // Jamais l'erreur de `serde` : elle peut citer le texte reçu.
+                        Err(_) => UploadFrame::Other,
+                    },
+                )
+            }
+            Some(Ok(_)) => Ok(UploadFrame::Other),
         }
     }
 }

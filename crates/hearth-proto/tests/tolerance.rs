@@ -1016,6 +1016,18 @@ fn every_custom_read_is_declared() {
 /// Chaque occurrence acceptée est une DÉCISION, avec sa raison.
 const UNKNOWN_FOLDS: &[(&str, &str, &str, &str)] = &[
     (
+        "hearth-link/src/manager/transfers.rs",
+        "TransferErrorCode",
+        "TransferErrorCode::Unknown => UploadEnd::Refused(UploadRefusal::Rejected)",
+        "décision de HRT-96 : un code de transfert inconnu est un refus de l'agent, jamais un succès ; la reprise reste un geste du compte",
+    ),
+    (
+        "hearth-link/src/manager/transfers.rs",
+        "UploadServerMessage",
+        "UploadServerMessage::Unknown => {}",
+        "décision de HRT-96 : un message inconnu du socket d'envoi est ignoré, aucun morceau n'est compté sans son accusé",
+    ),
+    (
         "hearth-proto/src/error.rs",
         "ErrorCode",
         "Self::InternalError | Self::Unknown => 500",

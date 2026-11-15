@@ -24,6 +24,7 @@ pub mod services;
 pub mod settings;
 pub mod startup;
 pub mod texts;
+pub mod transfers;
 mod tray;
 pub mod tray_icons;
 pub mod update;
@@ -141,6 +142,12 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             service_ops::commands::read_game_view,
             service_ops::commands::set_public_address,
             service_ops::commands::reveal_game_password,
+            transfers::commands::pick_deposit_file,
+            transfers::commands::start_deposit,
+            transfers::commands::list_transfers,
+            transfers::commands::resume_transfer,
+            transfers::commands::cancel_transfer,
+            transfers::commands::dismiss_transfer,
         ])
         .typ::<link_dto::ServersEvent>()
         .typ::<link_dto::OperationEventDto>()
@@ -219,6 +226,8 @@ fn install_link<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
     let runtime = Arc::new(runtime);
     let events = runtime.manager().subscribe();
     app.manage(runtime.clone());
+    // Les envois de fichiers de cette session (HRT-96) : tenus par la coquille, relus par le panneau « Transferts ».
+    app.manage(Arc::new(transfers::service::TransferBook::default()));
     let log_sessions = Arc::new(services::logs::LogSessions::default());
     app.manage(log_sessions.clone());
     // Filet de la coquille : une lecture dont la page ne donne plus signe de vie est fermée d'office

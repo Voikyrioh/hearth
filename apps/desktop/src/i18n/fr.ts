@@ -2728,6 +2728,57 @@ export const fr = {
   // Déployer une image (HRT-69, BR-DEPLOY-001 à 009, 014 à 016, 020, 027 à 031, 033). Textes de la spec
   // `deployer-image` et du design du lot 1, mis au vouvoiement ; les autres sont marqués « hors spec ». Le moteur de
   // conteneurs, l'image, le registre : aucun nom interne n'est dit.
+  // Envoyer un fichier dans la zone d'attente de l'agent (HRT-96, HRT-95, BR-FILES-013, BR-FILES-019, BR-MOD-015) : le
+  // panneau « Transferts », ses états et les refus du serveur. Aucun texte ne vient de l'agent.
+  transfers: {
+    stripTitle: "Transferts",
+    stripRegion: "Transferts de fichiers",
+    rowLabel: "Envoi de {name}",
+    progress: "{sent} sur {total}",
+    progressLabel: "Progression de l'envoi de {name}",
+    announceDone: "{name} est arrivé sur le serveur.",
+    announceInterrupted: "L'envoi de {name} est interrompu.",
+    units: { byte: "o", kib: "Kio", mib: "Mio", gib: "Gio" },
+    status: {
+      sending: "Envoi en cours.",
+      interrupted: "Envoi interrompu. Reprenez l'envoi quand le lien est revenu.",
+      done: "Le fichier est arrivé sur le serveur, vérifié.",
+      cancelled: "Envoi annulé. La partie reçue est supprimée du serveur.",
+      failed: "L'envoi n'a pas pu aboutir.",
+    },
+    refusal: {
+      noSpace:
+        "Il manque {missing} sur le disque pour écrire ce fichier. Il resterait {remaining} de libre.",
+      tooMany:
+        "Trop de transferts sont en cours sur ce serveur. Attendez la fin d'un envoi, puis reprenez.",
+      missingRight: "Vous n'avez plus le droit de gérer les services de ce serveur.",
+      rejected: "Le serveur a refusé le fichier. Recommencez l'envoi.",
+      sourceUnreadable: "Le fichier n'est plus lisible sur votre ordinateur.",
+      sourceChanged: "Le fichier a changé pendant l'envoi. Recommencez l'envoi.",
+      gone: "Le serveur n'a plus la partie reçue (24 heures sans reprise). Recommencez l'envoi.",
+    },
+    deposit: {
+      wrongPassword: "Mot de passe incorrect.",
+      passwordRequired: "Saisissez votre mot de passe pour envoyer ce fichier.",
+      tooManyAttempts: "Trop de tentatives. Réessayez dans {seconds} secondes.",
+      busy: "Le serveur est occupé. Réessayez dans un instant.",
+      tooMany:
+        "Trop de dépôts sont en attente sur ce serveur. Abandonnez-en un ou attendez qu'il expire.",
+      nameInvalid: "Le nom de ce fichier n'est pas accepté par le serveur.",
+      sourceUnreadable: "Ce fichier est vide ou illisible. Choisissez un fichier ordinaire.",
+      other: "Le serveur a refusé l'envoi.",
+      unknown:
+        "Le lien est tombé avant la réponse du serveur : l'envoi n'est peut-être pas ouvert. Regardez la liste des transferts avant de recommencer.",
+    },
+    actions: {
+      resume: "Reprendre l'envoi",
+      resumeLabel: "Reprendre l'envoi de {name}",
+      cancel: "Annuler",
+      cancelLabel: "Annuler l'envoi de {name}",
+      dismiss: "Retirer de la liste",
+      dismissLabel: "Retirer {name} de la liste",
+    },
+  },
   deploy: {
     open: "Déployer un service",
     pageTitle: "Déployer un service",

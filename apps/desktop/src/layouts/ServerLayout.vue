@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, watch } from "vue";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import ErrorBoundary from "@/components/molecules/ErrorBoundary.vue";
 import StaleSurface from "@/components/molecules/StaleSurface.vue";
@@ -11,6 +11,7 @@ import ReconnectPanel from "@/components/organisms/ReconnectPanel.vue";
 import SecurityAlertBanner from "@/components/organisms/SecurityAlertBanner.vue";
 import ServerNav from "@/components/organisms/ServerNav.vue";
 import SessionsClosedNotice from "@/components/organisms/SessionsClosedNotice.vue";
+import TransfersStrip from "@/components/organisms/TransfersStrip.vue";
 import { formatClock } from "@/composables/format";
 import { useCurrentServer } from "@/composables/useCurrentServer";
 import { providePageData } from "@/composables/usePageData";
@@ -22,6 +23,7 @@ import { attackModeBlock } from "@/security/gate";
 import { useLinkStore } from "@/stores/link";
 import { useSecurityStore } from "@/stores/security";
 import { useServersStore } from "@/stores/servers";
+import { useTransfersStore } from "@/stores/transfers";
 import { useUpdatesStore } from "@/stores/updates";
 
 // Gabarit d'un serveur : navigation à gauche ; à droite en-tête (titre + état du lien, hors
@@ -35,6 +37,21 @@ const servers = useServersStore();
 const security = useSecurityStore();
 const link = useLinkStore();
 const updates = useUpdatesStore();
+// Les envois de fichiers (HRT-96) : tenus par la coquille, relus tant que l'un envoie ; le panneau est visible de tous
+// les écrans du serveur.
+const transfers = useTransfersStore();
+const serverTransfers = computed(() => (server.value ? transfers.of(server.value.id) : []));
+let stopWatchingTransfers: (() => void) | undefined;
+let unmounted = false;
+onMounted(async () => {
+  const stop = await transfers.watch();
+  if (unmounted) stop();
+  else stopWatchingTransfers = stop;
+});
+onBeforeUnmount(() => {
+  unmounted = true;
+  stopWatchingTransfers?.();
+});
 const { server, state, lastContactAt } = useCurrentServer();
 const pageHasData = providePageData();
 const pageTitle = providePageTitle();
@@ -122,6 +139,12 @@ function openSecurityPage() {
         :server-id="server.id"
         :active="security.dialog?.active ?? true"
         @close="security.closeDialog()"
+      />
+      <TransfersStrip
+        :transfers="serverTransfers"
+        @resume="transfers.resume($event.id)"
+        @cancel="transfers.cancel($event.id)"
+        @dismiss="transfers.dismiss($event.id)"
       />
       <main class="layout__content" :aria-label="title || undefined">
         <!-- Sans session : le formulaire de connexion, EN SURIMPRESSION de la dernière vue (périmée), premier dans

@@ -42,6 +42,7 @@ import type { DeleteOutcome, DeletePreviewOutcome, DeleteRequest } from "./servi
 import type { LifecycleGesture, LifecycleOutcome } from "./serviceLifecycle";
 import type { DecisionOutcome, OperationChoice, ServiceOperationEvent } from "./serviceOps";
 import type { EngineInfo, EnvVariable, ServiceRights, ServicesEvent } from "./services";
+import type { DepositOutcome, Transfer } from "./transfers";
 import type {
   AccountInputCheck,
   AccountList,
@@ -450,6 +451,34 @@ export interface LinkBridge {
     settings: BackupSettings,
     adminPassword: string | null,
   ): Promise<BackupSettingsOutcome>;
+
+  // Envoyer un fichier dans la zone d'attente de l'agent (HRT-96, HRT-95, BR-FILES-019, BR-MOD-015). La coquille lit
+  // le fichier local elle-même : la page ne reçoit qu'un chemin au départ et des nombres ensuite, jamais le contenu.
+
+  /**
+   * La boîte « Ouvrir » du système : le chemin du fichier choisi, ou `null` si le compte annule la boîte (annuler ne
+   * produit aucun message). Le contenu du fichier ne passe jamais par la page.
+   */
+  pickDepositFile(): Promise<string | null>;
+  /**
+   * Ouvre un dépôt dans la zone d'attente (`POST /deposits`, acte `FileWrite`, couvert par l'élévation de cinq
+   * minutes : `adminPassword` selon `reauthPasswordNeed`, jamais gardé) puis envoie le fichier en tâche de fond :
+   * l'envoi continue quand on quitte l'onglet. Jamais rejoué : `unknown` = le lien est tombé avant la réponse. Sans le
+   * droit « gérer les services » : échec `missing_services_right`.
+   */
+  startDeposit(
+    serverId: string,
+    path: string,
+    adminPassword: string | null,
+  ): Promise<DepositOutcome>;
+  /** Les envois de cette session, sans lecture réseau : le panneau « Transferts » les relit tant que l'un envoie. */
+  readTransfers(): Promise<Transfer[]>;
+  /** Reprend un envoi interrompu : un geste du compte, jamais automatique. */
+  resumeTransfer(transferId: string): Promise<void>;
+  /** Annule un envoi : ferme le socket puis retire la partie reçue du serveur. */
+  cancelTransfer(transferId: string): Promise<void>;
+  /** Retire de la liste un envoi fini (réussi, annulé ou échoué). Un envoi encore ouvert reste. */
+  dismissTransfer(transferId: string): Promise<void>;
   /**
    * Les bornes des curseurs de ressources et la part de la machine déjà engagée (`GET /engine/capacity`,
    * BR-DEPLOY-038) : une lecture. `null` : réponse incomplète ou illisible, rien ne se règle ni ne s'envoie sans

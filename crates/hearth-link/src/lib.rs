@@ -17,5 +17,6 @@ pub use manager::{
     AccountsRead, Acted, ActionOutcome, ActionRequest, Analysis, AuditExportFile, EventStream,
     InspectOutcome, LinkConfig, LinkManager, LogEnd, LogOutput, LoginInfo, NewServer,
     OperationActResult, Ports, ProbeResult, ReauthState, ServerUpdate, ServiceLogReader,
-    ServiceRightsRead, WorldsOutcome, is_stable_id,
+    ServiceRightsRead, UploadEnd, UploadRefusal, UploadSource, WorldsOutcome, expires_at,
+    is_stable_id,
 };

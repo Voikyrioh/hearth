@@ -29,6 +29,7 @@ mod service_ops;
 mod service_spec;
 mod services;
 mod task;
+mod transfers;
 mod watchers;
 mod worlds;
 
@@ -59,6 +60,7 @@ pub use service_logs::{LogEnd, LogOutput, ServiceLogReader};
 pub use service_ops::OperationActResult;
 pub use services::{Acted, KnownServices};
 use task::Command;
+pub use transfers::{UploadEnd, UploadRefusal, UploadSource, expires_at};
 pub use worlds::{InspectOutcome, WorldsOutcome};
 
 use crate::adapters::DeviceKey;
