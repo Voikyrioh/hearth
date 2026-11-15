@@ -117,6 +117,12 @@ fn act_of(kind: AdminActKindDto, role: Option<RoleDto>) -> AdminAct<'static> {
             env_set: 0,
             env_removed: 0,
             command: false,
+        // Déposer un fichier : le genre seul décide (la table de l'élévation), ni le nom ni la taille ne comptent.
+        AdminActKindDto::FileWrite => AdminAct::FileWrite {
+            target: "deposit".into(),
+            gesture: "upload",
+            name: "".into(),
+            size: 0,
         },
         AdminActKindDto::ServiceStart => AdminAct::ServiceStart { target: "".into() },
         AdminActKindDto::ServiceStop => AdminAct::ServiceStop { target: "".into() },
@@ -225,6 +231,8 @@ mod tests {
                 (Kind::BackupCreate, None, UnlessElevated),
                 (Kind::BackupSettings, None, UnlessElevated),
                 (Kind::BackupDelete, None, Yes),
+                // Déposer un fichier : la table de l'élévation (BR-FILES-023).
+                (Kind::FileWrite, None, UnlessElevated),
                 // Enregistrer les réglages d'un jeu : la table de l'élévation (HRT-108, ADR-0051).
                 (Kind::GameSettingsSave, None, UnlessElevated),
             ] {
