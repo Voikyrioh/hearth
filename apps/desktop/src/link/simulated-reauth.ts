@@ -58,6 +58,8 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
     // Créer une sauvegarde et régler les éléments ignorés : couverts par l'élévation (HRT-98, ADR-0047).
     case "backup_create":
     case "backup_settings":
+    // Déposer un fichier : couvert par l'élévation de cinq minutes (BR-FILES-023).
+    case "file_write":
       return true;
     case "account_password":
     case "agent_update":
@@ -105,6 +107,7 @@ function isPiloting(kind: AdminActKind): boolean {
     case "backup_delete":
     case "backup_settings":
     case "service_update":
+    case "file_write":
       return false;
   }
 }

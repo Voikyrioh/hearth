@@ -46,7 +46,9 @@ export { SimulatedSecurity } from "./simulated-security";
 export { SimulatedServiceOps } from "./simulated-service-ops";
 export { SimulatedServices } from "./simulated-services";
 export { SimulatedWorlds } from "./simulated-worlds";
+export { SimulatedTransfers } from "./simulated-transfers";
 export { TauriLinkBridge } from "./tauri";
+export * from "./transfers";
 export * from "./types";
 export * from "./worlds";
 

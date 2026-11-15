@@ -82,6 +82,8 @@ import { SimulatedSecurity } from "./simulated-security";
 import { SimulatedServiceOps } from "./simulated-service-ops";
 import { SimulatedServices } from "./simulated-services";
 import { SimulatedWorlds } from "./simulated-worlds";
+import { SimulatedTransfers } from "./simulated-transfers";
+import { DEPOSIT_ACT_KIND, type DepositOutcome, type Transfer } from "./transfers";
 import {
   type AccountInputCheck,
   type AccountList,
@@ -263,6 +265,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly deletes: SimulatedDeletes;
   /** Les sauvegardes d'un service (HRT-98) : l'agent simulé juge comme le vrai ; la suite est pilotée (`backups.seed`, `toStep`, `progress`, `succeed`, `fail`). */
   readonly backups: SimulatedBackups;
+  /** Envoyer un fichier dans la zone d'attente (HRT-96) : l'agent simulé juge comme le vrai ; la suite est pilotée (`transfers.advance`, `interrupt`, `complete`, `refuse`). */
+  readonly transfers = new SimulatedTransfers();
   /** Le Catalogue et l'installation depuis une fiche (HRT-102) : l'agent simulé propose Terraria (`catalog.addRich()` en ajoute une plus riche). */
   readonly catalog: SimulatedCatalog;
   /** Les mondes que l'agent simulé reconnaît (HRT-106) : l'agent juge comme le vrai ; la copie est une étape du déploiement, pilotée par le test. */
@@ -733,6 +737,61 @@ export class SimulatedLinkBridge implements LinkBridge {
     }
     if (this.deletes.failPreview) throw this.fail({ kind: "unreachable" });
     return this.deletes.preview(serverId, key);
+  }
+
+  // Envoyer un fichier dans la zone d'attente de l'agent (HRT-96).
+  async pickDepositFile(): Promise<string | null> {
+    return this.transfers.pick();
+  }
+
+  async startDeposit(
+    serverId: string,
+    path: string,
+    adminPassword: string | null,
+  ): Promise<DepositOutcome> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("deposit start");
+    // Les contrôles dans l'ordre de l'agent : droit, confirmation (couverte par l'élévation), puis le fichier.
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    const confirmation = this.reauth.confirm(
+      serverId,
+      DEPOSIT_ACT_KIND,
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") {
+      const refusal = confirmation.refusal;
+      return {
+        kind: "refused",
+        refusal:
+          refusal.kind === "too_many_attempts"
+            ? { kind: "too_many_attempts", waitS: refusal.retry_after_s }
+            : { kind: refusal.kind },
+      };
+    }
+    return this.transfers.start(serverId, path);
+  }
+
+  async readTransfers(): Promise<Transfer[]> {
+    return this.transfers.list();
+  }
+
+  async resumeTransfer(transferId: string): Promise<void> {
+    this.transfers.resume(transferId);
+  }
+
+  async cancelTransfer(transferId: string): Promise<void> {
+    this.transfers.cancel(transferId);
+  }
+
+  async dismissTransfer(transferId: string): Promise<void> {
+    this.transfers.dismiss(transferId);
   }
 
   async deleteService(

@@ -33,8 +33,11 @@ maj: 2026-11-15
 - `crates/hearth-agent/tests/service_transfers_https.rs::the_agent_holds_at_most_two_transfers_per_account_and_four_in_all`
 - `crates/hearth-agent/src/infrastructure/transfer_files.rs::tests (Linux)`
 - `crates/hearth-proto/src/api/transfers.rs::tests`
+- `crates/hearth-link/tests/transfers.rs` (liaison contre un vrai agent : envoi, reprise sans renvoi, fichier changé, abandon)
+- `apps/desktop/src/components/organisms/transfersStrip.test.ts`, `apps/desktop/e2e/hrt96-transfers.spec.ts`
 
 ## Cas limites
+- Côté client (HRT-96) : `crates/hearth-link/src/manager/transfers.rs::LinkManager::{open_deposit, upload, abandon_deposit}` (la reprise relit localement l'empreinte de ce que l'agent a déjà, jamais n'est automatique), `apps/desktop/src-tauri/src/transfers/service.rs` (le carnet, la lecture du fichier local par morceaux ; un fichier dont la taille change est refusé), panneau `TransfersStrip`.
 - Cette tranche livre l'envoi vers la zone d'attente. L'envoi vers un dossier de service (« Remplacer », « Garder les deux », verrou du service, propriétaire du fichier) vient avec l'onglet Fichiers ; le téléchargement (BR-BACKUP-026) vient après : le même socket et la même trame, dans le sens inverse.
 - Entre deux morceaux, aucun descripteur n'est gardé : un client lent ne retient aucun fichier ouvert.
 - Un arrêt de l'agent entre la publication de `<id>.bin` et l'écriture de la ligne `complete` ne perd pas le fichier : au prochain `open`, l'agent retrouve le fichier du registre (inode, taille) et ses empreintes et termine l'envoi.
