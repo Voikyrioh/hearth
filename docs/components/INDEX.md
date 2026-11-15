@@ -187,3 +187,4 @@ Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,orga
 - Responsive : captures 1366, 1920 et 2560 px (`npm run e2e`, `apps/desktop/e2e/screenshots/`, non commitées).
 - [LogViewer](./LogViewer.md), [LogMarker](./LogMarker.md), [LogSearch](./LogSearch.md) : onglet Journaux d'un service (HRT-67)
 - [ServiceDetail](./ServiceDetail.md), [EnvVarsSection](./EnvVarsSection.md), [HTabs](./HTabs.md), [BoundedText](./BoundedText.md) : détail d un service (HRT-63)
+- [GameCards](./GameCards.md), [GameAddressCard](./GameAddressCard.md), [GamePortsCard](./GamePortsCard.md), [GamePasswordCard](./GamePasswordCard.md), [GameStopCard](./GameStopCard.md), [GameSequenceDialog](./GameSequenceDialog.md) : un serveur de jeu au quotidien, quatre cartes du détail et la séquence d'un arrêt (HRT-104)

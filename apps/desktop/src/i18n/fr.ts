@@ -1255,6 +1255,137 @@ export const fr = {
     },
   },
 
+  // Le quotidien d'un serveur de jeu (HRT-104, BR-JEU-004, 010, 017 à 021, 027). Vouvoiement, phrases complètes.
+  game: {
+    address: {
+      title: "Adresse pour vos joueurs",
+      copy: "Copier",
+      copied: "Copiée",
+      copyLabel: "Copier l'adresse",
+      toast: "Adresse copiée.",
+      copyFailed: "Impossible de copier. Sélectionnez le texte et copiez-le à la main.",
+      others: "Ce jeu utilise d'autres ports : ils sont listés dans la carte « Ports à ouvrir ».",
+      localOnly: "Cette adresse ne marche que depuis votre réseau.",
+      unverified: "Hearth ne peut pas vérifier que cette adresse est joignable.",
+      stopped: "Le service est arrêté : personne ne peut se connecter.",
+      noPort: "Ce service ne publie aucun port : il n'y a pas d'adresse à donner à vos joueurs.",
+      label: "Adresse du serveur",
+    },
+    ports: {
+      title: "Ports à ouvrir",
+      table: "Ports à ouvrir sur votre box",
+      colPort: "Port",
+      colProtocol: "Protocole",
+      colRole: "Rôle",
+      copyList: "Copier la liste",
+      listCopied: "Liste copiée.",
+      listFailed: "Impossible de copier. Sélectionnez la liste et copiez-la à la main.",
+      open: "Pour que des joueurs hors de votre réseau vous rejoignent, ouvrez ces ports sur votre box (redirection de ports vers l'adresse de ce serveur) et, si votre serveur a un pare-feu, sur ce pare-feu. Hearth ne les ouvre pas lui-même.",
+      unverified: "Hearth ne peut pas vérifier que ces ports sont joignables depuis Internet.",
+      changed: "Les ports ont changé : mettez à jour votre box et votre pare-feu.",
+      none: "Ce service ne publie aucun port.",
+      role: {
+        game: "Port du jeu",
+        query: "Port de requêtes",
+        voice: "Port vocal",
+        webAdmin: "Port d'administration web",
+        remoteConsole: "Port de console distante",
+        other: "Autre port du jeu",
+        unknown: "Port du service",
+      },
+    },
+    password: {
+      title: "Mot de passe du serveur",
+      masked: "Le mot de passe est masqué.",
+      maskedValue: "Mot de passe masqué",
+      reveal: "Révéler le mot de passe",
+      hide: "Masquer le mot de passe",
+      reading: "Lecture en cours",
+      visible: "Mot de passe visible",
+      value: "Mot de passe du serveur",
+      none: "Aucun mot de passe : toute personne qui peut joindre ce port peut rejoindre la partie.",
+      reserved: "Réservé aux comptes qui peuvent gérer les services.",
+      failed: "Impossible de lire les valeurs. Réessayez.",
+      logs: "Certains jeux écrivent leurs réglages, mot de passe compris, dans leurs journaux : Hearth ne peut pas le filtrer.",
+      offline: "Indisponible tant que le serveur est hors ligne.",
+      engineNotReady: "Indisponible tant que le moteur de conteneurs n'est pas prêt.",
+    },
+    stopCard: {
+      title: "Arrêt du jeu",
+      asks: "Ce jeu n'enregistre pas son monde en s'arrêtant : Hearth lui demande de l'enregistrer avant.",
+      cannotAsk:
+        "Ce jeu n'enregistre pas son monde en s'arrêtant, et Hearth ne peut pas encore lui demander de l'enregistrer : chaque arrêt vous demandera de choisir.",
+      saves: "Ce jeu enregistre son monde en s'arrêtant. Il lui faut jusqu'à {delay}.",
+      outside:
+        "Si le serveur ou le moteur arrête ce jeu sans passer par Hearth, le monde n'est enregistré que par l'enregistrement automatique du jeu.",
+      grace: "Délai d'arrêt : {delay}",
+    },
+    // La fenêtre de confirmation d'un arrêt ou d'un redémarrage (BR-JEU-004, BR-JEU-007), à la place de la phrase générale.
+    effect: {
+      sequenceStop:
+        "Hearth va d'abord demander à {game} d'enregistrer son monde et attendre qu'il l'ait fait, puis arrêter le service (au plus {delay} pour l'arrêt). Tout ce qui est arrivé jusqu'à cet enregistrement sera conservé.",
+      sequenceRestart:
+        "Hearth va d'abord demander à {game} d'enregistrer son monde et attendre qu'il l'ait fait, puis arrêter le service (au plus {delay} pour l'arrêt) et le relancer. Tout ce qui est arrivé jusqu'à cet enregistrement sera conservé. Le service sera indisponible pendant ce temps.",
+      imageStop:
+        "{game} enregistre son monde en s'arrêtant. Il lui faut jusqu'à {delay} ; passé ce délai, le service est coupé de force et ce qu'il n'a pas eu le temps d'enregistrer peut être perdu.",
+      imageRestart:
+        "{game} enregistre son monde en s'arrêtant. Il lui faut jusqu'à {delay} ; passé ce délai, le service est coupé de force et ce qu'il n'a pas eu le temps d'enregistrer peut être perdu. Le service sera ensuite relancé et indisponible pendant ce temps.",
+      askStop:
+        "Hearth ne peut pas demander à {game} d'enregistrer son monde. Si vous arrêtez maintenant, ce qui est arrivé depuis le dernier enregistrement automatique du jeu peut être perdu. À l'étape suivante, vous choisirez d'arrêter quand même ou d'annuler.",
+      askRestart:
+        "Hearth ne peut pas demander à {game} d'enregistrer son monde. Si vous redémarrez maintenant, ce qui est arrivé depuis le dernier enregistrement automatique du jeu peut être perdu. À l'étape suivante, vous choisirez de redémarrer quand même ou d'annuler.",
+    },
+    // La séquence (BR-JEU-003, 005, 008).
+    sequence: {
+      titleStop: "Arrêt de {name}",
+      titleRestart: "Redémarrage de {name}",
+      steps: "Étapes de l'arrêt",
+      saveWorld: "Sauvegarde du monde",
+      stop: "Arrêt",
+      start: "Démarrage",
+      saving: "Hearth attend que {game} confirme l'enregistrement de son monde.",
+      savingFor:
+        "Hearth attend que {game} confirme l'enregistrement de son monde depuis {elapsed}.",
+      stopping:
+        "Le service a reçu l'ordre de s'arrêter. Il lui reste {left} avant d'être coupé de force.",
+      stoppingLate: "Le délai d'arrêt est dépassé : le service va être coupé de force.",
+      starting: "Le service redémarre.",
+      saved: "Le monde est enregistré.",
+      closeNote: "Fermer cette fenêtre n'arrête rien : la séquence continue sur le serveur.",
+      waiting: "Hearth attend votre choix : le service tourne toujours.",
+      successStop: "Le service {name} est arrêté.",
+      successStopSaved: "Le service {name} est arrêté. Le monde est enregistré.",
+      successRestart: "Le service {name} a redémarré.",
+      successRestartSaved:
+        "Le service {name} a redémarré. Le monde a été enregistré avant l'arrêt.",
+      unknown: "Le résultat de cette action n'est pas connu.",
+      unknownAfter: "Rien n'est relancé : l'issue sera annoncée au retour du lien.",
+    },
+    // La décision quand la confirmation manque (BR-JEU-006, BR-JEU-007).
+    decision: {
+      notConfirmed:
+        "Hearth n'a pas pu s'assurer que le monde est enregistré. Si vous arrêtez maintenant, ce qui est arrivé depuis le dernier enregistrement automatique du jeu peut être perdu.",
+      cannotAsk: "Hearth ne peut pas demander à {game} d'enregistrer son monde.",
+      cannotAskMore:
+        "Si vous arrêtez maintenant, ce qui est arrivé depuis le dernier enregistrement automatique du jeu peut être perdu.",
+      nothingYet: "Rien n'a été arrêté : le service tourne toujours.",
+      deadline: "Sans réponse avant {time}, l'arrêt sera annulé.",
+      legend: "Votre choix",
+      cancel: "Annuler : le service reste en marche",
+      continueStop: "Arrêter quand même",
+      continueRestart: "Redémarrer quand même",
+      submitCancel: "Annuler l'arrêt",
+      submitStop: "Arrêter quand même",
+      submitRestart: "Redémarrer quand même",
+      later: "Décider plus tard",
+    },
+    outcome: {
+      cancelled: "L'arrêt de {name} a été annulé. Le service tourne toujours.",
+      expired:
+        "La demande est restée sans réponse : l'arrêt a été annulé. Le service tourne toujours.",
+      interrupted: "L'arrêt de {name} a été interrompu. Le service tourne toujours.",
+    },
+  },
   lifecycle: {
     start: "Démarrer",
     stop: "Arrêter",

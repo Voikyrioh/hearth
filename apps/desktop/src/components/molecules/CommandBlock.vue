@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HTag from "@/components/atoms/HTag.vue";
+import { useCopyText } from "@/composables/useCopyText";
 import { t } from "@/i18n";
 import Callout from "./Callout.vue";
 
@@ -30,25 +30,9 @@ const props = withDefaults(
   },
 );
 
-const COPIED_MS = 2000;
-const state = ref<"idle" | "copied" | "failed">("idle");
-let timer: ReturnType<typeof setTimeout> | undefined;
-
-async function copy() {
-  clearTimeout(timer);
-  try {
-    if (!navigator.clipboard) throw new Error("presse-papiers indisponible");
-    await navigator.clipboard.writeText(props.text);
-    state.value = "copied";
-    timer = setTimeout(() => {
-      state.value = "idle";
-    }, COPIED_MS);
-  } catch {
-    state.value = "failed";
-  }
-}
-
-onBeforeUnmount(() => clearTimeout(timer));
+const copier = useCopyText();
+const state = copier.state;
+const copy = () => copier.copy(props.text);
 </script>
 
 <template>

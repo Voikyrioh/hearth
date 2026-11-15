@@ -142,20 +142,47 @@ fn evidence(evidence: &Evidence) -> EvidenceView {
     }
 }
 
-fn detail_of(fiche: &Fiche) -> FicheDetail {
-    let file = &fiche.file;
-    let protocol = |p: Protocol| match p {
+/// Le nom du protocole d'un port de fiche, tel que le client le lit.
+fn protocol_name(protocol: Protocol) -> &'static str {
+    match protocol {
         Protocol::Tcp => "tcp",
         Protocol::Udp => "udp",
-    };
-    let port_role = |r: PortRole| match r {
+    }
+}
+
+/// Le rôle d'un port de fiche, tel que le client le lit.
+pub(crate) fn port_role_name(role: PortRole) -> &'static str {
+    match role {
         PortRole::Game => "game",
         PortRole::Query => "query",
         PortRole::Voice => "voice",
         PortRole::WebAdmin => "web_admin",
         PortRole::RemoteConsole => "remote_console",
         PortRole::Other => "other",
-    };
+    }
+}
+
+/// La façon dont le jeu s'arrête, telle que la fiche la déclare (BR-JEU-002) : le détail d'une fiche et la vue d'un
+/// service de jeu la lisent au MÊME endroit.
+pub(crate) fn stop_view(fiche: &Fiche) -> StopView {
+    let file = &fiche.file;
+    StopView {
+        grace_s: file.stop.grace_s,
+        world_saved: match file.stop.world_saved {
+            WorldSaved::ByImageOnSignal => WorldSavedView::ByImageOnSignal,
+            WorldSaved::BySequence => WorldSavedView::BySequence,
+            WorldSaved::NotSaved => WorldSavedView::NotSaved,
+        },
+        sequence_tested: file
+            .stop
+            .sequence
+            .as_ref()
+            .is_some_and(|sequence| sequence.status == Proof::Tested),
+    }
+}
+
+fn detail_of(fiche: &Fiche) -> FicheDetail {
+    let file = &fiche.file;
     let publish = |p: Publish| match p {
         Publish::Always => "always",
         Publish::Optional => "optional",
@@ -196,8 +223,8 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
             .map(|p| PortView {
                 id: p.id.clone(),
                 container: p.container,
-                protocol: protocol(p.protocol).to_owned(),
-                role: port_role(p.role).to_owned(),
+                protocol: protocol_name(p.protocol).to_owned(),
+                role: port_role_name(p.role).to_owned(),
                 publish: publish(p.publish).to_owned(),
                 default_host: p.default_host,
                 mapping: match p.mapping {
@@ -278,19 +305,7 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
                 .map(|stage| stage.label.clone())
                 .collect(),
         }),
-        stop: Some(StopView {
-            grace_s: file.stop.grace_s,
-            world_saved: match file.stop.world_saved {
-                WorldSaved::ByImageOnSignal => WorldSavedView::ByImageOnSignal,
-                WorldSaved::BySequence => WorldSavedView::BySequence,
-                WorldSaved::NotSaved => WorldSavedView::NotSaved,
-            },
-            sequence_tested: file
-                .stop
-                .sequence
-                .as_ref()
-                .is_some_and(|sequence| sequence.status == Proof::Tested),
-        }),
+        stop: Some(stop_view(fiche)),
         // Les réglages posés par la fiche, avec leur raison. Une valeur tirée, dérivée ou secrète n'est jamais rendue.
         imposed: fiche
             .settings

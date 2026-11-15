@@ -1,4 +1,5 @@
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
+import { useOperationFollow } from "@/composables/useOperationFollow";
 import type { ActReport } from "@/composables/useReauth";
 import { useServerAction } from "@/composables/useServerAction";
 import { logUiError } from "@/errors/report";
@@ -14,7 +15,6 @@ import {
 } from "@/link";
 import { outcomeOf } from "@/serviceOps/messages";
 import { erasableFolders } from "@/services/delete";
-import { useServiceOpsStore } from "@/stores/serviceOps";
 import { useServiceRightsStore } from "@/stores/serviceRights";
 import { useToastsStore } from "@/stores/toasts";
 
@@ -59,7 +59,6 @@ const OPTIONS = {
  */
 export function useServiceDelete(serverId: () => string, services: () => readonly ServiceInfo[]) {
   const toasts = useToastsStore();
-  const operations = useServiceOpsStore();
   const action = useServerAction(serverId);
   /** Le service visé tel qu'il était à l'ouverture : de quoi garder son nom si la liste le perd. */
   const target = ref<ServiceInfo | null>(null);
@@ -156,7 +155,7 @@ export function useServiceDelete(serverId: () => string, services: () => readonl
     }
     if (result.kind === "accepted") {
       // La fenêtre de suivi suit l'opération elle-même : son issue ne passe pas par une notification.
-      operations.watch(id, result.operationId);
+      follow.begin(result.operationId);
       launch.value = { ...made, operationId: result.operationId, unknown: false };
       ended.value = null;
       phase.value = "progress";
@@ -180,18 +179,10 @@ export function useServiceDelete(serverId: () => string, services: () => readonl
 
   // ── Le suivi ─────────────────────────────────────────────────────────────────────────────────
 
-  const tracked = computed(() => {
-    const current = launch.value;
-    return current?.operationId ? operations.get(serverId(), current.operationId) : undefined;
-  });
+  const follow = useOperationFollow(serverId, () => launch.value?.operationId ?? null);
   /** L'opération telle qu'elle court (étape, progression, annulable). */
-  const operation = computed<ServiceOperation | null>(() => tracked.value?.operation ?? null);
-  const finished = computed(() => {
-    const current = launch.value;
-    return current?.operationId
-      ? operations.finishedOf(serverId(), current.operationId)
-      : undefined;
-  });
+  const operation = follow.operation;
+  const finished = follow.finished;
 
   watch(finished, (done) => {
     const current = launch.value;
@@ -209,18 +200,10 @@ export function useServiceDelete(serverId: () => string, services: () => readonl
     }
   });
 
-  function settle(): void {
-    const current = launch.value;
-    if (current?.operationId) operations.settle(serverId(), current.operationId);
-  }
-
   /** « Fermer » : l'issue est dite ; ou la suppression continue en arrière-plan, la bande la porte (BR-DEL-031). */
   function closeProgress(): void {
-    const current = launch.value;
-    if (current?.operationId) {
-      if (ended.value) settle();
-      else operations.release(serverId(), current.operationId);
-    }
+    if (ended.value) follow.settle();
+    else follow.release();
     reset();
   }
 
@@ -244,12 +227,6 @@ export function useServiceDelete(serverId: () => string, services: () => readonl
     if (result.kind === "unknown") return { kind: "unknown" };
     return { kind: "refused", refusal: result.refusal };
   }
-
-  // La page se ferme avec une fenêtre de suivi ouverte : l'issue sera annoncée comme les autres.
-  onBeforeUnmount(() => {
-    const current = launch.value;
-    if (current?.operationId) operations.release(serverId(), current.operationId);
-  });
 
   return {
     target,

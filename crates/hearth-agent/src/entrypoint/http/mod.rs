@@ -592,6 +592,18 @@ pub static ENDPOINTS: &[Endpoint] = &[
         audit: Some(AuditAction::ServiceGameSettings),
         route: || put(game_settings::save),
     },
+    // Ce que le détail d'un serveur de jeu montre (HRT-104, BR-JEU-017 à BR-JEU-021) : fiche, façon d'arrêter, ports
+    // publiés, mot de passe oui ou non. Une consultation ouverte à tout compte authentifié (un service créé par
+    // Hearth se lit de tous), sans effet ni journal ; aucun secret. Un service qui n'est pas de fiche : 404.
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/game",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(game_settings::game_view),
+    },
     // Le mot de passe du serveur de jeu (HRT-103, BR-JEU-025, BR-JEU-026) : réservé au droit « gérer les services »
     // (niveau `Services`), lu dans la description chiffrée, jamais dans le moteur ni le fichier. Comme la
     // révélation des variables, une consultation et non un acte d'administration (aucun mot de passe demandé) :
@@ -1075,6 +1087,8 @@ mod tests {
         // le niveau d'accès de la route (voir `Class::ServiceStream`).
         ("GET", "/services/{key}/logs", ServiceStream),
         ("GET", "/services/{key}/env", Service),
+        // Ce que le détail d'un serveur de jeu montre (HRT-104) : ouvert à tout compte authentifié, aucun secret.
+        ("GET", "/services/{key}/game", OpenRead),
         // Le mot de passe du serveur de jeu (HRT-103) : le droit est exigé par le niveau, la révélation est consignée.
         ("GET", "/services/{key}/game-secret", Service),
         // Les réglages d'un serveur de jeu (HRT-108) : le droit est exigé par le niveau ; l'analyse d'un texte collé

@@ -29,7 +29,7 @@ export function useLifecycleActions(serverId: () => string) {
       return { kind: "refused", refusal: { kind: "password_required" } };
     }
     if (!result) return action.failedReport();
-    if (result.kind === "accepted") return { kind: "done" };
+    if (result.kind === "accepted") return { kind: "done", actionId: result.actionId };
     if (result.kind === "refused") return { kind: "refused", refusal: result.refusal };
     return { kind: "unknown" };
   }

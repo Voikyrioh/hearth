@@ -20,6 +20,7 @@ use hearth_proto::api::game_secret::GameSecret;
 use hearth_proto::api::game_settings::{
     AnalyzeRequest, ImportView, SaveSettingsRequest, SaveSettingsResponse, SettingsView,
 };
+use hearth_proto::api::game_view::GameView;
 use hearth_proto::api::services::Concealed;
 use hearth_proto::error::{ErrorBody, ErrorCode};
 
@@ -148,6 +149,21 @@ pub async fn save(
     state
         .game_settings
         .save(&key, &actor, &request)
+        .await
+        .map(Json)
+        .map_err(settings_error)
+}
+
+/// `GET /api/v1/services/{key}/game` : ce que le détail d'un serveur de jeu montre (fiche, façon d'arrêter, ports
+/// publiés, mot de passe oui ou non). Ouvert à tout compte authentifié (BR-JEU-017, BR-JEU-020), sans aucun secret.
+pub async fn game_view(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<GameView>, ApiError> {
+    let key = key_of(&key)?;
+    state
+        .game_settings
+        .game_view(&key)
         .await
         .map(Json)
         .map_err(settings_error)

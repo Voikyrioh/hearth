@@ -16,6 +16,8 @@ Si l'ordre ne peut pas être envoyé du tout (entrée du service non ouverte, se
 ## Application (code)
 - `crates/hearth-agent/src/application/game_stop.rs::GameStop::run`
 - `crates/hearth-agent/src/domain/ops/game_stop.rs::AskReason`
+- `apps/desktop/src/services/game.ts::{decisionReason, gameEffectText}` (HRT-104 : la phrase avant l'arrêt et dans la décision)
+- `apps/desktop/src/components/organisms/OperationDecisionDialog.vue`
 
 ## Vérification
 - `crates/hearth-agent/tests/game_stop_https.rs::a_server_installed_with_a_closed_input_gets_a_decision_never_an_order_sent_to_nowhere`
@@ -30,3 +32,4 @@ Si l'ordre ne peut pas être envoyé du tout (entrée du service non ouverte, se
 
 ## Historique
 - 2026-10-24 — création (HRT-103, côté agent).
+- 2026-11-14 : côté client (HRT-104), la phrase avant l'arrêt et dans la décision.

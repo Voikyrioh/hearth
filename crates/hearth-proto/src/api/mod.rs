@@ -12,6 +12,7 @@ pub mod deploy;
 pub mod devices;
 pub mod game_secret;
 pub mod game_settings;
+pub mod game_view;
 pub mod hello;
 pub mod machine;
 pub mod metrics;
