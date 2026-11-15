@@ -245,6 +245,41 @@ function deleteOutcome(
   }
 }
 
+/**
+ * L'issue d'une sauvegarde (HRT-98, BR-BACKUP-007 à 009, 011, 013), dite par sa CAUSE : jamais un texte de l'agent. `null` :
+ * pas une sauvegarde, ou un statut que l'issue générale dit déjà.
+ */
+function backupOutcome(
+  operation: ServiceOperation,
+  name: string,
+): { message: string; tone: OutcomeTone } | null {
+  if (operation.kind !== "backup") return null;
+  const say = (key: MessageKey, tone: OutcomeTone) => ({ message: t(key, { name }), tone });
+  switch (operation.status) {
+    case "succeeded":
+      return operation.cause === "not_restarted"
+        ? say("backups.outcome.notRestarted", "warn")
+        : say("backups.outcome.done", "success");
+    case "failed":
+      switch (operation.cause) {
+        case "backup_corrupt":
+          return say("backups.outcome.corrupt", "error");
+        case "no_space":
+          return say("backups.outcome.noSpace", "error");
+        case "disk_almost_full":
+          return say("backups.outcome.almostFull", "error");
+        default:
+          return say("backups.outcome.failed", "error");
+      }
+    case "cancelled":
+      return say("backups.outcome.cancelled", "info");
+    case "interrupted":
+      return operation.cause === "timeout" ? say("backups.outcome.timeout", "warn") : null;
+    default:
+      return null;
+  }
+}
+
 /** L'issue d'une opération terminée : sa phrase et son ton, ou `null` si elle ne l'est pas. */
 export function outcomeOf(
   operation: ServiceOperation,
@@ -256,7 +291,8 @@ export function outcomeOf(
   const specific =
     deployOutcome(operation, name) ??
     lifecycleOutcome(operation, name) ??
-    deleteOutcome(operation, name);
+    deleteOutcome(operation, name) ??
+    backupOutcome(operation, name);
   if (specific) return specific;
   const tone: OutcomeTone =
     operation.status === "succeeded" ? "success" : operation.status === "failed" ? "error" : "warn";

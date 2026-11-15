@@ -5,7 +5,7 @@ titre: Supprimer une sauvegarde est refusé tant qu'une opération l'utilise ; H
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-sauvegardes-service.md (BR-BACKUP-027), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md (sections 6, 7 et 9.4), HRT-97
-maj: 2026-11-14
+maj: 2026-11-15
 ---
 
 # BR-BACKUP-027 : Supprimer une sauvegarde est refusé tant qu'une opération l'utilise ; Hearth ne supprime que ses propres sauvegardes
@@ -15,10 +15,12 @@ maj: 2026-11-14
 
 ## Application (code)
 - `crates/hearth-agent/src/application/backups.rs::Backups::delete, ::UseGuard`
+- `apps/desktop/src/composables/useServiceBackups.ts::performDelete` et `apps/desktop/src/components/organisms/DeleteBackupDialog.vue` (acte `backup_delete` jamais couvert par l'élévation : mot de passe toujours demandé ; message « seule sauvegarde vérifiée » par `services/backups.ts::isOnlyVerified`)
 
 ## Vérification
 - `crates/hearth-agent/tests/service_backups_https.rs::a_backup_of_hearth_is_deleted_with_its_manifest_and_nothing_else`
 - `crates/hearth-agent/tests/service_backups_https.rs::an_archive_replaced_by_hand_is_corrupt_and_deleting_it_only_drops_the_registry_line`
+- `apps/desktop/src/pages/ServicesBackups.test.ts` (supprimer, mot de passe, sauvegarde utilisée)
 
 ## Cas limites
 - —
@@ -30,3 +32,4 @@ maj: 2026-11-14
 
 ## Historique
 - 2026-11-14 : création (HRT-97, côté agent).
+- 2026-11-15 : côté client (HRT-98), onglet « Sauvegardes ».

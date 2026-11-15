@@ -5,7 +5,7 @@ titre: Les sauvegardes d'un service adopté ne sont pas prises en charge dans ce
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-sauvegardes-service.md (BR-BACKUP-028), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md (sections 6, 7 et 9.4), HRT-97
-maj: 2026-11-14
+maj: 2026-11-15
 ---
 
 # BR-BACKUP-028 : Les sauvegardes d'un service adopté ne sont pas prises en charge dans cette tranche : refus `SERVICE_ADOPTED`
@@ -15,9 +15,11 @@ Elles ne porteraient que sur ses dossiers situés sous un dossier ouvert aux ser
 
 ## Application (code)
 - `crates/hearth-agent/src/application/backups.rs::Backups::subject`
+- `apps/desktop/src/services/backups.ts::backupsDoor` (l'onglet n'existe pas pour un service adopté ou sans la capacité `service-backups`)
 
 ## Vérification
 - `crates/hearth-agent/tests/service_backups_https.rs::an_unsafe_root_or_an_unknown_service_is_refused_without_a_trace_of_writing`
+- `apps/desktop/src/pages/ServicesBackups.test.ts` (existence de l'onglet)
 
 ## Cas limites
 - Statut `partielle` : le test couvre le service inconnu ; le refus d'un adopté suit la même branche.
@@ -28,3 +30,4 @@ Elles ne porteraient que sur ses dossiers situés sous un dossier ouvert aux ser
 
 ## Historique
 - 2026-11-14 : création (HRT-97, côté agent).
+- 2026-11-15 : côté client (HRT-98), onglet « Sauvegardes ».

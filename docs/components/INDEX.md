@@ -119,6 +119,11 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`DeployProgressDialog`](./DeployProgressDialog.md) — La progression d'un déploiement, l'annulation et les issues (HRT-69).
 - [`DeleteServiceDialog`](./DeleteServiceDialog.md) — La fenêtre « Supprimer {nom} ? » : effet, dossiers et sort, deux cases décochées, nom retapé, socle (HRT-86).
 - [`DeleteProgressDialog`](./DeleteProgressDialog.md) — Le suivi d'une suppression, l'annulation avant le point de non-retour et les issues (HRT-86).
+- [`BackupsTab`](./BackupsTab.md) — L'onglet « Sauvegardes » d'un service (HRT-98, BR-BACKUP-001 à 015, 026 à 028) (HRT-98).
+- [`BackupTable`](./BackupTable.md) — La table des sauvegardes, de la plus récente à la plus ancienne (BR-BACKUP-012, 013) (HRT-98).
+- [`BackupDialog`](./BackupDialog.md) — La fenêtre de création d'une sauvegarde (BR-BACKUP-006 à 012, 033) (HRT-98).
+- [`DeleteBackupDialog`](./DeleteBackupDialog.md) — La confirmation de la suppression d'une sauvegarde (BR-BACKUP-027) (HRT-98).
+- [`IgnoredItemsDialog`](./IgnoredItemsDialog.md) — La fenêtre « Éléments ignorés » (BR-BACKUP-003, 033) (HRT-98).
 - [`ServiceRowMenu`](./ServiceRowMenu.md) — Le menu d'actions d'une ligne de la liste des services.
 - [`OperationDecisionDialog`](./OperationDecisionDialog.md) — La fenêtre de décision d'une opération (acte confirmé, mot de passe à chaque réponse).
 - [`AgentUpdateSteps`](./AgentUpdateSteps.md) — Les étapes d'une mise à jour de l'agent (téléchargement, vérification, installation, redémarrage, contrôle).

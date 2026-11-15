@@ -55,6 +55,10 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
     // Enregistrer les réglages d'un jeu : couvert par l'élévation de cinq minutes (HRT-108).
     case "game_settings_save":
       return true;
+    // Créer une sauvegarde et régler les éléments ignorés : couverts par l'élévation (HRT-98, ADR-0047).
+    case "backup_create":
+    case "backup_settings":
+      return true;
     case "account_password":
     case "agent_update":
     case "attack_mode_enable":
@@ -65,6 +69,8 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
     case "service_deploy":
     // Supprimer un service n'est JAMAIS couvert par l'élévation (BR-DEL-012) : le mot de passe est redemandé.
     case "service_delete":
+    // Supprimer une sauvegarde n'est JAMAIS couvert par l'élévation (BR-BACKUP-027).
+    case "backup_delete":
     // Répondre à une opération n'est jamais couvert par l'élévation seule (agent d'avant la grille).
     case "operation_decide":
       return false;
@@ -93,6 +99,9 @@ function isPiloting(kind: AdminActKind): boolean {
     case "service_delete":
     case "operation_cancel":
     case "game_settings_save":
+    case "backup_create":
+    case "backup_delete":
+    case "backup_settings":
       return false;
   }
 }

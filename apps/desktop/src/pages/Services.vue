@@ -66,18 +66,20 @@ const selectedKey = computed(() => {
   return typeof value === "string" && value !== "" && value.length <= 300 ? value : null;
 });
 /**
- * L'onglet du détail : `?onglet=journaux` ouvre les journaux, `?onglet=reglages` les réglages du jeu (HRT-109), tout autre
+ * L'onglet du détail : `?onglet=journaux` ouvre les journaux, `?onglet=reglages` les réglages du jeu (HRT-109),
+ * `?onglet=sauvegardes` les sauvegardes (HRT-98), tout autre
  * valeur (ou rien) le détail.
  */
-const TAB_QUERY = { logs: "journaux", settings: "reglages" } as const;
-const tab = computed<"detail" | "settings" | "logs">(() => {
+const TAB_QUERY = { logs: "journaux", settings: "reglages", backups: "sauvegardes" } as const;
+const tab = computed<"detail" | "settings" | "backups" | "logs">(() => {
   const raw = route.query.onglet;
   const value = Array.isArray(raw) ? raw[0] : raw;
   if (value === TAB_QUERY.logs) return "logs";
+  if (value === TAB_QUERY.backups) return "backups";
   return value === TAB_QUERY.settings ? "settings" : "detail";
 });
 
-function setTab(next: "detail" | "settings" | "logs") {
+function setTab(next: "detail" | "settings" | "backups" | "logs") {
   const { onglet: _tab, ...rest } = route.query;
   void router.replace({ query: next === "detail" ? rest : { ...rest, onglet: TAB_QUERY[next] } });
 }
@@ -530,6 +532,7 @@ async function openDocs() {
                 'svc__work--open': opened,
                 'svc__work--logs': opened && tab === 'logs',
                 'svc__work--settings': opened && tab === 'settings',
+                'svc__work--backups': opened && tab === 'backups',
                 'svc__work--grey':
                   (list.kind === 'live' && degradedList) || (list.kind === 'stale' && staleList),
               },
@@ -576,6 +579,7 @@ async function openDocs() {
                 :last-contact-at="lastContactAt"
                 :game-settings="rights.gameSettings.value"
                 :service-delete="rights.serviceDelete.value"
+                :service-backups="rights.serviceBackups.value"
                 @update:tab="setTab"
                 @back="closeDetail"
                 @open-other="openDetail"
@@ -760,6 +764,15 @@ async function openDocs() {
 /* Les réglages passent le détail en pleine largeur, comme les journaux, sans en fixer la hauteur (design 16.1). */
 .svc__work--settings .svc__list {
   display: none;
+}
+
+/* Les sauvegardes aussi : la table a besoin de la largeur (HRT-98). */
+.svc__work--backups .svc__list {
+  display: none;
+}
+
+.svc__work--backups .svc__detail {
+  max-width: none;
 }
 
 /* Les journaux ont besoin de la largeur : la liste est masquée, « Retour à la liste » la ramène (design, écran D). */

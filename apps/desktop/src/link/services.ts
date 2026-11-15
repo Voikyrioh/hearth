@@ -256,6 +256,8 @@ export interface ServiceRights {
   gameSettings: boolean;
   /** L'agent annonce `service-delete` : la carte « Suppression » d'un service créé par Hearth peut exister (HRT-86). */
   serviceDelete: boolean;
+  /** L'agent annonce `service-backups` : l'onglet « Sauvegardes » d'un service créé par Hearth peut exister (HRT-98). */
+  serviceBackups: boolean;
   account: string;
 }
 
@@ -265,6 +267,7 @@ export function toServiceRights(dto: ServiceRightsDto): ServiceRights {
     granted: dto.granted,
     gameSettings: dto.gameSettings,
     serviceDelete: dto.serviceDelete,
+    serviceBackups: dto.serviceBackups,
     account: dto.account,
   };
 }

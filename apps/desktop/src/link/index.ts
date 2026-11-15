@@ -16,6 +16,7 @@ export * from "./machine";
 export * from "./messages";
 export * from "./reauth";
 export * from "./security";
+export * from "./serviceBackups";
 export * from "./serviceDelete";
 export * from "./serviceLifecycle";
 export * from "./serviceOps";
@@ -33,6 +34,7 @@ export {
 export { SimulatedAccounts, simulatedCheckInput } from "./simulated-accounts";
 export { SimulatedAgentUpdates } from "./simulated-agent-update";
 export { SimulatedAudit } from "./simulated-audit";
+export { SimulatedBackups } from "./simulated-backups";
 export { SimulatedCatalog } from "./simulated-catalog";
 export { SimulatedDeletes } from "./simulated-delete";
 export { SimulatedDeploys } from "./simulated-deploy";

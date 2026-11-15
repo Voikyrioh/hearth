@@ -9,6 +9,7 @@ const known = (granted: boolean, account = "marie", knownByAgent = true): Rights
     granted,
     gameSettings: knownByAgent,
     serviceDelete: knownByAgent,
+    serviceBackups: knownByAgent,
     account,
   },
 });

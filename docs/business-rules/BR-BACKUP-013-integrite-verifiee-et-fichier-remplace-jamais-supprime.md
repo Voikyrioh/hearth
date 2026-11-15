@@ -5,7 +5,7 @@ titre: L'intégrité est vérifiée par empreintes après la création, sur dema
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-sauvegardes-service.md (BR-BACKUP-013), contexts/hearth/conceptions/2026-10-13-technique-deploiements-lots-suivants.md (sections 6, 7 et 9.4), HRT-97
-maj: 2026-11-14
+maj: 2026-11-15
 ---
 
 # BR-BACKUP-013 : L'intégrité est vérifiée par empreintes après la création, sur demande, et avant toute restauration ; une archive remplacée à la main n'est plus supprimée, seule sa ligne l'est
@@ -17,6 +17,7 @@ La relecture est faite par le port `BackupArchive` (`verify`), une à la fois po
 - `crates/hearth-agent/src/domain/backups/read.rs::ArchiveIndex`
 - `crates/hearth-agent/src/infrastructure/backup_archive.rs::verify_archive`
 - `crates/hearth-agent/src/application/backups.rs::Backups::verify, ::check_blocking, ::Backups::delete`
+- `apps/desktop/src/services/backups.ts::integrityText` et `apps/desktop/src/composables/useServiceBackups.ts::verify` (état et verdict dans la ligne)
 
 ## Vérification
 - `crates/hearth-agent/tests/service_backups_https.rs::an_archive_replaced_by_hand_is_corrupt_and_deleting_it_only_drops_the_registry_line`
@@ -25,6 +26,7 @@ La relecture est faite par le port `BackupArchive` (`verify`), une à la fois po
 - `crates/hearth-agent/tests/service_backups_https.rs::a_vanished_archive_is_listed_as_missing_and_its_line_can_be_removed`
 - `crates/hearth-agent/src/domain/backups/read.rs::tests`
 - `crates/hearth-agent/src/infrastructure/backup_archive.rs::tests`
+- `apps/desktop/src/pages/ServicesBackups.test.ts` (vérifier, corrompue) ; `apps/desktop/src/test/unknownLabels.test.ts` (unions Backup*)
 
 ## Cas limites
 - La vérification à la demande est synchrone dans cette tranche (une archive de plusieurs dizaines de Gio peut dépasser le délai d'une requête) : le suivi comme opération légère est un suivi de HRT-98.
@@ -35,3 +37,4 @@ La relecture est faite par le port `BackupArchive` (`verify`), une à la fois po
 
 ## Historique
 - 2026-11-14 : création (HRT-97, côté agent).
+- 2026-11-15 : côté client (HRT-98), onglet « Sauvegardes ».

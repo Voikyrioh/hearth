@@ -1386,6 +1386,261 @@ export const fr = {
       interrupted: "L'arrêt de {name} a été interrompu. Le service tourne toujours.",
     },
   },
+
+  backups: {
+    title: "Sauvegardes",
+    region: "Sauvegardes de ce service",
+    save: "Sauvegarder",
+    ignoredButton: "Éléments ignorés",
+    cancelRunning: "Annuler la sauvegarde",
+    cancelTitle: "Annuler la sauvegarde de {name} ?",
+    cancelKeep: "Poursuivre la sauvegarde",
+    cancelText:
+      "La copie déjà écrite sera supprimée : rien ne sera conservé de cette sauvegarde. Un service arrêté pour la copie sera relancé.",
+    // Ce que la sauvegarde contient, dit à chaque fois (BR-BACKUP-002, 004).
+    foreignNote:
+      "Hearth ne liste, n'ouvre et ne supprime jamais les sauvegardes faites hors de Hearth : seules celles qu'il a créées apparaissent ici.",
+    // Les états de l'onglet (BR-BACKUP-028, BR-SVC-029).
+    loading: "Lecture des sauvegardes…",
+    loadFailed: "La liste des sauvegardes n'a pas pu être lue.",
+    retry: "Réessayer",
+    empty: "Ce service n'a pas encore de sauvegarde.",
+    emptyHelp:
+      "Une sauvegarde est une copie des dossiers de données du service, rangée sur ce serveur.",
+    nothingToSave: "Rien à sauvegarder : ce service n'a aucun dossier de données.",
+    staleSince: "Liste affichée à titre indicatif : le lien avec le serveur est coupé.",
+    engineNotReady:
+      "Le moteur de conteneurs n'est pas accessible. Rien n'a été modifié. Vous pouvez encore consulter, vérifier et supprimer les sauvegardes.",
+    busyBlock: "Une action est déjà en cours sur ce service.",
+    notDrivable: "Hearth ne sauvegarde pas ce service dans son état actuel.",
+    rightsLost: "Votre compte ne peut plus gérer les services de ce serveur.",
+    // Les refus de lecture (BR-BACKUP-005, 028).
+    readRefused: {
+      serviceNotFound: "Ce service n'existe plus.",
+      adopted:
+        "Hearth ne prend pas encore en charge les sauvegardes d'un service créé hors de Hearth.",
+      engine: "Le moteur de conteneurs n'est pas accessible. Rien n'a été modifié.",
+      overlap: "Le dossier des sauvegardes chevauche un dossier de données du service.",
+      path: "Le dossier des sauvegardes du serveur n'est pas utilisable.",
+      other: "Le serveur n'a pas donné cette information.",
+    },
+    // La carte « Espace » (BR-BACKUP-005, 009, 012, 015).
+    spaceTitle: "Espace",
+    spaceLine: "{size} pour {count} sauvegardes",
+    spaceLineOne: "{size} pour 1 sauvegarde",
+    spaceFree: "{free} libres sur le disque des sauvegardes",
+    spaceMeter: "Espace libre sur le disque des sauvegardes",
+    sameDisk:
+      "Les sauvegardes sont sur le même disque que les données du service : elles ne vous protègent pas de la perte de ce disque. Copiez-les ailleurs.",
+    contentWarning:
+      "Une sauvegarde contient tout ce que contiennent les dossiers du service, y compris d'éventuels mots de passe.",
+    many: "Vous gardez {count} sauvegardes de ce service ({size}).",
+    diskAlmostFull: "Il ne reste que {free} sur le disque des sauvegardes.",
+    // La carte « Éléments ignorés » (BR-BACKUP-003).
+    ignoredTitle: "Éléments ignorés",
+    ignoredNone: "Aucun élément n'est ignoré par un compte pour ce service.",
+    ignoredChosen: "Ignoré : {path} (ajouté par un compte).",
+    ignoredDefaultHint:
+      "Hearth ignore aussi, par défaut, ce qui ressemble à des sauvegardes faites hors de Hearth. Ouvrez « Éléments ignorés » pour les voir.",
+    ignoredIncluded: "Inclus : {path} (retiré de la liste des éléments ignorés par défaut).",
+    // La table (BR-BACKUP-012, 013).
+    tableLabel: "Sauvegardes de ce service, de la plus récente à la plus ancienne",
+    colDate: "Date",
+    colNote: "Note",
+    colSize: "Taille",
+    colMode: "Mode",
+    colState: "État",
+    colActions: "Actions",
+    noNote: "Aucune note",
+    sizeDetail: "{data} de données · {count} fichiers",
+    sizeDetailOne: "{data} de données · 1 fichier",
+    expand: "Détails de la sauvegarde du {date}",
+    expandHide: "Masquer les détails de la sauvegarde du {date}",
+    detailAccount: "Compte",
+    detailImage: "Image et version du service",
+    detailFiles: "Fichiers",
+    detailData: "Données",
+    detailSkipped: "Éléments non archivés (tubes, sockets, autre système de fichiers)",
+    detailChanged: "Fichiers changés pendant la copie",
+    unknownAccount: "Compte inconnu",
+    noImage: "Non renseignées",
+    rowLabel: "Sauvegarde du {date}, {size}, {mode}, {state}",
+    rowLabelFlags: "Sauvegarde du {date}, {size}, {mode}, {state}, {flags}",
+    mode: {
+      stopped: "Service arrêté",
+      hot: "Sans arrêter le service (copie à chaud)",
+      stopCopyStart: "Arrêter, sauvegarder, relancer",
+      unknown: "Mode inconnu",
+    },
+    flag: {
+      hot: "À chaud",
+      maybeInconsistent: "Peut être incohérente",
+      forcedStop: "Arrêt forcé avant la copie",
+      beforeRestore: "Avant restauration",
+    },
+    integrity: {
+      verified: "Vérifiée le {date}",
+      corrupt: "Corrompue",
+      unchecked: "Jamais vérifiée",
+      missing: "Disparue",
+      unknown: "État inconnu",
+    },
+    verify: "Vérifier",
+    verifyLabel: "Vérifier la sauvegarde du {date}",
+    verifying: "Vérification en cours…",
+    verifiedNow: "La sauvegarde est intacte ({count} fichiers relus).",
+    verifiedNowOne: "La sauvegarde est intacte (1 fichier relu).",
+    verifyCorrupt: "La sauvegarde est corrompue : elle peut être incomplète.",
+    verifyMissing: "Le fichier de cette sauvegarde n'existe plus sur le serveur.",
+    verifyInUse: "Cette sauvegarde est en cours d'utilisation. Attendez la fin de l'opération.",
+    verifyFailed: "La vérification n'a pas pu être faite.",
+    verifyUnknown: "Le résultat de cette vérification n'est pas connu.",
+    remove: "Supprimer",
+    removeLabel: "Supprimer la sauvegarde du {date}",
+    // La fenêtre de création (BR-BACKUP-006 à 012, 033).
+    createTitle: "Sauvegarder {name}",
+    createSubmit: "Sauvegarder",
+    createInfo:
+      "Cette sauvegarde contient les fichiers des dossiers de données du service. Elle ne contient pas sa configuration (variables, ports, ressources).",
+    reading: "Vérification de l'espace disponible…",
+    readingHelp: "Hearth estime la taille des données : cela peut durer jusqu'à une minute.",
+    previewFailed: "L'estimation de la taille n'a pas pu être faite.",
+    previewRefused: "Le serveur n'a pas donné l'estimation de cette sauvegarde.",
+    stoppedLine: "Service arrêté : la copie est faite directement.",
+    modeLegend: "Comment sauvegarder",
+    modeHot: "Sans arrêter le service (copie à chaud)",
+    modeHotText:
+      "Le service continue de tourner pendant la copie. Les données peuvent changer pendant qu'elles sont copiées, et le programme peut garder des données en mémoire. Hearth ne peut pas encore lui demander d'enregistrer avant la copie.",
+    modeStop: "Arrêter, sauvegarder, relancer",
+    modeStopText:
+      "Le service sera arrêté puis relancé. Certains programmes n'enregistrent pas leur monde en s'arrêtant : ce qui n'est pas enregistré est perdu. Hearth ne peut pas le savoir.",
+    modeStopGrace:
+      "Le service recevra l'ordre de s'arrêter proprement ; s'il ne s'est pas arrêté au bout de {delay}, il sera coupé de force.",
+    modeStopGraceNone:
+      "Le service recevra l'ordre de s'arrêter proprement ; s'il ne s'arrête pas dans son délai d'arrêt, il sera coupé de force.",
+    bigFile:
+      "Le fichier {path} fait {size} et sera inclus. Vous pouvez l'ignorer pour cette sauvegarde.",
+    bigFileBox: "Ignorer ce fichier pour cette sauvegarde",
+    noteLabel: "Note (facultative)",
+    notePlaceholder: "Par exemple : avant mise à jour",
+    noteCount: "{n} sur 80",
+    noteTooLong: "La note fait 80 caractères au plus.",
+    noteHelp:
+      "La note est lue par les comptes du serveur ; elle n'est pas écrite dans le journal d'activité.",
+    estimate: "Estimation : {size} dans {count} fichiers, avant compression.",
+    estimateMore:
+      "Estimation : au moins {size} dans {count} fichiers, avant compression (mesure interrompue).",
+    spaceAfter:
+      "Espace libre sur le disque des sauvegardes : {free} (réserve de {reserve} comprise).",
+    noSpace:
+      "Il faut jusqu'à {needed} pour cette sauvegarde ; il reste {free} sur le disque des sauvegardes (réserve de {reserve} comprise).",
+    noSpaceNoFree:
+      "Il faut jusqu'à {needed} pour cette sauvegarde et le disque des sauvegardes est trop plein (réserve de {reserve} comprise).",
+    noSpaceReason: "Il n'y a pas assez de place sur le disque des sauvegardes.",
+    ignoredThisTime: "Ces éléments ne seront pas sauvegardés :",
+    ignoredLine: "Ignoré : {path} (ressemble à des sauvegardes faites hors de Hearth).",
+    ignoredLineChosen: "Ignoré : {path} (ajouté par un compte).",
+    ignoredMore: "Et {n} autres éléments ignorés.",
+    // Les refus de la création (BR-BACKUP-006, 009, 010, 028).
+    refused: {
+      gone: "Ce service n'existe plus.",
+      adopted:
+        "Hearth ne prend pas encore en charge les sauvegardes d'un service créé hors de Hearth.",
+      engine: "Le moteur de conteneurs n'est pas accessible ({state}). Rien n'a été modifié.",
+      engineNoState: "Le moteur de conteneurs n'est pas accessible. Rien n'a été modifié.",
+      busy: "Une action est déjà en cours sur ce service.",
+      busyBy: "Une action est déjà en cours sur ce service. Lancée par {account}.",
+      heavy:
+        "Une sauvegarde ou une restauration est déjà en cours sur ce serveur. Attendez sa fin.",
+      notDrivable: "Hearth ne sauvegarde pas ce service dans son état actuel.",
+      nothingToSave: "Rien à sauvegarder : ce service n'a aucun dossier de données.",
+      note: "La note fait 80 caractères au plus.",
+      items: "La liste d'éléments ignorés est trop longue.",
+      mode: "Ce mode de sauvegarde n'est pas permis dans l'état actuel du service.",
+      path: "Le dossier des sauvegardes du serveur n'est pas utilisable.",
+      overlap: "Le dossier des sauvegardes chevauche un dossier de données du service.",
+      notFound: "Cette sauvegarde n'existe plus.",
+      inUse: "Cette sauvegarde est en cours d'utilisation. Attendez la fin de l'opération.",
+      other: "Le serveur a refusé cette action. Rien n'a été modifié.",
+    },
+    unknownResult: "Le résultat de cette action n'est pas connu.",
+    unknownAfter: "Rien n'est relancé. Relisez la liste des sauvegardes avant de réessayer.",
+    // La suppression d'une sauvegarde (BR-BACKUP-027).
+    deleteTitle: "Supprimer la sauvegarde du {date} ({size}) ?",
+    deleteSubmit: "Supprimer la sauvegarde",
+    deleteText: "Il n'y a pas de corbeille.",
+    deleteOnlyVerified: "C'est la seule sauvegarde vérifiée de ce service.",
+    deleteLineOnly:
+      "Si le fichier de cette sauvegarde a été remplacé à la main, Hearth ne retire que sa ligne et ne touche pas au fichier.",
+    deleted: "La sauvegarde du {date} est supprimée.",
+    deletedRowOnly:
+      "La sauvegarde du {date} n'était plus le fichier créé par Hearth : seule son inscription a été retirée, le fichier n'a pas été touché.",
+    // Les éléments ignorés (BR-BACKUP-003, 033).
+    ignoredDialogTitle: "Éléments ignorés",
+    ignoredDialogSubmit: "Enregistrer",
+    ignoredDialogReading: "Lecture des éléments ignorés par défaut…",
+    ignoredDialogHelp:
+      "Ces éléments ne sont ni lus ni archivés. Une restauration ne les remplace pas.",
+    ignoredListLabel: "Éléments ignorés",
+    ignoredEmpty: "Aucun élément n'est ignoré.",
+    removeFromList: "Retirer de la liste",
+    removeFromListLabel: "Retirer {path} de la liste",
+    undoRemove: "Remettre dans la liste",
+    includedLine: "Sera inclus : {path}.",
+    includeTitle: "Inclure {path} dans les sauvegardes ?",
+    includeMessage:
+      "Cet élément sera inclus dans les sauvegardes et pourra être remplacé par une restauration.",
+    includeConfirm: "Inclure",
+    includeCancel: "Annuler",
+    addLabel: "Élément à ignorer",
+    addHelp: "Le chemin dans le service, par exemple /data/logs.",
+    addButton: "Ajouter",
+    addOutside: "Ce chemin n'est pas dans un dossier de données du service.",
+    addTooMany: "La liste ne peut pas dépasser {n} éléments.",
+    addAlready: "Cet élément est déjà dans la liste.",
+    settingsSaved: "Les éléments ignorés sont enregistrés.",
+    // L'issue d'une sauvegarde (BR-BACKUP-007, 009, 013).
+    resultDone: "Sauvegarde du {date} créée ({size}, vérifiée).",
+    resultDoneBare: "La sauvegarde de {name} est créée et vérifiée.",
+    resultHotClean:
+      "Aucun fichier n'a changé pendant la copie. La cohérence n'est pas garantie pour autant.",
+    resultHotChanged:
+      "{n} fichiers ont changé pendant la copie : cette sauvegarde peut être incohérente.",
+    resultHotChangedOne:
+      "1 fichier a changé pendant la copie : cette sauvegarde peut être incohérente.",
+    resultSkipped:
+      "{n} éléments n'ont pas été archivés (tubes, sockets, autre système de fichiers).",
+    resultSkippedOne: "1 élément n'a pas été archivé (tube, socket ou autre système de fichiers).",
+    resultNotRestarted:
+      "La sauvegarde est faite, mais le service ne repart pas : il reste arrêté. Démarrez-le depuis l'onglet Détail.",
+    resultCorrupt: "La sauvegarde n'a pas passé la vérification et a été supprimée. Réessayez.",
+    resultNoSpace:
+      "Sauvegarde arrêtée : il n'y a pas assez de place sur le disque des sauvegardes.",
+    resultAlmostFull: "Sauvegarde arrêtée : le disque est presque plein.",
+    resultCancelled: "La sauvegarde a été annulée. Rien n'a été conservé.",
+    resultTimeout:
+      "La sauvegarde a dépassé 6 heures : elle a été arrêtée et rien n'a été conservé.",
+    resultInterrupted:
+      "La sauvegarde de {name} a été interrompue. Le résultat n'est pas connu : vérifiez la liste et l'état du service.",
+    resultFailed: "La sauvegarde de {name} a échoué. Rien n'a été conservé.",
+    resultEngine:
+      "La sauvegarde de {name} a échoué : le moteur de conteneurs n'est pas accessible.",
+    dismiss: "Fermer",
+    // L'issue annoncée par une notification quand l'onglet n'est pas ouvert (BR-BACKUP-007, 009, 013).
+    outcome: {
+      done: "La sauvegarde de {name} est créée et vérifiée.",
+      notRestarted:
+        "La sauvegarde de {name} est faite, mais le service ne repart pas : il reste arrêté.",
+      corrupt: "La sauvegarde de {name} n'a pas passé la vérification et a été supprimée.",
+      noSpace:
+        "La sauvegarde de {name} a été arrêtée : il n'y a pas assez de place sur le disque des sauvegardes.",
+      almostFull: "La sauvegarde de {name} a été arrêtée : le disque est presque plein.",
+      cancelled: "La sauvegarde de {name} a été annulée. Rien n'a été conservé.",
+      timeout: "La sauvegarde de {name} a dépassé 6 heures et a été arrêtée.",
+      failed: "La sauvegarde de {name} a échoué. Rien n'a été conservé.",
+    },
+  },
+
   lifecycle: {
     start: "Démarrer",
     stop: "Arrêter",
@@ -1470,6 +1725,7 @@ export const fr = {
     tabDetail: "Détail",
     tabLogs: "Journaux",
     tabSettings: "Réglages",
+    tabBackups: "Sauvegardes",
     loading: "Lecture du service…",
     gone: "Ce service n'existe plus.",
     goneBack: "Retour à la liste",

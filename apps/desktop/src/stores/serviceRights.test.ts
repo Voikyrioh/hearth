@@ -29,6 +29,7 @@ describe("lecture du droit", () => {
         granted: true,
         gameSettings: true,
         serviceDelete: true,
+        serviceBackups: true,
         account: "marie",
       },
     });
@@ -72,6 +73,7 @@ describe("lecture du droit", () => {
         granted: false,
         gameSettings: true,
         serviceDelete: true,
+        serviceBackups: true,
         account: "marie",
       }));
     const slow = store.load("forge");
@@ -81,6 +83,7 @@ describe("lecture du droit", () => {
       granted: true,
       gameSettings: true,
       serviceDelete: true,
+      serviceBackups: true,
       account: "marie",
     });
     await slow;
@@ -121,6 +124,7 @@ describe("échec et lien coupé", () => {
         granted: true,
         gameSettings: true,
         serviceDelete: true,
+        serviceBackups: true,
         account: "marie",
       },
     });
@@ -173,6 +177,7 @@ describe("changement de compte ou de session", () => {
       granted: true,
       gameSettings: true,
       serviceDelete: true,
+      serviceBackups: true,
       account: "marie",
     });
     return { ...ctx, store };
@@ -200,6 +205,7 @@ describe("changement de compte ou de session", () => {
       granted: false,
       gameSettings: true,
       serviceDelete: true,
+      serviceBackups: true,
       account: "paul",
     });
     const shown = JSON.stringify(seen);
@@ -231,6 +237,7 @@ describe("changement de compte ou de session", () => {
       granted: true,
       gameSettings: true,
       serviceDelete: true,
+      serviceBackups: true,
       account: "marie",
     });
     await late;
