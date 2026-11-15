@@ -433,8 +433,25 @@ pub fn write_build_record(
 
 /// `cargo xtask agent [--release]`. Sans l'option : construction de développement (avertit si l'arbre
 /// n'est pas le commit). Avec `--release` : construction de publication, arbre propre exigé (HRT-173).
+/// Les variables d'une construction d'essai : `--preview-fiches` ouvre le catalogue aux fiches `preview` (HRT-101,
+/// ADR-0050 : variable de construction `HEARTH_PREVIEW_FICHES`), ce qu'il faut pour proposer une fiche qui n'a pas
+/// encore passé son banc d'essai. Jamais avec `--release` : une construction de publication n'embarque aucune fiche
+/// d'essai. Le binaire ainsi construit n'est ni à signer ni à publier (l'enregistrement de construction le dit).
+pub fn preview_build_env(args: &[String]) -> Result<Vec<(String, String)>, String> {
+    let preview = args.iter().any(|arg| arg == "--preview-fiches");
+    let release = args.iter().any(|arg| arg == "--release");
+    match (preview, release) {
+        (true, true) => Err(
+            "--preview-fiches et --release s'excluent : une construction de publication n'embarque jamais les fiches d'essai"
+                .to_owned(),
+        ),
+        (true, false) => Ok(vec![("HEARTH_PREVIEW_FICHES".to_owned(), "1".to_owned())]),
+        (false, _) => Ok(Vec::new()),
+    }
+}
+
 pub fn run(args: &[String]) -> Result<PathBuf, String> {
-    crate::release_stage::check_flags(args, &[], &["--release"])?;
+    crate::release_stage::check_flags(args, &[], &["--release", "--preview-fiches"])?;
     let release = args.iter().any(|arg| arg == "--release");
     let root = docker::repo_root()?;
     let version = workspace_version(&root)?;
@@ -443,10 +460,15 @@ pub fn run(args: &[String]) -> Result<PathBuf, String> {
     let spec = Build {
         dist: root.join("target").join("dist"),
         out_name: "hearth-agent".to_owned(),
-        env: Vec::new(),
+        env: preview_build_env(args)?,
         expect_version: version.clone(),
         expect_key: Some(repo_key_line(&root)?),
     };
+    if !spec.env.is_empty() {
+        println!(
+            "construction d'essai : les fiches `preview` sont proposées par ce binaire (à ne pas signer ni publier)"
+        );
+    }
     if release {
         check_preview_gate(std::env::var_os("HEARTH_PREVIEW_FICHES").as_deref())?;
         return build_release(
@@ -938,6 +960,31 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.root);
         }
+    }
+
+    #[test]
+    fn the_preview_flag_opens_the_catalog_to_trial_fiches_and_never_with_a_release() {
+        let args = |list: &[&str]| list.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>();
+        assert_eq!(preview_build_env(&args(&[])), Ok(Vec::new()));
+        assert_eq!(preview_build_env(&args(&["--release"])), Ok(Vec::new()));
+        assert_eq!(
+            preview_build_env(&args(&["--preview-fiches"])),
+            Ok(vec![("HEARTH_PREVIEW_FICHES".to_owned(), "1".to_owned())])
+        );
+        let refused = preview_build_env(&args(&["--release", "--preview-fiches"])).unwrap_err();
+        assert!(
+            refused.contains("--release") && !refused.contains("  "),
+            "{refused}"
+        );
+        // Une faute de frappe sur le drapeau n'est jamais une construction ordinaire.
+        assert!(
+            crate::release_stage::check_flags(
+                &args(&["--preview-fiche"]),
+                &[],
+                &["--release", "--preview-fiches"]
+            )
+            .is_err()
+        );
     }
 
     #[test]
