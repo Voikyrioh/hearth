@@ -7,6 +7,7 @@
 mod support;
 
 use hearth_agent::domain::accounts::Role;
+use hearth_agent::domain::install::Version;
 use hearth_proto::api::update::{UpdateOutcome, UpdateReason, UpdateStep};
 use hearth_proto::stream::{Topic, UpdateMessage};
 use serde_json::json;
@@ -35,6 +36,9 @@ async fn an_administrator_follows_every_step_and_a_read_only_account_sees_them_t
     let env = env().await;
     env.create("lucas", Role::ReadOnly).await;
     let rig = Rig::new(&env, true, true);
+    // Le binaire déposé annonce la version visée (sinon : binaire refusé à l'installation).
+    rig.host
+        .with(|state| state.announced = Some(Version::new(99, 0, 0)));
     let agent = support::https::start_updating(&env, metering(), Some(rig.updating())).await;
     let admin = agent.actor(&env, "marie", Role::Admin).await;
     let readonly = login(&agent, "lucas").await;
@@ -89,6 +93,9 @@ async fn an_administrator_follows_every_step_and_a_read_only_account_sees_them_t
 async fn a_client_that_subscribes_in_the_middle_gets_the_current_step_then_the_result() {
     let env = env().await;
     let rig = Rig::new(&env, true, true);
+    // Le binaire déposé annonce la version visée (sinon : binaire refusé à l'installation).
+    rig.host
+        .with(|state| state.announced = Some(Version::new(99, 0, 0)));
     let agent = support::https::start_updating(&env, metering(), Some(rig.updating())).await;
     let marie = agent.actor(&env, "marie", Role::Admin).await;
     let token = marie.token.clone();
