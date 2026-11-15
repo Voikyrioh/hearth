@@ -2475,7 +2475,8 @@ export const fr = {
     send: "Envoyer le fichier au serveur",
     sendNote: "Le fichier part par un envoi qui reprend là où il s'est arrêté si le lien coupe.",
     sendTitle: "Envoyer le pack au serveur",
-    sendHelp: "Hearth envoie « {name} » dans la zone d'attente du serveur. Rien n'est installé avant que vous lanciez l'installation.",
+    sendHelp:
+      "Hearth envoie « {name} » dans la zone d'attente du serveur. Rien n'est installé avant que vous lanciez l'installation.",
     sendSubmit: "Envoyer",
     sendLater: "Plus tard",
     sending: "Envoi du pack en cours : {progress}.",
