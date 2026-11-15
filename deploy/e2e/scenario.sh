@@ -822,7 +822,7 @@ ok "même version, autre binaire : service redémarré, mêmes comptes, même em
 # FIX:01M7G9JGSR3FNA775EFAAV07KN : la version courante est lue dans le binaire, jamais un numéro écrit ici (docs/bugs/FIX-01M7G9JGSR3FNA775EFAAV07KN.md) ; le dépôt change de version à chaque release.
 CUR_VERSION=$("$BIN" --version | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 [ "${#CUR_VERSION}" = 5 ] || die "la version courante doit tenir sur 5 caractères pour être remplacée par 0.0.9 : '$CUR_VERSION'"
-CUR_RE=${CUR_VERSION//./[.]}
+CUR_RE=$(printf '%s' "$CUR_VERSION" | sed 's/\./[.]/g')
 LC_ALL=C sed "s/$CUR_RE/0.0.9/g" "$BIN" >/tmp/agent-old && chmod 0755 /tmp/agent-old
 /tmp/agent-old --version | grep -q '0\.0\.9' || die "le binaire ancien ne dit pas 0.0.9 : $(/tmp/agent-old --version)"
 "$INSTALLED" uninstall --keep-data --yes >/dev/null 2>&1 || die "désinstallation avant la mise à niveau"
