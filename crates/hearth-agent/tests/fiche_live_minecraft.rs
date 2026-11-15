@@ -8,7 +8,7 @@
 //! repos 60 s après le signe). Le relevé est consigné dans `evidence.toml` : c'est lui qui décide du passage de `ready` à
 //! `tested` et des chiffres de mémoire `measured`.
 //!
-//! Hors job, rien ne tourne : `HEARTH_TEST_FICHE_LIVE=1`, un vrai moteur Linux, et pour le scénario `pack` le fichier du pack
+//! Rien ne tourne sans lancement voulu (sur la forge, à la main, jamais en CI) : `HEARTH_TEST_FICHE_LIVE=1`, un vrai moteur Linux, et pour le scénario `pack` le fichier du pack
 //! serveur (`HEARTH_LIVE_MC_PACK`). `HEARTH_LIVE_MC_SCENARIOS` (liste séparée par des virgules) choisit les scénarios.
 
 #![cfg(unix)]
@@ -38,7 +38,7 @@ const FICHE: &str = include_str!("../catalog/minecraft/fiche.toml");
 const SETTINGS: &str = include_str!("../catalog/minecraft/settings.toml");
 const KEY: &str = "01J0ABCDEFGHJKMNPQRSTVWXYZ";
 const NAME: &str = "hearth-fiche-live-minecraft";
-/// Port du serveur choisi pour l'essai (le 7777 d'un poste peut être pris).
+/// Port du serveur choisi pour l'essai (le 25565 d'un poste peut être pris).
 const HOST_PORT: u16 = 35_565;
 const MOTD: &str = "hearth-probe";
 
@@ -207,7 +207,7 @@ impl Evidence {
 
     fn write(&self, dir: &Path) {
         let mut out = String::from(
-            "# Relevé du banc d'essai réel (HRT-114). Engendré par `tests/fiche_live.rs`, jamais écrit à la main.\n",
+            "# Relevé du banc d'essai réel (HRT-116). Engendré par `tests/fiche_live_minecraft.rs`, jamais écrit à la main.\n",
         );
         for (key, value) in &self.lines {
             let _ = writeln!(out, "{key} = {value}");

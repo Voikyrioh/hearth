@@ -3,8 +3,7 @@
 # `tests/fiche_live_minecraft.rs`, sur la forge, le 15/11/2026 (relevé dans l'ADR-0053).
 #
 # Construite depuis la documentation de l'image `itzg/minecraft-server` (https://docker-minecraft-server.readthedocs.io)
-# et l'inventaire des jeux (section 3.1). Tout ce qui est marqué « non vérifié » ne l'a pas été par un essai réel :
-# rien n'a été ajouté de mémoire.
+# et l'inventaire des jeux (section 3.1), puis essayée sur ses vraies images : rien n'a été ajouté de mémoire.
 #
 # Ce que cette fiche NE fait pas, par décision (BR-MOD-016, BR-MOD-017) : aucune variable `CF_*`, aucun type
 # `AUTO_CURSEFORGE`, aucune liste de téléchargements. Un pack CurseForge se dépose sous sa forme « pack serveur »
@@ -261,7 +260,7 @@ cpu = { evidence = "unmeasured" }
 # Banc d'essai réel, forge, 15/11/2026, sans joueur : ce sont les LIMITES essayées, chacune démarre, répond, enregistre et
 # s'arrête proprement. Jeu officiel (26.3) avec 2 Gio : 552 Mio au repos 60 s après le signe « prêt » (compteur du moteur,
 # sans le cache de fichiers). Avec 4 Gio : 698 Mio. Fabric 1.20.1 + pack serveur Prominence II 4.1.8 avec 10 Gio : 7,6 Gio
-# au repos, pic de 9,4 Gio au démarrage (cache de fichiers compris), signe « prêt » après 95 s. Un plancher plus bas n'a pas
+# au repos, pic de 9,4 Go (décimal) au démarrage (cache de fichiers compris), signe « prêt » après 95 s. Un plancher plus bas n'a pas
 # été essayé : il n'est pas affirmé.
 memory = { min_bytes = 2147483648, recommended_bytes = 4294967296, evidence = "measured" }
 # Jeu officiel : image (1 363 527 826 octets) + dossiers gérés après un premier démarrage. Avec le pack Prominence II :

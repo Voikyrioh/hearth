@@ -31,11 +31,11 @@ Banc : `crates/hearth-agent/tests/fiche_live_minecraft.rs`, lancé SUR LA FORGE 
 
 **Défaut trouvé et corrigé par l'essai** : « LATEST » prend la version 26.3 du jeu, compilée pour Java 25 : elle ne démarrait pas sur l'image `java21` de la fiche (`UnsupportedClassVersionError`, classe version 69). La fiche passe à l'étiquette `java25` (`sha256:52a530ef...`) pour le jeu officiel, Paper et Purpur ; NeoForge reste sur `java21`, Fabric, Quilt et Forge sur `java17` (packs de la 1.20). Version de la fiche : 2.
 
-| Scénario | Limite | Signe « prêt » | Repos (compteur du moteur) | Pic de démarrage (cgroupe, cache compris) | Arrêt |
+| Scénario | Limite | Signe « prêt » | Repos (compteur du moteur) | Pic de démarrage (cgroupe, cache compris, Mo et Go décimaux) | Arrêt |
 |---|---|---|---|---|---|
-| Jeu officiel 26.3 | 2 Gio | 10 s | 552 Mio | 696 Mio | 0 s, code 0, monde enregistré |
-| Jeu officiel 26.3 | 4 Gio | 12 s | 698 Mio | 872 Mio | 0 s, code 0, monde enregistré |
-| Fabric 1.20.1 + Prominence II 4.1.8 (377 mods) | 10 Gio | 95 s | 7,6 Gio | 9,4 Gio | 3 s, code 0, monde enregistré |
+| Jeu officiel 26.3 | 2 Gio | 10 s | 552 Mio | 696 Mo | 0 s, code 0, monde enregistré |
+| Jeu officiel 26.3 | 4 Gio | 12 s | 698 Mio | 872 Mo | 0 s, code 0, monde enregistré |
+| Fabric 1.20.1 + Prominence II 4.1.8 (377 mods) | 10 Gio | 95 s | 7,6 Gio | 9,4 Go | 3 s, code 0, monde enregistré |
 
 Disque : 1 497 623 985 octets pour le jeu officiel (image 1 363 527 826 + dossiers gérés), 5 248 719 852 avec le pack (fichier de 1 577 339 200 octets). Le redémarrage du jeu officiel retrouve son monde.
 Promotion : `ready` passe à `tested` ; mémoire `measured` avec `min_bytes` = 2 Gio et `recommended_bytes` = 4 Gio (les LIMITES essayées : aucun plancher plus bas n'a été essayé, donc aucun n'est affirmé), cran « Ultra » à 10 Gio (le gros pack, essayé) ; `status = "published"`. Le processeur reste non mesuré (non exigé pour publier). `catalog-check --release` ne reproche plus rien à Minecraft (il reproche encore Terraria, `preview`). Limite : aucun joueur, donc aucune charge de jeu ; les chiffres sont ceux d'un serveur vide.
