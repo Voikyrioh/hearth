@@ -19,7 +19,7 @@ Après le passage du dépôt à 0.2.0 : `tests/update_stream.rs` (deux tests, Li
 Passer la version du workspace à 0.2.0 puis lancer `cargo test -p hearth-agent --test update_stream` ou `cargo xtask e2e-install`.
 
 ## Impacté
-`crates/hearth-agent/tests/update_stream.rs`, `tests/support/update.rs` (`Rig::request_for`), `deploy/e2e/scenario.sh`. Les autres tests de mise à jour et `scenario-update.sh` fixent leurs versions eux-mêmes (`HEARTH_AGENT_VERSION` ou faux agent) et ne dépendent pas du dépôt.
+`crates/hearth-agent/tests/update_stream.rs`, `tests/support/update.rs` (`Rig::request_for`), `crates/hearth-link/tests/{agent_update.rs,support/update_rig.rs}`, `apps/desktop/src-tauri/tests/agent_update_runtime.rs` (banc qui annonce 99.0.0), `deploy/e2e/scenario.sh`. Les autres tests de mise à jour et `scenario-update.sh` fixent leurs versions eux-mêmes (`HEARTH_AGENT_VERSION` ou faux agent) et ne dépendent pas du dépôt.
 
 ## Workaround
 Aucun.
