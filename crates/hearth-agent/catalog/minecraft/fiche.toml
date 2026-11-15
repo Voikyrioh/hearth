@@ -241,7 +241,7 @@ source_label = "Mojang et l'éditeur du moteur"
 evidence = "unmeasured"
 
 [ready]
-log_contains = "For help, type"           # fin de la ligne « Done (…s)! For help, type "help" » de Minecraft ; non vu sur l'image
+log_contains = "For help, type"           # fin de la ligne « Done (…s)! For help, type "help" » de Minecraft ; vu sur l'image java17 avec Prominence II (15/11, Done (47,5 s)! For help, type "help") ; banc d'essai Hearth non lancé
 status = "untested"
 
 # L'image intercepte le signal d'arrêt, envoie « stop » au jeu par sa console interne (le jeu enregistre le monde) et
