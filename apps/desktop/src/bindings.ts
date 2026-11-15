@@ -314,6 +314,16 @@ export const commands = {
 	 */
 	readFiche: (serverId: string, fiche: string) => typedError<FicheReadDto, LinkFailure>(__TAURI_INVOKE("read_fiche", { serverId, fiche })),
 	/**
+	 *  Les mondes que la fiche reconnaît dans les dossiers ouverts aux services (`GET /catalog/{id}/worlds`, HRT-106) : une
+	 *  lecture, ni acte ni journal. Sans le droit « gérer les services » : `MissingServicesRight`.
+	 */
+	readWorlds: (serverId: string, fiche: string) => typedError<WorldsReadDto, LinkFailure>(__TAURI_INVOKE("read_worlds", { serverId, fiche })),
+	/**
+	 *  Inspecte un monde (`POST /catalog/{id}/worlds/inspect`, HRT-106) : une consultation, rien n'est écrit ; un monde
+	 *  refusé se lit par son code, ce n'est pas une panne.
+	 */
+	inspectWorld: (serverId: string, fiche: string, world: WorldRefDto) => typedError<WorldInspectReadDto, LinkFailure>(__TAURI_INVOKE("inspect_world", { serverId, fiche, world })),
+	/**
 	 *  Installe un serveur de jeu depuis une fiche (`POST /deployments` avec un membre `source`) : le même acte
 	 *  d'administration confirmé que le déploiement d'une image, JAMAIS couvert par l'élévation (le mot de passe à
 	 *  chaque fois), jamais rejoué. La valeur d'une réponse (mot de passe du serveur, jeton) n'est ni tracée ni gardée.
@@ -1061,7 +1071,11 @@ export type DeployEnvDto = {
 };
 
 /**  Les champs de texte qu'une consultation ou un refus peut désigner (liste fermée de l'agent). */
-export type DeployFieldDto = "name" | "image" | "tag" | "env" | "ports" | "mounts" | "command" | "resources";
+export type DeployFieldDto = "name" | "image" | "tag" | "env" | "ports" | "mounts" | "command" | "resources" | 
+/**  Le membre `source` de la demande (fiche) : une incohérence entre la reprise d'un monde et la demande (HRT-106). */
+"source" | 
+/**  Le monde à reprendre (`source.world`, HRT-106) : son code de raison dit lequel des refus. */
+"world";
 
 /**
  *  L'issue de l'envoi : accepté (`202`, l'opération court à l'arrière-plan), refusé, ou résultat inconnu (le
@@ -1083,7 +1097,12 @@ export type DeployRefusal = { kind: "wrong_password" } | { kind: "password_requi
 /**  Une valeur du formulaire n'est pas valable : le champ et la raison (code stable de l'agent). */
 { kind: "invalid"; field: DeployFieldDto; reason: string } | { kind: "setting_refused" } | { kind: "limits_required" } | 
 /**  Le nom est pris ; `holder` : le conteneur non adopté qui le porte, par son nom (BR-ADOPT-022, HRT-214). */
-{ kind: "name_taken"; holder: string | null } | { kind: "name_being_deleted" } | { kind: "port_in_use"; port: number; protocol: DeployProtocolDto; status: PortStatusDto; holder: string | null; suggested: number | null } | { kind: "deploy_limit" } | { kind: "no_space"; freeBytes: number | null } | 
+{ kind: "name_taken"; holder: string | null } | { kind: "name_being_deleted" } | { kind: "port_in_use"; port: number; protocol: DeployProtocolDto; status: PortStatusDto; holder: string | null; suggested: number | null } | { kind: "deploy_limit" } | 
+/**
+ *  Une sauvegarde, une restauration ou une autre reprise de monde tient déjà la place des opérations lourdes
+ *  du serveur (`BR-MONDE-013`) : le client attend, rien n'est mis en file.
+ */
+{ kind: "heavy_io_busy" } | { kind: "no_space"; freeBytes: number | null } | 
 /**  Installer depuis une fiche (HRT-102) : la fiche n'est pas proposée par cet agent. */
 { kind: "fiche_unknown" } | 
 /**  La fiche n'est plus celle que le client a lue (version ou empreinte). */
@@ -1297,6 +1316,8 @@ export type FicheDetailDto = {
 	themes: FicheThemeDto[],
 	/**  Le catalogue complet de réglages (HRT-109) ; vide d'un agent plus ancien. */
 	settings: FicheSettingDto[],
+	/**  Ce que la fiche dit d'un monde repris (HRT-106) ; `None` : la fiche ne reprend pas de monde. */
+	worldImport: FicheWorldImportDto | null,
 	/**
 	 *  Des réglages ou thèmes d'une version plus récente que ce client, illisibles ici : l'onglet le dit, mais la
 	 *  fiche reste installable (ils ne changent pas ce que l'installation écrit).
@@ -1366,6 +1387,8 @@ export type FicheInstallRequestDto = {
 	agreements: string[],
 	ports: FichePortChoiceDto[],
 	optionalPorts: string[],
+	/**  Reprendre un monde existant (HRT-106) : le monde choisi et les deux gestes ; `None` : un monde neuf. */
+	world: WorldPickDto | null,
 	resources: DeployResourcesDto,
 	accept: DeployAcceptDto,
 };
@@ -1502,6 +1525,12 @@ export type FicheVariantDto = {
 	label: string,
 	help: string,
 	default: boolean,
+};
+
+/**  Les réglages que la reprise d'un monde remplit ou ne touche pas (HRT-106, BR-MONDE-014). */
+export type FicheWorldImportDto = {
+	namesSetting: string,
+	carriedByWorld: string[],
 };
 
 export type FicheWorldSavedDto = "by_image_on_signal" | "by_sequence" | "not_saved" | "unknown";
@@ -2395,6 +2424,66 @@ export type VerifyResultDto = {
 	integrity: BackupIntegrityDto,
 	verifiedAt: string | null,
 	filesChecked: number | null,
+};
+
+/**  Un monde trouvé. */
+export type WorldEntryDto = {
+	path: string,
+	name: string,
+	files: number | null,
+	bytes: number | null,
+	modifiedAt: string | null,
+	usable: boolean,
+};
+
+/**  Ce que l'inspection a donné : les chiffres, ou le refus du monde (pas une panne). */
+export type WorldInspectReadDto = { kind: "ready"; inspection: WorldInspectionDto } | { kind: "refused"; reason: WorldRefusalDto };
+
+/**  Ce que l'inspection d'un monde donne. */
+export type WorldInspectionDto = {
+	files: number | null,
+	bytes: number | null,
+	notCopied: number | null,
+	notCopiedNames: string[],
+	skippedLinks: number | null,
+	skippedLinkNames: string[],
+	partial: boolean,
+	freeBytes: number | null,
+};
+
+/**  Le monde choisi pour l'installation et les deux gestes qui l'accompagnent (`BR-MONDE-009`, `016`). */
+export type WorldPickDto = {
+	folder: string,
+	path: string,
+	versionUnderstood: boolean,
+	keepIfChanged: boolean,
+};
+
+/**  Le monde désigné : un dossier ouvert et un chemin relatif, jamais un chemin absolu. */
+export type WorldRefDto = {
+	folder: string,
+	path: string,
+};
+
+/**  Pourquoi l'agent refuse un monde (`details.reason`) ; un code que ce client ne connaît pas se lit `Unknown`. */
+export type WorldRefusalDto = "unknown_folder" | "bad_path" | "not_a_world" | "not_found" | "too_big" | "name_unusable" | "unreadable" | "unknown";
+
+/**  Un dossier ouvert aux services et ce que la recherche y a trouvé. */
+export type WorldRootDto = {
+	folder: string,
+	readable: boolean,
+	truncated: boolean,
+	worlds: WorldEntryDto[],
+};
+
+/**  Ce que la lecture a donné : la liste, ou « cette fiche ne dit pas ce qu'est un monde » (`BR-MONDE-039`). */
+export type WorldsReadDto = { kind: "ready"; view: WorldsViewDto } | { kind: "notSupported" };
+
+/**  La liste des mondes de la fiche. */
+export type WorldsViewDto = {
+	roots: WorldRootDto[],
+	maxDepth: number,
+	maxEntries: number,
 };
 
 /* Tauri Specta runtime */
