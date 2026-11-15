@@ -494,7 +494,9 @@ pub fn run(args: &[String]) -> Result<PathBuf, String> {
             &mut |line| println!("{line}"),
         );
     }
-    remove_record(&binary, &mut |line| println!("{line}"));
+    if !trial {
+        remove_record(&binary, &mut |line| println!("{line}"));
+    }
     let before = report_tree(&host, &root, &mut |line| println!("{line}"));
     let path = build(&spec)?;
     if trial {
