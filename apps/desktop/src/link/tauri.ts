@@ -77,6 +77,7 @@ import {
 } from "./gameSettings";
 import { type LogMessage, type LogReading, toLogMessage } from "./logs";
 import { type MachineEvent, toHistory, toMetrics, toView } from "./machine";
+import { type PackCheck, type PackDeposit, toPackCheck } from "./packs";
 import {
   type AdminActKind,
   type PasswordNeed,
@@ -860,6 +861,15 @@ export class TauriLinkBridge implements LinkBridge {
         await commands.inspectWorld(serverId, ficheId, { folder: world.folder, path: world.path }),
       ),
     );
+  }
+
+  async inspectPack(serverId: string, deposit: string): Promise<PackCheck> {
+    return toPackCheck(unwrap(await commands.inspectPack(serverId, deposit)));
+  }
+
+  async depositPack(): Promise<PackDeposit> {
+    // L'envoi d'un fichier dans la zone d'attente (HRT-95, HRT-96) n'est pas encore livré dans ce client.
+    return { kind: "unavailable" };
   }
 
   async installFiche(

@@ -33,6 +33,8 @@ use super::game_view;
 use super::game_view_dto::{GameReadDto, GameSecretDto};
 use super::lifecycle::{self, GestureDto, LifecycleOutcome};
 use super::public_address::{self, PublicAddressOutcome};
+use super::pack;
+use super::pack_dto::PackCheckOutcome;
 use super::service;
 use super::worlds;
 use super::worlds_dto::{WorldInspectReadDto, WorldRefDto, WorldsReadDto};
@@ -360,6 +362,21 @@ pub async fn inspect_world(
 ) -> Result<WorldInspectReadDto, LinkFailure> {
     let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
     worlds::inspect(link.manager(), &id, &fiche, world).await
+}
+
+/// Ce que l'agent lit dans un pack de mods déjà déposé dans sa zone d'attente (`POST /deployments/pack-check`) : une
+/// CONSULTATION, ni acte ni journal. Le genre est lu par l'agent dans le contenu, jamais fourni par l'interface ; un
+/// refus est rendu par un code fixe (BR-MOD-008, BR-MOD-016). Sans le droit « gérer les services » :
+/// `MissingServicesRight`.
+#[tauri::command]
+#[specta::specta]
+pub async fn inspect_pack(
+    link: Runtime_<'_>,
+    server_id: String,
+    deposit: String,
+) -> Result<PackCheckOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    pack::inspect(link.manager(), &id, &deposit).await
 }
 
 /// Installe un serveur de jeu depuis une fiche (`POST /deployments` avec un membre `source`) : le même acte

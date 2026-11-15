@@ -145,6 +145,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`AgreementDialog`](./AgreementDialog.md) — La fenêtre du contrat de licence, « Je refuse » et « J'accepte » (HRT-102).
 - [`FicheSummaryDialog`](./FicheSummaryDialog.md) — « Vérifiez avant de lancer » d'une installation depuis une fiche (HRT-102).
 - [`InstallAnswers`](./InstallAnswers.md) — Les « Réponses » de l'installation (HRT-102).
+- [`InstallPack`](./InstallPack.md) — Le pack de mods de l'installation : le genre lu par l'agent, les refus en phrases (HRT-125).
 - [`GameSettingsTab`](./GameSettingsTab.md) — L'onglet « Réglages » d'un service de jeu (HRT-109).
 - [`GameSettingsList`](./GameSettingsList.md) — La liste des réglages d'un jeu : recherche, filtres, thèmes (HRT-109).
 - [`SettingThemeCard`](./SettingThemeCard.md) — Carte de thème repliable (HRT-109).

@@ -2,6 +2,7 @@ import { nameIssue } from "@/deploy/rules";
 import type { FicheDetail, FicheInstallRequest, FichePort } from "@/link";
 import type { Resources } from "@/resources";
 import { answersToSend, extraAnswersToSend, extraSettings, visibleQuestions } from "./answers";
+import { type PackDraft, packIssue } from "./pack";
 import { publishedPorts, readableHostPorts, startingHostPort } from "./ports";
 import {
   hiddenByWorld,
@@ -35,6 +36,10 @@ export interface FicheDraft {
   optionalPorts: string[];
   /** La carte « Monde » (HRT-106) : un monde neuf, ou la reprise d'un monde existant. */
   world: WorldDraft;
+  /** « Installer avec un pack de mods » est coché (HRT-125, BR-MOD-006). */
+  packWanted: boolean;
+  /** Le pack déposé et ce que l'agent en a lu ; `null` : aucun fichier choisi. Jamais gardé hors de la mémoire. */
+  pack: PackDraft | null;
   /** `null` tant que les bornes de la machine ne sont pas lues : les curseurs prennent alors leur valeur de départ. */
   resources: Resources | null;
   /** L'utilisateur a touché au moins un champ : fermer demande « Abandonnez-vous votre saisie ? ». */
@@ -58,6 +63,8 @@ export function newFicheDraft(detail: FicheDetail, name: string): FicheDraft {
     hostPorts: {},
     optionalPorts: [],
     world: newWorldDraft(),
+    packWanted: false,
+    pack: null,
     resources: null,
     edited: false,
   };
@@ -76,6 +83,8 @@ export function wipeFicheDraft(draft: FicheDraft): void {
   wipeWorldDraft(draft.world);
   draft.name = "";
   draft.variant = null;
+  draft.packWanted = false;
+  draft.pack = null;
   draft.resources = null;
   draft.edited = false;
 }
@@ -102,6 +111,7 @@ export function toInstallRequest(
   // Reprendre un monde sans l'avoir choisi : la demande ne part pas (BR-MONDE-002).
   if (worldMissing(draft.world)) return null;
   const hidden = hiddenByWorld(detail, draft.world);
+  if (packIssue(detail, draft.packWanted, draft.pack, draft.variant) !== null) return null;
   const resources = draft.resources;
   if (resources === null || resources.memoryBytes === null || resources.cpuMillis === null) {
     return null;
@@ -126,6 +136,7 @@ export function toInstallRequest(
     world: worldPickOf(draft.world, choices.worldVersionUnderstood === true),
     resources: { memoryBytes: resources.memoryBytes, cpuMillis: resources.cpuMillis },
     accept: { ...choices.accept },
+    pack: draft.packWanted ? (draft.pack?.deposit ?? null) : null,
   };
 }
 

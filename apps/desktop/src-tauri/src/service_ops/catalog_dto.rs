@@ -10,12 +10,12 @@
 use hearth_proto::api::catalog::{
     AgreementView, CatalogView, CharsetView, CpuNeed, DiskNeed, DownloadView, EvidenceView,
     FicheCard, FicheDetail, FicheStatus, FirstStartView, FolderView, ImageView, ImposedView,
-    ItemCharsetView, LevelView, ListView, MemoryNeed, PortMappingView, PortView, QuestionKind,
-    QuestionView, ResourcesView, SecretKindView, SettingView, StopView, ThemeView, VariantView,
-    WorldSavedView,
+    ItemCharsetView, LevelView, ListView, MemoryNeed, ModsView, PortMappingView, PortView,
+    QuestionKind, QuestionView, ResourcesView, SecretKindView, SettingView, StopView, ThemeView,
+    VariantView, WorldSavedView,
 };
 use hearth_proto::api::deploy::{
-    DeployAccept, DeployResources, DeploySource, DeploySpec, FicheAnswer, FichePort,
+    DeployAccept, DeployPack, DeployResources, DeploySource, DeploySpec, FicheAnswer, FichePort,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -613,6 +613,61 @@ pub struct FicheWorldImportDto {
     pub carried_by_world: Vec<String>,
 }
 
+/// Les voies de mods d'une fiche (HRT-124), dans l'ordre où l'écran les montre.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FicheModsDto {
+    /// `drop_files` ou `drop_pack` ; une voie que ce client ne connaît pas n'est pas montrée.
+    pub ways: Vec<String>,
+    pub pack: Option<FichePackWayDto>,
+    /// L'indication de la fiche pour le dossier « Tes mods ».
+    pub files_hint: Option<String>,
+}
+
+/// Les genres de pack que la fiche prend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FichePackWayDto {
+    pub genres: Vec<FichePackGenreDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FichePackGenreDto {
+    /// `server_pack` ou `modrinth_pack`.
+    pub kind: String,
+    /// Les variantes de la fiche (moteurs de serveur) permises avec ce genre.
+    pub variants: Vec<String>,
+}
+
+fn mods_dto(view: &ModsView) -> FicheModsDto {
+    FicheModsDto {
+        ways: view
+            .ways
+            .iter()
+            .filter(|way| matches!(way.as_str(), "drop_files" | "drop_pack"))
+            .cloned()
+            .collect(),
+        pack: view.pack.as_ref().map(|pack| FichePackWayDto {
+            genres: pack
+                .genres
+                .iter()
+                .filter(|genre| matches!(genre.kind.as_str(), "server_pack" | "modrinth_pack"))
+                .map(|genre| FichePackGenreDto {
+                    kind: genre.kind.clone(),
+                    variants: genre
+                        .variants
+                        .iter()
+                        .filter(|variant| hearth_link::is_stable_id(variant))
+                        .cloned()
+                        .collect(),
+                })
+                .collect(),
+        }),
+        files_hint: view.files_hint.clone(),
+    }
+}
+
 /// Le détail d'une fiche (`GET /catalog/{id}`).
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -637,6 +692,8 @@ pub struct FicheDetailDto {
     pub settings: Vec<FicheSettingDto>,
     /// Ce que la fiche dit d'un monde repris (HRT-106) ; `None` : la fiche ne reprend pas de monde.
     pub world_import: Option<FicheWorldImportDto>,
+    /// Les voies de mods que la fiche offre (HRT-124, BR-MOD-001) ; absent : le jeu n'en offre aucune (BR-MOD-014).
+    pub mods: Option<FicheModsDto>,
     /// Des réglages ou thèmes d'une version plus récente que ce client, illisibles ici : l'onglet le dit, mais la
     /// fiche reste installable (ils ne changent pas ce que l'installation écrit).
     pub settings_unreadable: u32,
@@ -665,8 +722,8 @@ impl From<&FicheDetail> for FicheDetailDto {
             themes,
             settings,
             // Les voies de mods : lues par le client avec HRT-125, pas encore par cette projection.
-            mods: _,
             world_import,
+            mods,
         } = detail;
         let ImageView {
             repository,
@@ -708,6 +765,7 @@ impl From<&FicheDetail> for FicheDetailDto {
                 names_setting: view.names_setting.clone(),
                 carried_by_world: view.carried_by_world.clone(),
             }),
+            mods: mods.as_ref().map(mods_dto),
             settings_unreadable: themes.unreadable().saturating_add(settings.unreadable()),
             unreadable,
         }
@@ -883,6 +941,8 @@ pub struct FicheInstallRequestDto {
     pub world: Option<super::worlds_dto::WorldPickDto>,
     pub resources: DeployResourcesDto,
     pub accept: DeployAcceptDto,
+    /// L'identifiant du pack de mods déjà déposé dans la zone d'attente de l'agent (HRT-124), jamais un chemin.
+    pub pack: Option<String>,
 }
 
 impl std::fmt::Debug for FicheInstallRequestDto {
@@ -896,6 +956,7 @@ impl std::fmt::Debug for FicheInstallRequestDto {
             .field("answers", &self.answers.len())
             .field("agreements", &self.agreements)
             .field("ports", &self.ports)
+            .field("pack", &self.pack.is_some())
             .field("resources", &self.resources)
             .field("accept", &self.accept)
             .finish_non_exhaustive()
@@ -916,6 +977,16 @@ impl FicheInstallRequestDto {
             exact_bytes(self.resources.memory_bytes).ok_or(LinkFailure::InvalidInput {
                 field: InvalidField::Other,
             })?;
+        // Le pack est désigné par l'identifiant que l'agent a donné au dépôt, jamais par un chemin ni un nom de fichier.
+        let pack = match self.pack {
+            None => None,
+            Some(deposit) if hearth_link::is_deposit_id(&deposit) => Some(DeployPack { deposit }),
+            Some(_) => {
+                return Err(LinkFailure::InvalidInput {
+                    field: InvalidField::Other,
+                });
+            }
+        };
         Ok(DeploySpec {
             name: self.name,
             image: String::new(),
@@ -957,7 +1028,7 @@ impl FicheInstallRequestDto {
                 optional_ports: self.optional_ports,
                 world_imported: self.world.is_some(),
                 world: self.world.map(Into::into),
-                pack: None,
+                pack,
             }),
             extra: std::collections::BTreeMap::new(),
         })

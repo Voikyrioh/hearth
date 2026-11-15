@@ -6,6 +6,7 @@ import DashCard from "@/components/molecules/DashCard.vue";
 import FichePortField from "@/components/molecules/FichePortField.vue";
 import QuestionField from "@/components/molecules/QuestionField.vue";
 import VariantChoice from "@/components/molecules/VariantChoice.vue";
+import InstallPack from "@/components/organisms/InstallPack.vue";
 import InstallSettings from "@/components/organisms/InstallSettings.vue";
 import WorldCard from "@/components/organisms/WorldCard.vue";
 import type { FicheInstallState } from "@/composables/useFicheInstall";
@@ -111,6 +112,8 @@ defineExpose({
 
     <!-- Le monde : neuf, ou repris d'un monde existant (HRT-106) -->
     <WorldCard :install="install" />
+    <!-- Le pack de mods (HRT-125) : seulement si la fiche offre le dépôt d'un pack -->
+    <InstallPack :install="install" />
 
     <DashCard v-if="install.questions.value.length > 0" :title="t('fiche.cardQuestionsAsk')">
       <QuestionField

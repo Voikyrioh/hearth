@@ -19,6 +19,7 @@ import type {
 } from "./gameSettings";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
+import type { PackCheck, PackDeposit } from "./packs";
 import type {
   AdminActKind,
   PasswordNeed,
@@ -520,6 +521,21 @@ export interface LinkBridge {
    * Hearth ne contacte jamais cette adresse lui-même.
    */
   openFicheLink(serverId: string, ficheId: string, kind: FicheLinkKind, key: string): Promise<void>;
+
+  // Les packs de mods d'un serveur de jeu (HRT-124, ADR-0054, BR-MOD-006 à 009, 016). Le genre d'un pack est lu PAR L'AGENT
+  // dans le contenu de l'archive : l'interface ne le demande ni ne le devine.
+
+  /**
+   * Ce que l'agent lit dans un pack déjà déposé (`POST /deployments/pack-check`) : une CONSULTATION, ni acte ni journal,
+   * rien n'est rangé. Un refus est un code fixe (`PACK_IS_A_DOWNLOAD_LIST`, `PACK_HOST_FORBIDDEN`, ...). Sans le droit :
+   * échec `missing_services_right`. Hors « Connecté » : `not_connected`.
+   */
+  inspectPack(serverId: string, deposit: string): Promise<PackCheck>;
+  /**
+   * Ouvre le choix du fichier et l'envoie dans la zone d'attente de l'agent (transfert reprenable, HRT-95 et HRT-96).
+   * `cancelled` : l'utilisateur n'a rien choisi (aucun message). `unavailable` : ce client n'envoie pas encore de fichier.
+   */
+  depositPack(serverId: string): Promise<PackDeposit>;
 
   // Les réglages d'un serveur de jeu (HRT-109, ADR-0051, BR-FICHE-037, 040 à 049, 051 à 054). Les libellés, bornes et choix viennent de
   // la fiche (`readFiche`) ; ici, les VALEURS voulues et l'état du fichier. Un secret n'est jamais rendu.

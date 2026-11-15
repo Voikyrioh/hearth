@@ -15,6 +15,7 @@ import type { AnswerIssue } from "./answers";
 import type { AttentionPoint } from "./attention";
 import { characterName } from "./character";
 import type { Coverage, DiskVerdict, Lack, MemoryNotice, MinimumVerdict } from "./fit";
+import { packRefusalSentences } from "./pack";
 import { type ProofKind, proofOf } from "./proof";
 import { installRefusalText } from "./world";
 
@@ -77,6 +78,7 @@ const FOLDER_ROLES = {
   config: "fiche.folderRole.config",
   logs: "fiche.folderRole.logs",
   mods: "fiche.folderRole.mods",
+  packs: "fiche.folderRole.packs",
   data: "fiche.folderRole.data",
 } as const;
 
@@ -336,6 +338,15 @@ export function ficheRefusalText(
       return t("fiche.refusals.ficheChanged");
     case "agreement_required":
       return t("fiche.refusals.agreementRequired");
+    case "pack_unknown":
+      return packRefusalSentences({ kind: "unknown" }).join(" ");
+    case "pack_refused":
+      return packRefusalSentences({
+        kind: "refused",
+        reason: refused.reason,
+        mods: refused.mods,
+        host: refused.host,
+      }).join(" ");
     case "answer_refused": {
       const label = detail?.questions.find((question) => question.id === refused.id)?.label;
       const head =

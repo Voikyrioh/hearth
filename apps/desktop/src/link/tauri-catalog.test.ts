@@ -185,6 +185,7 @@ const install = {
   world: null,
   resources: { memoryBytes: 2 * 1024 ** 3, cpuMillis: 1000 },
   accept: { reservedPorts: false, lowDisk: true },
+  pack: null,
 };
 
 describe("le pont réel, catalogue", () => {

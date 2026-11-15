@@ -14,6 +14,7 @@ export * from "./gameSettings";
 export * from "./logs";
 export * from "./machine";
 export * from "./messages";
+export * from "./packs";
 export * from "./reauth";
 export * from "./security";
 export * from "./serviceBackups";

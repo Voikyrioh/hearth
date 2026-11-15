@@ -130,6 +130,7 @@ mod tests {
             }],
             optional_ports: vec![],
             world: None,
+            pack: None,
             resources: DeployResourcesDto {
                 memory_bytes: 2_147_483_648.0,
                 cpu_millis: 1000,
@@ -150,6 +151,38 @@ mod tests {
             DeployOutcome::Refused { refusal } => refusal,
             other => panic!("refus attendu, reçu {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_pack_goes_as_the_identifier_the_agent_gave_never_a_path_or_a_name() {
+        let mut with = request();
+        with.pack = Some("0a1b-2c3d".into());
+        let spec = with.into_spec().unwrap();
+        let Some(DeploySource::Fiche { pack, .. }) = &spec.source else {
+            panic!("source attendue");
+        };
+        assert_eq!(pack.as_ref().map(|p| p.deposit.as_str()), Some("0a1b-2c3d"));
+        for bad in [
+            "",
+            "../x",
+            r"C:\packs\p.zip",
+            "p.zip",
+            "a b",
+            &"a".repeat(65),
+        ] {
+            let mut refused = request();
+            refused.pack = Some(bad.to_owned());
+            assert!(
+                matches!(refused.into_spec(), Err(LinkFailure::InvalidInput { .. })),
+                "{bad}"
+            );
+        }
+        // Sans pack, rien ne part.
+        let none = request().into_spec().unwrap();
+        let Some(DeploySource::Fiche { pack, .. }) = &none.source else {
+            panic!("source attendue");
+        };
+        assert!(pack.is_none());
     }
 
     #[test]

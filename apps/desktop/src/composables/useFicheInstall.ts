@@ -13,6 +13,7 @@ import { toInstallRequest } from "@/fiche/draft";
 import { diskVerdict, memoryNotices, minimumVerdicts, placement, tooSmall } from "@/fiche/fit";
 import { ficheFormRefusal } from "@/fiche/messages";
 import { proposedName } from "@/fiche/name";
+import { allowedVariants, packGenres, packIssue, readPack } from "@/fiche/pack";
 import {
   duplicateHostPorts,
   type HostPortIssue,
@@ -143,11 +144,90 @@ export function useFicheInstall(
   const nameProblem = computed(() => (draft.value ? nameIssue(draft.value.name) : null));
   /** Reprendre un monde sans l'avoir choisi : la page ne continue pas (BR-MONDE-002). */
   const worldProblem = computed(() => (draft.value ? worldMissing(draft.value.world) : false));
+  // ── Le pack de mods (HRT-124, HRT-125) ───────────────────────────────────────────────────────
+  /** Les genres de pack que la fiche prend ; `null` : la fiche n'offre pas le dépôt d'un pack. */
+  const packWay = computed(() => (detail.value ? packGenres(detail.value) : null));
+  /** Ce qui empêche de continuer avec le pack (case cochée), ou `null`. */
+  const packProblem = computed(() =>
+    detail.value && draft.value
+      ? packIssue(detail.value, draft.value.packWanted, draft.value.pack, draft.value.variant)
+      : null,
+  );
+  const packBusy = ref(false);
+  /** L'envoi d'un fichier n'est pas encore possible depuis ce client. */
+  const packUnavailable = ref(false);
+  /** La lecture du pack a échoué (lien, droit) : le fichier est à choisir de nouveau. */
+  const packReadFailed = ref(false);
+  /** Au plus UN moteur permis pour ce genre de pack : il est choisi d'office (un pack Modrinth). */
+  function alignEngine(): void {
+    const current = draft.value;
+    const read = detail.value;
+    const pack = readPack(current?.pack ?? null);
+    if (!current || !read || !pack) return;
+    const allowed = allowedVariants(read, pack);
+    const only = allowed[0];
+    if (allowed.length === 1 && only !== undefined && current.variant !== only)
+      current.variant = only;
+  }
+  function setPackWanted(on: boolean): void {
+    edit((current) => {
+      current.packWanted = on;
+      if (!on) current.pack = null;
+    });
+    packUnavailable.value = false;
+    packReadFailed.value = false;
+  }
+  /** Demande à l'agent ce qu'est le pack déposé (une consultation, rien n'est rangé). */
+  async function readDeposit(deposit: string): Promise<void> {
+    packBusy.value = true;
+    packReadFailed.value = false;
+    try {
+      const check = await getLinkBridge().inspectPack(serverId(), deposit);
+      edit((current) => {
+        if (current.pack?.deposit === deposit) current.pack.check = check;
+      });
+      alignEngine();
+    } catch {
+      packReadFailed.value = true;
+      edit((current) => {
+        current.pack = null;
+      });
+    } finally {
+      packBusy.value = false;
+    }
+  }
+  /** Choisit un fichier, l'envoie dans la zone d'attente de l'agent puis le fait lire. */
+  async function choosePack(): Promise<void> {
+    if (packBusy.value) return;
+    packBusy.value = true;
+    packUnavailable.value = false;
+    packReadFailed.value = false;
+    try {
+      const deposited = await getLinkBridge().depositPack(serverId());
+      if (deposited.kind === "unavailable") {
+        packUnavailable.value = true;
+        return;
+      }
+      if (deposited.kind === "cancelled") return;
+      edit((current) => {
+        current.pack = { deposit: deposited.deposit, fileName: deposited.fileName, check: null };
+      });
+    } catch {
+      packReadFailed.value = true;
+      return;
+    } finally {
+      packBusy.value = false;
+    }
+    const current = draft.value?.pack;
+    if (current) await readDeposit(current.deposit);
+  }
+
   /** Au moins un défaut de forme sur la page « Réponses ». */
   const answersInvalid = computed(
     () =>
       nameProblem.value !== null ||
       worldProblem.value ||
+      packProblem.value !== null ||
       answerProblems.value.size > 0 ||
       extraProblems.value.size > 0 ||
       portProblems.value.size > 0,
@@ -356,7 +436,15 @@ export function useFicheInstall(
       };
     },
     wipe,
-    refusal: (refused: DeployRefusal) => ficheFormRefusal(refused, detail.value),
+    refusal: (refused: DeployRefusal) => {
+      // Le pack refusé (ou disparu) est retiré de la zone d'attente de l'agent : il est à choisir de nouveau.
+      if (refused.kind === "pack_unknown" || refused.kind === "pack_refused") {
+        edit((current) => {
+          current.pack = null;
+        });
+      }
+      return ficheFormRefusal(refused, detail.value);
+    },
   };
 
   return {
@@ -373,6 +461,13 @@ export function useFicheInstall(
     nameProblem,
     worldProblem,
     worldImport,
+    packWay,
+    packProblem,
+    packBusy,
+    packUnavailable,
+    packReadFailed,
+    setPackWanted,
+    choosePack,
     answersInvalid,
     touch,
     touchAll,

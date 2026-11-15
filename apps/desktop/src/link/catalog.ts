@@ -3,6 +3,7 @@ import type {
   FicheDetailDto,
   FicheInstallRequestDto,
   FicheLinkKind,
+  FicheModsDto,
   FicheQuestionDto,
   FicheReadDto,
   FicheSettingDto,
@@ -217,10 +218,26 @@ export interface FicheDetail {
    * ou un agent plus ancien ne le dit pas.
    */
   worldImport: { namesSetting: string; carriedByWorld: string[] } | null;
+  /** Les voies de mods que la fiche offre (HRT-124) ; `null` : le jeu n'en offre aucune (BR-MOD-014). */
+  mods: FicheMods | null;
   /** Réglages ou thèmes d'une version plus récente que ce client, illisibles : l'onglet le dit, l'installation continue. */
   settingsUnreadable: number;
   /** Des éléments d'une version plus récente que ce client, illisibles : la fiche ne s'installe pas à l'aveugle. */
   unreadable: number;
+}
+
+/** Un genre de pack que la fiche prend, avec les variantes (moteurs de serveur) permises pour lui. */
+export interface FichePackGenre {
+  kind: "server_pack" | "modrinth_pack";
+  variants: string[];
+}
+
+/** Les voies de mods d'une fiche (BR-MOD-001) : une voie que ce client ne connaît pas n'est pas montrée. */
+export interface FicheMods {
+  ways: ("drop_files" | "drop_pack")[];
+  /** Les genres de pack que la fiche prend, quand elle offre le dépôt d'un pack. */
+  packGenres: FichePackGenre[];
+  filesHint: string | null;
 }
 
 /** La lecture d'une fiche : trouvée, ou inconnue de cet agent (une fiche d'essai sur un agent publié se lit ainsi). */
@@ -246,6 +263,8 @@ export interface FicheInstallRequest {
   resources: { memoryBytes: number; cpuMillis: number };
   /** Les cases de l'agent : le port réservé, le manque de place annoncé par l'éditeur. */
   accept: { reservedPorts: boolean; lowDisk: boolean };
+  /** L'identifiant du pack de mods déposé dans la zone d'attente de l'agent (HRT-124), jamais un chemin ; `null` : aucun. */
+  pack: string | null;
 }
 
 // ── Conversions depuis les types générés (`bindings.ts`) ──────────────────────────────────────────
@@ -299,6 +318,21 @@ function toSetting(dto: FicheSettingDto): FicheSetting {
   };
 }
 
+function toMods(dto: FicheModsDto): FicheMods {
+  const ways = dto.ways.filter(
+    (way): way is "drop_files" | "drop_pack" => way === "drop_files" || way === "drop_pack",
+  );
+  const genres = (dto.pack?.genres ?? []).filter(
+    (genre): genre is FichePackGenre =>
+      genre.kind === "server_pack" || genre.kind === "modrinth_pack",
+  );
+  return {
+    ways,
+    packGenres: genres.map((genre) => ({ kind: genre.kind, variants: [...genre.variants] })),
+    filesHint: dto.filesHint,
+  };
+}
+
 function toFicheDetail(dto: FicheDetailDto): FicheDetail {
   return {
     card: { ...dto.card },
@@ -343,6 +377,7 @@ function toFicheDetail(dto: FicheDetailDto): FicheDetail {
           carriedByWorld: [...dto.worldImport.carriedByWorld],
         }
       : null,
+    mods: dto.mods ? toMods(dto.mods) : null,
     settingsUnreadable: dto.settingsUnreadable,
     unreadable: dto.unreadable,
   };
@@ -372,5 +407,6 @@ export function toFicheInstallRequestDto(request: FicheInstallRequest): FicheIns
       cpuMillis: request.resources.cpuMillis,
     },
     accept: { reservedPorts: request.accept.reservedPorts, lowDisk: request.accept.lowDisk },
+    pack: request.pack,
   };
 }

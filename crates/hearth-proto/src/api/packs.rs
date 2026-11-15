@@ -10,6 +10,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::lenient::Items;
 
+/// Au plus ce que la lecture d'un pack peut durer côté agent (secondes) : elle relit toute l'archive (jusqu'à 4 Gio).
+/// Le client allonge d'autant le délai de cette seule consultation.
+pub const INSPECT_BUDGET_S: u64 = 300;
+/// Le chemin de la consultation.
+pub const INSPECT_PATH: &str = "/deployments/pack-check";
+
 /// Corps de la demande : l'identifiant du dépôt (jamais un chemin ni un nom de fichier).
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PackInspectRequest {

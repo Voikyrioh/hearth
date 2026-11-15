@@ -4,6 +4,7 @@ import type { DeployOutcome, DeployRefusal, DeployStep } from "./deploy";
 import type { SimulatedDeploys } from "./simulated-deploy";
 import { rich, terraria } from "./simulated-fiches";
 import { judgeValue } from "./simulated-judge";
+import type { SimulatedPacks } from "./simulated-packs";
 import type { SimulatedWorlds } from "./simulated-worlds";
 
 /**
@@ -54,7 +55,10 @@ export class SimulatedCatalog {
   worlds: SimulatedWorlds | null = null;
   private readonly fiches = new Map<string, FicheDetail>();
 
-  constructor(private readonly deploys: SimulatedDeploys) {
+  constructor(
+    private readonly deploys: SimulatedDeploys,
+    private readonly packs: SimulatedPacks,
+  ) {
     this.fiches.set("terraria", terraria());
   }
 
@@ -129,6 +133,13 @@ export class SimulatedCatalog {
     }
     if (request.variant !== null && !detail.variants.some((item) => item.id === request.variant)) {
       return refused({ kind: "other" });
+    }
+
+    // Un pack de mods joint (HRT-124) : jugé comme l'agent (le dépôt existe, le pack est lisible, la fiche offre ce genre
+    // avec cette variante) AVANT le reste, et un pack refusé est retiré aussitôt.
+    if (request.pack !== null) {
+      const judged = this.packs.judgeForInstall(request.pack, detail, request.variant);
+      if (judged !== null) return refused(judged);
     }
 
     // Les contrats : l'agent refuse même d'un client modifié.

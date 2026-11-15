@@ -21,6 +21,7 @@ import type {
 } from "./gameSettings";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
+import type { PackCheck, PackDeposit } from "./packs";
 import type {
   AdminActKind,
   PasswordNeed,
@@ -77,6 +78,7 @@ import { SimulatedGameSettings } from "./simulated-game-settings";
 import { SimulatedGames } from "./simulated-games";
 import { SimulatedLogs } from "./simulated-logs";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
+import { SimulatedPacks } from "./simulated-packs";
 import { SimulatedReauth, simulatedPasswordNeed } from "./simulated-reauth";
 import { SimulatedSecurity } from "./simulated-security";
 import { SimulatedServiceOps } from "./simulated-service-ops";
@@ -271,6 +273,8 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly catalog: SimulatedCatalog;
   /** Les mondes que l'agent simulé reconnaît (HRT-106) : l'agent juge comme le vrai ; la copie est une étape du déploiement, pilotée par le test. */
   readonly worlds: SimulatedWorlds;
+  /** Les packs de mods déposés dans la zone d'attente de l'agent d'essai (HRT-124). */
+  readonly packs: SimulatedPacks;
   /** Les réglages des services de jeu (HRT-109). */
   readonly gameSettings: SimulatedGameSettings;
   readonly games = new SimulatedGames();
@@ -311,7 +315,8 @@ export class SimulatedLinkBridge implements LinkBridge {
     );
     this.deletes = new SimulatedDeletes(this.services, this.serviceOps, this.deploys);
     this.backups = new SimulatedBackups(this.services, this.serviceOps);
-    this.catalog = new SimulatedCatalog(this.deploys);
+    this.packs = new SimulatedPacks();
+    this.catalog = new SimulatedCatalog(this.deploys, this.packs);
     this.worlds = new SimulatedWorlds((ficheId) => this.catalog.get(ficheId)?.worldImport != null);
     this.catalog.worlds = this.worlds;
     this.gameSettings = new SimulatedGameSettings(this.catalog);
@@ -1075,6 +1080,26 @@ export class SimulatedLinkBridge implements LinkBridge {
     this.calls.push("fiche link");
     if (this.failLinks) throw this.fail({ kind: "internal" });
     this.openedLinks.push({ serverId, ficheId, kind, key });
+  }
+
+  async inspectPack(serverId: string, deposit: string): Promise<PackCheck> {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push("pack check");
+    if (!this.accounts.ownRights(server).granted) {
+      throw this.fail({ kind: "missing_services_right" });
+    }
+    return this.packs.inspect(deposit);
+  }
+
+  async depositPack(serverId: string): Promise<PackDeposit> {
+    this.requireServer(serverId);
+    await this.delay();
+    this.calls.push("pack deposit");
+    return this.packs.nextDeposit();
   }
 
   async installFiche(

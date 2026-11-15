@@ -123,6 +123,10 @@ impl HttpTransport {
             // Estimer une sauvegarde ou mesurer un monde dure jusqu'à une minute (BR-BACKUP-009, BR-MONDE-006).
             self.config.request_timeout
                 + Duration::from_secs(hearth_proto::api::backups::ESTIMATE_BUDGET_S)
+        } else if path == hearth_proto::api::packs::INSPECT_PATH {
+            // La lecture d'un pack relit toute l'archive (HRT-124) : plusieurs secondes pour un gros pack.
+            self.config.request_timeout
+                + Duration::from_secs(hearth_proto::api::packs::INSPECT_BUDGET_S)
         } else {
             self.config.request_timeout
         }
