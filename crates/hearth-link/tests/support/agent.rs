@@ -448,6 +448,7 @@ impl TestAgent {
                     host_paths: None,
                     catalog: hearth_agent::app::CatalogParts::production(),
                     backups: hearth_agent::app::BackupParts::production(),
+                    transfers: hearth_agent::app::TransferParts::production(),
                 },
             )
             .await

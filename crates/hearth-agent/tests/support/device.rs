@@ -380,6 +380,11 @@ pub fn act_of<'a>(
                 digest,
             }
         }
+        // Déposer un fichier dans la zone d'attente (HRT-95) : le dernier nom et la taille du corps, jamais le contenu
+        // (une seule fonction, partagée avec l'agent et la liaison cliente : `AdminAct::file_deposit`).
+        ("POST", ["deposits"]) => hearth_proto::admin_act::AdminAct::file_deposit(
+            &serde_json::from_value(body.clone()).expect("corps du dépôt"),
+        ),
         // Annuler et décider une opération de service (HRT-144) : l'identifiant du chemin, le choix du corps.
         ("DELETE", ["operations", "services", id]) => AdminAct::OperationCancel { target: id },
         ("POST", ["operations", "services", id, "decision"]) => AdminAct::OperationDecide {

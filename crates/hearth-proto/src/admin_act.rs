@@ -69,6 +69,9 @@ pub enum ActKind {
     OperationDecide,
     /// Enregistrer les réglages d'un serveur de jeu (HRT-108).
     GameSettingsSave,
+    /// Écrire un fichier sur le serveur : pour l'instant, déposer un fichier dans la zone d'attente de l'agent
+    /// par un transfert reprenable (HRT-95, BR-FILES-019, BR-MOD-015).
+    FileWrite,
 }
 
 impl ActKind {
@@ -93,6 +96,7 @@ impl ActKind {
         Self::ServiceRelease,
         Self::ServiceUpdate,
         Self::ServiceDelete,
+        Self::FileWrite,
         Self::BackupCreate,
         Self::BackupDelete,
         Self::BackupSettings,
@@ -102,8 +106,9 @@ impl ActKind {
 
     /// Les actes DÉCLARÉS dont la route n'existe pas encore : leur lot l'ajoute à `ROUTES` et à `ENDPOINTS`
     /// en la retirant d'ici. Tant qu'un acte est ici, aucune route ne le porte, aucune requête ne peut le
-    /// produire, et le test de `ROUTES` le sait. `0x15` à `0x18` et `0x1A` sont réservés par la conception et ne
-    /// sont pas encore déclarés. Aucun acte n'est plus déclaré sans route depuis HRT-97.
+    /// produire, et le test de `ROUTES` le sait. `0x15`, `0x17`, `0x18` et `0x1A` sont réservés par la conception et
+    /// ne sont pas encore déclarés (`0x16`, `FileWrite`, l'est par HRT-95). Aucun acte n'est plus déclaré sans route
+    /// depuis HRT-97.
     pub const DECLARED_WITHOUT_ROUTE: [ActKind; 0] = [];
 
     /// L'octet du code de l'acte dans le message signé. `0x09` est réservé (jamais utilisé : le retrait
@@ -129,6 +134,7 @@ impl ActKind {
             Self::ServiceRelease => 0x12,
             Self::ServiceUpdate => 0x13,
             Self::ServiceDelete => 0x14,
+            Self::FileWrite => 0x16,
             Self::BackupCreate => 0x19,
             Self::BackupDelete => 0x1B,
             Self::BackupSettings => 0x1C,
@@ -167,6 +173,7 @@ impl ActKind {
             Self::BackupSettings => action::SERVICE_BACKUP_SETTINGS,
             Self::OperationDecide => action::OPERATION_DECIDE,
             Self::GameSettingsSave => action::SERVICE_GAME_SETTINGS,
+            Self::FileWrite => action::SERVICE_FILE_WRITE,
         }
     }
 }
@@ -296,6 +303,14 @@ pub enum AdminAct<'a> {
         origin: &'a str,
         effect: &'a str,
     },
+    /// Écrire un fichier : la cible (`deposit` pour la zone d'attente de l'agent, ou la clé d'un service), le geste
+    /// (`upload`), le DERNIER nom du fichier (jamais un chemin) et sa taille en octets. Jamais le contenu.
+    FileWrite {
+        target: Cow<'a, str>,
+        gesture: &'a str,
+        name: Cow<'a, str>,
+        size: u64,
+    },
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -316,6 +331,18 @@ fn role_text(role: RoleName) -> &'static str {
 }
 
 impl AdminAct<'_> {
+    /// L'acte d'un dépôt dans la zone d'attente de l'agent (HRT-95) : la cible `deposit`, le geste `upload`, le
+    /// dernier nom du fichier et sa taille. Jamais un chemin ni un octet du contenu. Source unique pour l'agent
+    /// (qui reconstruit l'acte depuis le corps) et la liaison cliente (qui le signe).
+    pub fn file_deposit(request: &crate::api::transfers::DepositRequest) -> AdminAct<'static> {
+        AdminAct::FileWrite {
+            target: Cow::Borrowed("deposit"),
+            gesture: "upload",
+            name: Cow::Owned(request.name.clone()),
+            size: request.size,
+        }
+    }
+
     /// L'acte d'un déploiement (HRT-68) : le nom (cible), `dépôt:version`, l'empreinte de la partie non secrète
     /// ([`crate::api::service_spec::deploy_digest`]), le NOMBRE de variables et si une commande est fixée. Ni
     /// valeur, ni nom de variable, ni commande. Source unique pour l'agent (qui reconstruit l'acte depuis le
@@ -432,6 +459,7 @@ impl AdminAct<'_> {
             Self::BackupSettings { .. } => ActKind::BackupSettings,
             Self::OperationDecide { .. } => ActKind::OperationDecide,
             Self::GameSettingsSave { .. } => ActKind::GameSettingsSave,
+            Self::FileWrite { .. } => ActKind::FileWrite,
         }
     }
 
@@ -455,6 +483,7 @@ impl AdminAct<'_> {
             | Self::ServiceDelete { target, .. }
             | Self::BackupCreate { target, .. }
             | Self::BackupSettings { target, .. }
+            | Self::FileWrite { target, .. }
             | Self::GameSettingsSave { target, .. } => target,
             Self::ServiceDeploy { name, .. } => name,
             Self::OperationCancel { target }
@@ -539,6 +568,16 @@ impl AdminAct<'_> {
                 origin.as_bytes().to_vec(),
                 effect.as_bytes().to_vec(),
             ],
+            Self::FileWrite {
+                gesture,
+                name,
+                size,
+                ..
+            } => vec![
+                gesture.as_bytes().to_vec(),
+                name.as_bytes().to_vec(),
+                size.to_string().into_bytes(),
+            ],
             _ => Vec::new(),
         }
     }
@@ -599,6 +638,7 @@ pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
         | AdminAct::OperationCancel { .. }
         | AdminAct::BackupCreate { .. }
         | AdminAct::BackupSettings { .. }
+        | AdminAct::FileWrite { .. }
         | AdminAct::GameSettingsSave { .. } => true,
         AdminAct::OperationDecide { .. }
         | AdminAct::ServiceDeploy { .. }
@@ -664,6 +704,7 @@ pub const fn is_piloting(kind: ActKind) -> bool {
         | ActKind::BackupCreate
         | ActKind::BackupDelete
         | ActKind::BackupSettings
+        | ActKind::FileWrite
         | ActKind::GameSettingsSave => false,
     }
 }
@@ -905,6 +946,15 @@ pub const ROUTES: &[RouteAct] = &[
         kinds: &[ActKind::GameSettingsSave],
         contract: Contract::Reauth,
     },
+    // Déposer un fichier dans la zone d'attente de l'agent (HRT-95, BR-FILES-019, BR-FILES-023) : la cible signée est
+    // `deposit`, les paramètres signés le geste, le dernier nom du fichier et sa taille (jamais un chemin ni un
+    // octet de contenu) ; couvert par l'élévation. L'envoi lui-même passe par le WebSocket du transfert.
+    RouteAct {
+        method: "POST",
+        pattern: "/deposits",
+        kinds: &[ActKind::FileWrite],
+        contract: Contract::Reauth,
+    },
     // Le suivi des opérations de service (HRT-144, ADR-0045) : annuler, décider.
     RouteAct {
         method: "DELETE",
@@ -935,13 +985,20 @@ pub struct Exception {
     pub reason: &'static str,
 }
 
-/// Les exceptions nommées. Une seule : se déconnecter ne donne aucun pouvoir, et c'est la voie de sortie
-/// d'une session volée.
-pub const NOT_AN_ACT: &[Exception] = &[Exception {
-    method: "DELETE",
-    pattern: "/sessions/current",
-    reason: "la déconnexion ne donne aucun pouvoir à qui tient la session",
-}];
+/// Les exceptions nommées. Se déconnecter ne donne aucun pouvoir, et c'est la voie de sortie d'une session volée.
+/// Abandonner un transfert n'efface que la partie reçue par CE compte, un fichier d'attente de Hearth (HRT-95).
+pub const NOT_AN_ACT: &[Exception] = &[
+    Exception {
+        method: "DELETE",
+        pattern: "/sessions/current",
+        reason: "la déconnexion ne donne aucun pouvoir à qui tient la session",
+    },
+    Exception {
+        method: "DELETE",
+        pattern: "/transfers/{id}",
+        reason: "n'efface que la partie reçue par le compte appelant, dans la zone d'attente de Hearth",
+    },
+];
 
 /// La ligne de la table des actes pour cette route, s'il y en a une.
 pub fn route_act(method: &str, pattern: &str) -> Option<&'static RouteAct> {
@@ -970,7 +1027,7 @@ mod tests {
             codes,
             vec![
                 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-                0x10, 0x11, 0x12, 0x13, 0x14, 0x19, 0x1B, 0x1C, 0x1D, 0x1E
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x19, 0x1B, 0x1C, 0x1D, 0x1E
             ]
         );
         let mut sorted = codes.clone();
@@ -1437,6 +1494,12 @@ mod tests {
             ActKind::OperationDecide => AdminAct::OperationDecide {
                 target: "01OP",
                 choice: OperationChoice::Keep,
+            },
+            ActKind::FileWrite => AdminAct::FileWrite {
+                target: "deposit".into(),
+                gesture: "upload",
+                name: "pack.zip".into(),
+                size: 1,
             },
             ActKind::GameSettingsSave => AdminAct::GameSettingsSave {
                 target: target.into(),
