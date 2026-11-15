@@ -38,7 +38,7 @@ impl DepositZone for Zone {
     async fn release(&self, id: &TransferId, account: &str) -> Result<(), TransferError> {
         self.released
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push((id.as_str().to_owned(), account.to_owned()));
         Ok(())
     }
@@ -81,7 +81,13 @@ async fn a_complete_deposit_is_read_placed_and_released() {
     .unwrap();
     assert_eq!(result, Ok(()));
     assert_eq!(fs.content(&key, "pack.zip").as_deref(), Some(&pack[..]));
-    assert_eq!(zone.released.lock().unwrap().len(), 1);
+    assert_eq!(
+        zone.released
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len(),
+        1
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -102,7 +108,12 @@ async fn another_account_or_a_bad_id_finds_nothing_and_nothing_is_placed() {
     assert_eq!(out.0, Err(DepositError::NotFound));
     assert_eq!(out.1, Some(DepositError::NotFound));
     assert!(fs.content(&key, "pack.zip").is_none());
-    assert!(zone.released.lock().unwrap().is_empty());
+    assert!(
+        zone.released
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -120,5 +131,10 @@ async fn a_pack_that_changed_since_its_judgement_is_not_placed_and_stays_in_the_
     .unwrap();
     assert_eq!(result, Err(DepositError::Changed));
     assert!(fs.content(&key, "pack.zip").is_none());
-    assert!(zone.released.lock().unwrap().is_empty());
+    assert!(
+        zone.released
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+    );
 }
