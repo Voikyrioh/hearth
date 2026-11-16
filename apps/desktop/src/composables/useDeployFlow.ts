@@ -102,8 +102,8 @@ export interface Launch {
 /**
  * Le parcours d'un déploiement, de « Déployer » à l'issue (HRT-69, BR-DEPLOY-015, 016, 019, 028, 029, 030, 032) :
  *
- * 1. `openSummary` refait la consultation (le serveur a le dernier mot) : un point qui a changé ramène au champ sans
- *    ouvrir le récapitulatif ; sinon le récapitulatif s'ouvre avec les points d'attention frais ;
+ * 1. `openReview` refait la consultation (le serveur a le dernier mot) : un point qui a changé ramène au champ sans
+ *    afficher la vérification ; sinon la vérification s'affiche dans la page (HRT-246) avec les points d'attention frais ;
  * 2. `perform` envoie le déploiement (acte confirmé, mot de passe toujours demandé). L'agent répond « accepté » :
  *    l'issue ne se lit JAMAIS dans cette réponse, elle arrive par le suivi des opérations (`useServiceOpsStore`) ;
  *    un refus de champ (nom pris, port pris au dernier moment…) ferme la fenêtre et ramène au champ, la saisie reste ;
@@ -133,8 +133,8 @@ export function useDeployFlow(
   const toasts = useToastsStore();
   const action = useServerAction(() => serverId());
 
-  const summaryOpen = ref(false);
-  const summaryCheck = ref<DeployCheck | null>(null);
+  const reviewing = ref(false);
+  const reviewCheck = ref<DeployCheck | null>(null);
   /** `null` : rien n'est exigé ; sinon le manque de place que le serveur vient de dire (`freeBytes` : `null` sans chiffre). */
   const forceLowDisk = ref<{ freeBytes: number | null } | null>(null);
   const opening = ref(false);
@@ -155,8 +155,8 @@ export function useDeployFlow(
 
   // ── 1. Le récapitulatif ──────────────────────────────────────────────────────────────────────
 
-  async function openSummary(): Promise<void> {
-    if (opening.value || summaryOpen.value) return;
+  async function openReview(): Promise<void> {
+    if (opening.value || reviewing.value) return;
     if (form.validate()) return;
     opening.value = true;
     refusal.value = null;
@@ -169,15 +169,15 @@ export function useDeployFlow(
         if (blocking.field) focusLater(blocking.field);
         return;
       }
-      summaryCheck.value = fresh;
-      summaryOpen.value = true;
+      reviewCheck.value = fresh;
+      reviewing.value = true;
     } finally {
       opening.value = false;
     }
   }
 
-  function closeSummary(): void {
-    summaryOpen.value = false;
+  function leaveReview(): void {
+    reviewing.value = false;
   }
 
   // ── 2. L'envoi ───────────────────────────────────────────────────────────────────────────────
@@ -228,7 +228,7 @@ export function useDeployFlow(
       // Un refus propre à la source (une réponse refusée, une machine trop petite) : la page le dit, la saisie reste.
       refusal.value = own;
       void form.refreshCheck();
-      summaryOpen.value = false;
+      reviewing.value = false;
       if (own.question && options.focusQuestion) {
         const question = own.question;
         void nextTick()
@@ -242,7 +242,7 @@ export function useDeployFlow(
     refusal.value = { text: refusalText(refused), field };
     // Les constats du formulaire se rafraîchissent : le port refusé propose son port libre, le nom se dit pris.
     void form.refreshCheck();
-    summaryOpen.value = false;
+    reviewing.value = false;
     if (field) focusLater(field);
     return { kind: "done" };
   }
@@ -369,8 +369,8 @@ export function useDeployFlow(
   }
 
   return {
-    summaryOpen,
-    summaryCheck,
+    reviewing,
+    reviewCheck,
     forceLowDisk,
     opening,
     refusal,
@@ -379,8 +379,8 @@ export function useDeployFlow(
     operation,
     service,
     busy: action.busy,
-    openSummary,
-    closeSummary,
+    openReview,
+    leaveReview,
     perform,
     performCancel,
     background,

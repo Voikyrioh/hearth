@@ -28,4 +28,5 @@ Règle portée par le client (HRT-102). Le second bouton de la fiche ouvre l'ins
 BR-FICHE-014, BR-FICHE-058
 
 ## Historique
+- 2026-11-16 — « Installer avec les valeurs proposées » affiche directement l'étape de vérification, plus la fenêtre (HRT-246).
 - 2026-10-24 — création (HRT-102).

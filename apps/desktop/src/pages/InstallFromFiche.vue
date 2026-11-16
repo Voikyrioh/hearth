@@ -11,7 +11,7 @@ import InstallAside from "@/components/molecules/InstallAside.vue";
 import StepTrail from "@/components/molecules/StepTrail.vue";
 import DeployProgressDialog from "@/components/organisms/DeployProgressDialog.vue";
 import EnginePanel from "@/components/organisms/EnginePanel.vue";
-import FicheSummaryDialog from "@/components/organisms/FicheSummaryDialog.vue";
+import FicheReview from "@/components/organisms/FicheReview.vue";
 import ImposedDialog from "@/components/organisms/ImposedDialog.vue";
 import InstallAnswers from "@/components/organisms/InstallAnswers.vue";
 import InstallResources from "@/components/organisms/InstallResources.vue";
@@ -104,7 +104,7 @@ const flow = useDeployFlow({
 });
 
 watch(
-  () => flow.summaryOpen.value,
+  () => flow.reviewing.value,
   (open) => {
     if (open) resumedWorld.value = draft.value?.world.resume === true;
   },
@@ -228,7 +228,7 @@ async function next() {
     if (install.next()) await nextTick();
     return;
   }
-  await flow.openSummary();
+  await flow.openReview();
 }
 
 // ── « Installer avec les valeurs proposées » ───────────────────────────────────────────────────
@@ -240,7 +240,7 @@ watch(
     if (!current || !resources || !on) return;
     proposedDone = true;
     await nextTick();
-    await flow.openSummary();
+    await flow.openReview();
   },
   { immediate: true },
 );
@@ -267,13 +267,19 @@ watch(
  * constat 20). Une saisie déjà commencée, ou un refus qui a ramené à la page, reste sur la page.
  */
 const proposedEntry = route.query.proposees === "1";
-function closeSummary() {
+function leaveReview() {
   if (proposedEntry && !edited()) {
     install.wipe();
     void guard.leave(back());
     return;
   }
-  flow.closeSummary();
+  flow.leaveReview();
+}
+
+/** « Modifier les réglages » depuis la vérification : retour à la première étape, la saisie intacte. */
+function editSettings() {
+  flow.leaveReview();
+  while (install.step.value > 1) install.back();
 }
 
 onBeforeUnmount(() => {
@@ -371,7 +377,11 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
     </div>
 
     <template v-else>
-      <StepTrail :steps="steps" :current="install.step.value - 1" :label="t('fiche.stepsLabel')" />
+      <StepTrail
+        :steps="steps"
+        :current="flow.reviewing.value ? 2 : install.step.value - 1"
+        :label="t('fiche.stepsLabel')"
+      />
 
       <Callout v-if="refusalVisible" tone="error" role="alert" data-install-refusal>
         {{ flow.refusal.value?.text }}
@@ -390,6 +400,7 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
         {{ minimumText(install.tooSmallVerdict.value) }}
       </Callout>
 
+      <div v-show="!flow.reviewing.value" class="inst__stage">
       <div class="inst__cols">
         <div class="inst__main">
           <InstallAnswers
@@ -446,11 +457,13 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
           </HButton>
         </div>
       </div>
+      </div>
 
-      <FicheSummaryDialog
-        v-if="server"
-        :open="flow.summaryOpen.value"
+      <FicheReview
+        v-if="server && flow.reviewing.value"
         :server-id="server.id"
+        :server-name="serverName"
+        :host="server.host"
         :detail="detail"
         :draft="draft"
         :questions="install.questions.value"
@@ -461,11 +474,13 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
             : null
         "
         :capacity="install.capacity.value"
-        :check="flow.summaryCheck.value"
+        :check="flow.reviewCheck.value"
         :force-low-disk="flow.forceLowDisk.value"
         :agent-version="agentVersion"
         :perform="flow.perform"
-        @close="closeSummary"
+        @leave="leaveReview"
+        @launched="flow.leaveReview()"
+        @edit="editSettings"
         @agree="install.agreed.value = $event"
         @imposed="imposedOpen = true"
       />
@@ -530,6 +545,13 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
   display: flex;
   flex-direction: column;
   gap: var(--card-gap);
+}
+
+.inst__stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
 }
 
 .inst__cols {

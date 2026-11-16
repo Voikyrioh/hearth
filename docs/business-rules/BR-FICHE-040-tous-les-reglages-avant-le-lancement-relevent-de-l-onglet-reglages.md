@@ -15,7 +15,7 @@ Règle partagée entre HRT-102 et HRT-109. Le récapitulatif compte les réponse
 
 ## Application (code)
 - `apps/desktop/src/fiche/answers.ts::changedAnswers`
-- `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
+- `apps/desktop/src/components/organisms/FicheReview.vue`
 - `apps/desktop/src/components/organisms/InstallSettings.vue`, `apps/desktop/src/fiche/answers.ts::{extraSettings, extraAnswersToSend, changedExtras}`, `apps/desktop/src/fiche/draft.ts::toInstallRequest`
 
 ## Vérification

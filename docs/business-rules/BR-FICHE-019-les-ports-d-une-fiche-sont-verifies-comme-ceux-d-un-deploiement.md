@@ -22,7 +22,7 @@ Deux règles de port portées par le client (HRT-102) : (1) un port d'une autre 
 - `apps/desktop/src/fiche/ports.ts::forVariant`
 - `apps/desktop/src/fiche/ports.ts::containerPortOf`
 - `apps/desktop/src/fiche/ports.ts::readableHostPorts`
-- `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
+- `apps/desktop/src/components/organisms/FicheReview.vue`
 - `apps/desktop/src/components/molecules/FichePortField.vue`
 
 ## Vérification

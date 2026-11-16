@@ -92,7 +92,7 @@ export const reason = (wrapper: VueWrapper) => wrapper.find("[data-deploy-reason
 export const toasts = () => useToastsStore().items.map((toast) => toast.message);
 /** Le texte de TOUTES les fenêtres ouvertes (une confirmation peut s'ouvrir par-dessus la progression). */
 export const dialogText = () =>
-  [...document.querySelectorAll("dialog[open]")]
+  [...document.querySelectorAll("dialog[open], [data-review]")]
     .map((dialog) => dialog.textContent ?? "")
     .join(" ");
 
@@ -104,7 +104,7 @@ export async function openSummary(wrapper: VueWrapper) {
 /** Le bouton de la fenêtre la plus récente (une confirmation s'ouvre par-dessus la progression), par son texte. */
 export function topButton(label: string): HTMLButtonElement | undefined {
   const dialogs = [...document.querySelectorAll("dialog[open]")];
-  const top = dialogs[dialogs.length - 1];
+  const top = dialogs[dialogs.length - 1] ?? document.querySelector("[data-review]");
   return [...(top?.querySelectorAll("button") ?? [])].find(
     (button) => button.textContent?.trim() === label,
   );
@@ -114,7 +114,7 @@ export function topButton(label: string): HTMLButtonElement | undefined {
 export async function confirmTop(label: string, password: string | null = OWN) {
   await flushPromises();
   const dialogs = [...document.querySelectorAll("dialog[open]")];
-  const top = dialogs[dialogs.length - 1];
+  const top = dialogs[dialogs.length - 1] ?? document.querySelector("[data-review]");
   const field = top?.querySelector<HTMLInputElement>("[data-reauth-field] input");
   if (field && password !== null) {
     typeInto(field, password);

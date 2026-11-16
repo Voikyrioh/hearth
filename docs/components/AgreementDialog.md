@@ -6,4 +6,4 @@ La fenêtre du contrat de licence d'une fiche (HRT-102, BR-FICHE-058, 026). Hear
 
 - Props : `open`, `agreement`, `openFailed`
 - Événements et slots : `read`, `accept`, `refuse`
-- Notes : Posé par `FicheSummaryDialog`, qui l'ouvre par `AdminActDialog.beforeSubmit`. Tests : `pages/InstallFromFiche.test.ts`.
+- Notes : Posé par `FicheReview`, qui l'ouvre avant l'envoi (`useAdminAct.beforeSubmit`). Tests : `pages/InstallFromFiche.test.ts`.

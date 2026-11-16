@@ -2522,6 +2522,41 @@ export const fr = {
     summaryTitle: "Vérifiez avant de lancer",
     summarySubmit: "Installer le serveur de jeu",
     summaryBack: "Retour",
+    // La vérification en page, troisième étape (HRT-246, BR-FICHE-025)
+    review: {
+      intro:
+        "Voici ce que Hearth va faire sur {server}. Relisez, puis lancez. Vous pourrez modifier les réglages du jeu plus tard.",
+      introFrozen:
+        "Voici ce que Hearth va faire sur {server}. Relisez, puis lancez. Vous pourrez modifier les réglages du jeu plus tard, sauf {frozen}.",
+      blockServer: "Le serveur de jeu",
+      blockWhat: "Ce qui va se passer",
+      blockAddress: "L'adresse prévue pour vos joueurs",
+      blockAttention: "Points d'attention",
+      blockPassword: "Votre mot de passe Hearth",
+      size: " (environ {size})",
+      step1: "Hearth récupère le programme serveur de {game}{size}.",
+      step2:
+        "Il crée le serveur de jeu « {name} » sur {server}, avec {memory} de mémoire et {cpu} au plus.",
+      step3World: " et génère le monde « {world} »",
+      step3: "Le jeu démarre{world}. Cela peut prendre jusqu'à {d} minutes.",
+      step3Unknown: "Le jeu démarre{world}. Cela peut prendre quelques minutes.",
+      step4:
+        "Hearth s'assure que le jeu répond, puis vous donne l'adresse à transmettre à vos joueurs.",
+      noteSave: "Avant chaque arrêt, Hearth demandera au jeu d'enregistrer le monde.",
+      noteCancel: "Vous pourrez annuler tant que le serveur n'est pas en cours de création.",
+      lan: "En réseau maison : {address}. Pour les joueurs qui sont chez vous, sur le même réseau que {server}.",
+      internet:
+        "Depuis internet : il faudra ouvrir {ports} sur votre box, vers {server}. Hearth vous montrera la marche à suivre une fois le serveur en marche.",
+      internetPort: "le port {port} ({protocol})",
+      passwordHelp:
+        "Installer un serveur de jeu est un acte d'administration : Hearth le redemande à chaque fois.",
+      reasonBoth: "Cochez les points d'attention et saisissez votre mot de passe pour lancer.",
+      reasonAttention: "Cochez les points d'attention pour lancer.",
+      reasonPassword: "Saisissez votre mot de passe pour lancer.",
+      back: "Retour",
+      editSettings: "Modifier les réglages",
+      proposedValue: "valeur proposée",
+    },
     sumFiche: "Fiche",
     sumVariant: "Variante",
     sumImage: "Image",
@@ -3199,6 +3234,17 @@ export const fr = {
     imagePresentLatest: "Si une version plus récente existe, elle n'est pas récupérée.",
     summaryAttentionNeeded: "Validez les points d'attention pour continuer.",
     summaryEdit: "Modifier",
+    // La vérification en page du formulaire libre (HRT-246)
+    review: {
+      intro:
+        "Voici ce que Hearth va faire sur {server}. Relisez, puis lancez. Vous pourrez modifier le service plus tard.",
+      passwordHelp:
+        "Déployer un service est un acte d'administration : Hearth le redemande à chaque fois.",
+      reasonBoth: "Cochez les points d'attention et saisissez votre mot de passe pour lancer.",
+      reasonAttention: "Cochez les points d'attention pour lancer.",
+      reasonPassword: "Saisissez votre mot de passe pour lancer.",
+      back: "Modifier",
+    },
     summarySubmit: "Déployer le service",
     // Progression (BR-DEPLOY-016)
     progressTitle: "Déploiement de {name}",

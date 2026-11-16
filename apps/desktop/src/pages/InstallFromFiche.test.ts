@@ -373,7 +373,7 @@ describe("« Vérifiez avant de lancer » (BR-FICHE-025, 026, 036)", () => {
     await answer(wrapper, "max_players", "16");
     await openSummary(wrapper);
     const text = dialogText();
-    expect(text).toContain("Vérifiez avant de lancer");
+    expect(text).toContain("Voici ce que Hearth va faire sur");
     expect(document.querySelector("[data-sum-fiche]")?.textContent).toContain("Terraria");
     expect(document.querySelector("[data-sum-fiche]")?.textContent).toMatch(/Livrée avec Hearth/);
     expect(document.querySelector("[data-sum-name]")?.textContent).toBe("terraria");
@@ -424,14 +424,50 @@ describe("« Vérifiez avant de lancer » (BR-FICHE-025, 026, 036)", () => {
     wrapper.unmount();
   });
 
+  it("dit ce que Hearth va faire, l'adresse prévue, et ce qui retient le bouton de lancement (HRT-246)", async () => {
+    const { wrapper } = await bootCatalogue(undefined, installPath("terraria"));
+    await openSummary(wrapper);
+    const review = document.querySelector("[data-review]");
+    expect(review?.querySelectorAll("[data-review-what] li")).toHaveLength(4);
+    expect(review?.querySelector("[data-review-lan]")?.textContent).toMatch(
+      /^En réseau maison : .+:\d+\./,
+    );
+    expect(review?.querySelector("[data-review-internet]")?.textContent).toContain("sur votre box");
+    // Le mot de passe manque : la barre le dit, le bouton est inactif.
+    expect(review?.querySelector("[data-review-reason]")?.textContent).toBe(
+      "Saisissez votre mot de passe pour lancer.",
+    );
+    expect(review?.querySelector("[data-review-launch]")?.getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+    typeInto(document.querySelector("[data-review] [data-reauth-field] input"), "Correct-Horse-9");
+    await flushPromises();
+    expect(review?.querySelector("[data-review-reason]")).toBeNull();
+    expect(review?.querySelector("[data-review-launch]")?.getAttribute("aria-disabled")).not.toBe(
+      "true",
+    );
+    wrapper.unmount();
+  });
+
+  it("« Modifier les réglages » revient à la première étape, la saisie intacte (HRT-246)", async () => {
+    const { wrapper } = await bootCatalogue(undefined, installPath("terraria"));
+    await answer(wrapper, "motd", "Bonjour");
+    await openSummary(wrapper);
+    document.querySelector<HTMLElement>("[data-review-edit]")?.click();
+    await settle();
+    expect(document.querySelector("[data-review]")).toBeNull();
+    expect(questionInput(wrapper, "motd").element.value).toBe("Bonjour");
+    wrapper.unmount();
+  });
+
   it("retourne à la page d'où l'on vient sans rien perdre", async () => {
     const { wrapper } = await bootCatalogue(undefined, installPath("terraria"));
     await answer(wrapper, "motd", "Bonjour");
     await openSummary(wrapper);
-    expect(dialog()).not.toBeNull();
+    expect(document.querySelector("[data-review]")).not.toBeNull();
     dialogButton("Retour")?.click();
     await settle();
-    expect(dialog()).toBeNull();
+    expect(document.querySelector("[data-review]")).toBeNull();
     expect(wrapper.find("[data-install-resources]").exists()).toBe(true);
     wrapper.unmount();
   });
@@ -544,7 +580,7 @@ describe("lancer, suivre, terminer (BR-FICHE-013, 027, 034)", () => {
     await confirmTop("Installer le serveur de jeu", "faux");
     await settle();
     expect(bridge.catalog.received).toHaveLength(0);
-    expect(dialogText()).toContain("Vérifiez avant de lancer");
+    expect(document.querySelector("[data-review]")).not.toBeNull();
     wrapper.unmount();
   });
 });
@@ -708,7 +744,9 @@ describe("le contrat de licence (BR-FICHE-026, 058)", () => {
     await toSummary(wrapper);
     // Aucune case de contrat dans la fenêtre : il a sa propre fenêtre.
     expect(document.querySelector("[data-agreement-dialog]")).toBeNull();
-    const field = document.querySelector<HTMLInputElement>("dialog [data-reauth-field] input");
+    const field = document.querySelector<HTMLInputElement>(
+      "[data-review] [data-reauth-field] input",
+    );
     typeInto(field, "Correct-Horse-9");
     await flushPromises();
     topButton("Installer le serveur de jeu")?.click();
@@ -734,7 +772,7 @@ describe("le contrat de licence (BR-FICHE-026, 058)", () => {
     const { wrapper, bridge } = await bootCatalogue(rich, installPath("essai"));
     await toSummary(wrapper);
     typeInto(
-      document.querySelector<HTMLInputElement>("dialog [data-reauth-field] input"),
+      document.querySelector<HTMLInputElement>("[data-review] [data-reauth-field] input"),
       "Correct-Horse-9",
     );
     await flushPromises();
@@ -744,7 +782,7 @@ describe("le contrat de licence (BR-FICHE-026, 058)", () => {
     await settle();
     expect(document.querySelector("[data-agreement-dialog]")).toBeNull();
     expect(bridge.catalog.received).toHaveLength(0);
-    expect(dialogText()).toContain("Vérifiez avant de lancer");
+    expect(document.querySelector("[data-review]")).not.toBeNull();
     wrapper.unmount();
   });
 
@@ -752,7 +790,7 @@ describe("le contrat de licence (BR-FICHE-026, 058)", () => {
     const { wrapper, bridge } = await bootCatalogue(rich, installPath("essai"));
     await toSummary(wrapper);
     typeInto(
-      document.querySelector<HTMLInputElement>("dialog [data-reauth-field] input"),
+      document.querySelector<HTMLInputElement>("[data-review] [data-reauth-field] input"),
       "Correct-Horse-9",
     );
     await flushPromises();
@@ -804,20 +842,17 @@ describe("« Installer avec les valeurs proposées » (BR-FICHE-039)", () => {
       installPath("terraria", "?proposees=1"),
     );
     await settle();
-    expect(dialogText()).toContain("Vérifiez avant de lancer");
-    const back = [...document.querySelectorAll<HTMLElement>("dialog button")].find(
-      (button) => button.textContent?.trim() === "Retour",
-    );
-    back?.click();
+    expect(document.querySelector("[data-review]")).not.toBeNull();
+    document.querySelector<HTMLElement>("[data-review-back]")?.click();
     await settle();
     expect(router.currentRoute.value.name).toBe("fiche");
     wrapper.unmount();
   });
 
-  it("ouvre aussitôt la fenêtre « Vérifiez avant de lancer » quand tout est valable", async () => {
+  it("affiche aussitôt « Vérifiez avant de lancer » dans la page quand tout est valable", async () => {
     const { wrapper } = await bootCatalogue(undefined, installPath("terraria", "?proposees=1"));
     await settle();
-    expect(dialogText()).toContain("Vérifiez avant de lancer");
+    expect(document.querySelector("[data-review]")).not.toBeNull();
     expect(document.querySelector("[data-sum-name]")?.textContent).toBe("terraria");
     wrapper.unmount();
   });
@@ -892,7 +927,7 @@ describe("le récapitulatif suit la variante et le mapping des ports (BR-FICHE-0
     await fillRich(wrapper);
     await openSummary(wrapper);
     typeInto(
-      document.querySelector<HTMLInputElement>("dialog [data-reauth-field] input"),
+      document.querySelector<HTMLInputElement>("[data-review] [data-reauth-field] input"),
       "Correct-Horse-9",
     );
     await flushPromises();

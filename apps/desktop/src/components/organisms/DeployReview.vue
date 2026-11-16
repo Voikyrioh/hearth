@@ -1,29 +1,32 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
+import HButton from "@/components/atoms/HButton.vue";
 import HCheckbox from "@/components/atoms/HCheckbox.vue";
 import HTag from "@/components/atoms/HTag.vue";
 import Callout from "@/components/molecules/Callout.vue";
-import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
+import AdminActPanel from "@/components/organisms/AdminActPanel.vue";
+import { useAdminAct } from "@/composables/useAdminAct";
 import type { ActReport } from "@/composables/useReauth";
 import type { Draft } from "@/deploy/draft";
 import { shownRepository, shownVersion } from "@/deploy/form";
 import { portVerdict, refusalText } from "@/deploy/messages";
+import { launchReason } from "@/fiche/review";
 import { t } from "@/i18n";
 import type { DeployCheck } from "@/link";
 import { formatCpu, formatMemory } from "@/resources";
 import { formatSize } from "@/serviceOps/messages";
 
-// Le récapitulatif d'un déploiement (HRT-69, BR-DEPLOY-015, 018, 031) : UNE fenêtre pour tout ce qui va partir ET la
-// confirmation du socle (`AdminActDialog`, acte `service_deploy`, JAMAIS couvert par l'élévation de 5 minutes : le
-// mot de passe est demandé même juste après un autre acte). Elle montre le nom, l'image et la version, les ports (et
-// qui peut les joindre), le nombre de variables (leurs valeurs masquées, jamais en clair), la commande oui ou non, le
-// redémarrage, les ressources, puis les POINTS D'ATTENTION qui s'appliquent : chacun une case, et « Déployer le
-// service » reste inactif tant qu'un point n'est pas validé. Les points viennent de la consultation faite à
-// l'ouverture (`check`) ; le serveur les refait au lancement et a le dernier mot (BR-DEPLOY-032). « Modifier » ferme et
-// revient au formulaire intact. La commande n'est pas répétée ici : la fenêtre dit seulement si elle est personnalisée.
+// La vérification d'un déploiement, troisième étape de la PAGE (HRT-246, plus une fenêtre ; HRT-69, BR-DEPLOY-015, 018, 031) :
+// tout ce qui va partir ET la confirmation du socle (`AdminActPanel`, acte `service_deploy`, JAMAIS couvert par l'élévation
+// de 5 minutes : le mot de passe est demandé même juste après un autre acte). Elle montre le nom, l'image et la version, les
+// ports (et qui peut les joindre), le nombre de variables (leurs valeurs masquées, jamais en clair), la commande oui ou non,
+// le redémarrage, les ressources, puis les POINTS D'ATTENTION qui s'appliquent : chacun une case, et « Déployer le service »
+// reste inactif tant qu'un point n'est pas validé ou que le mot de passe manque. Les points viennent de la consultation
+// faite à l'arrivée (`check`) ; le serveur les refait au lancement et a le dernier mot (BR-DEPLOY-032). « Modifier » revient
+// au formulaire intact. La commande n'est pas répétée ici : la page dit seulement si elle est personnalisée.
 const props = defineProps<{
-  open: boolean;
   serverId: string;
+  serverName: string;
   draft: Draft;
   /** Les constats frais du serveur à l'ouverture ; `null` : la consultation n'a pas pu être faite. */
   check: DeployCheck | null;
@@ -34,17 +37,15 @@ const props = defineProps<{
     accept: { reservedPorts: boolean; lowDisk: boolean },
   ) => Promise<ActReport>;
 }>();
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{
+  /** « Modifier » : revient au formulaire, la saisie intacte. */
+  leave: [];
+  /** L'envoi est parti (accepté, ou résultat inconnu) : la progression prend le relais. */
+  launched: [];
+}>();
 
 const reservedOk = ref(false);
 const diskOk = ref(false);
-watch(
-  () => props.open,
-  () => {
-    reservedOk.value = false;
-    diskOk.value = false;
-  },
-);
 
 const version = computed(() => shownVersion(props.draft));
 const repository = computed(() => shownRepository(props.draft));
@@ -90,22 +91,31 @@ function send(adminPassword: string | null): Promise<ActReport> {
     lowDisk: diskOk.value,
   });
 }
+
+const act = useAdminAct({
+  serverId: () => props.serverId,
+  kind: () => "service_deploy",
+  role: () => null,
+  active: () => true,
+  canSubmit: () => attentionDone.value,
+  blockedReason: () => launchReason(true, false) ?? undefined,
+  perform: send,
+  refusalText,
+  onFinished: () => emit("launched"),
+});
+
+const passwordMissing = computed(() => act.askPassword.value && act.password.value === "");
+/** Pourquoi le bouton est inactif ; `null` : il est actif. */
+const reason = computed(() =>
+  launchReason(needsAttention.value && !attentionDone.value, passwordMissing.value),
+);
 </script>
 
 <template>
-  <AdminActDialog
-    :open="open"
-    :server-id="serverId"
-    kind="service_deploy"
-    :title="t('deploy.summaryTitle')"
-    :submit-label="t('deploy.summarySubmit')"
-    :cancel-label="t('deploy.summaryEdit')"
-    :can-submit="attentionDone"
-    :perform="send"
-    :refusal-text="refusalText"
-    wide
-    @close="emit('close')"
-  >
+  <form class="review" data-review data-deploy-review novalidate @submit.prevent="act.canSend.value && act.submit()">
+    <p class="review__intro" data-review-intro>
+      {{ t("deploy.review.intro", { server: serverName }) }}
+    </p>
     <dl class="sum" data-deploy-summary>
       <div class="sum__row">
         <dt>{{ t("deploy.summaryName") }}</dt>
@@ -195,10 +205,99 @@ function send(adminPassword: string | null): Promise<ActReport> {
     <p v-if="needsAttention && !attentionDone" class="sum__need" data-sum-need>
       {{ t("deploy.summaryAttentionNeeded") }}
     </p>
-  </AdminActDialog>
+
+    <section class="review__block" :aria-label="t('fiche.review.blockPassword')">
+      <h2 class="review__title">{{ t("fiche.review.blockPassword") }}</h2>
+      <fieldset class="review__fieldset">
+        <AdminActPanel :act="act" :server-id="serverId" />
+      </fieldset>
+      <p class="review__note" data-review-password-help>{{ t("deploy.review.passwordHelp") }}</p>
+      <Callout v-if="act.error.value" tone="error" role="alert" data-review-error>
+        {{ act.error.value }}
+      </Callout>
+    </section>
+
+    <div class="review__bar" data-review-bar>
+      <HButton variant="ghost" size="lg" data-review-back @click="emit('leave')">
+        {{ t("deploy.review.back") }}
+      </HButton>
+      <p v-if="reason" class="review__reason" data-review-reason>{{ reason }}</p>
+      <HButton
+        type="submit"
+        size="lg"
+        data-review-launch
+        :disabled="!act.canSend.value"
+        :busy="act.sending.value"
+      >
+        {{ t("deploy.summarySubmit") }}
+      </HButton>
+    </div>
+  </form>
 </template>
 
 <style scoped>
+.review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.review__intro {
+  margin: 0;
+  color: var(--tx-secondary);
+}
+
+.review__block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--card-edge);
+}
+
+.review__title {
+  margin: 0;
+  font-size: var(--fs-lead);
+  font-weight: var(--fw-semibold);
+}
+
+.review__note {
+  margin: 0;
+  color: var(--tx-secondary);
+}
+
+.review__fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.review__bar {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-raised);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--card-edge);
+}
+
+.review__reason {
+  margin: 0;
+  min-width: 0;
+  color: var(--tx-secondary);
+}
+
 .sum {
   display: flex;
   flex-direction: column;

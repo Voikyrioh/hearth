@@ -121,7 +121,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`DeployForm`](./DeployForm.md) — Le formulaire « Déployer un service » : Général, variables, ports, commande, ressources, pied (HRT-69).
 - [`EnvVarRows`](./EnvVarRows.md) — La section Variables d'environnement du formulaire de déploiement (HRT-69).
 - [`PortMappingRows`](./PortMappingRows.md) — La section Ports du formulaire de déploiement (HRT-69).
-- [`DeploySummaryDialog`](./DeploySummaryDialog.md) — Le récapitulatif « Vérifiez avant de lancer » et ses points d'attention (HRT-69).
+- [`DeployReview`](./DeployReview.md) — Le récapitulatif « Vérifiez avant de lancer » et ses points d'attention (HRT-69).
 - [`DeployProgressDialog`](./DeployProgressDialog.md) — La progression d'un déploiement, l'annulation et les issues (HRT-69).
 - [`DeleteServiceDialog`](./DeleteServiceDialog.md) — La fenêtre « Supprimer {nom} ? » : effet, dossiers et sort, deux cases décochées, nom retapé, socle (HRT-86).
 - [`DeleteProgressDialog`](./DeleteProgressDialog.md) — Le suivi d'une suppression, l'annulation avant le point de non-retour et les issues (HRT-86).
@@ -149,7 +149,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`FicheSheet`](./FicheSheet.md) — Les cartes de lecture de la fiche d'un jeu (HRT-102).
 - [`ImposedDialog`](./ImposedDialog.md) — Ce que la fiche impose, réglage par réglage (HRT-102).
 - [`AgreementDialog`](./AgreementDialog.md) — La fenêtre du contrat de licence, « Je refuse » et « J'accepte » (HRT-102).
-- [`FicheSummaryDialog`](./FicheSummaryDialog.md) — « Vérifiez avant de lancer » d'une installation depuis une fiche (HRT-102).
+- [`FicheReview`](./FicheReview.md) — « Vérifiez avant de lancer » d'une installation depuis une fiche (HRT-102).
 - [`InstallAnswers`](./InstallAnswers.md) — Les « Réponses » de l'installation (HRT-102).
 - [`InstallPack`](./InstallPack.md) — Le pack de mods de l'installation : le genre lu par l'agent, les refus en phrases (HRT-125).
 - [`GameSettingsTab`](./GameSettingsTab.md) — L'onglet « Réglages » d'un service de jeu (HRT-109).

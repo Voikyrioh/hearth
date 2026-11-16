@@ -91,8 +91,8 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   await shoot(page, page, "installer-ressources");
   await page.locator("[data-install-next]").click();
 
-  const dialog = page.locator("dialog[open]");
-  await expect(dialog).toContainText("Vérifiez avant de lancer");
+  const dialog = page.locator("[data-review]");
+  await expect(dialog).toContainText("Voici ce que Hearth va faire sur");
   await expect(dialog).toContainText("ryshe/terraria:vanilla-1.4.5.8");
   await expect(dialog).toContainText("7777 vers 7777 (TCP)");
   await expect(dialog).toContainText("••••••••");
@@ -158,7 +158,7 @@ test("la fiche d'essai : preuves, variante, jeton, contrat à accepter dans sa f
   );
   await page.locator("[data-install-next]").click();
 
-  const dialog = page.locator("dialog[open]").first();
+  const dialog = page.locator("[data-review]");
   await dialog.locator("[data-reauth-field] input").fill(PASSWORD);
   await dialog.getByRole("button", { name: "Installer le serveur de jeu" }).click();
   // Le contrat a sa fenêtre : rien n'est envoyé tant que « J'accepte » n'est pas cliqué.
@@ -200,8 +200,8 @@ test("« Installer avec les valeurs proposées » ouvre aussitôt la fenêtre, e
 }) => {
   await open(page, "#/servers/forge/catalogue/terraria");
   await page.locator("[data-fiche-install-proposed]").click();
-  const dialog = page.locator("dialog[open]");
-  await expect(dialog).toContainText("Vérifiez avant de lancer");
+  const dialog = page.locator("[data-review]");
+  await expect(dialog).toContainText("Voici ce que Hearth va faire sur");
   // Sans rien avoir saisi, « Retour » ramène à la fiche, d'où l'on vient (revue UX du 24/10, constat 20).
   await dialog.getByRole("button", { name: "Retour" }).click();
   await expect(page.locator("[data-fiche-page]")).toBeVisible();

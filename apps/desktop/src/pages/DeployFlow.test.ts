@@ -68,12 +68,12 @@ const stepStates = () =>
   );
 
 describe("le récapitulatif (BR-DEPLOY-015, 031)", () => {
-  it("montre tout ce qui part dans une seule fenêtre, sans jamais écrire une valeur en clair", async () => {
+  it("montre tout ce qui part dans une seule page, sans jamais écrire une valeur en clair", async () => {
     const { wrapper } = await boot();
     await fillAll(wrapper);
     await openSummary(wrapper);
     const text = dialogText();
-    expect(text).toContain("Vérifiez avant de lancer");
+    expect(text).toContain("Voici ce que Hearth va faire sur");
     expect(document.querySelector("[data-sum-name]")?.textContent).toBe("web");
     expect(document.querySelector("[data-sum-image]")?.textContent).toContain("nginx:1.27");
     expect(document.querySelector("[data-sum-ports]")?.textContent).toContain("8080 vers 80 (TCP)");
@@ -413,8 +413,8 @@ describe("l'état de confiance change entre la lecture et l'envoi", () => {
     dialogButton("Déployer le service")?.click();
     await settle();
     expect(toasts()).toEqual([]);
-    expect(document.querySelector("dialog[open] [data-reauth-notice]")).not.toBeNull();
-    expect(document.querySelector("dialog[open]")).not.toBeNull();
+    expect(document.querySelector("[data-review] [data-reauth-notice]")).not.toBeNull();
+    expect(document.querySelector("[data-review]")).not.toBeNull();
     expect(field(wrapper, "name").element.value).toBe("web");
     wrapper.unmount();
   });
@@ -673,7 +673,7 @@ describe("les refus du serveur au lancement : le serveur a le dernier mot (BR-DE
     wrapper.unmount();
   });
 
-  it("deux déploiements déjà en cours : le refus est dit dans la fenêtre, qui reste ouverte", async () => {
+  it("deux déploiements déjà en cours : le refus est dit dans la page de vérification, qui reste affichée", async () => {
     const { wrapper, bridge } = await boot();
     await fillMinimum(wrapper);
     await openSummary(wrapper);
@@ -712,7 +712,7 @@ describe("les refus du serveur au lancement : le serveur a le dernier mot (BR-DE
     expect(dialogText()).toContain(
       "Deux déploiements sont déjà en cours sur ce serveur. Attendez la fin de l'un d'eux.",
     );
-    expect(document.querySelector("dialog[open]")).not.toBeNull();
+    expect(document.querySelector("[data-review]")).not.toBeNull();
     wrapper.unmount();
   });
 
@@ -742,7 +742,7 @@ describe("les refus du serveur au lancement : le serveur a le dernier mot (BR-DE
     expect(document.querySelector("[data-attention='disk']")?.textContent).toContain(
       "Il reste 3 Go libres",
     );
-    expect(document.querySelector("dialog[open]")).not.toBeNull();
+    expect(document.querySelector("[data-review]")).not.toBeNull();
     typeInto(reauthField(), OWN);
     document.querySelector<HTMLInputElement>("[data-attention='disk'] input")?.click();
     await flushPromises();

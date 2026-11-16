@@ -15,7 +15,7 @@ Dans « Vérifiez avant de lancer », une ligne « Pack de mods » dit le genre 
 
 ## Application (code)
 - `apps/desktop/src/fiche/pack.ts::packSentences`
-- `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
+- `apps/desktop/src/components/organisms/FicheReview.vue`
 
 ## Vérification
 - apps/desktop/src/fiche/pack.test.ts : `dit avant de lancer ce que le jeu fera, et finit toujours par la phrase des mods`

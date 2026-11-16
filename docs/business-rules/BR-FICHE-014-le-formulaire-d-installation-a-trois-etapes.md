@@ -17,7 +17,7 @@ Règle de présentation, portée par le client (HRT-102). « Réglages » (varia
 - `apps/desktop/src/pages/InstallFromFiche.vue`
 - `apps/desktop/src/components/organisms/InstallAnswers.vue`
 - `apps/desktop/src/components/organisms/InstallResources.vue`
-- `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
+- `apps/desktop/src/components/organisms/FicheReview.vue`
 
 ## Vérification
 - `apps/desktop/src/pages/InstallFromFiche.test.ts::la page (BR-FICHE-014, 015)`
@@ -31,5 +31,6 @@ Règle de présentation, portée par le client (HRT-102). « Réglages » (varia
 BR-FICHE-013, BR-FICHE-026, BR-FICHE-038, BR-FICHE-058, BR-FICHE-060
 
 ## Historique
+- 2026-11-16 — la vérification est la troisième étape de la page, plus une fenêtre (HRT-246).
 - 2026-10-24 — création (HRT-102).
 - 2026-11-16 — révisée (HRT-244) : les étapes s'appellent « Réglages », « Mémoire et processeur » puis « Vérifiez avant de lancer » ; « Retour à la fiche » à gauche de la barre du bas. La vérification en page (HRT-246) et l'écran de fin (HRT-247) restent à livrer : la vérification est encore une fenêtre.
