@@ -1,8 +1,9 @@
 # Satisfactory, serveur officiel sans mod. Fiche en `preview` (HRT-234, ADR-0050 version 2, ADR-0053).
 #
 # Construite depuis le README de l'image `wolveix/satisfactory-server` (https://github.com/wolveix/satisfactory-server). Rien n'a été
-# ajouté de mémoire. RESTE `preview` : le banc d'essai réel n'a pas tourné (téléchargement de plus de 8 Go et mémoire recommandée de 8 à
-# 16 Gio, sur une machine d'essai de 8 Gio dont le disque est partagé) ; aucun signe « prêt », aucune mesure. Le nom du serveur, son mot de
+# ajouté de mémoire. RESTE `preview` : le banc d'essai réel n'a pas tourné (mémoire recommandée de 8 à 16 Gio sur une machine d'essai de
+# 8 Gio). Un essai manuel a montré que le serveur démarre, mais qu'il sort en code 130 à l'arrêt (voir plus bas) et qu'il n'a pas de monde
+# avant qu'un client n'en crée un. Le nom du serveur, son mot de
 # passe et le mot de passe d'administration se règlent dans le jeu (le client de Satisfactory), pas par l'image.
 
 format = 2
@@ -88,10 +89,12 @@ source_label = "Steam"
 evidence = "unmeasured"
 
 [ready]
-log_contains = "Server is ready"          # NON VU : à confirmer par un essai réel
+log_contains = "Server API listening on"  # vu en essai manuel (16/11/2026, docker run simple) : 20 s après le lancement, sans monde ; pas essayé par le banc
 status = "untested"
 
-# Le README ne dit rien de l'arrêt propre : non essayé.
+# Essai manuel (16/11/2026, docker run simple, sans monde, 6 Gio) : le jeu sort sur le signal en 0,6 s avec le code 130 (SIGINT reçu), pas 0 ;
+# aucun monde n'existe tant qu'un client n'en a pas créé un, l'enregistrement à l'arrêt n'a donc pas pu être jugé. Le premier démarrage
+# échoue une fois (« Failed to install app 1690800 (Missing configuration) » de SteamCMD) et réussit au second : `unless-stopped` le rejoue.
 [stop]
 grace_s = 60
 signal = "SIGTERM"
