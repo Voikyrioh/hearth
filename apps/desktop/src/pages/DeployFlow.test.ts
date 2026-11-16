@@ -89,7 +89,7 @@ describe("le récapitulatif (BR-DEPLOY-015, 031)", () => {
       "Le service redémarre tout seul après un redémarrage du serveur, sauf si vous l'avez arrêté.",
     );
     expect(document.querySelector("[data-sum-resources]")?.textContent).toBe(
-      "Le service reçoit 2 Go de mémoire et 4 cœurs de processeur.",
+      "Le service reçoit 2 Go de mémoire et 2 cœurs de processeur.",
     );
     // Ni la valeur de la variable, ni la commande n'apparaissent dans la page.
     expect(document.body.textContent).not.toContain(SECRET);
@@ -222,7 +222,7 @@ describe("le lancement et la progression (BR-DEPLOY-016)", () => {
       env: [{ name: "DB_PASSWORD", value: SECRET }],
       ports: [{ hostPort: 8080, containerPort: 80, protocol: "tcp" }],
       command: `run --token ${COMMAND_SECRET}`,
-      resources: { memoryBytes: 2 * GIB, cpuMillis: 4000 },
+      resources: { memoryBytes: 2 * GIB, cpuMillis: 2000 },
     });
     expect(progress()?.textContent).toContain("Déploiement de web");
     expect(stepStates()).toEqual([

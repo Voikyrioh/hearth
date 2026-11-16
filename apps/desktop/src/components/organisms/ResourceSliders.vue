@@ -94,6 +94,8 @@ const proposedText = computed(() =>
           <p v-else-if="memoryNote" class="sliders__hint" data-memory-note>{{ memoryNote }}</p>
           <p v-else class="sliders__hint">{{ proposedText }}</p>
           <Callout v-if="below" tone="warn" inline>{{ t("resources.belowRecommended") }}</Callout>
+          <!-- Les avertissements de la mémoire se lisent sous le curseur de mémoire, jamais sous celui du processeur. -->
+          <slot name="memory-notices" />
         </template>
       </ResourceSlider>
       <ResourceSlider

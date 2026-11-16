@@ -353,7 +353,7 @@ describe("la machine et la place (BR-FICHE-020 à 023)", () => {
     expect(diskVerdict(terraria(), 1)).toEqual({ kind: "unknown" });
   });
 
-  it("place les curseurs sur le recommandé prouvé, sinon sur la proposition prudente et tous les processeurs", () => {
+  it("place les curseurs sur le recommandé prouvé, sinon sur la proposition prudente et deux cœurs au plus", () => {
     const placed = placement(rich(), machine(8, 16));
     expect(placed.resources).toEqual({ memoryBytes: 4 * GIB, cpuMillis: 2000 });
     expect(placed.memory).toMatchObject({
@@ -368,7 +368,7 @@ describe("la machine et la place (BR-FICHE-020 à 023)", () => {
     // Aucune preuve : proposition prudente, tous les processeurs.
     const bare = placement(terraria(), machine(4, 16));
     expect(bare.memory.recommended).toBeNull();
-    expect(bare.resources.cpuMillis).toBe(4000);
+    expect(bare.resources.cpuMillis).toBe(2000);
     expect(bare.cpu.recommended).toBeNull();
   });
 

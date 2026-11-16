@@ -4,6 +4,8 @@ import { GIB, MIB, MIN_MEMORY_BYTES, maxMemoryBytes } from "./scale";
 /** BR-RES-039 : 2 Go, ou la moitié de la mémoire disponible si elle est plus petite, jamais moins de 256 Mo. */
 const PROPOSED_MEMORY_BYTES = 2 * GIB;
 const PROPOSED_MEMORY_FLOOR_BYTES = 256 * MIB;
+/** Un jeu ou un programme inconnu ne reçoit pas toute la machine : deux cœurs au plus, que l'on peut monter au curseur. */
+const PROPOSED_CPUS = 2;
 
 /** La mémoire de la machine encore disponible : totale, moins la réserve, moins ce qui est déjà engagé. */
 function availableBytes(capacity: EngineCapacity): number {
@@ -25,9 +27,9 @@ export function proposedMemoryBytes(capacity: EngineCapacity): number {
   return clampToMachine(capacity, proposed);
 }
 
-/** Le processeur proposé : tous les processeurs de la machine (BR-RES-039). */
+/** Le processeur proposé : deux cœurs au plus, jamais toute la machine (BR-RES-039, revue UX du 17/11). */
 export function proposedCpuMillis(capacity: EngineCapacity): number {
-  return capacity.cpus * 1000;
+  return Math.min(capacity.cpus, PROPOSED_CPUS) * 1000;
 }
 
 export interface Resources {

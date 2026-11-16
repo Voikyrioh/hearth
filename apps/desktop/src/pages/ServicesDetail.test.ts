@@ -161,7 +161,8 @@ describe("ce que dit le détail (BR-SVC-007)", () => {
     expect(mounts).toContain("Lecture et écriture");
     expect(text).toContain("30 secondes");
     expect(text).toContain("Redémarre tout seul sauf si vous l'arrêtez");
-    expect(text).toContain("Ressources : non limitées");
+    // Jamais « non limitées » : un service créé par Hearth a toujours des limites, que cette liste ne porte pas (revue UX).
+    expect(text).not.toContain("non limitées");
     expect(text).toContain("Créé le");
     wrapper.unmount();
   });
@@ -183,7 +184,6 @@ describe("ce que dit le détail (BR-SVC-007)", () => {
     await row(wrapper, "c_nu").trigger("click");
     await flushPromises();
     expect(wrapper.get("[data-detail-ports]").text()).toContain("Aucun port");
-    expect(detail(wrapper).text()).not.toContain("Ressources : non limitées");
     wrapper.unmount();
   });
 

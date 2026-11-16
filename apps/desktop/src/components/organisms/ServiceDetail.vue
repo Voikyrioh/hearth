@@ -414,13 +414,6 @@ const commandNote = computed(() => {
             <dt>{{ t("serviceDetail.graceLabel") }}</dt>
             <dd>{{ graceText(service.graceS) }}</dd>
           </div>
-          <div v-if="service.origin === 'hearth'" class="defs__row defs__row--wide">
-            <dt class="sr-only">{{ t("serviceDetail.resources") }}</dt>
-            <dd class="defs__soft">
-              <HIcon name="info" size="sm" />
-              {{ t("serviceDetail.resources") }}
-            </dd>
-          </div>
         </dl>
       </DashCard>
 

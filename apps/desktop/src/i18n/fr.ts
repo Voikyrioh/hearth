@@ -1801,7 +1801,6 @@ export const fr = {
     grace: "{n} secondes",
     graceOne: "{n} seconde",
     graceLabel: "Délai d'arrêt",
-    resources: "Ressources : non limitées",
     exitCode: "Code {code} : {explanation}",
     exitCodeBare: "Code {code}",
     exit0: "terminé normalement",

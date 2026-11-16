@@ -11,7 +11,7 @@ maj: 2026-10-24
 # BR-RES-013
 
 ## Règle
-Règle portée par le client (HRT-102). L'étape « Ressources » d'une installation réutilise `ResourceSliders` (HRT-146) : mêmes bornes, jamais « sans limite » (BR-RES-037). La mémoire part de la valeur recommandée PROUVÉE de la fiche (ramenée au maximum de la machine, ce que la page dit), le processeur de sa valeur recommandée prouvée, sinon de tous les processeurs du serveur avec « Hearth ne sait pas combien de processeur ce jeu demande. ».
+Règle portée par le client (HRT-102). L'étape « Ressources » d'une installation réutilise `ResourceSliders` (HRT-146) : mêmes bornes, jamais « sans limite » (BR-RES-037). La mémoire part de la valeur recommandée PROUVÉE de la fiche (ramenée au maximum de la machine, ce que la page dit), le processeur de sa valeur recommandée prouvée, sinon de deux cœurs au plus (BR-RES-039) avec « Hearth ne sait pas combien de processeur ce jeu demande. ».
 
 ## Application (code)
 - `apps/desktop/src/fiche/fit.ts::placement`
