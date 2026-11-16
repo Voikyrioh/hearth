@@ -112,3 +112,9 @@ pack.no_auto_restart = true
 - Le fichier du monde est relu par sa taille et sa date, pas par un client de jeu. L'effet de `save` est jugé sur un relevé pris AVANT `exit` (qui enregistre aussi).
 - Une fois un statut promu dans la fiche livrée, l'essai l'EXIGE : si l'image ne lit plus son entrée, le job échoue.
 - Pas de registre d'empreintes ni de veille nocturne contre l'étiquette la plus récente (HRT-115), pas de relevé `golden` ni de `probe.toml` déclaratif : l'essai est écrit en Rust pour la seule fiche Terraria ; il se généralisera avec la deuxième fiche.
+
+## Rejeu local et publication de Terraria (16/11/2026, HRT-226)
+Banc : `tests/fiche_live.rs`, rejoué EN LOCAL sur Docker Desktop (WSL2, 8 Gio) depuis un conteneur Linux `rust:1.95` qui monte le socket du moteur (aucun `workflow_dispatch`, quota Actions). Les dossiers gérés sont posés dans un volume nommé monté au MÊME chemin dans le conteneur de test et dans le moteur (un bind-mount est résolu par le moteur, pas par le conteneur de test). Résultat sur `ryshe/terraria:vanilla-1.4.5.8` (`sha256:3ece8ceb...`) : signe « prêt » en 14 s, port TCP répond, monde nommé comme demandé, `save` puis `exit` lus sans terminal (code 0, 0 s), service qui reste arrêté, monde conservé au redémarrage ; mémoire 593 Mio au repos avec la limite de 2 Gio. Promotion : `status = "published"`, `memory` = 2 Gio `measured` (la limite essayée : aucun plancher plus bas affirmé), fiche en version 5, `evidence.toml` et `golden.toml` (relevé `docker image inspect` de l'image épinglée) à côté de la fiche.
+
+## Banc générique (HRT-226)
+`tests/fiche_live_game.rs` généralise le banc de Minecraft aux jeux à arrêt par signal : une entrée du tableau `GAMES` par jeu, un relevé `<out>/<id>/evidence.toml`. Il révèle des défauts de fiche que la lecture ne montre pas : voir les tickets HRT-227 et suivants (7 Days to Die ne démarre pas sous `no-new-privileges`).

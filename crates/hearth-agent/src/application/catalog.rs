@@ -533,15 +533,26 @@ mod tests {
     #[test]
     fn a_published_catalog_hides_a_preview_fiche_and_a_trial_one_lists_it_with_its_digest() {
         let published = CatalogService::embedded(false);
-        assert!(published.list().fiches.iter().all(|c| c.id != "terraria"));
-        assert!(published.detail("terraria").is_err());
         let trial = CatalogService::embedded(true);
         let list = trial.list();
+        let previews: Vec<_> = list
+            .fiches
+            .iter()
+            .filter(|c| c.status == FicheStatus::Preview)
+            .collect();
+        assert!(!previews.is_empty(), "au moins une fiche preview embarquée");
+        for preview in &previews {
+            assert!(published.list().fiches.iter().all(|c| c.id != preview.id));
+            assert!(published.detail(&preview.id).is_err());
+            let detail = trial.detail(&preview.id).unwrap();
+            assert_eq!(detail.digest.len(), 64);
+        }
         let terraria = list.fiches.iter().find(|c| c.id == "terraria").unwrap();
-        assert_eq!(terraria.status, FicheStatus::Preview);
-        let detail = trial.detail("terraria").unwrap();
-        assert_eq!(detail.digest.len(), 64);
-        assert_eq!(detail.image.repository, "ryshe/terraria");
+        assert_eq!(terraria.status, FicheStatus::Published);
+        assert_eq!(
+            published.detail("terraria").unwrap().image.repository,
+            "ryshe/terraria"
+        );
     }
 
     #[test]

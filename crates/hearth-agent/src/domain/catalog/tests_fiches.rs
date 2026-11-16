@@ -1422,7 +1422,7 @@ fn coherence_proposed_values_and_arguments_are_valid_for_their_type() {
 // ---- La fiche Terraria embarquée ------------------------------------------------------------------------------------------------
 
 #[test]
-fn the_embedded_terraria_fiche_is_a_preview_tried_on_the_real_image_with_a_pinned_image() {
+fn the_embedded_terraria_fiche_is_published_after_its_real_trial_with_a_pinned_image() {
     let (fiches, refused) = load_all();
     assert!(refused.is_empty(), "{refused:?}");
     let terraria = fiches
@@ -1431,8 +1431,8 @@ fn the_embedded_terraria_fiche_is_a_preview_tried_on_the_real_image_with_a_pinne
         .expect("terraria est embarquée");
     assert_eq!(
         terraria.file.status,
-        Status::Preview,
-        "elle reste en preview"
+        Status::Published,
+        "publiée après le banc d'essai local (HRT-226)"
     );
     assert_eq!(
         terraria.file.image.digest.as_deref(),
@@ -1440,12 +1440,11 @@ fn the_embedded_terraria_fiche_is_a_preview_tried_on_the_real_image_with_a_pinne
         "l'empreinte est celle relevée par le banc d'essai réel (HRT-114)"
     );
     assert_eq!(EMBEDDED.len(), fiches.len());
-    // Embarquée, mais jamais proposée : `offered_with(false)` ne rend que les fiches `published`.
     assert!(
         super::embedded::offered_with(false)
             .iter()
-            .all(|f| f.id() != "terraria"),
-        "une fiche preview n'est pas proposée"
+            .any(|f| f.id() == "terraria"),
+        "une fiche publiée est proposée"
     );
     for embedded in EMBEDDED {
         assert_eq!(
@@ -1491,13 +1490,14 @@ fn the_embedded_terraria_fiche_is_a_preview_tried_on_the_real_image_with_a_pinne
         Some("Server started"),
         "le signe essayé sur la vraie image est cru"
     );
-    // Ressources : seuls la mémoire et le disque au repos sont mesurés (banc d'essai, HRT-114) ; ni la mémoire
-    // recommandée ni le processeur n'ont de chiffre : la fiche reste preview (BR-RES-038).
+    // Ressources : mémoire mesurée sur la limite essayée (2 Gio, banc local HRT-226), disque au repos (HRT-114) ; le
+    // processeur n'est pas mesuré (non exigé pour publier, BR-RES-038).
     let r = &terraria.file.resources;
     assert!(r.cpu.evidence.is_unmeasured());
-    assert_eq!(r.memory.min_bytes, Some(591_187_148));
+    assert_eq!(r.memory.min_bytes, Some(2_147_483_648));
+    assert_eq!(r.memory.recommended_bytes, Some(2_147_483_648));
     assert_eq!(r.disk.install_bytes, Some(53_014_364));
-    assert!(r.memory.recommended_bytes.is_none() && r.cpu.min_millis.is_none());
+    assert!(r.cpu.min_millis.is_none());
 }
 
 #[test]
@@ -1548,8 +1548,8 @@ fn the_terraria_catalog_speaks_to_the_user_in_vous_and_every_text_stays_within_i
             .all(|n| n.channel == "args" || n.key == "banlist")
     );
     assert_eq!(
-        terraria.file.version, 4,
-        "version 4 : suites essayées sur la vraie image, empreinte et mesures au repos (HRT-114) ; version 3 : l'aide ne redit plus les bornes ni le jeu de caractères (ADR-0050)"
+        terraria.file.version, 5,
+        "version 5 : publiée après le banc local, mémoire mesurée (HRT-226) ; version 4 : suites essayées sur la vraie image, empreinte et mesures au repos (HRT-114) ; version 3 : l'aide ne redit plus les bornes ni le jeu de caractères (ADR-0050)"
     );
     // Un entier dit ses bornes quand l'inventaire les donne ; un réglage à valeurs fermées dit chacune.
     let max_players = terraria.setting("max_players").expect("max_players");

@@ -43,8 +43,7 @@ async fn bench(include_preview: bool) -> Bench {
 }
 
 #[tokio::test]
-async fn a_published_agent_lists_no_preview_fiche_and_a_trial_agent_lists_terraria_with_its_digest()
-{
+async fn a_published_agent_lists_no_preview_fiche_and_a_trial_agent_lists_one_with_its_digest() {
     let published = bench(false).await;
     let reply = published
         .agent
@@ -54,13 +53,18 @@ async fn a_published_agent_lists_no_preview_fiche_and_a_trial_agent_lists_terrar
         .await;
     assert_eq!(reply.status, 200, "{}", reply.text);
     let view: CatalogView = serde_json::from_value(reply.body).unwrap();
-    // Seule la fiche Minecraft est publiée (HRT-116) : Terraria reste `preview`, absente d'un agent publié.
+    // Minecraft (HRT-116) et Terraria (HRT-226) sont publiées : les fiches `preview` (7 Days to Die...) sont absentes
+    // d'un agent publié.
     let ids: Vec<&str> = view.fiches.iter().map(|f| f.id.as_str()).collect();
-    assert_eq!(ids, ["minecraft"], "seule Minecraft est publiée");
-    assert_eq!(view.fiches[0].status, FicheStatus::Published);
+    assert_eq!(ids, ["minecraft", "terraria"], "seules les fiches publiées");
+    assert!(
+        view.fiches
+            .iter()
+            .all(|f| f.status == FicheStatus::Published)
+    );
     assert!(view.refused.is_empty());
     // Une fiche d'essai n'existe pas pour un agent publié : même réponse qu'une fiche inconnue.
-    for id in ["terraria", "nope"] {
+    for id in ["7dtd", "nope"] {
         let reply = published
             .agent
             .request("GET", &format!("/catalog/{id}"))
@@ -81,9 +85,9 @@ async fn a_published_agent_lists_no_preview_fiche_and_a_trial_agent_lists_terrar
         .await;
     assert_eq!(reply.status, 200, "{}", reply.text);
     let view: CatalogView = serde_json::from_value(reply.body).unwrap();
-    let terraria = view.fiches.iter().find(|f| f.id == "terraria").unwrap();
-    assert_eq!(terraria.status, FicheStatus::Preview);
-    assert!(terraria.installable);
+    let preview = view.fiches.iter().find(|f| f.id == "7dtd").unwrap();
+    assert_eq!(preview.status, FicheStatus::Preview);
+    assert!(preview.installable);
     let reply = trial
         .agent
         .request("GET", "/catalog/terraria")
@@ -95,10 +99,13 @@ async fn a_published_agent_lists_no_preview_fiche_and_a_trial_agent_lists_terrar
     assert_eq!(detail.digest.len(), 64);
     assert!(detail.digest.bytes().all(|b| b.is_ascii_hexdigit()));
     assert_eq!(detail.image.repository, "ryshe/terraria");
-    // Ressources : la mémoire au repos relevée par le banc d'essai réel (HRT-114), pas de recommandation inventée.
-    assert_eq!(detail.resources.memory.evidence, EvidenceView::MeasuredIdle);
-    assert_eq!(detail.resources.memory.min_bytes, Some(591_187_148));
-    assert_eq!(detail.resources.memory.recommended_bytes, None);
+    // Ressources : la limite de mémoire essayée par le banc d'essai réel (HRT-226), mesurée.
+    assert_eq!(detail.resources.memory.evidence, EvidenceView::Measured);
+    assert_eq!(detail.resources.memory.min_bytes, Some(2_147_483_648));
+    assert_eq!(
+        detail.resources.memory.recommended_bytes,
+        Some(2_147_483_648)
+    );
     // Ce que la fiche impose : un port de jeu, des dossiers gérés (jamais un chemin du serveur).
     assert!(
         detail
