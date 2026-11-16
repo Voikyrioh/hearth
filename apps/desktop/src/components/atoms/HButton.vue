@@ -120,6 +120,9 @@ function onClick(event: MouseEvent) {
   border-radius: var(--radius-control);
   font-weight: var(--fw-semibold);
   white-space: nowrap;
+  /* HRT-249 : un bouton ne passe jamais à la ligne et ne rétrécit jamais sous son texte ; c'est la barre qui passe à la ligne. */
+  flex-shrink: 0;
+  min-width: max-content;
   cursor: pointer;
   transition:
     background var(--motion-fast) var(--ease),

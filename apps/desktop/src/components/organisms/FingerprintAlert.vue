@@ -107,6 +107,7 @@ function accept() {
 
 .alert__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-3);
   margin-top: var(--space-5);

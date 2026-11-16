@@ -97,6 +97,7 @@ const icon = computed(() => {
 
 .callout__actions {
   display: flex;
+  flex-wrap: wrap;
   flex: none;
   align-items: center;
   gap: var(--space-2);

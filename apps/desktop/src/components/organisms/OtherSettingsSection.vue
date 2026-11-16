@@ -148,5 +148,6 @@ function confirm() {
 
 .others__actions {
   display: flex;
+  flex-wrap: wrap;
 }
 </style>

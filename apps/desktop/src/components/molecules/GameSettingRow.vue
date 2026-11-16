@@ -293,6 +293,7 @@ function update(next: string) {
 
 .row__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-start;
 }
 </style>

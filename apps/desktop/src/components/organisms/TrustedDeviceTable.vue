@@ -307,6 +307,7 @@ const named = (device: TrustedDevice) => `${t("devices.remove")} ${device.name}`
 
 .table__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
 }
 
