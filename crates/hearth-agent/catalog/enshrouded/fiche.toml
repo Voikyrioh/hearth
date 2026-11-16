@@ -76,16 +76,16 @@ status = "tested"
 # L'image arrête le serveur Windows sous supervisord. Vérifié par le banc (16/11/2026) : code 0 en 77 à 78 s, monde réécrit, service qui
 # reste arrêté, redémarrage sur le même monde.
 [stop]
-grace_s = 90
+grace_s = 240
 signal = "SIGTERM"
 world_saved = "by_image_on_signal"
 
-# Banc d'essai réel, 16/11/2026, serveur vide, sans joueur : les LIMITES essayées. 4 Gio : 892 Mio au repos (compteur du moteur), pic de
-# démarrage 3,95 Go (cgroupe, cache compris). 6 Gio : 805 Mio, pic 3,90 Go. Aucun plancher plus bas n'a été essayé : il n'est pas affirmé.
-# L'éditeur annonce 16 Gio pour un serveur en service (README) : un monde chargé de joueurs pèse davantage que ces chiffres.
+# Chiffre de l'éditeur (README) : « RAM >= 16 Go » pour un serveur en service ; il fonde `min_bytes` et `recommended_bytes` (BR-RES-038).
+# Le banc local (16/11/2026, serveur VIDE, sans joueur) a seulement vu le serveur tenir sous des limites de 4 et 6 Gio (892 et 805 Mio au
+# repos, pic de démarrage 3,95 Go, cache compris) : ce n'est pas une recommandation. Voir `evidence.toml`.
 [resources]
 cpu = { evidence = "unmeasured" }
-memory = { min_bytes = 4294967296, recommended_bytes = 6442450944, evidence = "measured" }
+memory = { min_bytes = 17179869184, recommended_bytes = 17179869184, evidence = { publisher = "https://github.com/mornedhels/enshrouded-server" } }
 disk = { install_bytes = 8946101770, evidence = "measured_idle" }   # image (843 805 791 octets) + dossiers gérés après un premier démarrage (serveur de 7,5 Go)
 
 [[not_exposed]]

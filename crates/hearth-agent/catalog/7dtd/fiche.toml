@@ -177,8 +177,8 @@ label = "Téléchargement du serveur"
 log_contains = "downloading, progress"
 
 [ready]
-log_contains = "StartGame done"           # vu sur la vraie image (16/11/2026) : 48 s après le lancement du jeu, carte Navezgane
-status = "tested"
+log_contains = "StartGame done"           # vu à la main (16/11/2026) : 48 s après le lancement du jeu, carte Navezgane. `untested` : cet essai a tourné SANS `no-new-privileges` (docker run simple), pas sous le durcissement de Hearth, sous lequel le conteneur ne démarre pas (HRT-227)
+status = "untested"
 
 # L'image intercepte le signal d'arrêt, envoie « shutdown » au jeu par la console distante (le jeu enregistre) puis sort.
 # Vérifié à la main (16/11/2026, 4 min de jeu) : « Stopping sdtdserver: Graceful: telnet ... OK », code 0, 9 s.
