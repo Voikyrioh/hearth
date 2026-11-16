@@ -90,12 +90,13 @@ describe("le catalogue de Terraria rendu lisible (objectif de Voiky)", () => {
     expect(detail.settings.every((setting) => themes.has(setting.theme))).toBe(true);
   });
 
-  it("verrouille ce que la fiche impose, ce qui est figé et ce qui demande de recréer le service", () => {
+  it("verrouille ce que la fiche impose et ce qui est figé ; un réglage qui recrée le service se règle (HRT-266)", () => {
     const models = terrariaModels();
     expect(byId(models, "port").lock).toBe("imposed");
     expect(byId(models, "world_file").lock).toBe("imposed");
     expect(byId(models, "world_name").lock).toBe("frozen");
-    expect(byId(models, "announcement_box_off").lock).toBe("recreate");
+    expect(byId(models, "announcement_box_off").lock).toBeNull();
+    expect(byId(models, "announcement_box_off").effect).toBe("recreate");
     expect(byId(models, "motd").lock).toBeNull();
     // Dix-sept réglages se règlent encore (les 15 du mode Voyage, et le reste de la partie).
     expect(models.filter((model) => model.lock === null).length).toBeGreaterThan(20);
@@ -133,10 +134,10 @@ describe("modifié, remis, remise en bloc (BR-FICHE-041, 044)", () => {
     expect(isModified(motd, { action: "reset" })).toBe(false);
   });
 
-  it("ne remet en bloc ni un réglage figé, ni un imposé, ni un secret, ni celui qui attend la recréation", () => {
+  it("ne remet en bloc ni un réglage figé, ni un imposé, ni un secret", () => {
     const models = terrariaModels();
     const touch: Edits[string] = { action: "set", value: "x" };
-    for (const id of ["world_name", "port", "password", "announcement_box_off"]) {
+    for (const id of ["world_name", "port", "password"]) {
       expect(resettable(byId(models, id), touch)).toBe(false);
     }
     expect(resettable(byId(models, "max_players"), { action: "set", value: "12" })).toBe(true);
@@ -432,7 +433,7 @@ describe("les textes de l'onglet (vouvoiement, mots de la spec)", () => {
   it("dit les quatre mentions d'effet de la spec, mot pour mot", () => {
     expect(fr.gameSettings.effect.restart).toBe("Prend effet au prochain démarrage");
     expect(fr.gameSettings.effect.recreate).toBe(
-      "Prend effet quand Hearth recrée le service (bouton Redémarrer maintenant, ou prochain démarrage lancé depuis Hearth).",
+      "Prend effet quand vous enregistrez : Hearth recrée le service, qui repart avec ce réglage.",
     );
     expect(fr.gameSettings.effect.frozen).toBe(
       "Figé : ne peut plus changer après la création du monde. Il faudrait créer un autre monde.",

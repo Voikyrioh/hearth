@@ -139,15 +139,12 @@ describe("enregistrer, dans l'ordre de l'agent", () => {
     expect(secret).toMatchObject({ reason: "charset", character: null });
   });
 
-  it("n'applique pas un réglage reçu par argument : il demande de recréer le service", () => {
+  it("applique un réglage reçu par argument : l'effet est la recréation (HRT-266)", () => {
     const outcome = save({
       effect: "recreate",
       changes: [{ id: "announcement_box_off", action: "set", value: "1" }],
     });
-    expect(refusal(outcome)).toEqual({
-      kind: "recreate_not_available",
-      ids: ["announcement_box_off"],
-    });
+    expect(outcome).toMatchObject({ kind: "saved", effect: "recreate" });
   });
 
   it("recalcule l'effet signé et refuse un effet qui diffère", () => {

@@ -2704,14 +2704,13 @@ export const fr = {
     resetNoProposal: "Remettre le réglage à son défaut",
     resetNoProposalAria: "Remettre {label} à son défaut",
     imposedWhy: "Imposé par la fiche : {why}",
-    recreateSoon: "Ce réglage se change en recréant le service. Cela arrive bientôt.",
     goneSentence: "Ce réglage n'existe plus dans la version {version} : le jeu l'ignore.",
     goneSentenceBare: "Ce réglage n'existe plus dans cette version du jeu : le jeu l'ignore.",
     // Les mentions d'effet : quatre, jamais d'autre (BR-FICHE-042)
     effect: {
       restart: "Prend effet au prochain démarrage",
       recreate:
-        "Prend effet quand Hearth recrée le service (bouton Redémarrer maintenant, ou prochain démarrage lancé depuis Hearth).",
+        "Prend effet quand vous enregistrez : Hearth recrée le service, qui repart avec ce réglage.",
       frozen:
         "Figé : ne peut plus changer après la création du monde. Il faudrait créer un autre monde.",
       unknown: "Hearth ne sait pas si ce réglage existe dans cette version du jeu.",
@@ -2775,7 +2774,7 @@ export const fr = {
     saveRestartNow: "Redémarrer maintenant",
     saveRestartAfter: "Les changements s'appliqueront au prochain démarrage.",
     saveRecreateAfter:
-      "Les changements s'appliqueront quand Hearth recréera le service. Un redémarrage fait hors de Hearth ne les applique pas.",
+      "Hearth recrée le service pour appliquer ces changements : il repart, les joueurs connectés sont déconnectés et le monde est enregistré avant l'arrêt.",
     saveStopped:
       "Ce service est arrêté : il prendra ces réglages à son prochain démarrage lancé depuis Hearth.",
     saveNoEngine:
@@ -2797,7 +2796,7 @@ export const fr = {
       fileUnreadableLine:
         "Hearth n'arrive pas à lire ce fichier (ligne {line}). Rien n'a été enregistré.",
       recreate:
-        "Ces réglages demandent de recréer le service, ce que Hearth ne sait pas encore faire. Rien n'a été enregistré.",
+        "Hearth ne peut pas recréer ce service maintenant. Rien n'a été appliqué : réessayez quand le moteur est prêt et qu'aucune action n'est en cours.",
       busy: "Une action est en cours sur ce service. Réessayez quand elle sera finie.",
       notFound: "Ce service n'existe plus.",
       invalid: "Ces réglages ne sont pas valables. Rien n'a été enregistré.",

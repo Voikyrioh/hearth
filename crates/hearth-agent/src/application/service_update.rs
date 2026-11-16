@@ -72,8 +72,8 @@ use crate::domain::services::drift::{Drift, compare};
 use crate::domain::services::plan::{PlanContext, image_reference, plan_from_spec};
 use crate::domain::services::spec::{SecretsAccess, SpecBody, SpecMountKind, SpecSecrets};
 use crate::domain::services::update::{
-    Applied, Candidate, Summary, UpdateRefusal, apply, clone_secrets, deploy_mounts, deploy_ports,
-    image_variables, observed_container,
+    Applied, Candidate, GameChange, Summary, UpdateRefusal, apply, apply_game_env, clone_secrets,
+    deploy_mounts, deploy_ports, image_variables, observed_container,
 };
 use crate::domain::services::{
     EngineState, KeyKind, RunState, ServiceKey, ServiceStateKind, TransitionKind,
@@ -348,6 +348,12 @@ struct Subject {
     consigned: Vec<String>,
 }
 
+/// Ce qu'une modification demande : le formulaire d'un service, ou les réglages d'un serveur de jeu.
+enum Wanted {
+    Spec(SpecChange),
+    Game(GameChange),
+}
+
 impl ServiceUpdates {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -550,6 +556,44 @@ impl ServiceUpdates {
         actor: Actor,
         op_key: &str,
     ) -> Result<UpdateAccepted, UpdateFailed> {
+        let (base_rev, seen_drift) = (change.base_rev, change.seen_drift);
+        self.update_wanted(
+            key,
+            base_rev,
+            seen_drift,
+            Wanted::Spec(change),
+            actor,
+            op_key,
+        )
+        .await
+    }
+
+    /// Change les réglages d'un serveur de jeu qui passent par une variable ou la commande (HRT-266, BR-JEU-035) :
+    /// la description est révisée et le conteneur recréé par le plan de HRT-87. Rien ne dépend de la révision que
+    /// le client a lue : c'est la révision courante qui sert de base.
+    pub async fn update_game(
+        self: &Arc<Self>,
+        key: &ServiceKey,
+        change: GameChange,
+        actor: Actor,
+        op_key: &str,
+    ) -> Result<UpdateAccepted, UpdateFailed> {
+        // La révision courante est lue ici, sous le verrou de l'enregistrement des réglages : un autre changement
+        // entre-temps est un `SPEC_CONFLICT` honnête de `update_wanted`.
+        let subject = self.subject(key).await?;
+        self.update_wanted(key, subject.rev, None, Wanted::Game(change), actor, op_key)
+            .await
+    }
+
+    async fn update_wanted(
+        self: &Arc<Self>,
+        key: &ServiceKey,
+        base_rev: u32,
+        seen_drift: Option<DriftView>,
+        wanted: Wanted,
+        actor: Actor,
+        op_key: &str,
+    ) -> Result<UpdateAccepted, UpdateFailed> {
         // Une clôture en cours sur ce service se termine avant que l'on juge « occupé ».
         self.ops.wait_closed(key).await;
         let engine_state = self.registry.engine_state();
@@ -579,7 +623,7 @@ impl ServiceUpdates {
             return Err(named(UpdateError::NotUpdatable(target.state)));
         }
         // La révision lue par le formulaire est la courante (BR-EDIT-024), avant tout arrêt.
-        if change.base_rev != subject.rev {
+        if base_rev != subject.rev {
             return Err(named(UpdateError::Conflict {
                 current_rev: subject.rev,
                 outside: false,
@@ -588,7 +632,7 @@ impl ServiceUpdates {
         let drift = self.drift_of(key, &subject);
         // Le service a été changé hors de Hearth depuis l'ouverture du formulaire : refusé, sans nommer d'auteur.
         if matches!(drift, Drift::ModifiedOutside(_))
-            && change.seen_drift != Some(DriftView::ModifiedOutside)
+            && seen_drift != Some(DriftView::ModifiedOutside)
         {
             return Err(named(UpdateError::Conflict {
                 current_rev: subject.rev,
@@ -596,8 +640,11 @@ impl ServiceUpdates {
             }));
         }
 
-        let applied = apply(&subject.body, &subject.secrets, &change)
-            .map_err(|refusal| named(UpdateError::Refused(refusal)))?;
+        let applied = match &wanted {
+            Wanted::Spec(change) => apply(&subject.body, &subject.secrets, change),
+            Wanted::Game(change) => apply_game_env(&subject.body, &subject.secrets, change),
+        }
+        .map_err(|refusal| named(UpdateError::Refused(refusal)))?;
         let recreate_anyway = !matches!(drift, Drift::None);
         let (candidate, save_revision) = match applied {
             Applied::Changed(candidate) => (candidate, true),

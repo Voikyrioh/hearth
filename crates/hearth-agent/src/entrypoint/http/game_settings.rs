@@ -74,7 +74,7 @@ fn settings_error(error: SettingsError) -> ApiError {
         )),
         SettingsError::RecreateNotAvailable { ids } => ApiError(ErrorBody::with_details(
             ErrorCode::RecreateNotAvailable,
-            "Ce réglage s'applique quand Hearth recrée le service, ce qu'il ne sait pas encore faire.",
+            "Hearth ne peut pas recréer ce service maintenant : le réglage n'est pas enregistré. Réessayez quand le service est en marche ou arrêté sans action en cours.",
             serde_json::json!({ "ids": ids }),
         )),
         SettingsError::EffectMismatch => ApiError(ErrorBody::with_details(

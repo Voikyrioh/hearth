@@ -381,7 +381,6 @@ export class SimulatedGameSettings {
 
     // 1. Chaque changement vers son réglage, dans l'ordre de la demande.
     const asked: { setting: FicheSetting; wanted: Wanted }[] = [];
-    const recreate: string[] = [];
     for (const change of request.changes) {
       const setting = detail.settings.find((item) => item.question.id === change.id);
       if (!setting) {
@@ -400,10 +399,6 @@ export class SimulatedGameSettings {
           reason: "secret",
           character: null,
         });
-      }
-      if (this.effectOf(setting) === "recreate") {
-        recreate.push(question.id);
-        continue;
       }
       let wanted: Wanted;
       if (change.action === "set") {
@@ -426,7 +421,6 @@ export class SimulatedGameSettings {
       }
       asked.push({ setting, wanted });
     }
-    if (recreate.length > 0) return refused({ kind: "recreate_not_available", ids: recreate });
     for (const other of request.others) {
       if (!other.remove && other.value === null) return refused({ kind: "invalid" });
     }
@@ -525,7 +519,12 @@ export class SimulatedGameSettings {
     const toWrite = all.filter(([name, value]) => (observed.get(name) ?? null) !== value);
 
     // 6. L'effet signé : le plus lourd des changements, ou un redémarrage quand seul le fichier est retouché.
-    const effect: SettingEffect = changed.length > 0 || toWrite.length > 0 ? "restart" : "none";
+    const recreates = changed.some((setting) => this.effectOf(setting) === "recreate");
+    const effect: SettingEffect = recreates
+      ? "recreate"
+      : changed.length > 0 || toWrite.length > 0
+        ? "restart"
+        : "none";
     if (request.effect !== effect) {
       return refused({ kind: "conflict", by: null, effectMismatch: true });
     }

@@ -341,7 +341,7 @@ function openToken(id: string) {
           {{ t("gameSettings.saveOthers", { n: state.otherChanges.value.length }) }}
         </p>
         <HCheckbox
-          v-if="running"
+          v-if="running && state.effect.value !== 'recreate'"
           v-model="restartNow"
           :label="t('gameSettings.saveRestartNow')"
           :disabled="!canRestart"

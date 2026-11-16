@@ -193,13 +193,12 @@ describe("les réglages verrouillés ou secrets", () => {
     wrapper.unmount();
   });
 
-  it("dit un réglage reçu par argument en attente de la recréation, désactivé", async () => {
+  it("dit qu'un réglage reçu par argument recrée le service à l'enregistrement, et le laisse se régler", async () => {
     const { wrapper } = await open();
     await showAll(wrapper);
     const box = row(wrapper, "announcement_box_off");
-    expect(box.get("[data-setting-lock]").text()).toBe(
-      "Ce réglage se change en recréant le service. Cela arrive bientôt.",
-    );
+    expect(box.find("[data-setting-lock]").exists()).toBe(false);
+    expect(box.get("[data-setting-effect]").text()).toContain("Hearth recrée le service");
     wrapper.unmount();
   });
 
