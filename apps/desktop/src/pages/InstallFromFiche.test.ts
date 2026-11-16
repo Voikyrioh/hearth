@@ -66,7 +66,7 @@ describe("la page (BR-FICHE-014, 015)", () => {
     expect(questionInput(wrapper, "max_players").element.value).toBe("8");
     expect(questionInput(wrapper, "password").element.value).toBe("");
     expect(wrapper.get("[data-install-version]").text()).toBe(
-      "Hearth installe toujours la même image du programme serveur : elle ne se choisit pas. La version de Minecraft, elle, se choisit plus haut.",
+      "Hearth installe toujours la même image du programme serveur : elle ne se choisit pas. La version du jeu, elle, se choisit plus haut.",
     );
     // Aucun champ libre : ni image, ni variable, ni commande, ni dossier.
     expect(wrapper.find('[data-field="image"]').exists()).toBe(false);
