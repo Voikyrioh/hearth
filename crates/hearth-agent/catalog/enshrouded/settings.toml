@@ -1,0 +1,94 @@
+# Réglages d'Enshrouded (HRT-235) : variables d'environnement de l'image `mornedhels/enshrouded-server` (canal `env`). Les noms et les
+# défauts viennent du tableau du README de l'image. Un changement recrée le service (BR-FICHE-042).
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "players"
+label = "Joueurs"
+order = 2
+
+[[theme]]
+id = "network"
+label = "Réseau"
+order = 3
+
+[[setting]]
+id = "server_name"
+key = "SERVER_NAME"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Nom du serveur"
+help = "Le nom que vos joueurs voient dans la liste des serveurs."
+type = "text"
+charset = "line"
+max_len = 60
+game_default = "Enshrouded Server"
+proposed = "Mon serveur Enshrouded"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "slot_count"
+key = "SERVER_SLOT_COUNT"
+channel = "env"
+theme = "players"
+level = "essential"
+label = "Nombre de joueurs"
+help = "Combien de joueurs peuvent être connectés en même temps."
+type = "int"
+min = 1
+game_default = "16"
+proposed = "16"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "enable_voice_chat"
+key = "SERVER_ENABLE_VOICE_CHAT"
+channel = "env"
+theme = "players"
+level = "common"
+label = "Discussion vocale"
+help = "Active la discussion vocale dans le jeu."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "enable_text_chat"
+key = "SERVER_ENABLE_TEXT_CHAT"
+channel = "env"
+theme = "players"
+level = "common"
+label = "Discussion écrite"
+help = "Active la discussion écrite dans le jeu."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "query_port"
+key = "SERVER_QUERYPORT"
+channel = "env"
+theme = "network"
+level = "advanced"
+label = "Port du jeu dans le service"
+help = "Le port du jeu (celui de Steam), à l'intérieur du service. Celui de vos joueurs se règle dans « Modifier » : vous ne pouvez pas le modifier ici."
+type = "int"
+min = 1024
+max = 65535
+game_default = "15637"
+change = "anytime"
+imposed = { port = "query", why = "Le jeu annonce ce port : il suit celui que Hearth relie au service." }
+source = "verified"

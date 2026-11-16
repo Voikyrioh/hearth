@@ -1,0 +1,115 @@
+# Enshrouded, serveur officiel sans mod (serveur Windows sous Wine). Fiche en `preview` (HRT-235, ADR-0050 version 2, ADR-0053).
+#
+# Construite depuis le README de l'image `mornedhels/enshrouded-server` (https://github.com/mornedhels/enshrouded-server). Rien n'a été
+# ajouté de mémoire. RESTE `preview` : le banc d'essai réel n'a pas tourné (l'éditeur de l'image annonce 16 Gio de mémoire et 30 Gio de
+# disque au moins, la machine d'essai a 8 Gio) ; aucune mesure. Le mot de passe et les rôles viennent de variables que le README ne détaille
+# pas : ils ne sont pas exposés.
+
+format = 2
+id = "enshrouded"
+version = 1
+family = "enshrouded"
+name = "Enshrouded"
+summary = "Le serveur officiel d'Enshrouded, sans mod, par Wine."
+status = "preview"
+platform = "linux"
+
+[image]
+repository = "mornedhels/enshrouded-server"
+tag = "1.8.1-wine"
+digest = "sha256:002a8ac3387eddc5151b18ab5e7c02f9382f8e941dcfc75e56fa5134bd18f283"
+game_updates = "every_start"              # STEAMCMD_ARGS vaut `validate` : l'image met le jeu à jour à chaque démarrage
+
+[owner]
+uid = 4711                                # PUID et PGID (défaut de l'image)
+gid = 4711
+
+# Le serveur téléchargé par SteamCMD, et `savegame` (le monde), `logs`, `backups` dessous.
+[[folder]]
+id = "data"
+role = "world"
+target = "/opt/enshrouded"
+read_only = false
+backup = true
+
+[[port]]
+id = "query"
+container = 15637
+protocol = "udp"
+role = "game"
+publish = "always"
+default_host = 15637
+mapping = "same_number"
+game_setting = "query_port"
+
+[[channel]]
+id = "env"
+kind = "env"
+
+[[env]]
+name = "PUID"
+owner = "uid"
+
+[[env]]
+name = "PGID"
+owner = "gid"
+
+[first_start]
+ready_timeout_s = 3600
+world_generation = true
+
+[[first_start.download]]
+what = "Le serveur du jeu"
+source_label = "Steam"
+evidence = "unmeasured"
+
+[ready]
+log_contains = "'HostOnline' (up)!"      # signe annoncé par le README de l'image, NON VU par un essai réel
+status = "untested"
+
+# Le README ne dit rien de l'arrêt propre : non essayé.
+[stop]
+grace_s = 90
+signal = "SIGTERM"
+world_saved = "by_image_on_signal"
+
+# Chiffres de l'éditeur de l'image (README) : « CPU: >= 6 cores, RAM: >= 16 GB, Disk: >= 30 GB ».
+[resources]
+cpu = { evidence = "unmeasured" }
+memory = { min_bytes = 17179869184, evidence = { publisher = "https://github.com/mornedhels/enshrouded-server" } }
+disk = { install_bytes = 32212254720, evidence = { publisher = "https://github.com/mornedhels/enshrouded-server" } }
+
+[[not_exposed]]
+key = "SERVER_ROLES_0_PASSWORD"
+channel = "env"
+why = "Le mot de passe et les rôles du serveur : le README ne détaille pas ces variables, elles n'ont pas été lues ni essayées."
+
+[[not_exposed]]
+key = "SERVER_IP"
+channel = "env"
+why = "Adresse d'écoute dans le conteneur : la changer coupe le port publié."
+
+[[not_exposed]]
+key = "GAME_BRANCH"
+channel = "env"
+why = "Branche de test de Steam : Hearth n'installe que la version publique."
+
+[[not_exposed]]
+key = "STEAMCMD_ARGS"
+channel = "env"
+why = "Arguments de SteamCMD : laissés au défaut de l'image."
+
+[[not_exposed]]
+key = "SERVER_SAVE_DIR"
+channel = "env"
+why = "Dossier du monde : il reste celui de l'image, que Hearth garde et sauvegarde."
+
+[[not_exposed]]
+key = "SERVER_LOG_DIR"
+channel = "env"
+why = "Dossier des journaux : il reste celui de l'image."
+
+[[not_exposed]]
+key = "BACKUP_DIR"
+channel = "env"
+why = "Sauvegardes de l'image : Hearth garde ses propres sauvegardes."
