@@ -71,3 +71,25 @@ test("de la page des services à l'écran de fin : trois chemins, Catalogue, tro
   await done.locator("[data-done-open]").click();
   await expect(page).toHaveURL(new RegExp(`services?service=${op?.key}`));
 });
+
+test("le badge d'état d'une carte du Catalogue s'affiche entier, à 1 100 px comme plus étroit (HRT-241)", async ({
+  page,
+}) => {
+  for (const width of [1100, 900]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto("/?nodev#/servers/forge/catalogue");
+    await expect(page.locator("[data-fiche-card]").first()).toBeVisible();
+    const cards = page.locator("[data-fiche-card]");
+    for (let index = 0; index < (await cards.count()); index += 1) {
+      const card = cards.nth(index);
+      const badge = card.locator("[data-fiche-badge]");
+      const cardBox = await card.boundingBox();
+      const badgeBox = await badge.boundingBox();
+      expect(badgeBox && cardBox && badgeBox.x + badgeBox.width <= cardBox.x + cardBox.width).toBe(
+        true,
+      );
+      const clipped = await badge.evaluate((el) => el.scrollWidth > el.clientWidth);
+      expect(clipped, `largeur ${width}, carte ${index}`).toBe(false);
+    }
+  }
+});

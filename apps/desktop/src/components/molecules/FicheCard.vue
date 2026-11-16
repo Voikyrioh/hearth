@@ -109,12 +109,19 @@ function open() {
 
 .fcard__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
 }
 
+/* Le badge s'affiche entier : il passe sous le titre quand la place manque, jamais rogné par le bord de la carte. */
+.fcard__head > :last-child {
+  flex: 0 0 auto;
+}
+
 .fcard__name {
+  min-width: 0;
   margin: 0;
   font-family: var(--font-title);
   font-size: var(--fs-lead);
