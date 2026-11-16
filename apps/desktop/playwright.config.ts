@@ -59,6 +59,7 @@ export default defineConfig({
         "hrt125-pack.spec.ts",
         "hrt104-game.spec.ts",
         "hrt102-catalogue.spec.ts",
+        "ajouter-un-serveur-de-jeu.spec.ts",
         "boutons-une-ligne.spec.ts",
         "hrt109-reglages.spec.ts",
         "ux-2026-10-24.spec.ts",

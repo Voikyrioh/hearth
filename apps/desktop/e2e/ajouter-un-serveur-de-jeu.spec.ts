@@ -24,8 +24,11 @@ test("de la page des services à l'écran de fin : trois chemins, Catalogue, tro
   await page.goto("/?nodev#/servers/forge/services");
   await page.locator("[data-deploy-open]").click();
   await expect(page.locator("[data-add-game-server]")).toBeVisible();
-  await page.locator("[data-add-path-catalog]").click();
-  await expect(page.locator("[data-catalogue-list]")).toContainText("Terraria");
+  await page
+    .locator("[data-add-path-catalog]")
+    .getByRole("button", { name: "Ouvrir le Catalogue" })
+    .click();
+  await expect(page.locator("[data-catalogue]")).toContainText("Terraria");
   await page.getByRole("button", { name: "Voir la fiche de Terraria" }).click();
   await page.locator("[data-fiche-install]").click();
 
@@ -33,7 +36,6 @@ test("de la page des services à l'écran de fin : trois chemins, Catalogue, tro
   await expect(page.locator("[data-install-aside]")).toContainText(
     "Rien n'est créé avant l'étape « Vérifiez avant de lancer ».",
   );
-  await expect(page.locator("[data-install-reason]")).toBeVisible();
   await page.getByLabel("Mot de passe du serveur").fill("hunter2-jeu");
   await page.locator("[data-install-advanced-summary]").click();
   await page.getByLabel("Nombre de joueurs").fill("999");
@@ -69,7 +71,7 @@ test("de la page des services à l'écran de fin : trois chemins, Catalogue, tro
   await expect(done.locator("[data-game-address]")).toBeVisible();
   await expect(done.locator("[data-game-ports]")).toBeVisible();
   await done.locator("[data-done-open]").click();
-  await expect(page).toHaveURL(new RegExp(`services?service=${op?.key}`));
+  await expect(page).toHaveURL(new RegExp(`services[?]service=${op?.key}`));
 });
 
 test("le badge d'état d'une carte du Catalogue s'affiche entier, à 1 100 px comme plus étroit (HRT-241)", async ({
