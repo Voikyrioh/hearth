@@ -202,6 +202,40 @@ const GAMES: &[Game] = &[
             },
         ],
     },
+    Game {
+        id: "vrising",
+        fiche: include_str!("../catalog/vrising/fiche.toml"),
+        settings: include_str!("../catalog/vrising/settings.toml"),
+        answers: &[
+            ("server_name", "hearth-probe"),
+            ("description", "hearth-probe"),
+            ("difficulty", "Difficulty_Brutal"),
+            ("game_mode", "PvE"),
+            ("max_users", "7"),
+            ("list_on_steam", "false"),
+            ("list_on_eos", "false"),
+        ],
+        agreements: &[],
+        probe: Probe::File {
+            target: "/mnt/vrising/persistentdata",
+            path: "Settings/ServerHostSettings.json",
+            needle: "\"Description\": \"hearth-probe\"",
+        },
+        scenarios: &[
+            Scenario {
+                id: "min",
+                memory_bytes: 4 * GIB,
+                ready_within_s: 3000,
+                restart: true,
+            },
+            Scenario {
+                id: "rec",
+                memory_bytes: 6 * GIB,
+                ready_within_s: 3000,
+                restart: false,
+            },
+        ],
+    },
     //GAMES
 ];
 
@@ -298,7 +332,15 @@ async fn wait_ready(
         if lines.iter().any(|line| line.contains(sign)) {
             return Ok(started.elapsed());
         }
-        let running = docker(&["inspect", "-f", "{{.State.Running}}", id]) == "true";
+        // Un conteneur qui sort puis repart (`unless-stopped`, ex. le premier démarrage de V Rising) n'est pas arrêté.
+        let running = docker(&[
+            "inspect",
+            "-f",
+            "{{.State.Running}} {{.State.Restarting}}",
+            id,
+        ])
+        .split(' ')
+        .any(|state| state == "true");
         if !running || started.elapsed() > within {
             return Err(lines.into_iter().rev().take(40).rev().collect());
         }

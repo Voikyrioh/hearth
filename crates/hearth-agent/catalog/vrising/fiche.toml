@@ -1,0 +1,131 @@
+# V Rising, serveur officiel sans mod (serveur Windows sous Wine). Fiche en `preview` (HRT-232, ADR-0050 version 2, ADR-0053).
+#
+# Construite depuis le script `start.sh` de l'image `trueosiris/vrising` (lu DANS l'image épinglée) et depuis la configuration de la forge
+# (`products/forge/forge-nixos/jeux/vrising.nix`, même image, mêmes ports, mêmes réglages posés par variables). Prépare la migration de la
+# forge vers Hearth : l'image est celle de la forge, épinglée par la même empreinte.
+#
+# Les réglages d'un serveur V Rising sont dans deux fichiers JSON (`ServerHostSettings.json`, `ServerGameSettings.json`) que le format de
+# fiche ne lit pas ; l'image sait les modifier par des variables `HOST_SETTINGS_<clé>` et `GAME_SETTINGS_<clé>` (script `start.sh`, `jq`).
+# La fiche n'utilise que ces variables.
+#
+# RESTE `preview` (HRT-232) : le banc d'essai réel (`tests/fiche_live_game.rs`, local, 16/11/2026) a tout validé SAUF l'enregistrement du monde
+# à l'arrêt : le serveur sort en code 0 en 1 à 2 s mais ne réécrit aucune sauvegarde (`Shutting down Server` sans enregistrement) ; seul
+# l'enregistrement automatique (toutes les 120 s) protège le monde. Un arrêt perd donc jusqu'à deux minutes de partie. Voir `evidence.toml`.
+
+format = 2
+id = "vrising"
+version = 1
+family = "vrising"
+name = "V Rising"
+summary = "Le serveur officiel de V Rising, sans mod, par Wine."
+status = "preview"
+platform = "linux"
+
+[image]
+repository = "trueosiris/vrising"
+tag = "2026-04-23-1036"
+digest = "sha256:9356f98ad56139cccf4cfc7a62331d02e4216e8156d990792f5050252405bc7d"
+game_updates = "every_start"              # `start.sh` lance `steamcmd ... app_update 1829350 validate` à chaque démarrage
+
+# L'image tourne en root (le serveur Windows aussi, sous Wine).
+[owner]
+uid = 0
+gid = 0
+
+# Le serveur téléchargé par SteamCMD : jamais sauvegardé, il se retélécharge.
+[[folder]]
+id = "server"
+role = "game_files"
+target = "/mnt/vrising/server"
+read_only = false
+backup = false
+
+# `Saves/v4/<sauvegarde>` (le monde, `AutoSave_*`), `Settings/` (les deux fichiers JSON) et les journaux.
+[[folder]]
+id = "persistentdata"
+role = "world"
+target = "/mnt/vrising/persistentdata"
+read_only = false
+backup = true
+
+# Les variables GAMEPORT et QUERYPORT de l'image ne servent à rien (le serveur ignore les arguments, constaté sur la forge le 17/10/2026) :
+# les ports restent ceux du jeu, 9876 et 9877.
+[[port]]
+id = "game"
+container = 9876
+protocol = "udp"
+role = "game"
+publish = "always"
+default_host = 9876
+group = "base"
+mapping = "nat"
+
+[[port]]
+id = "query"
+container = 9877
+protocol = "udp"
+role = "query"
+publish = "always"
+default_host = 9877
+group = "base"
+mapping = "nat"
+
+[[channel]]
+id = "env"
+kind = "env"
+
+[[env]]
+name = "LOGDAYS"
+value = "14"
+
+[first_start]
+ready_timeout_s = 3600                    # téléchargement du serveur par SteamCMD puis lancement sous Wine (jusqu'à 10 minutes, d'après la forge)
+world_generation = true
+
+[[first_start.download]]
+what = "Le serveur du jeu"
+source_label = "Steam"
+evidence = "unmeasured"
+
+[ready]
+log_contains = "Startup Completed"        # vu sur la vraie image par le banc (16/11/2026) : ligne « [Server] Startup Completed - Disabling Scene Loading Systems » 117 à 136 s après le lancement (le premier démarrage sort une fois et repart : `unless-stopped`)
+status = "tested"
+
+# `start.sh` intercepte le signal : SIGTERM au serveur Windows (`wait`), puis `wineserver -k`. Vérifié par le banc : code 0 en 1 à 2 s, MAIS
+# aucune sauvegarde réécrite à l'arrêt : le monde n'est enregistré que par l'enregistrement automatique du jeu (`AutoSaveInterval` 120 s).
+[stop]
+grace_s = 90
+signal = "SIGTERM"
+world_saved = "not_saved"
+
+[resources]
+cpu = { evidence = "unmeasured" }
+# Banc d'essai réel, 16/11/2026, sans joueur : les LIMITES essayées. 4 Gio : 3,0 Gio au repos (compteur du moteur), pic de démarrage 3,77 Go
+# (cgroupe, cache compris). 6 Gio : 2,80 Gio, pic 3,50 Go. Aucun plancher plus bas n'a été essayé : il n'est pas affirmé.
+memory = { min_bytes = 4294967296, recommended_bytes = 6442450944, evidence = "measured" }
+disk = { install_bytes = 2936636943, evidence = "measured_idle" }   # image (912 014 363 octets) + dossiers gérés après un premier démarrage (serveur téléchargé, petit monde)
+
+[[not_exposed]]
+key = "WORLDNAME"
+channel = "env"
+why = "Le script passe l'argument entre guillemets et le serveur l'ignore (constaté sur la forge le 17/10/2026) : la sauvegarde reste `world1`."
+
+[[not_exposed]]
+key = "GAMEPORT"
+channel = "env"
+why = "Le script passe l'argument entre guillemets et le serveur l'ignore (constaté sur la forge le 17/10/2026) : le port reste 9876."
+
+[[not_exposed]]
+key = "QUERYPORT"
+channel = "env"
+why = "Le script passe l'argument entre guillemets et le serveur l'ignore (constaté sur la forge le 17/10/2026) : le port reste 9877."
+
+[[not_exposed]]
+key = "BRANCH"
+channel = "env"
+why = "Branche de test de Steam : Hearth n'installe que la version publique."
+
+[[not_exposed]]
+key = "GAME_SETTINGS_*"
+channel = "env"
+why = "Les réglages de partie (ServerGameSettings.json) se règlent par le préréglage de difficulté et le mode ; les autres se modifient dans l'onglet Fichiers (`persistentdata/Settings/ServerGameSettings.json`)."
