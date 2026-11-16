@@ -34,7 +34,12 @@ fn with_memory(memory: &str, extra: &str) -> String {
 fn published(text: &str) -> String {
     let digest = format!("sha256:{}", "a".repeat(64));
     replace(
-        &replace(text, "status = \"preview\"", "status = \"published\""),
+        &replace(
+            text,
+            "status = \"preview\"
+preview_reason = \"Fiche de démonstration, pas encore proposée.\"",
+            "status = \"published\"",
+        ),
         "tag = \"1.2.3\"",
         &format!("tag = \"1.2.3\"\ndigest = \"{digest}\""),
     )

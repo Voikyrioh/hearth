@@ -17,6 +17,7 @@ name = "Minecraft Java"
 summary = "Le serveur de Minecraft Java : officiel, Paper, Purpur, Fabric, Quilt, Forge ou NeoForge, avec ou sans pack de mods."
 status = "published"
 platform = "linux"
+illustration = "header.jpg"                # jeu absent de Steam : illustration originale embarquée (BR-FICHE-062, provenance à côté)
 
 [image]
 repository = "itzg/minecraft-server"

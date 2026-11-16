@@ -612,6 +612,16 @@ pub static ENDPOINTS: &[Endpoint] = &[
         audit: None,
         route: || get(catalog::detail),
     },
+    // L'illustration embarquée d'une fiche listée (HRT-238, ADR-0061) : mêmes garde et absence de journal que `/catalog`.
+    Endpoint {
+        method: Method::GET,
+        path: "/catalog/{id}/illustration",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(catalog::illustration),
+    },
     // Reprendre un monde existant (HRT-105, BR-MONDE-002 à 026) : la liste des mondes des dossiers ouverts aux
     // services et l'inspection d'un monde sont des consultations (ni diffusées ni journalisées, BR-MONDE-003),
     // réservées au droit « gérer les services » (BR-MONDE-024 : refus consigné). Installer avec un monde passe par
@@ -1169,6 +1179,7 @@ mod tests {
         // Le catalogue des fiches (HRT-101) : ouvert à tout compte authentifié, aucune écriture.
         ("GET", "/catalog", OpenRead),
         ("GET", "/catalog/{id}", OpenRead),
+        ("GET", "/catalog/{id}/illustration", OpenRead),
         // Reprendre un monde (HRT-105) : le droit est exigé par le niveau ; deux consultations.
         ("GET", "/catalog/{id}/worlds", Service),
         ("POST", "/catalog/{id}/worlds/inspect", ServiceCheck),

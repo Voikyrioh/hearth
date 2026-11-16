@@ -481,6 +481,94 @@ pub fn check_fiche_file(file: &FicheFile) -> Result<(), FicheRefusee> {
     Ok(())
 }
 
+/// BR-FICHE-061 : bornes (en caractères) de la raison d'attente d'une fiche `preview`.
+const MIN_PREVIEW_REASON_CHARS: usize = 20;
+const MAX_PREVIEW_REASON_CHARS: usize = 200;
+
+/// BR-FICHE-061 : une fiche `preview` dit au joueur ce qui la retient ; une fiche `published` n'en dit rien.
+fn check_preview_reason(file: &FicheFile) -> Result<(), FicheRefusee> {
+    let at = "preview_reason";
+    let Some(reason) = file.preview_reason.as_deref() else {
+        return match file.status {
+            Status::Preview => Err(refuse(Fichier::Fiche, at, Motif::PreviewSansRaison)),
+            Status::Published => Ok(()),
+        };
+    };
+    if file.status == Status::Published {
+        return Err(refuse(Fichier::Fiche, at, Motif::RaisonDAttenteSurPubliee));
+    }
+    let form = |raison: &'static str| {
+        Err(refuse(
+            Fichier::Fiche,
+            at,
+            Motif::RaisonDAttenteHorsForme { raison },
+        ))
+    };
+    let length = reason.chars().count();
+    if length < MIN_PREVIEW_REASON_CHARS {
+        return form("moins de 20 caractères");
+    }
+    if length > MAX_PREVIEW_REASON_CHARS {
+        return form("plus de 200 caractères");
+    }
+    if !reason.ends_with('.') {
+        return form("elle se termine par un point");
+    }
+    if reason.contains(['\n', '\r']) {
+        return form("aucun retour à la ligne");
+    }
+    if reason.contains(['<', '>']) {
+        return form("aucune balise");
+    }
+    if reason.contains(['\u{2014}', '\u{2013}']) {
+        return form("aucun tiret cadratin ni demi-cadratin");
+    }
+    Ok(())
+}
+
+/// BR-FICHE-062 : l'image d'un jeu vient de Steam (`steam_app_id`) ou d'une illustration livrée (`illustration`), jamais des deux.
+/// Ni l'un ni l'autre n'entre dans l'empreinte de la fiche. Les octets de l'illustration sont jugés par `build.rs`.
+fn check_image_source(file: &FicheFile) -> Result<(), FicheRefusee> {
+    if let Some(id) = file.steam_app_id
+        && !(1..=i64::from(u32::MAX)).contains(&id)
+    {
+        return Err(refuse(
+            Fichier::Fiche,
+            "steam_app_id",
+            Motif::SteamAppIdHorsBorne,
+        ));
+    }
+    let Some(name) = file.illustration.as_deref() else {
+        return Ok(());
+    };
+    if file.steam_app_id.is_some() {
+        return Err(refuse(
+            Fichier::Fiche,
+            "illustration",
+            Motif::IllustrationEtSteam,
+        ));
+    }
+    if !illustration_name_ok(name) {
+        return Err(refuse(
+            Fichier::Fiche,
+            "illustration",
+            Motif::IllustrationNomInvalide,
+        ));
+    }
+    Ok(())
+}
+
+/// `[a-z0-9-]+.jpg` : un nom simple du dossier de la fiche, jamais un chemin.
+pub fn illustration_name_ok(name: &str) -> bool {
+    name.strip_suffix(".jpg").is_some_and(|stem| {
+        !stem.is_empty()
+            && stem.len() <= 64
+            && stem
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    })
+}
+
 fn check_identity(file: &FicheFile) -> Result<(), FicheRefusee> {
     let f = Fichier::Fiche;
     if !ident_ok(&file.id, MIN_FICHE_ID_CHARS, MAX_FICHE_ID_CHARS, false) {
@@ -504,6 +592,8 @@ fn check_identity(file: &FicheFile) -> Result<(), FicheRefusee> {
     }
     check_text(f, "name", "nom", &file.name, MAX_NAME_CHARS)?;
     check_text(f, "summary", "résumé", &file.summary, MAX_SUMMARY_CHARS)?;
+    check_preview_reason(file)?;
+    check_image_source(file)?;
     if let super::schema::fiche::Platform::Unavailable(u) = &file.platform {
         check_text(
             f,

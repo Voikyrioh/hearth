@@ -1,0 +1,15 @@
+# Registre des identifiants de réglage de la fiche `rust` (HRT-252, conception technique 12.4).
+# Un identifiant publié ne disparaît pas par oubli : retiré de la fiche, il passe en [[retired]] avec sa raison,
+# et son état ici devient `retired` (avec `retired_in`). `cargo xtask catalog-check` le vérifie.
+
+ids = [
+  { id = "server_name", key = "+server.hostname", channel = "args", state = "active", since = 1 },
+  { id = "max_players", key = "+server.maxplayers", channel = "args", state = "active", since = 1 },
+  { id = "world_size", key = "+server.worldsize", channel = "args", state = "active", since = 1 },
+  { id = "seed", key = "+server.seed", channel = "args", state = "active", since = 1 },
+  { id = "save_interval", key = "+server.saveinterval", channel = "args", state = "active", since = 1 },
+  { id = "server_ip", key = "+server.ip", channel = "args", state = "active", since = 1 },
+  { id = "server_port", key = "+server.port", channel = "args", state = "active", since = 1 },
+  { id = "server_queryport", key = "+server.queryport", channel = "args", state = "active", since = 1 },
+  { id = "server_identity", key = "+server.identity", channel = "args", state = "active", since = 1 },
+]

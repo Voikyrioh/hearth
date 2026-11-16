@@ -13,6 +13,7 @@ name = "Valheim"
 summary = "Le serveur officiel de Valheim, sans mod."
 status = "published"
 platform = "linux"
+steam_app_id = 892970                        # identifiant du JEU dans le magasin Steam, relu sur sa page le 16/11/2026 (BR-FICHE-062)
 
 [image]
 repository = "lloesche/valheim-server"

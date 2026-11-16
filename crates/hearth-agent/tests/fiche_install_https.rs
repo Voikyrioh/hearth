@@ -493,7 +493,11 @@ async fn an_unmeasured_minimum_never_blocks_the_install() {
             "digest = \"sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677\"",
             &format!("digest = \"{IMAGE_DIGEST}\""),
         )
-        .replace("status = \"published\"", "status = \"preview\"")
+        .replace(
+            "status = \"published\"",
+            "status = \"preview\"
+preview_reason = \"Fiche d'essai, pas encore proposée.\"",
+        )
         .replace(
             "memory = { min_bytes = 2147483648, recommended_bytes = 2147483648, evidence = \"measured\" }",
             "memory = { evidence = \"unmeasured\" }",

@@ -14,7 +14,9 @@ family = "corekeeper"
 name = "Core Keeper"
 summary = "Le serveur officiel de Core Keeper, en connexion directe, sans mod."
 status = "preview"
+preview_reason = "Le mot de passe du serveur apparaîtrait dans les journaux du jeu, et le jeu ne s'arrête pas encore proprement."
 platform = "linux"
+steam_app_id = 1621690                        # identifiant du JEU dans le magasin Steam, relu sur sa page le 16/11/2026 (BR-FICHE-062)
 
 [image]
 repository = "escaping/core-keeper-dedicated"

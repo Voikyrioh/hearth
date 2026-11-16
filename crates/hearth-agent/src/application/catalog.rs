@@ -2,16 +2,19 @@
 //!
 //! Les fiches sont embarquées dans le binaire (`domain::catalog::embedded`) et rechargées par le chargeur réel au
 //! démarrage : une fiche que le chargeur refuse est ÉCARTÉE, comptée, nommée avec son invariant et consignée au
-//! journal d'activité UNE fois (auteur : le système). Une fiche `preview` n'est proposée que par une construction
-//! d'essai (`include_preview`). Le catalogue ne rend jamais un secret : une fiche n'en contient aucun.
+//! journal d'activité UNE fois (auteur : le système). Un agent de publication LISTE ses fiches `preview` avec leur
+//! raison mais ne les PROPOSE pas (détail, installation) ; seule une construction d'essai (`include_preview`) les
+//! propose (HRT-236, BR-FICHE-002, `embedded::partition`). Le catalogue ne rend jamais un secret : une fiche n'en contient aucun.
+
+use std::collections::HashMap;
 
 use hearth_proto::api::catalog::{
     AgreementView, CatalogView, CharsetView, ChoiceView, CpuNeed, DiskNeed, DownloadView,
-    EvidenceView, FicheCard, FicheDetail, FicheStatus, FirstStartView, FolderView, ImageView,
-    ImposedView, ItemCharsetView, LevelView, ListView, MemoryNeed, ModsView, PackGenreView,
-    PackWayView, PortMappingView, PortView, QuestionKind, QuestionView, RefusedFiche,
-    ResourcesView, SecretKindView, SettingView, StopView, ThemeView, VariantView, WorldImportView,
-    WorldSavedView,
+    EvidenceView, FicheCard, FicheDetail, FicheStatus, FirstStartView, FolderView,
+    IllustrationView, ImageView, ImposedView, ItemCharsetView, LevelView, ListView, MemoryHint,
+    MemoryNeed, ModsView, PackGenreView, PackWayView, PortMappingView, PortView, QuestionKind,
+    QuestionView, RefusedFiche, ResourcesView, SecretKindView, SettingView, StopView, ThemeView,
+    VariantView, WorldImportView, WorldSavedView,
 };
 
 use crate::application::ports::AuditSink;
@@ -31,22 +34,45 @@ pub struct Refused {
     pub invariant: &'static str,
 }
 
+/// L'illustration embarquée d'une fiche, telle que la route la sert : ses octets, leur empreinte (hexadécimale) et la
+/// vue que la liste en donne. Les octets sont ceux du binaire : aucune lecture de fichier à l'exécution (HRT-238).
+#[derive(Clone, Debug)]
+pub struct IllustrationBytes {
+    pub bytes: &'static [u8],
+    pub digest_hex: String,
+    pub view: IllustrationView,
+}
+
 pub struct CatalogService {
+    /// Les fiches PROPOSÉES : détail, installation, mondes.
     fiches: Vec<Fiche>,
+    /// Les fiches LISTÉES : les proposées et les `preview` d'un agent de publication (jamais installables).
+    listed: Vec<Fiche>,
     refused: Vec<Refused>,
+    /// Les illustrations des fiches listées, par identifiant (jamais une lecture de disque).
+    illustrations: HashMap<String, IllustrationBytes>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogError {
     /// La fiche n'existe pas dans ce catalogue (ou est d'essai et cet agent est une publication).
     Unknown,
+    /// La fiche est listée mais n'a pas d'illustration embarquée (toute fiche Steam).
+    IllustrationAbsent,
 }
 
 impl CatalogService {
-    /// Charge les fiches embarquées : toutes sont chargées, les `preview` ne sont gardées que pour une
+    /// Charge les fiches embarquées : toutes sont listées, les `preview` ne sont proposées que par une
     /// construction d'essai.
     pub fn embedded(include_preview: bool) -> Self {
         let (accepted, refused) = embedded::load_all();
+        let illustrations = embedded::EMBEDDED
+            .iter()
+            .filter_map(|e| {
+                let illustration = e.illustration.as_ref()?;
+                Some((e.dir.to_owned(), illustration_of(illustration)))
+            })
+            .collect();
         Self::from_parts(
             accepted,
             refused
@@ -58,13 +84,29 @@ impl CatalogService {
                 .collect(),
             include_preview,
         )
+        .with_illustrations(illustrations)
+    }
+
+    /// Ajoute les illustrations embarquées (la liste en rend la vue, la route les octets).
+    fn with_illustrations(mut self, illustrations: HashMap<String, IllustrationBytes>) -> Self {
+        self.illustrations = illustrations;
+        self
     }
 
     /// Un catalogue de ces fiches (tests).
     pub fn from_parts(fiches: Vec<Fiche>, refused: Vec<Refused>, include_preview: bool) -> Self {
-        let mut fiches = embedded::keep_offered(fiches, include_preview);
-        fiches.sort_by(|a, b| a.id().cmp(b.id()));
-        Self { fiches, refused }
+        let embedded::Partition {
+            mut offered,
+            mut listed,
+        } = embedded::partition(fiches, include_preview);
+        offered.sort_by(|a, b| a.id().cmp(b.id()));
+        listed.sort_by(|a, b| a.id().cmp(b.id()));
+        Self {
+            fiches: offered,
+            listed,
+            refused,
+            illustrations: HashMap::new(),
+        }
     }
 
     /// La fiche proposée de cet identifiant, ou rien : une fiche `preview` d'un agent publié n'existe pas.
@@ -74,7 +116,18 @@ impl CatalogService {
 
     pub fn list(&self) -> CatalogView {
         CatalogView {
-            fiches: self.fiches.iter().map(card).collect::<Vec<_>>().into(),
+            fiches: self
+                .listed
+                .iter()
+                .map(|fiche| {
+                    card(
+                        fiche,
+                        self.fiche(fiche.id()).is_some(),
+                        self.illustrations.get(fiche.id()),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .into(),
             refused: self
                 .refused
                 .iter()
@@ -87,8 +140,25 @@ impl CatalogService {
         }
     }
 
+    /// L'illustration embarquée d'une fiche LISTÉE (publiée ou en cours de preuve) : une fiche inconnue (ou écartée)
+    /// répond `Unknown`, une fiche listée sans illustration `IllustrationAbsent` (BR-FICHE-062). Jamais journalisée.
+    pub fn illustration(&self, id: &str) -> Result<&IllustrationBytes, CatalogError> {
+        if !self.listed.iter().any(|fiche| fiche.id() == id) {
+            return Err(CatalogError::Unknown);
+        }
+        self.illustrations
+            .get(id)
+            .ok_or(CatalogError::IllustrationAbsent)
+    }
+
     pub fn detail(&self, id: &str) -> Result<FicheDetail, CatalogError> {
-        self.fiche(id).map(detail_of).ok_or(CatalogError::Unknown)
+        self.fiche(id)
+            .map(|fiche| {
+                let mut detail = detail_of(fiche);
+                detail.card.illustration = self.illustrations.get(id).map(|i| i.view.clone());
+                detail
+            })
+            .ok_or(CatalogError::Unknown)
     }
 
     /// Consigne UNE entrée par fiche écartée, sous le compte « système » (BR-FICHE-007). À appeler une fois au
@@ -118,7 +188,8 @@ impl CatalogService {
     }
 }
 
-fn card(fiche: &Fiche) -> FicheCard {
+/// `offered` : la fiche est proposée par cette construction (sinon elle n'est que listée, BR-FICHE-002).
+fn card(fiche: &Fiche, offered: bool, illustration: Option<&IllustrationBytes>) -> FicheCard {
     FicheCard {
         id: fiche.id().to_owned(),
         name: fiche.file.name.clone(),
@@ -128,8 +199,47 @@ fn card(fiche: &Fiche) -> FicheCard {
             Status::Published => FicheStatus::Published,
             Status::Preview => FicheStatus::Preview,
         },
-        installable: !matches!(fiche.file.platform, Platform::Unavailable(_)),
+        installable: offered && !matches!(fiche.file.platform, Platform::Unavailable(_)),
+        preview_reason: fiche.file.preview_reason.clone(),
+        memory: memory_hint(fiche),
+        steam_app_id: fiche
+            .file
+            .steam_app_id
+            .and_then(|id| u32::try_from(id).ok()),
+        illustration: illustration.map(|i| i.view.clone()),
     }
+}
+
+/// La vue et les octets d'une illustration embarquée (empreinte hexadécimale, dimensions exigées par `build.rs`).
+fn illustration_of(illustration: &embedded::Illustration) -> IllustrationBytes {
+    use std::fmt::Write as _;
+    let mut digest_hex = String::with_capacity(64);
+    for byte in illustration.digest {
+        let _ = write!(digest_hex, "{byte:02x}");
+    }
+    IllustrationBytes {
+        bytes: illustration.bytes,
+        view: IllustrationView {
+            digest: format!("sha256:{digest_hex}"),
+            bytes: u32::try_from(illustration.bytes.len()).unwrap_or(u32::MAX),
+            width: crate::domain::catalog::jpeg::ILLUSTRATION_WIDTH,
+            height: crate::domain::catalog::jpeg::ILLUSTRATION_HEIGHT,
+            media_type: "image/jpeg".to_owned(),
+        },
+        digest_hex,
+    }
+}
+
+/// La mémoire recommandée de la fiche avec sa preuve (BR-FICHE-064). Les ressources ne dépendent pas de la variante :
+/// c'est donc aussi celle de la variante par défaut. Absente quand la fiche ne recommande aucun chiffre.
+fn memory_hint(fiche: &Fiche) -> Option<MemoryHint> {
+    let memory = &fiche.file.resources.memory;
+    memory
+        .recommended_bytes
+        .map(|recommended_bytes| MemoryHint {
+            recommended_bytes,
+            evidence: evidence(&memory.evidence),
+        })
 }
 
 fn evidence(evidence: &Evidence) -> EvidenceView {
@@ -199,7 +309,7 @@ fn detail_of(fiche: &Fiche) -> FicheDetail {
         FolderRole::Data => "data",
     };
     FicheDetail {
-        card: card(fiche),
+        card: card(fiche, true, None),
         digest: fiche.digest_hex(),
         image: ImageView {
             repository: file.image.repository.clone(),
@@ -531,10 +641,9 @@ mod tests {
     use crate::domain::catalog::test_support::{base, rich};
 
     #[test]
-    fn a_published_catalog_hides_a_preview_fiche_and_a_trial_one_lists_it_with_its_digest() {
+    fn a_publication_agent_lists_previews_with_their_reason_but_never_offers_them() {
         let published = CatalogService::embedded(false);
-        let trial = CatalogService::embedded(true);
-        let list = trial.list();
+        let list = published.list();
         let previews: Vec<_> = list
             .fiches
             .iter()
@@ -542,15 +651,116 @@ mod tests {
             .collect();
         assert!(!previews.is_empty(), "au moins une fiche preview embarquée");
         for preview in &previews {
-            assert!(published.list().fiches.iter().all(|c| c.id != preview.id));
+            assert!(!preview.installable, "{} n'est pas installable", preview.id);
+            assert!(
+                preview
+                    .preview_reason
+                    .as_deref()
+                    .is_some_and(|r| !r.is_empty()),
+                "{} dit pourquoi elle attend",
+                preview.id
+            );
             assert!(published.detail(&preview.id).is_err());
-            let detail = trial.detail(&preview.id).unwrap();
-            assert_eq!(detail.digest.len(), 64);
+            assert!(published.fiche(&preview.id).is_none());
+        }
+        for card in list
+            .fiches
+            .iter()
+            .filter(|c| c.status == FicheStatus::Published)
+        {
+            assert!(card.preview_reason.is_none(), "{}", card.id);
         }
         let terraria = list.fiches.iter().find(|c| c.id == "terraria").unwrap();
         assert_eq!(terraria.status, FicheStatus::Published);
+        assert!(terraria.installable);
+    }
+
+    #[test]
+    fn the_card_carries_the_recommended_memory_with_its_proof_and_none_without_a_figure() {
+        let list = CatalogService::embedded(true).list();
+        let card = |id: &str| list.fiches.iter().find(|c| c.id == id).unwrap().clone();
+        // Terraria : mémoire mesurée (banc d'essai réel) ; Palworld : chiffre de l'éditeur ; 7 Days to Die : aucun chiffre.
+        let terraria = card("terraria")
+            .memory
+            .expect("Terraria recommande une mémoire");
+        assert_eq!(terraria.recommended_bytes, 2_147_483_648);
+        assert_eq!(terraria.evidence, EvidenceView::Measured);
+        let palworld = card("palworld")
+            .memory
+            .expect("Palworld recommande une mémoire");
+        assert_eq!(palworld.recommended_bytes, 34_359_738_368);
+        assert!(matches!(palworld.evidence, EvidenceView::Publisher { .. }));
+        assert_eq!(card("7dtd").memory, None, "aucun chiffre, aucun membre");
+        // Un chiffre n'est jamais donné sans sa preuve.
+        for c in &list.fiches {
+            if let Some(hint) = &c.memory {
+                assert_ne!(hint.evidence, EvidenceView::Unmeasured, "{}", c.id);
+            }
+        }
+    }
+
+    #[test]
+    fn the_card_carries_the_steam_app_id_or_the_embedded_illustration() {
+        let catalog = CatalogService::embedded(false);
+        let list = catalog.list();
+        let card = |id: &str| list.fiches.iter().find(|c| c.id == id).unwrap().clone();
+        assert_eq!(card("terraria").steam_app_id, Some(105_600));
+        assert_eq!(card("valheim").steam_app_id, Some(892_970));
+        assert_eq!(card("terraria").illustration, None);
+        let minecraft = card("minecraft");
+        assert_eq!(minecraft.steam_app_id, None);
+        let view = minecraft
+            .illustration
+            .expect("Minecraft porte son illustration");
+        assert!(view.digest.starts_with("sha256:") && view.digest.len() == 71);
+        assert_eq!((view.width, view.height), (920, 430));
+        assert_eq!(view.media_type, "image/jpeg");
+        // La route sert exactement ces octets, pour une fiche listée seulement.
+        let served = catalog.illustration("minecraft").unwrap();
+        assert_eq!(served.view, view);
+        assert_eq!(served.bytes.len() as u32, view.bytes);
         assert_eq!(
-            published.detail("terraria").unwrap().image.repository,
+            catalog.illustration("terraria").unwrap_err(),
+            CatalogError::IllustrationAbsent
+        );
+        assert_eq!(
+            catalog.illustration("nope").unwrap_err(),
+            CatalogError::Unknown
+        );
+        // Une fiche en cours de preuve est listée : son illustration (ou son absence) se lit, elle n'est pas inconnue.
+        assert_eq!(
+            catalog.illustration("zomboid").unwrap_err(),
+            CatalogError::IllustrationAbsent
+        );
+    }
+
+    #[test]
+    fn a_trial_build_offers_previews_with_their_detail_and_digest() {
+        let trial = CatalogService::embedded(true);
+        let list = trial.list();
+        let previews: Vec<_> = list
+            .fiches
+            .iter()
+            .filter(|c| c.status == FicheStatus::Preview)
+            .collect();
+        assert!(!previews.is_empty());
+        for preview in &previews {
+            let detail = trial.detail(&preview.id).unwrap();
+            assert_eq!(detail.digest.len(), 64);
+            assert_eq!(
+                preview.installable,
+                !matches!(
+                    trial.fiche(&preview.id).unwrap().file.platform,
+                    Platform::Unavailable(_)
+                )
+            );
+        }
+        assert_eq!(
+            CatalogService::embedded(false)
+                .detail("terraria")
+                .unwrap()
+                .image
+                .repository,
             "ryshe/terraria"
         );
     }

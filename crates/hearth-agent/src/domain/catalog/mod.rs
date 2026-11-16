@@ -7,6 +7,7 @@
 //!
 //! - `loading/` : schéma, chargeur, invariants I1 à I9, `ids.lock`. AUTONOME (`super::` seulement) : `build.rs` et
 //!   `xtask` l'incluent par `#[path]` pour appliquer le chargeur réel ;
+//! - `jpeg` : lecteur d'en-tête JPEG pur de `hearth-proto` (illustration embarquée, HRT-238, BR-FICHE-062) ;
 //! - `formats/` : `kv_lines` et `xml_properties`, lecture et retouche sans perte d'un fichier de réglages ;
 //! - `settings_io` : plan d'un enregistrement dans le fichier du jeu (écart, retouche sans perte), analyse d'un texte collé ;
 //! - `settings_state` : état des réglages, validation d'un changement, effet déduit du canal, écart ;
@@ -18,6 +19,8 @@
 pub mod embedded;
 pub mod formats;
 pub mod generate;
+// Le lecteur d'en-tête JPEG vit dans `hearth-proto` (une seule source, partagée avec la coquille du client).
+pub use hearth_proto::jpeg;
 pub mod loading;
 pub mod readiness;
 pub mod settings_io;

@@ -8,6 +8,7 @@
 //! que le chargeur refuse fait échouer la compilation, avec un message qui nomme la fiche, le fichier, l'invariant
 //! et le motif. La table des fiches embarquées et leur empreinte sont écrites dans `OUT_DIR`.
 
+use sha2::Digest as _;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -15,6 +16,11 @@ use std::path::{Path, PathBuf};
 #[path = "src/domain/catalog/loading/mod.rs"]
 #[allow(dead_code, unused_imports)]
 mod loading;
+
+/// Lecteur d'en-tête JPEG : autonome, incluable ici (HRT-238).
+#[path = "../hearth-proto/src/jpeg.rs"]
+#[allow(dead_code)]
+mod jpeg;
 
 fn main() {
     println!("cargo:rerun-if-changed=migrations");
@@ -111,9 +117,10 @@ fn embed_fiches(manifest: &Path, out: &Path) {
             ));
         }
         let digest: Vec<String> = fiche.digest.iter().map(|b| format!("{b:#04x}")).collect();
+        let illustration = embed_illustration(&catalog, dir, fiche.file.illustration.as_deref());
         let _ = writeln!(
             table,
-            "    EmbeddedFiche {{ dir: {dir:?}, fiche_toml: include_bytes!({fiche:?}), settings_toml: include_bytes!({settings:?}), digest: [{digest}] }},",
+            "    EmbeddedFiche {{ dir: {dir:?}, fiche_toml: include_bytes!({fiche:?}), settings_toml: include_bytes!({settings:?}), digest: [{digest}], illustration: {illustration} }},",
             fiche = fiche_path.to_string_lossy(),
             settings = settings_path.to_string_lossy(),
             digest = digest.join(", "),
@@ -125,4 +132,68 @@ fn embed_fiches(manifest: &Path, out: &Path) {
             "table des fiches non écrite dans OUT_DIR : {error}"
         ));
     });
+}
+
+/// L'illustration d'une fiche (HRT-238, BR-FICHE-062) : jugée à la COMPILATION (signature JPEG, 300 Kio au plus, 920 sur
+/// 430, provenance complète), puis embarquée en octets avec son empreinte SHA-256. Une fiche sans illustration : `None`.
+fn embed_illustration(catalog: &Path, dir: &str, name: Option<&str>) -> String {
+    let Some(name) = name else {
+        return "None".to_owned();
+    };
+    let folder = catalog.join(dir);
+    let path = folder.join(name);
+    println!("cargo:rerun-if-changed={}", path.display());
+    let bytes = std::fs::read(&path).unwrap_or_else(|_| {
+        fail(&format!(
+            "fiche `{dir}` refusée : illustration_missing : le fichier `{name}` manque dans son dossier"
+        ))
+    });
+    if let Err(refusal) = jpeg::check_illustration(&bytes) {
+        fail(&format!(
+            "fiche `{dir}` refusée : {} : l'illustration `{name}` est hors règle (JPEG 920 x 430, 300 Kio au plus, BR-FICHE-062)",
+            refusal.motif()
+        ));
+    }
+    check_provenance(&folder, dir);
+    let digest = sha2::Sha256::digest(&bytes);
+    let digest: Vec<String> = digest.iter().map(|b| format!("{b:#04x}")).collect();
+    format!(
+        "Some(Illustration {{ bytes: include_bytes!({path:?}), digest: [{digest}] }})",
+        path = path.to_string_lossy(),
+        digest = digest.join(", ")
+    )
+}
+
+/// `illustration.provenance.toml` : lu seulement pour exiger sa présence et ses clés, jamais embarqué.
+fn check_provenance(folder: &Path, dir: &str) {
+    let path = folder.join("illustration.provenance.toml");
+    println!("cargo:rerun-if-changed={}", path.display());
+    let missing = |why: &str| -> ! {
+        fail(&format!(
+            "fiche `{dir}` refusée : illustration_provenance : {why} (`illustration.provenance.toml`, BR-FICHE-062)"
+        ))
+    };
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        missing("le fichier de provenance manque");
+    };
+    let Ok(table) = text.parse::<toml::Table>() else {
+        missing("le fichier de provenance n'est pas du TOML valable");
+    };
+    for key in ["tool", "requested_by", "prompt_ref"] {
+        let ok = table
+            .get(key)
+            .and_then(toml::Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty());
+        if !ok {
+            missing(&format!("la clé `{key}` manque ou est vide"));
+        }
+    }
+    if table.get("made").is_none() {
+        missing("la clé `made` manque");
+    }
+    if table.get("original").and_then(toml::Value::as_bool) != Some(true) {
+        missing(
+            "la clé `original` doit valoir true (aucun logo, personnage officiel, visuel d'éditeur, lettrage du nom)",
+        );
+    }
 }

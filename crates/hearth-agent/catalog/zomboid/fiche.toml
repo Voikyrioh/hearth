@@ -16,7 +16,9 @@ family = "zomboid"
 name = "Project Zomboid"
 summary = "Le serveur officiel de Project Zomboid (Build 42), sans mod."
 status = "preview"
+preview_reason = "Le mot de passe d'administration apparaîtrait dans les journaux du jeu. Hearth attend une correction de l'image."
 platform = "linux"
+steam_app_id = 108600                        # identifiant du JEU dans le magasin Steam, relu sur sa page le 16/11/2026 (BR-FICHE-062)
 
 [image]
 repository = "danixu86/project-zomboid-dedicated-server"

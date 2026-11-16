@@ -5,6 +5,7 @@ family = "rich"
 name = "Rich"
 summary = "Fiche de test qui exerce tout le format."
 status = "preview"
+preview_reason = "Fiche de test qui exerce tout le format."
 platform = "linux"
 
 [image]
