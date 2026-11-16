@@ -33,6 +33,21 @@ change = "anytime"
 source = "verified"
 
 [[setting]]
+id = "password"
+key = "SERVER_ROLE_0_PASSWORD"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Mot de passe du serveur"
+help = "Ce que vos joueurs tapent pour entrer. Laissez vide pour que tout le monde puisse entrer. Hearth ne l'affiche jamais."
+type = "secret"
+secret_kind = "game_password"
+max_len = 100
+game_default = ""
+change = "anytime"
+source = "verified"
+
+[[setting]]
 id = "slot_count"
 key = "SERVER_SLOT_COUNT"
 channel = "env"

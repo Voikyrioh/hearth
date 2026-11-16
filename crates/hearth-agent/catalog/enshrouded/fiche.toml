@@ -1,9 +1,10 @@
-# Enshrouded, serveur officiel sans mod (serveur Windows sous Wine). Fiche en `preview` (HRT-235, ADR-0050 version 2, ADR-0053).
+# Enshrouded, serveur officiel sans mod (serveur Windows sous Wine). Fiche publiée (HRT-235, ADR-0050 version 2, ADR-0053) : essayée sur sa
+# vraie image par `tests/fiche_live_game.rs` en local (Docker Desktop, 16/11/2026), voir `evidence.toml` et `golden.toml`.
 #
-# Construite depuis le README de l'image `mornedhels/enshrouded-server` (https://github.com/mornedhels/enshrouded-server). Rien n'a été
-# ajouté de mémoire. RESTE `preview` : le banc d'essai réel n'a pas tourné (l'éditeur de l'image annonce 16 Gio de mémoire et 30 Gio de
-# disque au moins, la machine d'essai a 8 Gio) ; aucune mesure. Le mot de passe et les rôles viennent de variables que le README ne détaille
-# pas : ils ne sont pas exposés.
+# Construite depuis le README de l'image `mornedhels/enshrouded-server` (https://github.com/mornedhels/enshrouded-server) et ses scripts
+# (`defaults`, `enshrouded-bootstrap-shared`) lus DANS l'image épinglée. Rien n'a été ajouté de mémoire. Les mémoires et le disque écrits plus
+# bas sont ceux d'un serveur VIDE essayé sans joueur ; l'éditeur de l'image annonce « CPU >= 6 coeurs, RAM >= 16 Go, disque >= 30 Go » pour
+# un serveur en service. Le mot de passe est celui du rôle 0 (« Default ») ; les autres rôles et les préréglages de difficulté sont hors fiche.
 
 format = 2
 id = "enshrouded"
@@ -11,7 +12,7 @@ version = 1
 family = "enshrouded"
 name = "Enshrouded"
 summary = "Le serveur officiel d'Enshrouded, sans mod, par Wine."
-status = "preview"
+status = "published"
 platform = "linux"
 
 [image]
@@ -54,6 +55,11 @@ owner = "uid"
 name = "PGID"
 owner = "gid"
 
+# Le rôle 0 est le groupe « Default » : son mot de passe est celui du serveur (réglage `password`).
+[[env]]
+name = "SERVER_ROLE_0_NAME"
+value = "Default"
+
 [first_start]
 ready_timeout_s = 3600
 world_generation = true
@@ -64,25 +70,33 @@ source_label = "Steam"
 evidence = "unmeasured"
 
 [ready]
-log_contains = "'HostOnline' (up)!"      # signe annoncé par le README de l'image, NON VU par un essai réel
-status = "untested"
+log_contains = "'HostOnline' (up)!"      # vu sur la vraie image par le banc (16/11/2026) : 166 à 207 s après le lancement avec le téléchargement du jeu
+status = "tested"
 
-# Le README ne dit rien de l'arrêt propre : non essayé.
+# L'image arrête le serveur Windows sous supervisord. Vérifié par le banc (16/11/2026) : code 0 en 77 à 78 s, monde réécrit, service qui
+# reste arrêté, redémarrage sur le même monde.
 [stop]
 grace_s = 90
 signal = "SIGTERM"
 world_saved = "by_image_on_signal"
 
-# Chiffres de l'éditeur de l'image (README) : « CPU: >= 6 cores, RAM: >= 16 GB, Disk: >= 30 GB ».
+# Banc d'essai réel, 16/11/2026, serveur vide, sans joueur : les LIMITES essayées. 4 Gio : 892 Mio au repos (compteur du moteur), pic de
+# démarrage 3,95 Go (cgroupe, cache compris). 6 Gio : 805 Mio, pic 3,90 Go. Aucun plancher plus bas n'a été essayé : il n'est pas affirmé.
+# L'éditeur annonce 16 Gio pour un serveur en service (README) : un monde chargé de joueurs pèse davantage que ces chiffres.
 [resources]
 cpu = { evidence = "unmeasured" }
-memory = { min_bytes = 17179869184, evidence = { publisher = "https://github.com/mornedhels/enshrouded-server" } }
-disk = { install_bytes = 32212254720, evidence = { publisher = "https://github.com/mornedhels/enshrouded-server" } }
+memory = { min_bytes = 4294967296, recommended_bytes = 6442450944, evidence = "measured" }
+disk = { install_bytes = 8946101770, evidence = "measured_idle" }   # image (843 805 791 octets) + dossiers gérés après un premier démarrage (serveur de 7,5 Go)
 
 [[not_exposed]]
-key = "SERVER_ROLES_0_PASSWORD"
+key = "SERVER_PASSWORD"
 channel = "env"
-why = "Le mot de passe et les rôles du serveur : le README ne détaille pas ces variables, elles n'ont pas été lues ni essayées."
+why = "Variable dépréciée par l'image (« SERVER_PASSWORD is deprecated ») : le mot de passe passe par `SERVER_ROLE_0_PASSWORD`."
+
+[[not_exposed]]
+key = "SERVER_ROLE_1_NAME"
+channel = "env"
+why = "Rôles supplémentaires (noms, mots de passe, droits de bannir, d'ouvrir les inventaires, de bâtir) : hors de cette fiche ; ils se règlent dans `server/enshrouded_server.json` (onglet Fichiers)."
 
 [[not_exposed]]
 key = "SERVER_IP"

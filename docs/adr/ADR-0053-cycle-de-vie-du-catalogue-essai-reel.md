@@ -118,3 +118,20 @@ Banc : `tests/fiche_live.rs`, rejoué EN LOCAL sur Docker Desktop (WSL2, 8 Gio) 
 
 ## Banc générique (HRT-226)
 `tests/fiche_live_game.rs` généralise le banc de Minecraft aux jeux à arrêt par signal : une entrée du tableau `GAMES` par jeu, un relevé `<out>/<id>/evidence.toml`. Il révèle des défauts de fiche que la lecture ne montre pas : voir les tickets HRT-227 et suivants (7 Days to Die ne démarre pas sous `no-new-privileges`).
+
+## Les autres jeux (16/11/2026, HRT-115, HRT-227 à HRT-235)
+Banc générique `tests/fiche_live_game.rs` lancé en local (Docker Desktop, machine virtuelle de 8 Gio et 62 Go de disque, tous les conteneurs sous `no-new-privileges`). Résultat par jeu (chaque ligne : image épinglée, ce que le banc a vu, statut) :
+
+| Jeu | Image | Résultat | Statut |
+|---|---|---|---|
+| Terraria | `ryshe/terraria:vanilla-1.4.5.8` | banc spécifique (HRT-114) rejoué : tout tient | publiée (v5) |
+| Valheim | `lloesche/valheim-server:sha-0ab6cdcc16dd` | prêt 158 s, arrêt code 0 en 8 s, 1,57 Gio au repos | publiée |
+| Project Zomboid | `danixu86/project-zomboid-dedicated-server:42.20.4-release-2` | prêt 74 s, arrêt code 0 en 23 à 71 s, 2,9 Gio au repos | publiée |
+| 7 Days to Die | `vinanrra/7dtd-server:v0.10.0` | le conteneur ne démarre pas sous `no-new-privileges` (`crontab` setgid) | preview (HRT-227) |
+| Factorio | `factoriotools/factorio:2.1.24` | tout tient (405 Mio au repos) mais le JSON de réglages n'est pas lu | preview (HRT-229) |
+| Core Keeper | `escaping/core-keeper-dedicated:v2.8.1` | arrêt en code 143 | preview (HRT-230) |
+| V Rising | `trueosiris/vrising:2026-04-23-1036` | l'arrêt (code 0, 2 s) ne réécrit aucune sauvegarde | preview (HRT-232) |
+| Enshrouded | `mornedhels/enshrouded-server:1.8.1-wine` | prêt 166 à 207 s, arrêt code 0 en 78 s, 0,8 à 0,9 Gio au repos (serveur vide) | publiée (HRT-235) |
+| Palworld, Satisfactory | README + essai manuel (pas le banc) | démarrent ; arrêt en code 143 et 130 | preview (HRT-233, 234) |
+
+Défauts de format ou de banc révélés : les noms de variables d'environnement d'une fiche sont en majuscules seulement (V Rising écrit en casse mixte) ; une image dont le premier démarrage sort puis repart (SteamCMD qui se met à jour : V Rising, Satisfactory) est rejouée par `unless-stopped` et ses variables ne s'appliquent qu'au second passage ; un arrêt par signal qui sort en code 143 ou 130 après avoir enregistré (Core Keeper, Palworld, Satisfactory) est refusé par la règle du code 0 : à trancher.

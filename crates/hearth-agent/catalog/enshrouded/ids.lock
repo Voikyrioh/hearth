@@ -4,6 +4,7 @@
 
 ids = [
   { id = "server_name", key = "SERVER_NAME", channel = "env", state = "active", since = 1 },
+  { id = "password", key = "SERVER_ROLE_0_PASSWORD", channel = "env", state = "active", since = 1 },
   { id = "slot_count", key = "SERVER_SLOT_COUNT", channel = "env", state = "active", since = 1 },
   { id = "enable_voice_chat", key = "SERVER_ENABLE_VOICE_CHAT", channel = "env", state = "active", since = 1 },
   { id = "enable_text_chat", key = "SERVER_ENABLE_TEXT_CHAT", channel = "env", state = "active", since = 1 },

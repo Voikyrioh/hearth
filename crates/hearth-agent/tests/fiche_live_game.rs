@@ -236,6 +236,36 @@ const GAMES: &[Game] = &[
             },
         ],
     },
+    Game {
+        id: "enshrouded",
+        fiche: include_str!("../catalog/enshrouded/fiche.toml"),
+        settings: include_str!("../catalog/enshrouded/settings.toml"),
+        answers: &[
+            ("server_name", "hearth-probe"),
+            ("slot_count", "4"),
+            ("password", "probesecret1"),
+        ],
+        agreements: &[],
+        probe: Probe::File {
+            target: "/opt/enshrouded",
+            path: "server/enshrouded_server.json",
+            needle: "\"password\": \"probesecret1\"",
+        },
+        scenarios: &[
+            Scenario {
+                id: "min",
+                memory_bytes: 4 * GIB,
+                ready_within_s: 3000,
+                restart: true,
+            },
+            Scenario {
+                id: "rec",
+                memory_bytes: 6 * GIB,
+                ready_within_s: 3000,
+                restart: false,
+            },
+        ],
+    },
     //GAMES
 ];
 
