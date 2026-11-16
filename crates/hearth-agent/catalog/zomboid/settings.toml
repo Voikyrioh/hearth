@@ -1,0 +1,254 @@
+# Réglages de Project Zomboid (HRT-231) : variables de l'image `danixu86/project-zomboid-dedicated-server` (canal `env`) et clés de
+# `Server/servertest.ini` (canal `ini`). Les noms viennent du README et du script `entry.sh` de l'image, les défauts du fichier écrit par le jeu.
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "players"
+label = "Joueurs"
+order = 2
+
+[[theme]]
+id = "performance"
+label = "Performances"
+order = 3
+
+[[theme]]
+id = "network"
+label = "Réseau"
+order = 4
+
+[[setting]]
+id = "display_name"
+key = "DISPLAYNAME"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Nom du serveur"
+help = "Le nom que vos joueurs voient dans la liste des serveurs."
+type = "text"
+charset = "line"
+max_len = 60
+game_default = "My PZ Server"
+proposed = "Mon serveur Zomboid"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "preset"
+key = "SERVERPRESET"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Préréglage de la partie"
+help = "Le préréglage de difficulté d'un nouveau serveur. Il n'est lu qu'à la création : le changer ensuite ne change pas la partie en cours."
+type = "choice"
+choices = [
+  { value = "Apocalypse", label = "Apocalypse" },
+  { value = "Beginner", label = "Débutant" },
+  { value = "Builder", label = "Bâtisseur" },
+  { value = "FirstWeek", label = "Première semaine" },
+  { value = "SixMonthsLater", label = "Six mois plus tard" },
+  { value = "Survival", label = "Survie" },
+  { value = "Survivor", label = "Survivant" },
+]
+game_default = "Apocalypse"
+proposed = "Apocalypse"
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "admin_username"
+key = "ADMINUSERNAME"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Compte administrateur"
+help = "Le nom du compte administrateur du jeu."
+type = "text"
+charset = "file_stem"
+max_len = 30
+game_default = "admin"
+proposed = "admin"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "admin_password"
+key = "ADMINPASSWORD"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Mot de passe de l'administrateur"
+help = "Obligatoire au premier démarrage : sans lui, le serveur échoue. L'image l'écrit en clair dans ses journaux. Hearth ne l'affiche jamais."
+type = "secret"
+secret_kind = "admin_password"
+min_len = 1
+max_len = 100
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "password"
+key = "PASSWORD"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Mot de passe du serveur"
+help = "Ce que vos joueurs tapent pour entrer. Laissez vide pour que tout le monde puisse entrer. Hearth ne l'affiche jamais."
+type = "secret"
+secret_kind = "game_password"
+max_len = 100
+game_default = ""
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "public"
+key = "PUBLIC"
+channel = "env"
+theme = "network"
+level = "common"
+label = "Serveur dans la liste publique"
+help = "Montre le serveur dans la liste des serveurs du jeu. Sinon, on s'y connecte seulement avec l'adresse."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+proposed = "false"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "steam_vac"
+key = "STEAMVAC"
+channel = "env"
+theme = "players"
+level = "advanced"
+label = "Protection VAC de Steam"
+help = "Active la protection contre la triche de Steam."
+type = "bool"
+on = "true"
+off = "false"
+proposed = "true"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "memory"
+key = "MEMORY"
+channel = "env"
+theme = "performance"
+level = "common"
+label = "Mémoire du jeu"
+help = "La mémoire donnée au serveur du jeu. La limite de mémoire du service doit être plus grande : prévoyez au moins 1 Gio de plus."
+type = "choice"
+choices = [
+  { value = "2048m", label = "2 Gio" },
+  { value = "3072m", label = "3 Gio" },
+  { value = "4096m", label = "4 Gio" },
+  { value = "6144m", label = "6 Gio" },
+  { value = "8192m", label = "8 Gio" },
+]
+game_default = "2048m"
+proposed = "2048m"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "max_players"
+key = "MaxPlayers"
+channel = "ini"
+theme = "players"
+level = "essential"
+label = "Nombre de joueurs"
+help = "Combien de joueurs peuvent être connectés en même temps."
+type = "int"
+min = 1
+game_default = "32"
+proposed = "16"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "pvp"
+key = "PVP"
+channel = "ini"
+theme = "players"
+level = "common"
+label = "Combat entre joueurs"
+help = "Les joueurs peuvent-ils se blesser et se tuer entre eux ?"
+type = "bool"
+on = "true"
+off = "false"
+game_default = "true"
+proposed = "true"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "pause_empty"
+key = "PauseEmpty"
+channel = "ini"
+theme = "game"
+level = "common"
+label = "Temps arrêté sans joueur"
+help = "Le temps du jeu s'arrête quand personne n'est connecté."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "true"
+proposed = "true"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "open"
+key = "Open"
+channel = "ini"
+theme = "players"
+level = "common"
+label = "Ouvert à tous les comptes"
+help = "Un joueur peut entrer sans avoir déjà un compte sur la liste blanche. Désactivé, un administrateur crée chaque compte à la main."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "true"
+proposed = "true"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "game_port"
+key = "PORT"
+channel = "env"
+theme = "network"
+level = "advanced"
+label = "Port du jeu dans le service"
+help = "Le port de connexion du jeu, à l'intérieur du service. Celui de vos joueurs se règle dans « Modifier » : vous ne pouvez pas le modifier ici."
+type = "int"
+min = 1024
+max = 65535
+game_default = "16261"
+change = "anytime"
+imposed = { port = "game", why = "Le jeu annonce son port : il suit celui que Hearth relie au service." }
+source = "verified"
+
+[[setting]]
+id = "direct_port"
+key = "UDPPORT"
+channel = "env"
+theme = "network"
+level = "advanced"
+label = "Second port du jeu dans le service"
+help = "Le port des connexions directes, à l'intérieur du service. Celui de vos joueurs se règle dans « Modifier » : vous ne pouvez pas le modifier ici."
+type = "int"
+min = 1024
+max = 65535
+game_default = "16262"
+change = "anytime"
+imposed = { port = "direct", why = "Le jeu annonce ce port : il suit celui que Hearth relie au service." }
+source = "verified"

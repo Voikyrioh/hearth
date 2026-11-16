@@ -34,9 +34,9 @@ async fn a_published_agent_lists_no_trial_fiche_and_reads_one_as_unknown_for_any
     // « marie » n'a pas le droit de gérer les services : la lecture du catalogue est ouverte à tout compte.
     let world = World::connected(options()).await;
     let view = world.manager.read_catalog(&world.id).await.unwrap();
-    // Minecraft (HRT-116), Terraria (HRT-226) et Valheim (HRT-228) sont publiées ; 7 Days to Die, `preview`, n'est pas listée.
+    // Minecraft (HRT-116), Terraria (HRT-226), Valheim (HRT-228) et Project Zomboid (HRT-231) sont publiées ; 7 Days to Die, `preview`, n'est pas listée.
     let ids: Vec<&str> = view.fiches.iter().map(|f| f.id.as_str()).collect();
-    assert_eq!(ids, ["minecraft", "terraria", "valheim"]);
+    assert_eq!(ids, ["minecraft", "terraria", "valheim", "zomboid"]);
     assert!(view.refused.is_empty());
 
     let unknown = world.manager.read_fiche(&world.id, "7dtd").await;

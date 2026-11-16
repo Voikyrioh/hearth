@@ -171,6 +171,37 @@ const GAMES: &[Game] = &[
             },
         ],
     },
+    Game {
+        id: "zomboid",
+        fiche: include_str!("../catalog/zomboid/fiche.toml"),
+        settings: include_str!("../catalog/zomboid/settings.toml"),
+        answers: &[
+            ("display_name", "hearth-probe"),
+            ("admin_password", "probesecret1"),
+            ("max_players", "8"),
+            ("memory", "2048m"),
+        ],
+        agreements: &[],
+        probe: Probe::File {
+            target: "/home/steam/Zomboid",
+            path: "Server/servertest.ini",
+            needle: "MaxPlayers=8",
+        },
+        scenarios: &[
+            Scenario {
+                id: "min",
+                memory_bytes: 4 * GIB,
+                ready_within_s: 1800,
+                restart: true,
+            },
+            Scenario {
+                id: "rec",
+                memory_bytes: 6 * GIB,
+                ready_within_s: 1800,
+                restart: false,
+            },
+        ],
+    },
     //GAMES
 ];
 
