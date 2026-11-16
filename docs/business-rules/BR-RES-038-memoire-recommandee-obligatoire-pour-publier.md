@@ -24,7 +24,7 @@ Une fiche `published` a `memory.recommended_bytes` avec une preuve `measured` ou
 - `xtask/src/catalog_check.rs::tests::the_release_profile_names_the_missing_recommended_memory`
 
 ## Cas limites
-- Terraria reste `preview` : sa mémoire est relevée sur forge par HRT-149.
+- Minecraft (HRT-116) et Terraria, Valheim, Project Zomboid, Enshrouded (HRT-226, 228, 231, 235) sont publiées avec une mémoire recommandée qui est la LIMITE ESSAYÉE par le banc local, sur un serveur vide, sans joueur (`measured`) ; Enshrouded pose en plus le chiffre de l'éditeur (`publisher`, 16 Gio). Savoir si une limite essayée à vide est un fondement suffisant attend la décision de Voiky (ADR-0053, règle 6).
 
 ## Règles liées
 - BR-FICHE-008, BR-RES-031

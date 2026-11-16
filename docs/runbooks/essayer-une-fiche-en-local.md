@@ -2,6 +2,10 @@
 
 Procédure (HRT-226, ADR-0053) pour lancer le banc d'essai réel `tests/fiche_live_game.rs` sur un poste Windows qui a Docker Desktop, sans CI (quota Actions) ni serveur. Le banc passe par le chemin de l'agent (traduction, jugement du déploiement ordinaire, plan fermé, création par `BollardEngine`, donc sous `no-new-privileges`) sur la vraie image épinglée.
 
+## Risque
+
+Monter `/var/run/docker.sock` et lancer en `--network host` donne `root` sur la machine virtuelle de Docker Desktop (et un accès aux autres conteneurs du poste). Cette procédure est RÉSERVÉE à l'essai local manuel sur le poste du propriétaire (ADR-0053, décision 1) ; elle ne se lance jamais sur un runner partagé ni sur un serveur, et le conteneur de test n'exécute que le code du dépôt relu.
+
 ## Pourquoi un conteneur de test
 
 `hearth-agent` ne compile les tests Unix que sous Linux, et le socket du moteur est un socket Unix. Le test tourne donc dans un conteneur Linux `rust:1.95` qui monte le socket de Docker Desktop (`/var/run/docker.sock`). Deux pièges :
@@ -23,7 +27,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --network host \
   cargo test -p hearth-agent --test fiche_live_game -- --ignored --nocapture --test-threads=1
 ```
 
-L'image de test est `rust:1.95-bookworm` plus la CLI `docker` copiée depuis `docker:27-cli`. Variables : `HEARTH_LIVE_GAME` (entrée du tableau `GAMES`), `HEARTH_LIVE_SCENARIOS` (par exemple `min`), `HEARTH_LIVE_MEM_GIB` (limite du premier scénario), `HEARTH_LIVE_PRESEED` (dossier contenant un sous-dossier par identifiant de dossier de la fiche, déplacé à la place du dossier géré pour éviter de retélécharger un gros jeu). Le relevé est écrit dans `<out>/<id>/evidence.toml` ; le copier à côté de la fiche, avec `golden.toml` (`docker image inspect` de l'image épinglée).
+L'image de test est `rust@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1` (`rust:1.95-bookworm` au 16/11/2026, à tirer par cette empreinte) plus la CLI `docker` copiée depuis `docker:27-cli` (à épingler de même). Variables : `HEARTH_LIVE_GAME` (entrée du tableau `GAMES`), `HEARTH_LIVE_SCENARIOS` (par exemple `min`), `HEARTH_LIVE_MEM_GIB` (limite du premier scénario), `HEARTH_LIVE_PRESEED` (dossier contenant un sous-dossier par identifiant de dossier de la fiche, déplacé à la place du dossier géré pour éviter de retélécharger un gros jeu). Le relevé est écrit dans `<out>/<id>/evidence.toml` ; le copier à côté de la fiche, avec `golden.toml` (`docker image inspect` de l'image épinglée).
 
 ## Limites de la machine
 
