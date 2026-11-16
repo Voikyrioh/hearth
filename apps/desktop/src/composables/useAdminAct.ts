@@ -133,7 +133,15 @@ export function useAdminAct(options: AdminActOptions) {
 
   async function submit() {
     if (sending.value) return;
-    if (options.beforeSubmit && !(await options.beforeSubmit())) return;
+    // « Envoi en cours » dès le geste : un second appui pendant la question préalable (le contrat) ne part pas.
+    sending.value = true;
+    let proceed = false;
+    try {
+      proceed = !options.beforeSubmit || (await options.beforeSubmit());
+    } finally {
+      if (!proceed) sending.value = false;
+    }
+    if (!proceed) return;
     error.value = undefined;
     passwordError.value = undefined;
     notice.value = undefined;

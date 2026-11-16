@@ -554,12 +554,22 @@ pub trait DeploymentValidator {
 /// la même valeur de remplissage des deux côtés, donc ils ne figurent jamais dans la différence et le service garde
 /// les siens. Un contexte inconnu après l'installation (monde repris, pack déposé) est compté de la même façon des
 /// deux côtés.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Default, PartialEq, Eq)]
 pub struct GameDiff {
     /// Variable à poser (`Some`) ou à retirer (`None`).
     pub env: Vec<(String, Option<String>)>,
     /// La nouvelle commande, seulement quand elle diffère.
     pub command: Option<Vec<String>>,
+}
+
+impl std::fmt::Debug for GameDiff {
+    /// Des nombres seulement : une valeur de variable ou un élément de commande peut être un secret.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GameDiff")
+            .field("env", &self.env.len())
+            .field("command", &self.command.is_some())
+            .finish()
+    }
 }
 
 /// Le contexte de l'installation que la description garde.

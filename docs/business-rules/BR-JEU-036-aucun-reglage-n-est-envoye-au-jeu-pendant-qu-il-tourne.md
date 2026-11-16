@@ -24,5 +24,6 @@ Hearth n'envoie à un jeu en marche aucune commande de réglage : sans console (
 - BR-FICHE-042, BR-JEU-035
 
 ## Historique
+- 2026-11-17 : une demande qui mêle fichier et conteneur est refusée en entier AVANT toute écriture quand la recréation n'est pas possible (`ServiceUpdates::precheck`) ; un refus tardif remet l'état et les scellés des réglages du conteneur (HRT-266).
 - 2026-11-16 : la recréation est livrée (HRT-266).
 - 2026-10-24 — création (HRT-108).

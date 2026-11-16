@@ -815,3 +815,86 @@ fn the_ordinary_deployment_validator_refuses_what_a_hand_made_deployment_refuses
         Err("ports:duplicate".into())
     );
 }
+
+// ---- game_diff (HRT-266) : ce qu'un changement de réponses change dans les variables et la commande ----
+
+fn minecraft() -> Fiche {
+    EMBEDDED
+        .iter()
+        .find(|e| e.dir == "minecraft")
+        .expect("minecraft")
+        .load()
+        .expect("chargée")
+}
+
+fn answers(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+    pairs
+        .iter()
+        .map(|(id, value)| ((*id).to_owned(), (*value).to_owned()))
+        .collect()
+}
+
+fn diff(before: &[(&str, &str)], after: &[(&str, &str)]) -> super::translate::GameDiff {
+    let fiche = minecraft();
+    let host_ports = BTreeMap::from([("game".to_owned(), 25565_u16)]);
+    super::translate::game_diff(
+        &fiche,
+        &super::translate::GameContext {
+            variant: None,
+            host_ports: &host_ports,
+        },
+        &answers(before),
+        &answers(after),
+    )
+    .expect("traduction")
+}
+
+#[test]
+fn game_diff_returns_only_the_variable_that_changed() {
+    let changed = diff(&[("motd", "Salut")], &[("motd", "Bonjour")]);
+    assert_eq!(
+        changed.env,
+        vec![("MOTD".to_owned(), Some("Bonjour".to_owned()))]
+    );
+    assert!(changed.command.is_none());
+    // Rien ne change : aucune différence.
+    assert_eq!(
+        diff(&[("motd", "Salut")], &[("motd", "Salut")]),
+        Default::default()
+    );
+}
+
+#[test]
+fn game_diff_never_carries_the_filler_of_a_generated_secret() {
+    // Le mot de passe de la console est tiré à l'installation : l'appelant ne le connaît pas, la traduction met le même
+    // remplissage des deux côtés, donc il ne figure jamais dans la différence (le service garde le sien).
+    let changed = diff(&[("motd", "A")], &[("motd", "B")]);
+    let filler = "a".repeat(32);
+    assert!(changed.env.iter().all(|(name, value)| {
+        name != "RCON_PASSWORD"
+            && value
+                .as_deref()
+                .is_none_or(|value| !value.contains(&filler))
+    }));
+}
+
+#[test]
+fn game_diff_reports_a_variable_that_disappears_as_none() {
+    // Une réponse retirée revient à la valeur proposée ; une variable qui n'existe plus d'un côté est `None`.
+    let changed = diff(&[("motd", "Salut")], &[]);
+    let motd = changed.env.iter().find(|(name, _)| name == "MOTD");
+    assert!(motd.is_none_or(|(_, value)| value.is_some()), "{changed:?}");
+}
+
+#[test]
+fn game_diff_debug_never_shows_a_value() {
+    let changed = diff(
+        &[("motd", "Salut-secret-77")],
+        &[("motd", "Bonjour-secret-88")],
+    );
+    let shown = format!("{changed:?}");
+    assert!(
+        !shown.contains("secret-77") && !shown.contains("secret-88"),
+        "{shown}"
+    );
+}

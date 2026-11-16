@@ -44,7 +44,7 @@ use super::ports::{
 use super::secret_vault::{SecretVault, VaultError};
 use super::service_ops::OpLocks;
 use super::service_specs::{ServiceSpecs, SpecServiceError};
-use super::service_update::UpdateError;
+use super::service_update::{UpdateError, UpdateFailed};
 use crate::domain::audit::{Actor, AuditAction, ClientName, Outcome, Target};
 use crate::domain::catalog::formats::{ConfigFormat, MAX_FILE_BYTES, format_for};
 use crate::domain::catalog::loading::model::{Fiche, Setting, ValueSpec, hex};
@@ -62,7 +62,7 @@ use crate::domain::catalog::settings_state::{
 };
 use crate::domain::catalog::translate::{GameContext, TranslateError, game_diff};
 use crate::domain::files::RelPath;
-use crate::domain::sealed::{AnswerId, SealContext, SecretField};
+use crate::domain::sealed::{AnswerId, SealContext, SealedBlob, SecretField};
 use crate::domain::secret::Secret;
 use crate::domain::services::deploy::{flatten_target, normalize_target};
 use crate::domain::services::from_fiche::game_ports;
@@ -111,8 +111,12 @@ pub enum SettingsError {
         character: Option<char>,
     },
     /// Le réglage se reçoit à la création du service : cet agent ne sait pas encore le recréer.
-    #[error("recréer le service n'est pas encore possible")]
-    RecreateNotAvailable { ids: Vec<String> },
+    #[error("recréer le service n'est pas possible maintenant")]
+    RecreateNotAvailable {
+        ids: Vec<String>,
+        /// Les réglages du fichier de la même demande sont enregistrés ; ceux passés au conteneur ne le sont pas.
+        partial: bool,
+    },
     /// L'effet annoncé (et signé) par le client n'est pas celui que l'agent déduit.
     #[error("l'effet annoncé n'est pas celui des changements")]
     EffectMismatch,
@@ -258,6 +262,8 @@ struct Loaded<'a> {
     variant: Option<String>,
     /// Numéro de la dernière écriture (0 : aucune ligne encore).
     rev: u32,
+    /// La révision de la description lue avec ces réglages : la base de la recréation (0 : non lue).
+    spec_rev: u32,
     state: SettingsState,
     fingerprint: Option<String>,
     stored: Option<crate::application::ports::StoredSettings>,
@@ -484,7 +490,9 @@ impl GameSettings {
         let Some((revision, access)) = self.specs.read(key, None).await? else {
             return Err(SettingsError::NotAGameService);
         };
-        self.loaded(key, revision.body, Some(access)).await
+        let spec_rev = revision.rev;
+        self.loaded(key, revision.body, Some(access), spec_rev)
+            .await
     }
 
     /// Comme `load`, sans desceller le moindre secret : pour une lecture ouverte à tout compte (`game_view`), qui ne
@@ -493,7 +501,7 @@ impl GameSettings {
         let Some(body) = self.specs.body(key).await? else {
             return Err(SettingsError::NotAGameService);
         };
-        self.loaded(key, body, None).await
+        self.loaded(key, body, None, 0).await
     }
 
     async fn loaded(
@@ -501,6 +509,7 @@ impl GameSettings {
         key: &ServiceKey,
         body: SpecBody,
         access: Option<SecretsAccess>,
+        spec_rev: u32,
     ) -> Result<Loaded<'_>, SettingsError> {
         let Some(spec_fiche) = &body.fiche else {
             return Err(SettingsError::NotAGameService);
@@ -526,6 +535,7 @@ impl GameSettings {
             body,
             variant,
             rev,
+            spec_rev,
             state,
             fingerprint,
             stored,
@@ -921,7 +931,10 @@ impl GameSettings {
                 .push((setting.id.clone(), wanted));
         }
         if !recreate.is_empty() {
-            return Err(SettingsError::RecreateNotAvailable { ids: recreate });
+            return Err(SettingsError::RecreateNotAvailable {
+                ids: recreate,
+                partial: false,
+            });
         }
         let choices: BTreeMap<String, DriftChoice> = request
             .drift_choices
@@ -1011,6 +1024,7 @@ impl GameSettings {
         }
         // Les réglages passés par une variable ou un argument (HRT-266) : l'état, puis ce que la fiche en tire.
         let mut game_change = None;
+        let env_ids: Vec<String> = env_changes.iter().map(|(id, _)| id.clone()).collect();
         if !env_changes.is_empty() {
             let applied = apply_changes(fiche, &ctx, &state, &env_changes)
                 .map_err(|refusal| refused(&refusal, fiche))?;
@@ -1021,6 +1035,14 @@ impl GameSettings {
             }
             if !applied.changed.is_empty() {
                 game_change = Some(self.game_change(&loaded, &env_changes, &applied.secrets)?);
+                // Refuser TOUT l'enregistrement avant d'écrire le moindre fichier quand la recréation ne peut pas
+                // être acceptée (moteur pas prêt, action en cours, service changé hors de Hearth).
+                if let Some(updates) = self.updates.get() {
+                    updates
+                        .precheck(key)
+                        .await
+                        .map_err(|failed| Self::recreate_error(failed, env_ids.clone(), false))?;
+                }
             }
             state = applied.state;
         }
@@ -1087,6 +1109,8 @@ impl GameSettings {
             )
         }));
 
+        // FIX:01M7KAB43G8ZFZ2RN8YEQ0QC30
+        // FIX:01M7KAB43G8ZFZ2RN8YEQ0QC30
         // Si la recréation est refusée après l'enregistrement, les réglages passés par le conteneur reviennent à ce
         // qu'ils étaient (le fichier, lui, est déjà écrit et garde sa valeur).
         let revert = game_change.is_some().then(|| {
@@ -1097,7 +1121,21 @@ impl GameSettings {
                     loaded.state.slot(id).cloned().unwrap_or(Slot::Unwritten),
                 );
             }
-            back
+            // Les anciens scellés des réglages passés au conteneur reviennent ; sans ancien scellé, l'état « non
+            // secret » du réglage fait supprimer le nouveau (le dépôt retire tout scellé que l'état ne réclame plus).
+            let old: Vec<(String, SealedBlob)> = loaded
+                .stored
+                .as_ref()
+                .map(|stored| {
+                    stored
+                        .sealed
+                        .iter()
+                        .filter(|(id, _)| env_ids.contains(id))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+            (back, old)
         });
         let rev = match self
             .repo
@@ -1126,29 +1164,79 @@ impl GameSettings {
             }
             Err(SettingsStoreError::Store(error)) => return Err(error.into()),
         };
-        self.record(&loaded, actor, &changed, &secrets, &request.others)
-            .await;
         if let Some(change) = game_change {
-            // L'enregistrement des réglages ne tient plus le service : la recréation prend son propre verrou.
+            // L'enregistrement des réglages ne tient plus le service : la recréation prend son propre verrou. Le verrou
+            // par service (`serial`) reste tenu : aucun autre enregistrement ne s'intercale ; `spec_rev` protège de
+            // toute modification de la description entre la lecture et l'acceptation.
             drop(_lock);
-            if let Err(error) = self.recreate(key, change, actor).await {
-                if let Some(state) = revert {
-                    let _ = self
+            let partial =
+                changed.iter().any(|id| !env_ids.contains(id)) || !request.others.is_empty();
+            if let Err(error) = self
+                .recreate(
+                    key,
+                    loaded.spec_rev,
+                    change,
+                    actor,
+                    env_ids.clone(),
+                    partial,
+                )
+                .await
+            {
+                if let Some((state, sealed)) = revert
+                    && let Err(failure) = self
                         .repo
                         .save(NewSettings {
                             key: key.clone(),
                             expected_rev: Some(rev),
                             state,
                             file_fingerprint: Some(new_stamp),
-                            sealed: Vec::new(),
+                            sealed,
                             by: Self::account_of(actor),
                             at: self.clock.now(),
                         })
-                        .await;
+                        .await
+                {
+                    tracing::error!(
+                        error = %failure,
+                        "les réglages passés au conteneur n'ont pas pu être remis après une recréation refusée"
+                    );
+                }
+                // FIX:01M7KAB43G8ZFZ2RN8YEQ0QC30
+                // FIX:01M7KAB43G8ZFZ2RN8YEQ0QC30
+                // Le journal dit ce qui a vraiment été enregistré : seulement les réglages du fichier.
+                let file_only: Vec<String> = changed
+                    .iter()
+                    .filter(|id| !env_ids.contains(id))
+                    .cloned()
+                    .collect();
+                let file_secrets: Vec<(String, Secret)> = secrets
+                    .iter()
+                    .filter(|(id, _)| !env_ids.contains(id))
+                    .map(|(id, secret)| (id.clone(), Secret::new(secret.expose().to_owned())))
+                    .collect();
+                if !file_only.is_empty() || !request.others.is_empty() {
+                    self.record(
+                        &loaded,
+                        actor,
+                        &file_only,
+                        &file_secrets,
+                        &request.others,
+                        Outcome::Failed(crate::domain::audit::Reason::Conflict),
+                    )
+                    .await;
                 }
                 return Err(error);
             }
         }
+        self.record(
+            &loaded,
+            actor,
+            &changed,
+            &secrets,
+            &request.others,
+            Outcome::Succeeded,
+        )
+        .await;
         Ok(SaveSettingsResponse {
             rev,
             effect: effect_wire(effect),
@@ -1287,6 +1375,11 @@ impl GameSettings {
             };
             let value = match change {
                 Change::Set(value) => Some(value.clone()),
+                // « Non écrit » n'existe pas pour un réglage que la fiche propose : la traduction pose toujours sa
+                // valeur proposée. Le dire plutôt que d'enregistrer autre chose que ce qui est demandé.
+                Change::Unset if setting.proposed.is_some() => {
+                    return Err(SettingsError::Invalid("action"));
+                }
                 Change::Unset | Change::Reset => None,
             };
             // Un secret saisi arrive par la liste des secrets de l'enregistrement.
@@ -1332,37 +1425,44 @@ impl GameSettings {
 
     /// Recrée le service avec la description révisée (le plan de HRT-87). Rend la main quand l'opération est
     /// acceptée ; son déroulement se suit comme celui de toute modification.
+    fn recreate_error(failed: UpdateFailed, ids: Vec<String>, partial: bool) -> SettingsError {
+        match failed.error {
+            UpdateError::Busy { .. } => SettingsError::Busy,
+            UpdateError::NotFound | UpdateError::Adopted => SettingsError::NotAGameService,
+            UpdateError::SecretsUnreadable => SettingsError::SecretsUnreadable,
+            UpdateError::Refused(UpdateRefusal::SettingNotAllowed { reason }) => {
+                SettingsError::Refused {
+                    id: None,
+                    reason,
+                    character: None,
+                }
+            }
+            UpdateError::Conflict { .. } => SettingsError::Conflict { by: None, at: None },
+            // Le moteur, l'état du service ou un port : impossible de recréer maintenant.
+            _ => SettingsError::RecreateNotAvailable { ids, partial },
+        }
+    }
+
+    /// Recrée le service avec la description révisée (le plan de HRT-87), sur la révision lue AVANT d'écrire. Rend la
+    /// main quand l'opération est acceptée ; son déroulement se suit comme celui de toute modification.
     async fn recreate(
         &self,
         key: &ServiceKey,
+        spec_rev: u32,
         change: GameChange,
         actor: &Actor,
+        ids: Vec<String>,
+        partial: bool,
     ) -> Result<(), SettingsError> {
         let Some(updates) = self.updates.get() else {
-            return Err(SettingsError::RecreateNotAvailable { ids: Vec::new() });
+            return Err(SettingsError::RecreateNotAvailable { ids, partial });
         };
         let op_key = format!("game-settings-{}", self.clock.now().unix_timestamp_nanos());
-        match updates
-            .update_game(key, change, actor.clone(), &op_key)
+        updates
+            .update_game(key, spec_rev, change, actor.clone(), &op_key)
             .await
-        {
-            Ok(_) => Ok(()),
-            Err(failed) => Err(match failed.error {
-                UpdateError::Busy { .. } => SettingsError::Busy,
-                UpdateError::NotFound | UpdateError::Adopted => SettingsError::NotAGameService,
-                UpdateError::SecretsUnreadable => SettingsError::SecretsUnreadable,
-                UpdateError::Refused(UpdateRefusal::SettingNotAllowed { reason }) => {
-                    SettingsError::Refused {
-                        id: None,
-                        reason,
-                        character: None,
-                    }
-                }
-                UpdateError::Conflict { .. } => SettingsError::Conflict { by: None, at: None },
-                // Le moteur, l'état du service ou un port : impossible de recréer maintenant.
-                _ => SettingsError::RecreateNotAvailable { ids: Vec::new() },
-            }),
-        }
+            .map(|_| ())
+            .map_err(|failed| Self::recreate_error(failed, ids, partial))
     }
 
     fn account_of(actor: &Actor) -> String {
@@ -1381,6 +1481,7 @@ impl GameSettings {
         changed: &[String],
         secrets: &[(String, Secret)],
         others: &[hearth_proto::api::game_settings::OtherChange],
+        outcome: Outcome,
     ) {
         // Un enregistrement va TOUJOURS au journal (BR-FICHE-053) : si le nom du service ne se nettoie pas en un nom
         // affichable, la clé du service (`h_...`, toujours affichable) le remplace.
@@ -1410,7 +1511,7 @@ impl GameSettings {
                     actor.clone(),
                     AuditAction::ServiceGameSettings,
                     target,
-                    Outcome::Succeeded,
+                    outcome,
                 )
                 .await;
         }
@@ -1420,11 +1521,12 @@ impl GameSettings {
     // Ce que le détail d'un serveur de jeu montre (HRT-104, BR-JEU-017 à BR-JEU-021, BR-JEU-027)
     // -------------------------------------------------------------------------------------------------
 
-    /// Pose la source des adresses de la machine (une seule fois, à l'assemblage de l'agent).
+    /// Branche la recréation d'un service (une seule fois, à l'assemblage de l'agent).
     pub fn set_updates(&self, updates: Arc<super::service_update::ServiceUpdates>) {
         let _ = self.updates.set(updates);
     }
 
+    /// Pose la source des adresses de la machine (une seule fois, à l'assemblage de l'agent).
     pub fn set_network(&self, network: Arc<dyn super::ports::NetworkAddresses>) {
         let _ = self.network.set(network);
     }

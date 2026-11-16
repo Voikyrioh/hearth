@@ -568,20 +568,46 @@ impl ServiceUpdates {
         .await
     }
 
+    /// Ce que `update` jugerait AVANT toute écriture, sans rien accepter : le service est modifiable (moteur prêt,
+    /// aucune action en cours, état permis, pas changé hors de Hearth). Sert à refuser tout un enregistrement de
+    /// réglages avant d'écrire le moindre fichier (HRT-266). Le serveur refait chaque contrôle à l'acceptation.
+    pub async fn precheck(&self, key: &ServiceKey) -> Result<(), UpdateFailed> {
+        self.ops.wait_closed(key).await;
+        let engine_state = self.registry.engine_state();
+        let subject = self.subject(key).await?;
+        let named = |error| UpdateFailed::named(error, &subject.name);
+        if engine_state != EngineState::Ready {
+            return Err(named(UpdateError::EngineUnavailable(engine_state)));
+        }
+        if let Some(busy) = self.busy_error(key) {
+            return Err(named(busy));
+        }
+        if let Some(target) = &subject.target
+            && !updatable(target.state)
+        {
+            return Err(named(UpdateError::NotUpdatable(target.state)));
+        }
+        if matches!(self.drift_of(key, &subject), Drift::ModifiedOutside(_)) {
+            return Err(named(UpdateError::Conflict {
+                current_rev: subject.rev,
+                outside: true,
+            }));
+        }
+        Ok(())
+    }
+
     /// Change les réglages d'un serveur de jeu qui passent par une variable ou la commande (HRT-266, BR-JEU-035) :
-    /// la description est révisée et le conteneur recréé par le plan de HRT-87. Rien ne dépend de la révision que
-    /// le client a lue : c'est la révision courante qui sert de base.
+    /// la description est révisée et le conteneur recréé par le plan de HRT-87. `base_rev` est la révision que
+    /// l'appelant a lue AVANT d'écrire quoi que ce soit : une description changée entre-temps est un `SPEC_CONFLICT`.
     pub async fn update_game(
         self: &Arc<Self>,
         key: &ServiceKey,
+        base_rev: u32,
         change: GameChange,
         actor: Actor,
         op_key: &str,
     ) -> Result<UpdateAccepted, UpdateFailed> {
-        // La révision courante est lue ici, sous le verrou de l'enregistrement des réglages : un autre changement
-        // entre-temps est un `SPEC_CONFLICT` honnête de `update_wanted`.
-        let subject = self.subject(key).await?;
-        self.update_wanted(key, subject.rev, None, Wanted::Game(change), actor, op_key)
+        self.update_wanted(key, base_rev, None, Wanted::Game(change), actor, op_key)
             .await
     }
 

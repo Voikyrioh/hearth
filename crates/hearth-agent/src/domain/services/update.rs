@@ -484,13 +484,24 @@ impl std::fmt::Debug for AnswerChange {
 
 /// Ce que le changement de réglages d'un serveur de jeu fait à sa description (HRT-266, BR-JEU-035) : les réponses,
 /// puis les variables et la commande que la fiche en tire (calculées par `translate`, jamais par le client).
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq, Eq)]
 pub struct GameChange {
     pub answers: Vec<AnswerChange>,
     /// Variable à poser (`Some`) ou à retirer (`None`), par nom.
     pub env: Vec<(String, Option<String>)>,
     /// La nouvelle commande de lancement, élément par élément (`Some(vide)` : celle de l'image).
     pub command: Option<Vec<String>>,
+}
+
+impl std::fmt::Debug for GameChange {
+    /// Des nombres seulement : une valeur de variable ou un élément de commande peut être un secret.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GameChange")
+            .field("answers", &self.answers.len())
+            .field("env", &self.env.len())
+            .field("command", &self.command.is_some())
+            .finish()
+    }
 }
 
 /// Applique des réglages d'un service de fiche à sa description (HRT-266) : les réponses, les variables et la

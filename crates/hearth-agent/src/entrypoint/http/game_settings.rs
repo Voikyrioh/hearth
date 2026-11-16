@@ -72,10 +72,14 @@ fn settings_error(error: SettingsError) -> ApiError {
             "Une valeur n'est pas valable.",
             serde_json::json!({ "id": id, "reason": reason, "char": character }),
         )),
-        SettingsError::RecreateNotAvailable { ids } => ApiError(ErrorBody::with_details(
+        SettingsError::RecreateNotAvailable { ids, partial } => ApiError(ErrorBody::with_details(
             ErrorCode::RecreateNotAvailable,
-            "Hearth ne peut pas recréer ce service maintenant : le réglage n'est pas enregistré. Réessayez quand le service est en marche ou arrêté sans action en cours.",
-            serde_json::json!({ "ids": ids }),
+            if partial {
+                "Les réglages du fichier sont enregistrés ; ceux passés au conteneur ne le sont pas."
+            } else {
+                "Hearth ne peut pas recréer ce service maintenant : le réglage n'est pas enregistré. Réessayez quand le service est en marche ou arrêté sans action en cours."
+            },
+            serde_json::json!({ "ids": ids, "partial": partial }),
         )),
         SettingsError::EffectMismatch => ApiError(ErrorBody::with_details(
             ErrorCode::SettingsConflict,
