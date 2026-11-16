@@ -23,7 +23,9 @@ use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use hearth_agent::application::ports::{ContainerEngine, LogQuery};
-use hearth_agent::domain::catalog::loading::schema::fiche::{FolderRole, Protocol, Publish};
+use hearth_agent::domain::catalog::loading::schema::fiche::{
+    FolderRole, PortMapping, Protocol, Publish,
+};
 use hearth_agent::domain::catalog::stop_plan::{StopPlan, ready_sign, stop_plan};
 use hearth_agent::domain::catalog::translate::{Request, translate};
 use hearth_agent::domain::catalog::{Fiche, Origin, load};
@@ -117,6 +119,28 @@ const GAMES: &[Game] = &[
                 id: "rec",
                 memory_bytes: 6 * GIB,
                 ready_within_s: 1800,
+                restart: false,
+            },
+        ],
+    },
+    Game {
+        id: "factorio",
+        fiche: include_str!("../catalog/factorio/fiche.toml"),
+        settings: include_str!("../catalog/factorio/settings.toml"),
+        answers: &[("save_name", "Essai")],
+        agreements: &[],
+        probe: Probe::Env("SAVE_NAME=Essai"),
+        scenarios: &[
+            Scenario {
+                id: "min",
+                memory_bytes: GIB,
+                ready_within_s: 900,
+                restart: true,
+            },
+            Scenario {
+                id: "rec",
+                memory_bytes: 2 * GIB,
+                ready_within_s: 900,
                 restart: false,
             },
         ],
@@ -595,12 +619,17 @@ async fn run_scenario(
         .filter(|p| p.publish == Publish::Always)
     {
         let host = host_port_of(port.container);
+        // `same_number` : le jeu écoute sur le numéro du port publié ; `nat` : sur celui de la fiche.
+        let in_container = match port.mapping {
+            PortMapping::SameNumber => host,
+            PortMapping::Nat => port.container,
+        };
         let open = match port.protocol {
             Protocol::Tcp => ready_ok && tcp_accepts(host, Duration::from_secs(60)).await,
             Protocol::Udp => {
                 let mut ok = false;
                 for _ in 0..30 {
-                    if udp_listening(&id, port.container) {
+                    if udp_listening(&id, in_container) {
                         ok = true;
                         break;
                     }
