@@ -21,12 +21,14 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
       "ressources",
       "ports",
       "téléchargements",
+      "image",
+      "dossiers",
       "arrêt du jeu",
       "questions",
       "ce que cette fiche impose",
-      "image",
-      "dossiers",
     ]);
+    // Plus de carte « Espace disque » : la ligne Espace disque de la carte Ressources le dit.
+    expect(wrapper.find("[data-fiche-disk]").exists()).toBe(false);
     const tech = wrapper.get("[data-fiche-tech]");
     expect(tech.element.hasAttribute("open")).toBe(false);
     expect(tech.get("summary").text()).toBe("Détails techniques");
@@ -156,7 +158,7 @@ describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
     expect(verdicts).toContain("Processeur nécessaire : non vérifié.");
     // Aucun verdict de couverture sur un chiffre qu'on n'a pas.
     expect(wrapper.find("[data-res-cover]").exists()).toBe(false);
-    expect(wrapper.get("[data-fiche-disk]").text()).toContain("2 Go nécessaires");
+    expect(wrapper.get('[data-res-row="disk"] [data-res-min]').text()).toBe("2 Go");
     // Le bouton reste actif : rien n'est bloqué par une preuve manquante.
     expect(wrapper.get("[data-fiche-install]").attributes("aria-disabled")).not.toBe("true");
     wrapper.unmount();
@@ -176,10 +178,10 @@ describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
     expect(wrapper.get('[data-res-row="memory"] [data-res-min]').text()).toBe("2 Go");
     expect(wrapper.get('[data-res-row="memory"] [data-res-recommended]').text()).toBe("4 Go");
     expect(wrapper.find('[data-res-cover="memory-covers"]').exists()).toBe(true);
-    expect(wrapper.get("[data-fiche-disk]").text()).toContain("8 Go nécessaires");
+    expect(wrapper.get('[data-res-row="disk"] [data-res-min]').text()).toBe("8 Go");
     // Le téléchargement du premier démarrage dit sa taille, sa source et sa preuve.
     const downloads = wrapper.get("[data-fiche-downloads]").text();
-    expect(downloads).toContain("environ 6 Go de fichiers de jeu depuis les serveurs de l'éditeur");
+    expect(downloads).toContain("fichiers de jeu (environ 6 Go), depuis les serveurs de l'éditeur");
     expect(downloads).toContain("Chiffre de l'éditeur");
     expect(downloads).toContain("Étapes que Hearth reconnaît");
     wrapper.unmount();

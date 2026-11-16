@@ -11,7 +11,7 @@
 
 format = 2
 id = "minecraft"
-version = 3
+version = 4
 family = "minecraft"
 name = "Minecraft Java"
 summary = "Le serveur de Minecraft Java : officiel, Paper, Purpur, Fabric, Quilt, Forge ou NeoForge, avec ou sans pack de mods."

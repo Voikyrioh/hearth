@@ -66,7 +66,7 @@ describe("la page (BR-FICHE-014, 015)", () => {
     expect(questionInput(wrapper, "max_players").element.value).toBe("8");
     expect(questionInput(wrapper, "password").element.value).toBe("");
     expect(wrapper.get("[data-install-version]").text()).toBe(
-      "Version : vanilla-1.4.5.8 (la seule proposée par cette fiche).",
+      "Ce jeu n'a qu'une seule version de serveur : Hearth installe celle-là, il n'y a rien à choisir.",
     );
     // Aucun champ libre : ni image, ni variable, ni commande, ni dossier.
     expect(wrapper.find('[data-field="image"]').exists()).toBe(false);

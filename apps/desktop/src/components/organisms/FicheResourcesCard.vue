@@ -103,12 +103,19 @@ const TONES = { too_small: "error", publisher_above: "warn", unproven: "info" } 
             <th scope="col">{{ t("fiche.colMin") }}</th>
             <th scope="col">{{ t("fiche.colRecommended") }}</th>
             <th scope="col">{{ t("fiche.colThisServer") }}</th>
-            <th scope="col">{{ t("fiche.colProof") }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="row in rows" :key="row.key" :data-res-row="row.key">
-            <th scope="row">{{ row.label }}</th>
+            <th scope="row">
+              {{ row.label }}
+              <ProofTag
+                :proof="proofOf(row.evidence)"
+                :source="proofUrl(row.evidence) !== null"
+                :subject="row.label"
+                @source="emit('source', row.key)"
+              />
+            </th>
             <td data-res-min>
               <template v-if="row.min !== null">{{ row.min }}</template>
               <span v-else class="res__unproven">{{ t("fiche.notVerified") }}</span>
@@ -118,14 +125,6 @@ const TONES = { too_small: "error", publisher_above: "warn", unproven: "info" } 
               <span v-else class="res__unproven">{{ row.key === "disk" ? t("fiche.notApplicable") : t("fiche.notVerified") }}</span>
             </td>
             <td data-res-server>{{ row.server }}</td>
-            <td>
-              <ProofTag
-                :proof="proofOf(row.evidence)"
-                :source="proofUrl(row.evidence) !== null"
-                :subject="row.label"
-                @source="emit('source', row.key)"
-              />
-            </td>
           </tr>
         </tbody>
       </table>
@@ -156,13 +155,19 @@ const TONES = { too_small: "error", publisher_above: "warn", unproven: "info" } 
 
 <style scoped>
 .res__scroll {
-  overflow-x: auto;
+  min-width: 0;
 }
 
 .res__table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: auto;
   text-align: left;
+}
+
+.res__table th,
+.res__table td {
+  overflow-wrap: anywhere;
 }
 
 .res__table th,

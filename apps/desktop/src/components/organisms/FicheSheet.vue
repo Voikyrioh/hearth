@@ -10,7 +10,6 @@ import { noFigureAtAll } from "@/fiche/fit";
 import { registryOf } from "@/fiche/image";
 import {
   boundsText,
-  diskNeededText,
   downloadText,
   durationText,
   folderRoleText,
@@ -21,7 +20,7 @@ import {
   stopTexts,
   valueLabel,
 } from "@/fiche/messages";
-import { proofOf, proofUrl, proven } from "@/fiche/proof";
+import { proofOf } from "@/fiche/proof";
 import { t } from "@/i18n";
 import type { FicheDetail } from "@/link";
 import type { EngineCapacity } from "@/resources";
@@ -45,16 +44,28 @@ const emit = defineEmits<{
 const image = computed(() => props.detail.image);
 const registry = computed(() => registryText(registryOf(image.value.repository)));
 const firstStart = computed(() => props.detail.firstStart);
-const disk = computed(() => props.detail.resources.disk);
 /** Aucun besoin connu : la carte Ressources le dit une fois, la carte Espace disque ne le redit pas. */
 const nothingKnown = computed(() => noFigureAtAll(props.detail));
-const diskNeed = computed(() => proven(disk.value.installBytes, disk.value.evidence));
 const stop = computed(() => (props.detail.stop ? stopTexts(props.detail.stop) : []));
+/** Les ports que voit un joueur : jamais ceux qui ne sont jamais publiés (console à distance). */
+const shownPorts = computed(() => props.detail.ports.filter((port) => port.publish !== "never"));
 const downloads = computed(() => firstStart.value?.downloads ?? []);
 </script>
 
 <template>
   <div class="sheet" data-fiche-sheet>
+    <section v-if="detail.agreements.length > 0" class="sheet__grid" data-fiche-contract>
+      <DashCard v-if="detail.agreements.length > 0" :title="t('fiche.cardAgreements')" data-fiche-agreements>
+        <div v-for="agreement in detail.agreements" :key="agreement.id" class="sheet__block" data-fiche-agreement>
+          <p class="sheet__strong">{{ safeText(agreement.title) }}</p>
+          <HButton variant="secondary" size="sm" data-agreement-read @click="emit('agreement', agreement.id)">
+            <HIcon name="external" size="sm" />
+            {{ t("fiche.agreementRead") }}
+          </HButton>
+        </div>
+      </DashCard>
+    </section>
+
     <!-- Ce qu'il faut : ressources, ports à ouvrir, espace, téléchargements, arrêt (HRT-221) -->
     <section class="sheet__grid" :aria-label="t('fiche.sectionNeeds')" data-fiche-needs>
       <FicheResourcesCard :detail="detail" :capacity="capacity" :nothing-known="nothingKnown" @source="emit('source', $event)" />
@@ -70,8 +81,8 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
               </tr>
             </thead>
             <tbody>
-              <tr v-for="port in detail.ports" :key="port.id" data-fiche-port-row>
-                <td class="sheet__mono">{{ port.defaultHost ?? port.container }}</td>
+              <tr v-for="port in shownPorts" :key="port.id" data-fiche-port-row>
+                <td class="sheet__mono sheet__nowrap">{{ port.defaultHost ?? port.container }}</td>
                 <td>{{ port.protocol.toUpperCase() }}</td>
                 <td>{{ portRoleText(port.role) }}</td>
                 <td>{{ portPublishText(port.publish) }}</td>
@@ -82,15 +93,6 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
       </DashCard>
 
 
-      <DashCard v-if="!nothingKnown" :title="t('fiche.cardDisk')" data-fiche-disk>
-        <p class="sheet__line" data-disk-needed>{{ diskNeededText(diskNeed) }}</p>
-        <ProofTag
-          :proof="proofOf(disk.evidence)"
-          :source="proofUrl(disk.evidence) !== null"
-          :subject="t('fiche.resDisk')"
-          @source="emit('source', 'disk')"
-        />
-      </DashCard>
 
       <DashCard :title="t('fiche.cardDownloads')" data-fiche-downloads>
         <template v-if="downloads.length > 0">
@@ -111,14 +113,39 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
         </template>
       </DashCard>
 
-      <DashCard v-if="stop.length > 0" :title="t('fiche.cardStop')" data-fiche-stop>
-        <p v-for="line in stop" :key="line" class="sheet__line">{{ line }}</p>
-      </DashCard>
 
     </section>
 
-    <!-- Les réglages (HRT-221) -->
-    <section class="sheet__grid" :aria-label="t('fiche.sectionSettings')" data-fiche-settings-section>
+    <!-- Le détail technique, replié : image, empreinte, registre, dossiers (HRT-221) -->
+    <details class="sheet__tech" data-fiche-tech>
+      <summary class="sheet__tech-title">{{ t("fiche.technicalDetails") }}</summary>
+      <div class="sheet__grid">
+        <DashCard :title="t('fiche.cardImage')" data-fiche-image>
+          <p class="sheet__mono" data-image-ref>{{ safeText(image.repository) }}:{{ safeText(image.tag) }}</p>
+          <template v-if="image.digest !== null">
+            <p class="sheet__line">{{ t("fiche.imageDigest") }}</p>
+            <p class="sheet__mono" data-image-digest>{{ safeText(image.digest) }}</p>
+          </template>
+          <p v-else class="sheet__line" data-image-digest>{{ t("fiche.imageNoDigest") }}</p>
+          <p class="sheet__line">{{ registry }}</p>
+          <p class="sheet__line">{{ t("fiche.imageVersion", { version: safeText(image.tag) }) }}</p>
+        </DashCard>
+
+        <DashCard :title="t('fiche.cardFolders')" data-fiche-folders>
+          <ul class="sheet__list">
+            <li v-for="folder in detail.folders" :key="folder.id" data-fiche-folder>
+              <span class="sheet__strong">{{ folderRoleText(folder.role) }}</span>
+              <span class="sheet__mono">{{ safeText(folder.target) }}</span>
+              <span class="sheet__muted">{{ folder.backup ? t("fiche.folderBackup") : t("fiche.folderNoBackup") }}</span>
+            </li>
+          </ul>
+          <p class="sheet__muted">{{ t("fiche.foldersNote") }}</p>
+        </DashCard>
+
+
+      <DashCard v-if="stop.length > 0" :title="t('fiche.cardStop')" data-fiche-stop>
+        <p v-for="line in stop" :key="line" class="sheet__line">{{ line }}</p>
+      </DashCard>
       <DashCard :title="t('fiche.cardQuestions')" data-fiche-questions>
         <!-- Tous les réglages du jeu et leurs thèmes (HRT-109, BR-FICHE-037, 041) -->
         <template v-if="detail.settings.length > 0">
@@ -154,7 +181,6 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
           </ul>
         </template>
       </DashCard>
-
       <DashCard :title="t('fiche.cardImposed')" data-fiche-imposed>
         <p class="sheet__line" data-imposed-count>
           {{ detail.imposed.length === 0 ? t("fiche.imposedNone") : t("fiche.imposedCount", { n: detail.imposed.length }) }}
@@ -170,44 +196,6 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
           {{ t("fiche.imposedSee") }}
         </HButton>
       </DashCard>
-
-      <DashCard v-if="detail.agreements.length > 0" :title="t('fiche.cardAgreements')" data-fiche-agreements>
-        <div v-for="agreement in detail.agreements" :key="agreement.id" class="sheet__block" data-fiche-agreement>
-          <p class="sheet__strong">{{ safeText(agreement.title) }}</p>
-          <HButton variant="secondary" size="sm" data-agreement-read @click="emit('agreement', agreement.id)">
-            <HIcon name="external" size="sm" />
-            {{ t("fiche.agreementRead") }}
-          </HButton>
-        </div>
-      </DashCard>
-    </section>
-
-    <!-- Le détail technique, replié : image, empreinte, registre, dossiers (HRT-221) -->
-    <details class="sheet__tech" data-fiche-tech>
-      <summary class="sheet__tech-title">{{ t("fiche.technicalDetails") }}</summary>
-      <div class="sheet__grid">
-        <DashCard :title="t('fiche.cardImage')" data-fiche-image>
-          <p class="sheet__mono" data-image-ref>{{ safeText(image.repository) }}:{{ safeText(image.tag) }}</p>
-          <template v-if="image.digest !== null">
-            <p class="sheet__line">{{ t("fiche.imageDigest") }}</p>
-            <p class="sheet__mono" data-image-digest>{{ safeText(image.digest) }}</p>
-          </template>
-          <p v-else class="sheet__line" data-image-digest>{{ t("fiche.imageNoDigest") }}</p>
-          <p class="sheet__line">{{ registry }}</p>
-          <p class="sheet__line">{{ t("fiche.imageVersion", { version: safeText(image.tag) }) }}</p>
-        </DashCard>
-
-        <DashCard :title="t('fiche.cardFolders')" data-fiche-folders>
-          <ul class="sheet__list">
-            <li v-for="folder in detail.folders" :key="folder.id" data-fiche-folder>
-              <span class="sheet__strong">{{ folderRoleText(folder.role) }}</span>
-              <span class="sheet__mono">{{ safeText(folder.target) }}</span>
-              <span class="sheet__muted">{{ folder.backup ? t("fiche.folderBackup") : t("fiche.folderNoBackup") }}</span>
-            </li>
-          </ul>
-          <p class="sheet__muted">{{ t("fiche.foldersNote") }}</p>
-        </DashCard>
-
       </div>
       <slot name="technical" />
     </details>
@@ -315,6 +303,10 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
   color: var(--tx-secondary);
   font-size: var(--fs-small);
   font-weight: var(--fw-semibold);
+}
+
+.sheet__nowrap {
+  white-space: nowrap;
 }
 
 .sheet__action {

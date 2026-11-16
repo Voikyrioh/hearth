@@ -238,9 +238,8 @@ const delivered = computed(() =>
 
 .fiche__head {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: flex-start;
-  justify-content: space-between;
   gap: var(--space-4);
 }
 

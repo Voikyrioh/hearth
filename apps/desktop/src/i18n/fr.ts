@@ -2236,9 +2236,9 @@ export const fr = {
     resThisServerHas: "Votre serveur offre {cpu} et {memory} de mémoire.",
     // Téléchargements, premier démarrage
     downloadKnown:
-      "Au premier démarrage, ce programme télécharge environ {size} de {what} depuis {source}. Cela peut prendre longtemps.",
+      "Au premier démarrage, le jeu télécharge ce qui suit : {what} (environ {size}), depuis {source}. Cela peut prendre longtemps.",
     downloadUnknown:
-      "Au premier démarrage, ce programme télécharge des {what} depuis {source}. Hearth ne connaît pas leur taille. Cela peut prendre longtemps.",
+      "Au premier démarrage, le jeu télécharge ce qui suit : {what}, depuis {source}. Hearth ne connaît pas la taille du téléchargement. Cela peut prendre longtemps.",
     downloadNone: "Cette fiche ne déclare aucun téléchargement au premier démarrage.",
     firstStartLong:
       "Le premier démarrage peut prendre longtemps : Hearth attend jusqu'à {duration}.",
@@ -2314,8 +2314,9 @@ export const fr = {
     portRange: "Le port doit être compris entre 1024 et 65535.",
     portDuplicate: "Deux ports ne peuvent pas porter le même numéro.",
     portPlaceholder: "Numéro du port",
-    portLabel: "Port du serveur pour {role}",
-    versionFixed: "Version : {version} (la seule proposée par cette fiche).",
+    portLabel: "{role}",
+    versionFixed:
+      "Ce jeu n'a qu'une seule version de serveur : Hearth installe celle-là, il n'y a rien à choisir.",
     noPassword:
       "Aucun mot de passe : toute personne qui peut joindre ce port peut rejoindre la partie.",
     tokenHelp:
@@ -2324,7 +2325,8 @@ export const fr = {
     tokenNeeded: "Ce jeu a besoin d'un jeton de serveur.",
     secretHint: "Il est masqué ici et n'est jamais écrit dans le journal d'activité.",
     charsetFileStem: "Lettres, chiffres, tirets et soulignés seulement.",
-    charsetArgSafe: "Lettres sans accent, chiffres, points, tirets, soulignés et deux-points.",
+    charsetArgSafe:
+      "Écrivez des lettres sans accent, des chiffres, des points, des tirets ou des tirets bas.",
     // Un caractère refusé dit en mots (`fiche/character.ts`) : une espace ne se voit pas.
     character: {
       accented: "la lettre accentuée « {character} »",
@@ -2589,7 +2591,7 @@ export const fr = {
     tagModified: "Modifié",
     tagFrozen: "Figé",
     tagImposed: "Imposé par la fiche",
-    technicalName: "Nom dans le jeu : {key}",
+    technicalName: "Nom technique : {key}",
     gameDefault: "Défaut du jeu : {value}",
     gameDefaultEmpty: "Défaut du jeu : vide",
     gameDefaultUnverified: "Défaut du jeu : non vérifié.",

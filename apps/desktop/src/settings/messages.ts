@@ -31,7 +31,8 @@ export function valueText(model: SettingModel, value: string | null): string {
 export function defaultLine(model: SettingModel): string | null {
   if (isSecret(model.setting)) return null;
   const value = model.setting.gameDefault;
-  if (value === null) return t("gameSettings.gameDefaultUnverified");
+  // Un défaut « non vérifié » n'apprend rien à un joueur : aucune ligne (Nora, 16/11).
+  if (value === null) return null;
   if (value === "") return t("gameSettings.gameDefaultEmpty");
   return t("gameSettings.gameDefault", { value: valueText(model, value) });
 }
