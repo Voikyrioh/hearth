@@ -1,0 +1,134 @@
+# Réglages de Core Keeper (HRT-230) : reçus par variable d'environnement de l'image `escaping/core-keeper-dedicated` (canal `env`). Les
+# noms, les valeurs et les défauts viennent du README de l'image et de son script `compile-parameters.sh`. Un changement recrée le service.
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "players"
+label = "Joueurs"
+order = 2
+
+[[theme]]
+id = "network"
+label = "Réseau"
+order = 3
+
+[[setting]]
+id = "world_name"
+key = "WORLD_NAME"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Nom du monde"
+help = "Le nom du monde, tel que vos joueurs le voient."
+type = "text"
+charset = "line"
+max_len = 40
+game_default = "Core Keeper Server"
+proposed = "Mon monde"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "world_seed"
+key = "WORLD_SEED"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Graine du monde"
+help = "Le nombre qui sert à générer un nouveau monde. Laissez vide pour que le jeu en tire une au hasard. Elle ne change plus une fois le monde créé."
+type = "text"
+charset = "arg_safe"
+max_len = 20
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "world_mode"
+key = "WORLD_MODE"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Mode du monde"
+help = "La difficulté du monde : normal, difficile, créatif ou détendu."
+type = "choice"
+choices = [
+  { value = "0", label = "Normal" },
+  { value = "1", label = "Difficile" },
+  { value = "2", label = "Créatif" },
+  { value = "4", label = "Détendu" },
+]
+game_default = "0"
+proposed = "0"
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "season"
+key = "SEASON"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Saison forcée"
+help = "Force une saison de fête dans le monde. Sans choix, le jeu suit la date réelle."
+type = "choice"
+choices = [
+  { value = "0", label = "Aucune" },
+  { value = "1", label = "Pâques" },
+  { value = "2", label = "Halloween" },
+  { value = "3", label = "Noël" },
+  { value = "4", label = "Saint-Valentin" },
+  { value = "5", label = "Anniversaire" },
+  { value = "6", label = "Fleurs de cerisier" },
+  { value = "7", label = "Nouvel an lunaire" },
+]
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "password"
+key = "PASSWORD"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Mot de passe du serveur"
+help = "Ce que vos joueurs tapent pour entrer. Donnez-en un : sans mot de passe valable, le jeu en tire un au hasard et vos joueurs ne le connaissent pas. Hearth ne l'affiche jamais."
+type = "secret"
+secret_kind = "game_password"
+min_len = 1
+max_len = 28
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "max_players"
+key = "MAX_PLAYERS"
+channel = "env"
+theme = "players"
+level = "essential"
+label = "Nombre de joueurs"
+help = "Combien de joueurs peuvent être connectés en même temps."
+type = "int"
+min = 1
+game_default = "10"
+proposed = "10"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "server_port"
+key = "SERVER_PORT"
+channel = "env"
+theme = "network"
+level = "advanced"
+label = "Port d'écoute dans le service"
+help = "Le port de connexion directe, à l'intérieur du service. Le port que vos joueurs utilisent se règle dans « Modifier » : vous ne pouvez pas le modifier ici."
+type = "int"
+min = 1024
+max = 65535
+change = "anytime"
+imposed = { port = "game", why = "Poser ce port met le jeu en connexion directe sur le port que Hearth relie au service." }
+source = "verified"

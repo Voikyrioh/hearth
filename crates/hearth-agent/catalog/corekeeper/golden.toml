@@ -1,0 +1,14 @@
+# Relevé de référence de l'image (ADR-0053, HRT-226). Engendré par `docker image inspect` sur l'image épinglée, jamais écrit à la main.
+# Le fichier de réglages par défaut du jeu n'est pas dans l'image (le jeu l'écrit au premier démarrage) : voir evidence.toml.
+image = "escaping/core-keeper-dedicated@sha256:87fa7925596264e1460cb6c7c128e9d39ac5445206e04e587993b5d4afa7c90f"
+id = "sha256:87fa7925596264e1460cb6c7c128e9d39ac5445206e04e587993b5d4afa7c90f"
+created = "2026-02-27T16:44:24.850099996Z"
+architecture = "amd64"
+user = ""
+workdir = "/home/steam"
+entrypoint = ["/usr/bin/tini","--"]
+cmd = ["bash","scripts/entry.sh"]
+exposed_ports = []
+volumes = []
+stop_signal = ""
+env = ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","USER=steam","HOMEDIR=/home/steam","STEAMCMDDIR=/home/steam/steamcmd","STEAMAPPID=1007","STEAMAPPID_TOOL=1963720","STEAMAPP=core-keeper","STEAMAPPDIR=/home/steam/core-keeper-dedicated","STEAMAPPDATADIR=/home/steam/core-keeper-data","SCRIPTSDIR=/home/steam/scripts","MODSDIR=/home/steam/core-keeper-dedicated/CoreKeeperServer_Data/StreamingAssets/Mods","DLURL=https://raw.githubusercontent.com/escapingnetwork/core-keeper-dedicated","BOX64_DYNAREC_BIGBLOCK=0","BOX64_DYNAREC_SAFEFLAGS=2","BOX64_DYNAREC_STRONGMEM=3","BOX64_DYNAREC_FASTROUND=0","BOX64_DYNAREC_FASTNAN=0","BOX64_DYNAREC_X87DOUBLE=1","BOX64_DYNAREC_BLEEDING_EDGE=0","BOX86_DYNAREC_BIGBLOCK=0","BOX86_DYNAREC_SAFEFLAGS=2","BOX86_DYNAREC_STRONGMEM=3","BOX86_DYNAREC_FASTROUND=0","BOX86_DYNAREC_FASTNAN=0","BOX86_DYNAREC_X87DOUBLE=1","BOX86_DYNAREC_BLEEDING_EDGE=0","PUID=1000","PGID=1000","USE_DEPOT_DOWNLOADER=false","WORLD_INDEX=0","WORLD_NAME=Core Keeper Server","WORLD_SEED=","WORLD_MODE=0","GAME_ID=","DATA_PATH=/home/steam/core-keeper-data","MAX_PLAYERS=10","SEASON=","SERVER_IP=","SERVER_PORT=","PASSWORD=","ACTIVATE_ALL_CONTENT=false","ALLOW_ONLY_PLATFORM=","DISCORD_WEBHOOK_URL=","DISCORD_PLAYER_JOIN_ENABLED=true","DISCORD_PLAYER_JOIN_MESSAGE=${char_name} (${steamid}) has joined the server.","DISCORD_PLAYER_JOIN_TITLE=Player Joined","DISCORD_PLAYER_JOIN_COLOR=47456","DISCORD_PLAYER_LEAVE_ENABLED=true","DISCORD_PLAYER_LEAVE_MESSAGE=${char_name} (${steamid}) has disconnected. Reason: ${reason}.","DISCORD_PLAYER_LEAVE_TITLE=Player Left","DISCORD_PLAYER_LEAVE_COLOR=11477760","DISCORD_SERVER_START_ENABLED=true","DISCORD_SERVER_START_MESSAGE=","DISCORD_SERVER_START_TITLE=Server Started","DISCORD_SERVER_START_COLOR=2013440","DISCORD_SERVER_STOP_ENABLED=true","DISCORD_SERVER_STOP_MESSAGE=","DISCORD_SERVER_STOP_TITLE=Server Stopped","DISCORD_SERVER_STOP_COLOR=12779520","MODS_ENABLED=false","MODIO_API_KEY=","MODIO_API_URL=","MODS="]

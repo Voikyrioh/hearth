@@ -1,0 +1,135 @@
+# Core Keeper, serveur officiel sans mod. Fiche en `preview` (HRT-230, ADR-0050 version 2, ADR-0053).
+#
+# Construite depuis le README de l'image `escaping/core-keeper-dedicated` (https://github.com/escapingnetwork/core-keeper-dedicated)
+# et ses scripts (`compile-parameters.sh`, `entry.sh`, `launch.sh`) lus DANS l'image épinglée. Rien n'a été ajouté de mémoire.
+# RESTE `preview` (HRT-230) : l'arrêt par le signal ne finit pas en code 0 mais en code 143 (le script de lancement de l'image `kill` le jeu
+# à la sortie ; le monde est bien réécrit, en 2 s). La règle de l'essai (ADR-0053, « arrêt propre » = code 0) n'est donc pas tenue.
+# Mode « connexion directe » (`SERVER_PORT` posé) : le joueur tape l'adresse, le port et le mot de passe ; le mode « relais Steam » (Game ID,
+# aucun port) n'est pas proposé. Les mods, les listes de plateformes, les contenus activables et les messages Discord sont hors fiche.
+
+format = 2
+id = "corekeeper"
+version = 1
+family = "corekeeper"
+name = "Core Keeper"
+summary = "Le serveur officiel de Core Keeper, en connexion directe, sans mod."
+status = "preview"
+platform = "linux"
+
+[image]
+repository = "escaping/core-keeper-dedicated"
+tag = "v2.8.1"
+digest = "sha256:87fa7925596264e1460cb6c7c128e9d39ac5445206e04e587993b5d4afa7c90f"
+game_updates = "every_start"              # l'image met le jeu à jour par SteamCMD à chaque démarrage (`setup.sh`)
+
+[owner]
+uid = 1000                                # PUID et PGID : l'image refuse de tourner en root
+gid = 1000
+
+[[folder]]
+id = "data"
+role = "world"
+target = "/home/steam/core-keeper-data"
+read_only = false
+backup = true
+
+# Le serveur téléchargé par SteamCMD (environ 570 Mo) : jamais sauvegardé, il se retélécharge.
+[[folder]]
+id = "server"
+role = "game_files"
+target = "/home/steam/core-keeper-dedicated"
+read_only = false
+backup = false
+
+[[port]]
+id = "game"
+container = 27015
+protocol = "udp"
+role = "game"
+publish = "always"
+default_host = 27015
+mapping = "same_number"
+game_setting = "server_port"
+
+[[channel]]
+id = "env"
+kind = "env"
+
+[[env]]
+name = "PUID"
+owner = "uid"
+
+[[env]]
+name = "PGID"
+owner = "gid"
+
+[first_start]
+ready_timeout_s = 1800
+world_generation = true
+
+[[first_start.download]]
+what = "Le serveur du jeu"
+source_label = "Steam"
+evidence = "unmeasured"
+
+[ready]
+log_contains = "Started session with info"   # vu sur la vraie image par le banc (16/11/2026) : prêt après 72 à 92 s avec le téléchargement ; la ligne donne l'adresse, le port ET le mot de passe (il figure donc dans les journaux)
+status = "tested"
+
+# L'image arrête le jeu quand elle reçoit le signal (le script de lancement envoie `kill` à la sortie) ; README : `stop_grace_period: 2m`.
+[stop]
+grace_s = 120
+signal = "SIGTERM"
+world_saved = "by_image_on_signal"
+
+[resources]
+cpu = { evidence = "unmeasured" }
+# Banc d'essai réel, 16/11/2026, sans joueur : les LIMITES essayées. 2 Gio : 1,34 Gio au repos (compteur du moteur), pic de démarrage au plafond
+# (cache compris). 4 Gio : 1,33 Gio, pic 2,4 Go. Aucun plancher plus bas n'a été essayé : il n'est pas affirmé.
+memory = { min_bytes = 2147483648, recommended_bytes = 4294967296, evidence = "measured" }
+disk = { install_bytes = 876520639, evidence = "measured_idle" }   # image (284 620 246 octets) + dossiers gérés après un premier démarrage
+
+[[not_exposed]]
+key = "GAME_ID"
+channel = "env"
+why = "Identifiant du mode relais Steam : la fiche n'utilise que la connexion directe."
+
+[[not_exposed]]
+key = "WORLD_INDEX"
+channel = "env"
+why = "Une instance gère un seul monde : le numéro de monde reste celui de l'image (0)."
+
+[[not_exposed]]
+key = "HASHED_WORLD_SEED"
+channel = "env"
+why = "Variante de la graine : la graine du monde suffit."
+
+[[not_exposed]]
+key = "SERVER_IP"
+channel = "env"
+why = "Adresse d'écoute dans le conteneur : la changer coupe le port publié."
+
+[[not_exposed]]
+key = "ALLOW_ONLY_PLATFORM"
+channel = "env"
+why = "Liste de plateformes autorisées : non essayée sur la vraie image."
+
+[[not_exposed]]
+key = "ACTIVATE_CONTENT"
+channel = "env"
+why = "Contenus activables du monde : liste du README non essayée sur la vraie image."
+
+[[not_exposed]]
+key = "ACTIVATE_ALL_CONTENT"
+channel = "env"
+why = "Contenus activables du monde : non essayé sur la vraie image."
+
+[[not_exposed]]
+key = "DISCORD_WEBHOOK_URL"
+channel = "env"
+why = "Messages Discord : hors fiche (adresse secrète d'un service tiers)."
+
+[[not_exposed]]
+key = "MODS_ENABLED"
+channel = "env"
+why = "Les mods sont hors de cette fiche."

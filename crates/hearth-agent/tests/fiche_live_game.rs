@@ -145,6 +145,32 @@ const GAMES: &[Game] = &[
             },
         ],
     },
+    Game {
+        id: "corekeeper",
+        fiche: include_str!("../catalog/corekeeper/fiche.toml"),
+        settings: include_str!("../catalog/corekeeper/settings.toml"),
+        answers: &[
+            ("world_name", "hearth-probe"),
+            ("password", "probesecret1"),
+            ("max_players", "3"),
+        ],
+        agreements: &[],
+        probe: Probe::Env("WORLD_NAME=hearth-probe"),
+        scenarios: &[
+            Scenario {
+                id: "min",
+                memory_bytes: 2 * GIB,
+                ready_within_s: 1800,
+                restart: true,
+            },
+            Scenario {
+                id: "rec",
+                memory_bytes: 4 * GIB,
+                ready_within_s: 1800,
+                restart: false,
+            },
+        ],
+    },
     //GAMES
 ];
 
