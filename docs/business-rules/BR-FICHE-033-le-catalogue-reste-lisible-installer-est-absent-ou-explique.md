@@ -30,3 +30,4 @@ BR-FICHE-012, BR-GRANT-014
 
 ## Historique
 - 2026-10-24 — création (HRT-102).
+- 2026-11-16 — une fiche « bientôt » n'a jamais de bouton d'installation, ni dans sa carte ni ailleurs ; une illustration absente ou illisible laisse un visuel neutre (HRT-241). Vérifié : `apps/desktop/src/pages/Catalogue.test.ts`, `components/atoms/FicheVisual.test.ts`.

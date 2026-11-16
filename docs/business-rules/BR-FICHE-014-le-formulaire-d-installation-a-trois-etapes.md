@@ -32,3 +32,4 @@ BR-FICHE-013, BR-FICHE-026, BR-FICHE-038, BR-FICHE-058, BR-FICHE-060
 
 ## Historique
 - 2026-10-24 — création (HRT-102).
+- 2026-11-16 — révisée (HRT-244) : les étapes s'appellent « Réglages », « Mémoire et processeur » puis « Vérifiez avant de lancer » ; « Retour à la fiche » à gauche de la barre du bas. La vérification en page (HRT-246) et l'écran de fin (HRT-247) restent à livrer : la vérification est encore une fenêtre.

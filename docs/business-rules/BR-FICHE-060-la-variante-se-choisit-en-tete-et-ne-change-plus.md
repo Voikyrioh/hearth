@@ -32,3 +32,4 @@ BR-FICHE-014, BR-FICHE-018
 
 ## Historique
 - 2026-10-24 — création (HRT-102).
+- 2026-11-16 — l'étape qui porte la variante s'appelle « Réglages » (HRT-244), plus « Réponses ».

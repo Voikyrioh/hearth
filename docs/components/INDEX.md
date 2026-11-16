@@ -38,7 +38,11 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`ToastStack`](./ToastStack.md) — Notifications empilées (3 visibles, compteur).
 - [`ConfirmDialog`](./ConfirmDialog.md) — Confirmation modale (piège à focus, défaut sûr).
 - [`ProofTag`](./ProofTag.md) — D'où vient un chiffre de ressource d'une fiche : mesuré, au repos, éditeur, non vérifié (HRT-102).
-- [`FicheCard`](./FicheCard.md) — Une fiche dans la liste du Catalogue (HRT-102).
+- [`FicheCard`](./FicheCard.md) — Une carte de la grille du Catalogue (HRT-102, HRT-241).
+- [`FicheVisual`](./FicheVisual.md) — L'image d'un jeu ou son visuel neutre (HRT-239).
+- [`CatalogToolbar`](./CatalogToolbar.md) — Recherche, filtres et « J'ai déjà un serveur de jeu » du Catalogue (HRT-241).
+- [`KeyFacts`](./KeyFacts.md) — Les quatre faits clés d'une fiche (HRT-242).
+- [`AddPathCard`](./AddPathCard.md) — Un chemin de l'écran « Ajouter un serveur de jeu » (HRT-243).
 - [`QuestionField`](./QuestionField.md) — Une question d'installation dans le champ de son genre, lue dans la fiche (HRT-102).
 - [`VariantChoice`](./VariantChoice.md) — Le choix de la variante d'une fiche (HRT-102).
 - [`PortNotes`](./PortNotes.md) — Les notes sous un port du serveur : avertissement, port sous 1024, port libre proposé par l'agent (HRT-69, HRT-102).
@@ -172,10 +176,21 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`Security`](./Security.md) — Sécurité : « Mode attaque » (carte) et tes postes de confiance (liste, retrait avec mot de passe).
 - [`Audit`](./Audit.md) — Journal d'activité (à venir).
 - [`DeployService`](./DeployService.md) — « Déployer un service » : formulaire en page, récapitulatif, progression, abandon (HRT-69).
-- [`Catalogue`](./Catalogue.md) — Les serveurs de jeu que l'agent propose (HRT-102).
+- [`Catalogue`](./Catalogue.md) — Les serveurs de jeu que l'agent liste, en grille avec recherche et filtres (HRT-102, HRT-241).
+- [`AddGameServer`](./AddGameServer.md) — L'écran des trois chemins pour ajouter un serveur de jeu (HRT-243).
 - [`FicheDetail`](./FicheDetail.md) — La fiche d'un jeu et ses deux boutons d'installation (HRT-102).
 - [`InstallFromFiche`](./InstallFromFiche.md) — Installer un serveur de jeu depuis une fiche en trois étapes (HRT-102).
 - [`Settings`](./Settings.md) — Réglages.
+
+## Règles communes
+
+- **Un bouton ne passe jamais à la ligne (HRT-249).** Le texte d'un bouton tient sur une seule ligne, à toute largeur de fenêtre (minimum 1 100 px) : `HButton` pose `white-space: nowrap`, `flex-shrink: 0` et `min-width: max-content`, jamais `text-overflow` ni `ellipsis`. Quand la place manque, c'est la BARRE (ou le conteneur) qui passe à la ligne. Toute barre d'actions est donc un conteneur flex avec `flex-wrap: wrap` et un écart par jeton :
+
+  ```css
+  .xxx__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+  ```
+
+  Test qui garde la règle : `apps/desktop/e2e/boutons-une-ligne.spec.ts` (1 100 et 1 280 px). Un nouvel écran se conforme à cette règle dès sa première version.
 
 ## Règle partagée
 

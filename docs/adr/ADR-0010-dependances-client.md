@@ -106,3 +106,5 @@ Stabilisé avant la vraie liaison (`apps/desktop/src/link/bridge.ts`) :
 - Tauri 2 : https://tauri.app · NSIS : https://tauri.app/distribute/windows-installer/
 - tauri-specta : https://github.com/specta-rs/tauri-specta
 - Fontsource : https://fontsource.org
+
+- 2026-11-16 (HRT-239, ADR-0061) : protocole d'URI `hearth-illustration` (`Builder::register_asynchronous_uri_scheme_protocol`) et client HTTPS `reqwest` dédié vers l'hôte d'images de Steam (sans redirection, hôte compilé) ; `sha2` devient une dépendance de la coquille (empreinte des illustrations de l'agent) ; commandes `get_remote_game_images` et `set_remote_game_images`.

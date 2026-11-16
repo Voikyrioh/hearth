@@ -12,20 +12,27 @@ Tout compte authentifié (niveau `Authenticated`). Non journalisée.
 {
   "fiches": [
     { "id": "terraria", "name": "Terraria", "summary": "Le serveur officiel de Terraria, sans mod.",
-      "version": 1, "status": "preview", "installable": true }
+      "version": 5, "status": "published", "installable": true,
+      "memory": { "recommended_bytes": 2147483648, "evidence": "measured" } },
+    { "id": "factorio", "name": "Factorio", "summary": "Le serveur officiel de Factorio, sans mod.",
+      "version": 1, "status": "preview", "installable": false,
+      "preview_reason": "Le nom de la partie, son mot de passe et le nombre de joueurs ne se règlent pas encore depuis Hearth." }
   ],
   "refused": [ { "dir": "autre-jeu", "invariant": "I2" } ]
 }
 ```
 
-- `fiches` : les fiches que CET agent propose. Un agent de publication ne propose que les fiches `published` ; une construction d'essai (variable de construction `HEARTH_PREVIEW_FICHES`, refusée par `cargo xtask agent --release`) propose aussi les `preview`. Au jour de HRT-101, aucune fiche n'est `published` : la liste d'un agent publié est vide.
+- `fiches` : les fiches que CET agent LISTE (HRT-236, BR-FICHE-002) : les `published` et les `preview` (en cours de preuve). Un agent de publication ne PROPOSE (détail, installation) que les fiches `published` : ses fiches `preview` sont listées avec `installable: false` et leur raison. Une construction d'essai (variable de construction `HEARTH_PREVIEW_FICHES`, refusée par `cargo xtask agent --release`) propose aussi les `preview` (`installable` suit alors la plateforme).
+- `memory` (HRT-237, BR-FICHE-064) : la mémoire recommandée de la fiche et sa preuve (`evidence`, même forme que dans le détail) ; absent quand la fiche n'a pas de mémoire recommandée. Membre facultatif : un client ancien l'ignore.
+- `steam_app_id` (HRT-238, BR-FICHE-062) : l'identifiant du JEU dans le magasin Steam ; absent d'un jeu hors Steam. `illustration` : `{ digest: "sha256:<64 hex>", bytes, width: 920, height: 430, media_type: "image/jpeg" }` pour un jeu absent de Steam (l'illustration embarquée, servie par la route ci-dessous) ; jamais les deux. Membres facultatifs : un client ancien les ignore.
+- `preview_reason` : présent seulement pour une fiche `preview` (BR-FICHE-061) : ce qui la retient, en une ou deux phrases pour le joueur. Membre facultatif : un client ancien l'ignore.
 - `refused` : les fiches embarquées que le chargeur a écartées (dossier et invariant violé, jamais un contenu). Chacune est consignée une fois au démarrage dans le journal d'activité (`catalog.fiche.refused`, auteur : le système).
-- `status` : `published`, `preview` ou `unknown` (valeur d'une version plus récente). `installable: false` : la fiche est listée mais ne s'installe pas sur ce serveur.
+- `status` : `published`, `preview` ou `unknown` (valeur d'une version plus récente). `installable: false` : la fiche est listée mais ne s'installe pas sur ce serveur (plateforme absente, ou fiche en cours de preuve d'un agent de publication).
 - Un élément illisible d'une version plus récente est écarté et compté par le client (`Items::unreadable`).
 
 ## `GET /api/v1/catalog/{id}`
 
-Tout compte authentifié. `404 FICHE_UNKNOWN` si l'agent ne propose pas cette fiche (inconnue, ou `preview` sur un agent publié : même réponse).
+Tout compte authentifié. `404 FICHE_UNKNOWN` si l'agent ne propose pas cette fiche (inconnue, ou `preview` listée par un agent publié : même réponse).
 
 Réponse (`FicheDetail`) :
 
@@ -50,7 +57,15 @@ Réponse (`FicheDetail`) :
 
 ## Règles
 
-BR-FICHE-001 à 004, 006, 007, 008, 010, 016, 037, 041, 056. Le client (HRT-102) lit ces deux routes par `read_catalog` et `read_fiche` de la coquille ; une fiche inconnue de l'agent se lit « inconnue », jamais comme une panne.
+BR-FICHE-001 à 004, 006, 007, 008, 010, 016, 037, 041, 056, 061, 062, 064. Le client (HRT-102) lit ces deux routes par `read_catalog` et `read_fiche` de la coquille ; une fiche inconnue de l'agent se lit « inconnue », jamais comme une panne.
+
+## `GET /api/v1/catalog/{id}/illustration`
+
+L'illustration embarquée d'une fiche LISTÉE (publiée ou en cours de preuve), HRT-238, ADR-0061, BR-FICHE-062. Tout compte authentifié (`Authenticated`), sans journal, sans corps de requête. L'identifiant est validé comme identifiant stable avant toute recherche (jamais répété).
+
+- `200` : corps binaire `image/jpeg` (307 200 octets au plus), `Content-Length`, `Cache-Control: private, max-age=31536000, immutable`, `ETag: "sha256:<64 hex>"`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'`. `If-None-Match` égal à l'`ETag` : `304` sans corps.
+- `404 FICHE_UNKNOWN` : identifiant inconnu ou non stable, ou fiche écartée. `404 ILLUSTRATION_ABSENT` : fiche listée sans illustration (dont toute fiche Steam). `401`, `426` : garde commune.
+- Aucune lecture de fichier à l'exécution : les octets sont ceux du binaire (`build.rs`, `include_bytes!`) ; l'agent ne contacte jamais Steam.
 
 ## Voies de mods (HRT-124)
 

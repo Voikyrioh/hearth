@@ -135,3 +135,7 @@ Banc générique `tests/fiche_live_game.rs` lancé en local (Docker Desktop, mac
 | Palworld, Satisfactory | README + essai manuel (pas le banc) | démarrent ; arrêt en code 143 et 130 | preview (HRT-233, 234) |
 
 Défauts de format ou de banc révélés : les noms de variables d'environnement d'une fiche sont en majuscules seulement (V Rising écrit en casse mixte) ; une image dont le premier démarrage sort puis repart (SteamCMD qui se met à jour : V Rising, Satisfactory) est rejouée par `unless-stopped` et ses variables ne s'appliquent qu'au second passage ; un arrêt par signal qui sort en code 143 ou 130 après avoir enregistré (Core Keeper, Palworld, Satisfactory) est refusé par la règle du code 0 : à trancher.
+
+## Amendement du 2026-11-16 (HRT-236)
+
+Une fiche `preview` est désormais LISTÉE avec sa raison (`preview_reason`, BR-FICHE-061) par un agent de publication ; elle n'est toujours ni détaillée ni installable (réponse `FICHE_UNKNOWN`), sauf dans une construction d'essai.
