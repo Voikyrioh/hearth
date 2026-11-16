@@ -2317,7 +2317,7 @@ export const fr = {
     portPlaceholder: "Numéro du port",
     portLabel: "{role}",
     versionFixed:
-      "Ce jeu n'a qu'une seule version de serveur : Hearth installe celle-là, il n'y a rien à choisir.",
+      "Hearth installe toujours la même image du programme serveur : elle ne se choisit pas. La version de Minecraft, elle, se choisit plus haut.",
     noPassword:
       "Aucun mot de passe : toute personne qui peut joindre ce port peut rejoindre la partie.",
     tokenHelp:

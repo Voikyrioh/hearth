@@ -186,6 +186,7 @@ onBeforeUnmount(() => clearTimeout(timer));
 }
 
 .row {
+  flex-shrink: 0;
   display: grid;
   grid-template-columns: var(--op-columns);
   align-items: center;

@@ -164,9 +164,14 @@ const reason = computed<Reason | null>(() => {
 });
 const reasonId = "install-reason";
 
-function goToRefusedQuestion() {
+/** Ramène à l'étape « Réponses » (le champ y est) puis met le curseur dans la question que le refus désigne. */
+async function goToRefusedQuestion() {
   const question = flow.refusal.value?.question;
-  if (question) answers.value?.focusQuestion(question);
+  if (!question) return;
+  if (install.step.value !== 1) install.back();
+  await nextTick();
+  await nextTick();
+  answers.value?.focusQuestion(question);
 }
 
 async function goToFirstIssue() {
