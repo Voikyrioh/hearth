@@ -2,6 +2,7 @@
 
 Procédures opérationnelles : installation, diagnostics, recovery.
 
+- [Essayer une fiche de jeu sur Docker Desktop](./essayer-une-fiche-en-local.md) — banc d'essai réel `fiche_live_game` en local (HRT-226) : conteneur de test Linux, volume monté au même chemin pour le moteur, variables, limites de la machine, lecture d'un résultat
 - [Installer, réinstaller et désinstaller l'agent](./installer-agent.md) — une commande, interactive ou sans question, installation gérée, refus et dépannage
 - [Mettre l'agent à jour à distance](./mettre-a-jour-agent.md) — clé de signature, publier une version, lancer, suivre, retour automatique, reprise à la main
 - [Publier une version du client](./publier-une-version-du-client.md) — clés de publication (en place, rotation), environnement `release`, flux « Publier une version » (HRT-175 : jobs, environnement `release`, six secrets, essai à blanc, reprise) et flux `publish-client` (à la main, rend un artefact signé, sans release), dépôt dans le bucket, release GitHub sans binaire, premier essai (HRT-56), dépannage
