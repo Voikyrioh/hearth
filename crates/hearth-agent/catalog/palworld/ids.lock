@@ -1,0 +1,22 @@
+# Registre des identifiants de réglage de la fiche `palworld` (HRT-226, conception technique 12.4).
+# Un identifiant publié ne disparaît pas par oubli : retiré de la fiche, il passe en [[retired]] avec sa raison,
+# et son état ici devient `retired` (avec `retired_in`). `cargo xtask catalog-check` le vérifie.
+
+ids = [
+  { id = "server_name", key = "SERVER_NAME", channel = "env", state = "active", since = 1 },
+  { id = "server_description", key = "SERVER_DESCRIPTION", channel = "env", state = "active", since = 1 },
+  { id = "server_password", key = "SERVER_PASSWORD", channel = "env", state = "active", since = 1 },
+  { id = "players", key = "PLAYERS", channel = "env", state = "active", since = 1 },
+  { id = "community", key = "COMMUNITY", channel = "env", state = "active", since = 1 },
+  { id = "difficulty", key = "DIFFICULTY", channel = "env", state = "active", since = 1 },
+  { id = "death_penalty", key = "DEATH_PENALTY", channel = "env", state = "active", since = 1 },
+  { id = "is_pvp", key = "IS_PVP", channel = "env", state = "active", since = 1 },
+  { id = "exp_rate", key = "EXP_RATE", channel = "env", state = "active", since = 1 },
+  { id = "pal_capture_rate", key = "PAL_CAPTURE_RATE", channel = "env", state = "active", since = 1 },
+  { id = "pal_spawn_num_rate", key = "PAL_SPAWN_NUM_RATE", channel = "env", state = "active", since = 1 },
+  { id = "daytime_speed", key = "DAYTIME_SPEEDRATE", channel = "env", state = "active", since = 1 },
+  { id = "nighttime_speed", key = "NIGHTTIME_SPEEDRATE", channel = "env", state = "active", since = 1 },
+  { id = "base_camp_max_num", key = "BASE_CAMP_MAX_NUM", channel = "env", state = "active", since = 1 },
+  { id = "drop_item_max_num", key = "DROP_ITEM_MAX_NUM", channel = "env", state = "active", since = 1 },
+  { id = "game_port", key = "PORT", channel = "env", state = "active", since = 1 },
+]
