@@ -2,6 +2,8 @@
 //! le protocole de la coquille (`hearth-illustration`), jamais par une adresse Steam dans la CSP, et `data:` n'est
 //! admis qu'en développement.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use serde_json::Value;
 
 fn security() -> (String, String) {
