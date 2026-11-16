@@ -207,7 +207,7 @@ const commandNote = computed(() => {
 
 <template>
   <section
-    :class="['detail', { 'detail--logs': tab === 'logs', 'detail--wide': tab === 'backups' }]"
+    :class="['detail', { 'detail--logs': tab === 'logs', 'detail--wide': tab === 'backups' || tab === 'settings' }]"
     :aria-label="service ? t('serviceDetail.region', { name: clip(service.name, 80).text }) : t('serviceDetail.unnamed')"
     :aria-busy="opened.kind === 'waiting' ? 'true' : undefined"
     :data-gone="gone ? '' : undefined"
