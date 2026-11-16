@@ -391,7 +391,11 @@ export const commands = {
 	 *  lien tombé avant la réponse donne `Unknown`. Sans le droit « gérer les services » : `MissingServicesRight`.
 	 */
 	startDeposit: (serverId: string, source: DepositSourceDto, adminPassword: string | null) => typedError<DepositOutcome, LinkFailure>(__TAURI_INVOKE("start_deposit", { serverId, source, adminPassword })),
-	/**  Les envois de cette session, sans lecture réseau : le panneau « Transferts » les relit tant que l'un envoie. */
+	/**
+	 *  Les envois de cette session : le panneau « Transferts » les relit tant que l'un envoie. La réponse n'attend
+	 *  jamais le réseau ; en tâche de fond, les envois réussis dont le fichier a quitté le serveur (consommé par une
+	 *  installation, ou expiré) sortent de la liste (HRT-222).
+	 */
 	listTransfers: () => typedError<TransferDto[], LinkFailure>(__TAURI_INVOKE("list_transfers")),
 	/**  Reprend un envoi interrompu : un geste du compte, jamais automatique. */
 	resumeTransfer: (transferId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("resume_transfer", { transferId })),

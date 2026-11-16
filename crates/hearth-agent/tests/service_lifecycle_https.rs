@@ -1020,13 +1020,13 @@ async fn an_action_cut_by_an_agent_restart_is_interrupted_frees_the_service_and_
 
 /// FIX:01M7GQRDE4VBF9CMCJJMM6MK93 : le verrou « une action est en cours » d'un service ne reste pas affiché chez un
 /// abonné de la liste une fois l'action close, même quand le service n'a pas changé d'état après elle
-/// (conteneur en boucle de plantage, déjà arrêté : l'arrêt dure quelques millisecondes et le moteur ne dit plus rien).
-/// Sans lot après la clôture, la projection `busy` lue à l'envoi restait celle d'avant (HRT-219).
+/// (le moteur ne dit plus rien après l'ordre : cas d'un conteneur en boucle de plantage dont l'arrêt dure quelques
+/// millisecondes). Sans lot après la clôture, la projection `busy` lue à l'envoi restait celle d'avant (HRT-219).
 #[tokio::test]
 async fn the_lock_shown_in_the_list_falls_when_the_action_closes_even_if_the_service_did_not_change()
  {
     let b = bench().await;
-    let (key, id) = publish(&b, "prominence", RunState::Running).await;
+    let (key, _id) = publish(&b, "prominence", RunState::Running).await;
     let mut client = ws::open(&b.agent).await;
     client.auth(&b.dan.token).await;
     client.subscribe(&[Topic::Services]).await;
@@ -1038,11 +1038,9 @@ async fn the_lock_shown_in_the_list_falls_when_the_action_closes_even_if_the_ser
         .iter()
         .find(|item| item.key == key)
         .and_then(|item| item.busy.clone());
-    // Le conteneur est déjà arrêté pour le moteur quand l'ordre part : l'ordre ne change plus rien.
-    b.engine.update(&id, |web| {
-        web.run_state = RunState::Exited;
-        web.exit_code = Some(1);
-    });
+    // Un arrêt ordinaire d'un service qui tourne, sur le faux moteur qui n'émet aucun événement : les lots de la liste
+    // pendant l'action (relecture du conteneur, fin de « Arrêt en cours ») montrent l'action ouverte ; plus rien ne
+    // change après la clôture. L'état de départ est « en marche » sur tous les systèmes (aucune mise en scène).
     let stop = b.accepted("stop", &key).await;
     let operation = b.finished(&stop.action_id).await;
     assert_eq!(operation.status, OperationStatus::Succeeded);
