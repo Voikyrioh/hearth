@@ -122,6 +122,11 @@ export function useDeployFlow(
     focusField: (field: DeployField) => void;
     /** Met le curseur sur cette question d'une fiche. */
     focusQuestion?: (id: string) => void;
+    /**
+     * L'installation a réussi (HRT-247) : `"stay"` garde la page, qui montre alors son écran de fin (installation par
+     * fiche) ; `"leave"` (défaut) dit la réussite par une notification et ramène à la liste (formulaire libre).
+     */
+    onSucceeded?: (launch: Launch, operation: ServiceOperation) => "stay" | "leave";
   } & (
     | /** Le formulaire d'une image (`DeployService`). */ { form: DeployFormState }
     | /** Une autre origine (une fiche du Catalogue). */ { source: DeployFlowSource }
@@ -268,6 +273,13 @@ export function useDeployFlow(
     const op = done.operation;
     const key = current.serviceKey;
     if (op.status === "succeeded" && op.cause !== "stopped_right_after_start") {
+      if (options.onSucceeded?.(current, op) === "stay") {
+        // L'écran de fin de la page remplace la notification et le retour à la liste ; la saisie est effacée.
+        settle();
+        form.wipe();
+        launch.value = null;
+        return;
+      }
       if (!done.announced) {
         toasts.push({ kind: "success", message: t("deploy.success", { name: current.name }) });
       }

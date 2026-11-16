@@ -43,6 +43,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`CatalogToolbar`](./CatalogToolbar.md) — Recherche, filtres et « J'ai déjà un serveur de jeu » du Catalogue (HRT-241).
 - [`KeyFacts`](./KeyFacts.md) — Les quatre faits clés d'une fiche (HRT-242).
 - [`InstallAside`](./InstallAside.md) — L'encart de résumé de l'étape « Réglages » (HRT-244).
+- [`InstallDone`](./InstallDone.md) — L'écran de fin d'une installation depuis une fiche : adresses, ports à ouvrir, étapes repliées (HRT-247).
 - [`AddPathCard`](./AddPathCard.md) — Un chemin de l'écran « Ajouter un serveur de jeu » (HRT-243).
 - [`QuestionField`](./QuestionField.md) — Une question d'installation dans le champ de son genre, lue dans la fiche (HRT-102).
 - [`VariantChoice`](./VariantChoice.md) — Le choix de la variante d'une fiche (HRT-102).

@@ -529,11 +529,42 @@ describe("lancer, suivre, terminer (BR-FICHE-013, 027, 034)", () => {
     await settle();
     bridge.deploys.succeed("forge", op.operationId);
     await settle();
-    expect(toasts()).toContain("Le service mon-terraria est en marche.");
-    expect(router.currentRoute.value.name).toBe("services");
-    expect(router.currentRoute.value.query.service).toBe(op.key);
+    // L'écran de fin remplace la notification et le retour à la liste (HRT-247, BR-FICHE-066).
+    expect(toasts()).toEqual([]);
+    const done = wrapper.get("[data-install-done]");
+    expect(done.get("[data-done-title]").text()).toMatch(
+      /^Le serveur de jeu « mon-terraria » (est en marche|démarre)\.$/,
+    );
+    expect(done.find("[data-game-address]").exists()).toBe(true);
+    expect(done.find("[data-game-ports]").exists()).toBe(true);
+    expect(done.get("[data-done-next]").text()).toContain(
+      "Il ne reste qu'à envoyer l'adresse à vos joueurs.",
+    );
+    expect(done.get("[data-done-steps] summary").text()).toMatch(
+      /^Les étapes de l'installation : \d+ faites$/,
+    );
     // Rien de la saisie ne reste en mémoire : ni la page ni le magasin.
     expect(JSON.stringify(document.body.innerHTML)).not.toContain(SECRET);
+    // « Ouvrir le serveur de jeu » mène au détail du service créé.
+    await done.get("[data-done-open]").trigger("click");
+    await settle();
+    expect(router.currentRoute.value.name).toBe("services");
+    expect(router.currentRoute.value.query.service).toBe(op.key);
+    wrapper.unmount();
+  });
+
+  it("« Fermer » de l'écran de fin ramène à la liste des services, sans détail (HRT-247)", async () => {
+    const { wrapper, bridge, router } = await bootCatalogue(undefined, installPath("terraria"));
+    await openSummary(wrapper);
+    await confirmTop("Installer le serveur de jeu");
+    await settle();
+    const op = running(bridge);
+    bridge.deploys.succeed("forge", op.operationId);
+    await settle();
+    await wrapper.get("[data-done-close]").trigger("click");
+    await settle();
+    expect(router.currentRoute.value.name).toBe("services");
+    expect(router.currentRoute.value.query.service).toBeUndefined();
     wrapper.unmount();
   });
 

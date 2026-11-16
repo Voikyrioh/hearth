@@ -15,7 +15,7 @@ import { proofOf } from "./proof";
  */
 
 /** Le nom du monde que le jeu va créer : la réponse du réglage figé à la création, quand la fiche en nomme un. */
-function createdWorld(detail: FicheDetail, draft: FicheDraft): string | null {
+export function createdWorld(detail: FicheDetail, draft: FicheDraft): string | null {
   const setting = detail.settings.find(
     (item) => item.question.frozenAfterCreation && !item.question.secret,
   );

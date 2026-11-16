@@ -2522,6 +2522,21 @@ export const fr = {
     summaryTitle: "Vérifiez avant de lancer",
     summarySubmit: "Installer le serveur de jeu",
     summaryBack: "Retour",
+    // L'écran de fin d'une installation (HRT-247, BR-FICHE-066)
+    done: {
+      titleRunning: "Le serveur de jeu « {name} » est en marche.",
+      titleStarting: "Le serveur de jeu « {name} » démarre.",
+      startingText:
+        "Le premier démarrage peut prendre jusqu'à {d} minutes. Vous pouvez déjà copier l'adresse : elle marchera dès que le jeu sera prêt.",
+      next: "Il ne reste qu'à envoyer l'adresse à vos joueurs. Tout ce qui suit se retrouve dans la fiche du serveur de jeu, onglet Jeu.",
+      nextWorld:
+        "Le monde « {world} » est créé. Il ne reste qu'à envoyer l'adresse à vos joueurs. Tout ce qui suit se retrouve dans la fiche du serveur de jeu, onglet Jeu.",
+      console: "La console à distance du jeu n'est pas publiée : rien d'autre à ouvrir.",
+      readFailed: "Hearth n'a pas pu lire les adresses de ce serveur de jeu.",
+      stepsTitle: "Les étapes de l'installation : {k} faites",
+      open: "Ouvrir le serveur de jeu",
+      close: "Fermer",
+    },
     // La vérification en page, troisième étape (HRT-246, BR-FICHE-025)
     review: {
       intro:

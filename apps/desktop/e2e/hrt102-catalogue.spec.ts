@@ -115,7 +115,10 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
     const first = s.deploys.running("forge")[0];
     if (first) s.deploys.succeed("forge", first.operationId);
   });
-  await expect(page.getByText("Le service terraria est en marche.")).toBeVisible();
+  // L'écran de fin remplace la notification (HRT-247) ; « Ouvrir le serveur de jeu » mène au service.
+  await expect(page.locator("[data-done-title]")).toContainText("Le serveur de jeu « terraria » ");
+  await shoot(page.locator("[data-install-done]"), page, "installer-fin");
+  await page.locator("[data-done-open]").click();
   await expect(page).toHaveURL(new RegExp(`services\\?service=${op?.key}`));
   // La saisie est partie avec la demande, jamais dans l'adresse.
   expect(page.url()).not.toContain("hunter2");

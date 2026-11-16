@@ -14,6 +14,7 @@ import EnginePanel from "@/components/organisms/EnginePanel.vue";
 import FicheReview from "@/components/organisms/FicheReview.vue";
 import ImposedDialog from "@/components/organisms/ImposedDialog.vue";
 import InstallAnswers from "@/components/organisms/InstallAnswers.vue";
+import InstallDone from "@/components/organisms/InstallDone.vue";
 import InstallResources from "@/components/organisms/InstallResources.vue";
 import ServiceLifecycleDialog from "@/components/organisms/ServiceLifecycleDialog.vue";
 import { useAgentVersion } from "@/composables/useAgentVersion";
@@ -31,8 +32,10 @@ import { shownHostPort } from "@/fiche/draft";
 import { memorySentence } from "@/fiche/memory";
 import { minimumText } from "@/fiche/messages";
 import { packIssueText } from "@/fiche/pack";
+import { createdWorld } from "@/fiche/review";
 import { notEnoughRoom } from "@/fiche/world";
 import { t } from "@/i18n";
+import type { ServiceOperation } from "@/link";
 import { resourcesIssue } from "@/resources";
 import { useFicheInstallStore } from "@/stores/ficheInstall";
 import { useServiceOpsStore } from "@/stores/serviceOps";
@@ -95,18 +98,47 @@ const guard = useLeaveGuard({
   home: back,
   wipe: () => install.wipe(),
 });
+// L'installation réussie : la page montre l'écran de fin au lieu de ramener à la liste (HRT-247, BR-FICHE-066). Ce qu'il
+// dit (nom du serveur de jeu, monde créé, fiche) est retenu quand la vérification s'affiche : la saisie est effacée au
+// lancement.
+const finished = ref<{
+  key: string;
+  name: string;
+  world: string | null;
+  detail: NonNullable<typeof install.detail.value>;
+  operation: ServiceOperation;
+  withWorld: boolean;
+} | null>(null);
+const toRemember = ref<{ world: string | null } | null>(null);
 const flow = useDeployFlow({
   serverId,
   source: install.flowSource,
   navigate: (to) => void guard.leave(to),
   focusField: () => undefined,
   focusQuestion: (id) => answers.value?.focusQuestion(id),
+  onSucceeded: (launch, operation) => {
+    const current = install.detail.value;
+    if (!current || launch.serviceKey === null) return "leave";
+    finished.value = {
+      key: launch.serviceKey,
+      name: launch.name,
+      world: toRemember.value?.world ?? null,
+      detail: current,
+      operation,
+      withWorld: resumedWorld.value,
+    };
+    return "stay";
+  },
 });
 
 watch(
   () => flow.reviewing.value,
   (open) => {
-    if (open) resumedWorld.value = draft.value?.world.resume === true;
+    if (!open) return;
+    resumedWorld.value = draft.value?.world.resume === true;
+    toRemember.value = {
+      world: detail.value && draft.value ? createdWorld(detail.value, draft.value) : null,
+    };
   },
 );
 
@@ -313,6 +345,19 @@ const steps = computed(() => [
   t("fiche.stepVerify"),
 ]);
 const progressOpen = computed(() => flow.launch.value !== null);
+
+/** « Ouvrir le serveur de jeu » : le détail du service créé. « Fermer » : la liste des services. */
+function openDone() {
+  const key = finished.value?.key;
+  void guard.leave({
+    name: "services",
+    params: { id: serverId() },
+    query: key ? { service: key } : {},
+  });
+}
+function closeDone() {
+  void guard.leave({ name: "services", params: { id: serverId() } });
+}
 const name = computed(() => safeText(detail.value?.card.name ?? ""));
 
 // L'encart de résumé (HRT-244) : des phrases composées par les règles pures de la fiche, jamais calculées dans le composant.
@@ -357,7 +402,25 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
       @recheck="server && services.recheck(server.id)"
     />
 
-    <Callout v-if="install.phase.value === 'failed' && !detail" tone="error" role="alert" data-install-failed>
+    <InstallDone
+      v-if="finished && server"
+      :server-id="server.id"
+      :service-key="finished.key"
+      :name="finished.name"
+      :world="finished.world"
+      :detail="finished.detail"
+      :operation="finished.operation"
+      :with-world="finished.withWorld"
+      @open="openDone"
+      @close="closeDone"
+    />
+
+    <Callout
+      v-else-if="install.phase.value === 'failed' && !detail"
+      tone="error"
+      role="alert"
+      data-install-failed
+    >
       {{ t("fiche.readFailed") }}
       <template #actions>
         <HButton variant="secondary" @click="install.reload()">{{ t("common.retry") }}</HButton>
