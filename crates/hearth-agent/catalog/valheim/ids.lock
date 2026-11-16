@@ -1,0 +1,10 @@
+# Registre des identifiants de réglage de la fiche `valheim` (HRT-226, conception technique 12.4).
+# Un identifiant publié ne disparaît pas par oubli : retiré de la fiche, il passe en [[retired]] avec sa raison,
+# et son état ici devient `retired` (avec `retired_in`). `cargo xtask catalog-check` le vérifie.
+
+ids = [
+  { id = "server_name", key = "SERVER_NAME", channel = "env", state = "active", since = 1 },
+  { id = "world_name", key = "WORLD_NAME", channel = "env", state = "active", since = 1 },
+  { id = "server_pass", key = "SERVER_PASS", channel = "env", state = "active", since = 1 },
+  { id = "server_public", key = "SERVER_PUBLIC", channel = "env", state = "active", since = 1 },
+]

@@ -95,6 +95,32 @@ const GAMES: &[Game] = &[
             },
         ],
     },
+    Game {
+        id: "valheim",
+        fiche: include_str!("../catalog/valheim/fiche.toml"),
+        settings: include_str!("../catalog/valheim/settings.toml"),
+        answers: &[
+            ("server_name", "hearth-probe"),
+            ("world_name", "Essai"),
+            ("server_pass", "probe-secret"),
+        ],
+        agreements: &[],
+        probe: Probe::Env("SERVER_NAME=hearth-probe"),
+        scenarios: &[
+            Scenario {
+                id: "min",
+                memory_bytes: 4 * GIB,
+                ready_within_s: 1800,
+                restart: true,
+            },
+            Scenario {
+                id: "rec",
+                memory_bytes: 6 * GIB,
+                ready_within_s: 1800,
+                restart: false,
+            },
+        ],
+    },
     //GAMES
 ];
 

@@ -53,10 +53,14 @@ async fn a_published_agent_lists_no_preview_fiche_and_a_trial_agent_lists_one_wi
         .await;
     assert_eq!(reply.status, 200, "{}", reply.text);
     let view: CatalogView = serde_json::from_value(reply.body).unwrap();
-    // Minecraft (HRT-116) et Terraria (HRT-226) sont publiées : les fiches `preview` (7 Days to Die...) sont absentes
+    // Minecraft (HRT-116), Terraria (HRT-226) et Valheim (HRT-228) sont publiées : les fiches `preview` (7 Days to Die...) sont absentes
     // d'un agent publié.
     let ids: Vec<&str> = view.fiches.iter().map(|f| f.id.as_str()).collect();
-    assert_eq!(ids, ["minecraft", "terraria"], "seules les fiches publiées");
+    assert_eq!(
+        ids,
+        ["minecraft", "terraria", "valheim"],
+        "seules les fiches publiées"
+    );
     assert!(
         view.fiches
             .iter()

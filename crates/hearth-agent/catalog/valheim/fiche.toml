@@ -1,0 +1,160 @@
+# Valheim, serveur officiel sans mod. Fiche publiée (HRT-228, ADR-0050 version 2, ADR-0053) : essayée sur sa vraie image par
+# `tests/fiche_live_game.rs` en local (Docker Desktop, 16/11/2026), voir `evidence.toml` et `golden.toml`.
+#
+# Construite depuis le fichier `defaults` et les scripts de l'image `lloesche/valheim-server` (lus DANS l'image épinglée) et son README
+# (https://github.com/lloesche/valheim-server-docker). Rien n'a été ajouté de mémoire. Les mods (ValheimPlus, BepInEx) et les listes
+# d'identifiants Steam sont hors fiche.
+
+format = 2
+id = "valheim"
+version = 1
+family = "valheim"
+name = "Valheim"
+summary = "Le serveur officiel de Valheim, sans mod."
+status = "published"
+platform = "linux"
+
+[image]
+repository = "lloesche/valheim-server"
+tag = "sha-0ab6cdcc16dd"                  # l'image ne publie que des étiquettes `sha-<commit>` et `latest` (build du 2026-10-20)
+digest = "sha256:fde7829b12d39203e155b6209689b70234f8a27d12c4d48baf890cc2ae2c2df3"
+game_updates = "at_install"               # UPDATE_CRON vidé ci-dessous : le jeu n'est mis à jour qu'à l'installation
+
+[owner]
+uid = 1000                                # PUID et PGID : l'image tourne en root par défaut
+gid = 1000
+
+# Le monde (`worlds_local`), les réglages et les listes d'identifiants.
+[[folder]]
+id = "config"
+role = "world"
+target = "/config"
+read_only = false
+backup = true
+
+# Le serveur téléchargé par SteamCMD (environ 1 Go) : jamais sauvegardé, il se retélécharge.
+[[folder]]
+id = "server"
+role = "game_files"
+target = "/opt/valheim"
+read_only = false
+backup = false
+
+# Le client se connecte à `port` puis interroge `port + 1` : les deux ports se déplacent ensemble (groupe « base »).
+[[port]]
+id = "game"
+container = 2456
+protocol = "udp"
+role = "game"
+publish = "always"
+default_host = 2456
+group = "base"
+mapping = "nat"
+
+[[port]]
+id = "query"
+container = 2457
+protocol = "udp"
+role = "query"
+publish = "always"
+default_host = 2457
+group = "base"
+mapping = "nat"
+
+[[channel]]
+id = "env"
+kind = "env"
+
+[[env]]
+name = "PUID"
+owner = "uid"
+
+[[env]]
+name = "PGID"
+owner = "gid"
+
+[[env]]
+name = "SERVER_PORT"
+value = "2456"                            # le port DANS le conteneur ; le port des joueurs se règle dans « Modifier »
+
+# Hearth garde la main sur les mises à jour, les redémarrages et les sauvegardes : l'image ne planifie rien d'elle-même.
+[[env]]
+name = "UPDATE_CRON"
+value = ""
+
+[[env]]
+name = "RESTART_CRON"
+value = ""
+
+[[env]]
+name = "BACKUPS"
+value = "false"
+
+[first_start]
+ready_timeout_s = 1800                    # téléchargement d'environ 1 Go (annoncé par l'image) puis génération du monde : non mesuré
+world_generation = true
+
+[[first_start.download]]
+what = "Le serveur du jeu"
+source_label = "Steam"
+evidence = "unmeasured"
+
+[ready]
+log_contains = "Game server connected"    # vu sur la vraie image par le banc d'essai (16/11/2026) : prêt après 158 s avec le téléchargement du jeu
+status = "tested"
+
+# L'image intercepte le signal d'arrêt (supervisord) : le jeu enregistre le monde puis sort. Le README demande un délai de 120 s. Vérifié par
+# le banc (16/11/2026) : code 0 en 8 s, monde réécrit, service qui reste arrêté, redémarrage sur le même monde.
+[stop]
+grace_s = 120
+signal = "SIGTERM"
+world_saved = "by_image_on_signal"
+
+[resources]
+cpu = { evidence = "unmeasured" }
+# Banc d'essai réel, 16/11/2026, sans joueur : les LIMITES essayées, chacune démarre, répond, enregistre et s'arrête proprement.
+# 4 Gio : 1,57 Gio au repos (compteur du moteur), pic de démarrage 2,17 Go (cgroupe, cache compris). 6 Gio : 1,45 Gio, pic 2,14 Go.
+# Aucun plancher plus bas n'a été essayé : il n'est pas affirmé (le README de l'image annonce environ 2,8 Gio au repos avec des joueurs).
+memory = { min_bytes = 4294967296, recommended_bytes = 6442450944, evidence = "measured" }
+# Image (369 792 694 octets) + dossiers gérés après un premier démarrage (serveur de 1 Go téléchargé, petit monde).
+disk = { install_bytes = 4743565597, evidence = "measured_idle" }
+
+[[not_exposed]]
+key = "SERVER_ARGS"
+channel = "env"
+why = "Arguments libres de la ligne de commande du jeu (préréglages, modificateurs) : Hearth ne passe aucun argument libre. Un réglage de préréglage viendra de la documentation du jeu."
+
+[[not_exposed]]
+key = "CROSSPLAY"
+channel = "env"
+why = "Le jeu entre plateformes demande un autre port et n'a pas été essayé sur la vraie image."
+
+[[not_exposed]]
+key = "ADMINLIST_IDS"
+channel = "env"
+why = "Les administrateurs se nomment par leur identifiant Steam : Hearth ne garde aucun identifiant de compte (BR-FICHE-011). Les fichiers de listes se modifient dans l'onglet Fichiers."
+
+[[not_exposed]]
+key = "BANNEDLIST_IDS"
+channel = "env"
+why = "Identifiants Steam : Hearth ne garde aucun identifiant de compte (BR-FICHE-011)."
+
+[[not_exposed]]
+key = "PERMITTEDLIST_IDS"
+channel = "env"
+why = "Identifiants Steam : Hearth ne garde aucun identifiant de compte (BR-FICHE-011)."
+
+[[not_exposed]]
+key = "VALHEIM_PLUS"
+channel = "env"
+why = "Les mods sont hors de cette fiche."
+
+[[not_exposed]]
+key = "BEPINEX"
+channel = "env"
+why = "Les mods sont hors de cette fiche."
+
+[[not_exposed]]
+key = "PUBLIC_TEST"
+channel = "env"
+why = "Branche de test de Steam : Hearth n'installe que la version publique."
