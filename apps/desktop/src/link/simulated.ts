@@ -177,6 +177,11 @@ export interface SimulatedOptions {
    * `bridge.machine` à la main.
    */
   liveMetrics?: boolean;
+  /**
+   * Démonstration (navigateur de développement) : le catalogue complet de l'agent de publication (douze fiches) et des
+   * déploiements qui avancent seuls jusqu'à l'écran de fin. Sans cela (tests), Terraria seul et rien n'avance seul.
+   */
+  demo?: boolean;
 }
 
 /** 8 groupes de 4 caractères hexadécimaux majuscules (les 16 premiers octets). */
@@ -335,6 +340,10 @@ export class SimulatedLinkBridge implements LinkBridge {
       connected: (id) => this.events.get(id)?.state === "connected",
       role: (id) => this.servers.find((server) => server.id === id)?.role ?? "readonly",
     });
+    if (options.demo) {
+      this.catalog.loadDemo();
+      this.deploys.autoRunMs = 900;
+    }
     if (options.liveMetrics) {
       this.audit.seed("forge", 250);
       for (const server of this.servers) {

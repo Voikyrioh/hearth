@@ -77,8 +77,8 @@ fn not_written_is_a_value_distinct_from_the_default_of_the_game() {
     // Proposé : écrit.
     assert_eq!(state.value("world_name"), Some("Monde"));
     assert_eq!(state.value("max_players"), Some("8"));
-    assert_eq!(state.value("world_size"), Some("3"));
-    assert_eq!(state.value("difficulty"), Some("2"));
+    assert_eq!(state.value("world_size"), Some("2"));
+    assert_eq!(state.value("difficulty"), Some("0"));
     assert_eq!(state.value("secure"), Some("1"));
     // Rien de proposé : non écrit, même quand l'inventaire connaît le défaut du jeu.
     assert_eq!(
@@ -517,8 +517,8 @@ fn drift_compares_the_state_to_the_file_and_lists_unknown_lines_without_touching
     let file: Vec<(String, String)> = [
         ("worldname", "Monde"),
         ("maxplayers", "8"),
-        ("autocreate", "3"),
-        ("difficulty", "2"),
+        ("autocreate", "2"),
+        ("difficulty", "0"),
         ("world", "/root/.local/share/Terraria/Worlds/Monde.wld"),
         ("worldpath", "/root/.local/share/Terraria/Worlds/"),
         ("port", "7777"),

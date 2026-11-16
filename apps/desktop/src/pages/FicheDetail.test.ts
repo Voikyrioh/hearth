@@ -103,7 +103,11 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
   });
 
   it("dit la façon d'arrêter le jeu sans promettre une suite non essayée, et le premier démarrage long", async () => {
-    const { wrapper } = await bootCatalogue(undefined, fiche("terraria"));
+    const { wrapper } = await bootCatalogue((bridge) => {
+      // Une suite d'arrêt pas encore essayée : la fiche ne promet rien (la fiche livrée de Terraria est essayée).
+      const detail = bridge.catalog.get("terraria");
+      if (detail?.stop) detail.stop.sequenceTested = false;
+    }, fiche("terraria"));
     const stop = wrapper.get("[data-fiche-stop]").text();
     expect(stop).toContain("Hearth ne peut pas encore lui demander de le faire");
     expect(stop).toContain("Le délai d'arrêt est de 10 secondes.");

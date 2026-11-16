@@ -174,7 +174,7 @@ choices = [
   { value = "2", label = "Moyen" },
   { value = "3", label = "Grand" },
 ]
-proposed = "3"                            # valeur observée sur une installation réelle, non vérifiée dans la documentation du jeu
+proposed = "2"                            # « Moyen » : la taille la plus courante pour un premier monde (16/11/2026, retour de revue UX : « Grand » n'est pas ce qu'un débutant attend, et elle ne change plus)
 change = "world_creation"
 source = "verified"                       # T04 ; sans cette ligne le jeu ne crée aucun monde
 
@@ -193,7 +193,7 @@ choices = [
   { value = "2", label = "Maître" },
   { value = "3", label = "Voyage" },
 ]
-proposed = "2"                            # valeur observée sur une installation réelle, non vérifiée dans la documentation du jeu
+proposed = "0"                            # « Classique » : la difficulté de départ du jeu (16/11/2026, retour de revue UX : « Maître » n'est pas une valeur pour un premier monde, et elle ne change plus)
 change = "world_creation"
 source = "partial"                        # T06 : défaut non vérifié
 

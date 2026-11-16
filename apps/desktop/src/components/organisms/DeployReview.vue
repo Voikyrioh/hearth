@@ -278,9 +278,7 @@ const reason = computed(() =>
 }
 
 .review__bar {
-  position: sticky;
-  bottom: 0;
-  z-index: var(--z-raised);
+  /* À la suite du mot de passe, jamais collée en bas de la fenêtre : elle ne cache plus l'erreur sous le champ. */
   display: flex;
   flex-wrap: wrap;
   align-items: center;

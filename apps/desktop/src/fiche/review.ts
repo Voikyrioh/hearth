@@ -5,6 +5,7 @@ import { formatCpu, formatMemory } from "@/resources";
 import { formatSize } from "@/serviceOps/messages";
 import { currentAnswer } from "./answers";
 import type { FicheDraft } from "./draft";
+import { stopTexts } from "./messages";
 import { publishedPorts, readableHostPorts } from "./ports";
 import { proofOf } from "./proof";
 
@@ -56,10 +57,13 @@ export function whatWillHappen(
   ];
 }
 
-/** La phrase qui suit la liste : l'enregistrement avant l'arrêt (seulement si la fiche a une suite d'arrêt), puis l'annulation. */
+/**
+ * La phrase qui suit la liste : ce que la fiche dit de l'enregistrement du monde à l'arrêt (la MÊME phrase que la ligne
+ * « Arrêt du jeu » : une seule vérité, BR-JEU-002), puis l'annulation. Une fiche sans arrêt déclaré ne promet rien.
+ */
 export function whatWillHappenNote(detail: FicheDetail): string {
-  const saves = detail.stop !== null;
-  return (saves ? t("fiche.review.noteSave") + " " : "") + t("fiche.review.noteCancel");
+  const saving = detail.stop ? (stopTexts(detail.stop)[0] ?? "") : "";
+  return (saving === "" ? "" : `${saving} `) + t("fiche.review.noteCancel");
 }
 
 export interface PlannedAddress {

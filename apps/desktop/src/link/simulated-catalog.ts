@@ -2,7 +2,7 @@ import { nameIssue } from "@/deploy/rules";
 import type { Catalog, FicheCard, FicheDetail, FicheInstallRequest, FicheRead } from "./catalog";
 import type { DeployOutcome, DeployRefusal, DeployStep } from "./deploy";
 import type { SimulatedDeploys } from "./simulated-deploy";
-import { rich, terraria, waitingCards } from "./simulated-fiches";
+import { demoPublished, demoTerraria, rich, terraria, waitingCards } from "./simulated-fiches";
 import { judgeValue } from "./simulated-judge";
 import type { SimulatedPacks } from "./simulated-packs";
 import type { SimulatedWorlds } from "./simulated-worlds";
@@ -76,6 +76,18 @@ export class SimulatedCatalog {
     const detail = rich();
     this.put(detail);
     return detail;
+  }
+
+  /**
+   * Le catalogue de démonstration du navigateur de développement : les douze fiches d'un agent de publication, quatre
+   * prêtes (Terraria, Minecraft Java, Valheim, Enshrouded) et huit en cours de preuve avec leur raison. Jamais appelé par
+   * les tests, qui construisent leurs fiches.
+   */
+  loadDemo(): void {
+    const base = this.fiches.get("terraria");
+    if (base) demoTerraria(base);
+    for (const detail of demoPublished()) this.put(detail);
+    this.addWaiting();
   }
 
   /**

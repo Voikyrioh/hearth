@@ -119,7 +119,7 @@ fn terraria_with_the_proposed_values_writes_only_what_is_known_and_pins_the_trie
     assert!(!draft.files[0].holds_secret);
     assert_eq!(
         text_of(&draft, "config"),
-        "worldname=Monde\nmaxplayers=8\nautocreate=3\ndifficulty=2\nworld=/root/.local/share/Terraria/Worlds/Monde.wld\nworldpath=/root/.local/share/Terraria/Worlds/\nport=7777\nupnp=0\nsecure=1\n",
+        "worldname=Monde\nmaxplayers=8\nautocreate=2\ndifficulty=0\nworld=/root/.local/share/Terraria/Worlds/Monde.wld\nworldpath=/root/.local/share/Terraria/Worlds/\nport=7777\nupnp=0\nsecure=1\n",
         "ni password, ni motd, ni language, ni les permissions du mode Voyage : rien d'inventé"
     );
     assert!(

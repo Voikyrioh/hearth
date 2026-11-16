@@ -93,6 +93,7 @@ export function createLinkBridge(): LinkBridge {
       ...(none ? { servers: [] } : {}),
       agents: [SAMPLE_AGENT],
       liveMetrics: true,
+      demo: true,
     });
     (window as unknown as { __hearthSim?: SimulatedLinkBridge }).__hearthSim = simulated;
     return simulated;

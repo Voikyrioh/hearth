@@ -146,7 +146,7 @@ describe("la page (BR-FICHE-014, 015)", () => {
       "Moyen",
       "Grand",
     ]);
-    expect(size.get('[aria-checked="true"]').text()).toBe("Grand");
+    expect(size.get('[aria-checked="true"]').text()).toBe("Moyen");
     const frozen = wrapper.findAll("[data-question-frozen]").map((item) => item.text());
     expect(frozen).toHaveLength(3);
     expect(frozen[0]).toContain(
@@ -509,7 +509,7 @@ describe("lancer, suivre, terminer (BR-FICHE-013, 027, 034)", () => {
     expect(received).toMatchObject({
       name: "mon-terraria",
       fiche: "terraria",
-      version: 5,
+      version: 6,
       variant: null,
       agreements: [],
       ports: [{ id: "game", hostPort: 7777 }],

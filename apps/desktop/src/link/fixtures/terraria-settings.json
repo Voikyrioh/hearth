@@ -1,8 +1,8 @@
 {
   "fiche": {
-    "digest": "d49c474edd06908c613b53f67dda7197b3cd9e7640bcbca8fb434e1c2de4f3a3",
+    "digest": "d1c7b7091cce380148a023c1d836dadfab6e5718aa09b72121daad1ab4c70b53",
     "id": "terraria",
-    "version": 5
+    "version": 6
   },
   "settings": [
     {
@@ -161,7 +161,7 @@
         "id": "world_size",
         "kind": "choice",
         "label": "Taille du monde",
-        "proposed": "3",
+        "proposed": "2",
         "secret": false,
         "variants": []
       },
@@ -195,7 +195,7 @@
         "id": "difficulty",
         "kind": "choice",
         "label": "Difficulté",
-        "proposed": "2",
+        "proposed": "0",
         "secret": false,
         "variants": []
       },

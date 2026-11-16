@@ -7,7 +7,7 @@
 
 format = 2
 id = "terraria"
-version = 5
+version = 6
 family = "terraria"
 name = "Terraria"
 summary = "Le serveur officiel de Terraria, sans mod."

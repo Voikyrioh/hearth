@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { newFicheDraft } from "@/fiche/draft";
+import { stopTexts } from "@/fiche/messages";
 import { launchReason, plannedAddress, whatWillHappen, whatWillHappenNote } from "@/fiche/review";
 import type { FicheDetail } from "@/link";
 import { freshBridge } from "@/test/app";
@@ -30,15 +31,20 @@ describe("whatWillHappen", () => {
     );
   });
 
-  it("ne dit l'enregistrement du monde que si la fiche a une suite d'arrêt, et dit toujours l'annulation", () => {
+  it("reprend la phrase de l'arrêt de la fiche, la même que la ligne « Arrêt du jeu », puis dit l'annulation", () => {
     const detail = terraria();
     const note = whatWillHappenNote(detail);
     expect(note).toContain(
       "Vous pourrez annuler tant que le serveur n'est pas en cours de création.",
     );
     expect(
-      note.startsWith("Avant chaque arrêt, Hearth demandera au jeu d'enregistrer le monde."),
-    ).toBe(detail.stop !== null);
+      note.startsWith(stopTexts(detail.stop as NonNullable<typeof detail.stop>)[0] ?? ""),
+    ).toBe(true);
+    // Une fiche dont la suite d'arrêt n'est pas essayée ne promet jamais « Hearth demandera au jeu d'enregistrer ».
+    const untested = structuredClone(detail);
+    untested.stop = { graceSeconds: 10, worldSaved: "by_sequence", sequenceTested: false };
+    expect(whatWillHappenNote(untested)).not.toContain("demandera");
+    expect(whatWillHappenNote(untested)).toContain("ne peut pas encore");
   });
 });
 

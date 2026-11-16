@@ -1552,8 +1552,8 @@ fn the_terraria_catalog_speaks_to_the_user_in_vous_and_every_text_stays_within_i
             .all(|n| n.channel == "args" || n.key == "banlist")
     );
     assert_eq!(
-        terraria.file.version, 5,
-        "version 5 : publiée après le banc local, mémoire mesurée (HRT-226) ; version 4 : suites essayées sur la vraie image, empreinte et mesures au repos (HRT-114) ; version 3 : l'aide ne redit plus les bornes ni le jeu de caractères (ADR-0050)"
+        terraria.file.version, 6,
+        "version 6 : valeurs proposées Moyen et Classique pour un premier monde (retour de revue UX) ; version 5 : publiée après le banc local, mémoire mesurée (HRT-226) ; version 4 : suites essayées sur la vraie image, empreinte et mesures au repos (HRT-114) ; version 3 : l'aide ne redit plus les bornes ni le jeu de caractères (ADR-0050)"
     );
     // Un entier dit ses bornes quand l'inventaire les donne ; un réglage à valeurs fermées dit chacune.
     let max_players = terraria.setting("max_players").expect("max_players");

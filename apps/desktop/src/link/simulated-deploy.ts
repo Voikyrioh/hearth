@@ -552,7 +552,38 @@ export class SimulatedDeploys {
     });
     this.held.set(serverId, mine);
     remember();
+    this.runAuto(serverId, operation.id);
     return { kind: "accepted", operationId: operation.id, serviceKey: key };
+  }
+
+  /**
+   * Démonstration (navigateur de développement) : le déploiement avance SEUL, une étape à la fois, jusqu'à « en marche »,
+   * pour qu'un parcours se voie de bout en bout. `null` (défaut, et toujours dans les tests) : rien n'avance seul.
+   */
+  autoRunMs: number | null = null;
+
+  private runAuto(serverId: string, opId: string): void {
+    const every = this.autoRunMs;
+    if (every === null) return;
+    const steps: Array<() => void> = [
+      () => this.progress(serverId, opId, 0),
+      () => this.progress(serverId, opId, 30, 300_000_000, 1_000_000_000),
+      () => this.progress(serverId, opId, 70, 700_000_000, 1_000_000_000),
+      () => this.progress(serverId, opId, 100, 1_000_000_000, 1_000_000_000),
+      () => this.toStep(serverId, opId, "create"),
+      () => this.toStep(serverId, opId, "start"),
+      () => this.toStep(serverId, opId, "watch"),
+      () => this.succeed(serverId, opId),
+    ];
+    steps.forEach((run, index) => {
+      setTimeout(
+        () => {
+          // Annulé ou déjà clos entre-temps : rien ne reprend.
+          if (this.held.get(serverId)?.has(opId)) run();
+        },
+        every * (index + 1),
+      );
+    });
   }
 
   // ── La suite de l'opération, pilotée par l'appelant ──────────────────────────────────────────

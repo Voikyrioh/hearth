@@ -2031,7 +2031,7 @@ export const fr = {
     haveServer: "J'ai déjà un serveur de jeu",
     readyTitle: "Prêts à installer",
     readyText:
-      "Essayés par Hearth sur une vraie machine : ils démarrent, enregistrent et s'arrêtent proprement.",
+      "Essayés par Hearth sur une vraie machine. Chaque fiche dit comment son jeu enregistre son monde avant l'arrêt.",
     soonTitle: "Bientôt dans Hearth",
     soonText:
       "Leur fiche existe, mais un point reste à régler avant de vous les proposer. Il est écrit sur chaque carte.",
@@ -2134,7 +2134,7 @@ export const fr = {
         "Vous gardez votre configuration telle quelle. Vous ne pouvez pas régler ses ressources depuis Hearth, ni lui faire enregistrer son monde avant un arrêt, ni modifier ses réglages.",
       moveTitle: "Si vous basculez",
       moveText:
-        "Vous gagnez les ressources au curseur, la modification, l'enregistrement du monde avant l'arrêt, l'adresse des joueurs, le mot de passe et tous les réglages du jeu, modifiables dans l'onglet Réglages. Vous perdez les réglages que la fiche ne reprend pas, la déclaration dans la configuration de votre serveur et l'ancien emplacement des données.",
+        "Vous gagnez les ressources au curseur, la modification, l'enregistrement du monde avant l'arrêt quand la fiche du jeu sait le demander, l'adresse des joueurs, le mot de passe et tous les réglages du jeu, modifiables dans l'onglet Réglages. Vous perdez les réglages que la fiche ne reprend pas, la déclaration dans la configuration de votre serveur et l'ancien emplacement des données.",
       neverTitle: "Ce qui ne change jamais.",
       neverText:
         "Votre monde d'origine et vos sauvegardes existantes ne sont ni lus, ni copiés, ni modifiés, ni effacés, hors le monde que vous choisissez de reprendre : celui-là est copié, jamais déplacé.",
@@ -2557,7 +2557,6 @@ export const fr = {
       step3Unknown: "Le jeu démarre{world}. Cela peut prendre quelques minutes.",
       step4:
         "Hearth s'assure que le jeu répond, puis vous donne l'adresse à transmettre à vos joueurs.",
-      noteSave: "Avant chaque arrêt, Hearth demandera au jeu d'enregistrer le monde.",
       noteCancel: "Vous pourrez annuler tant que le serveur n'est pas en cours de création.",
       lan: "En réseau maison : {address}. Pour les joueurs qui sont chez vous, sur le même réseau que {server}.",
       internet:
@@ -3045,7 +3044,7 @@ export const fr = {
     pathCatalogNames: "{names} et d'autres bientôt.",
     pathCatalogNoNames: "Le Catalogue propose des jeux prêts à installer.",
     pathCatalogText:
-      "Hearth connaît déjà ce qu'il faut à chaque jeu : la place, le port, la façon d'enregistrer le monde avant un arrêt. Vous choisissez un nom, quelques réglages, et vous vérifiez avant de lancer.",
+      "Hearth connaît déjà ce qu'il faut à chaque jeu : la place, le port, la façon dont le jeu enregistre son monde avant un arrêt. Vous choisissez un nom, quelques réglages, et vous vérifiez avant de lancer.",
     pathCatalogNote: "Comptez dix minutes, le premier démarrage compris.",
     pathCatalogButton: "Ouvrir le Catalogue",
     pathFreeTitle: "Installer un programme de votre choix",
@@ -3053,7 +3052,7 @@ export const fr = {
     pathFreeText:
       "Pour un serveur de jeu ou un outil qui n'a pas encore de fiche. Vous indiquez le nom de son image publique, sa version et ses réglages. Hearth vérifie ce qu'il peut, mais il ne connaît pas ce programme : c'est vous qui savez ce qu'il lui faut.",
     pathFreeNote:
-      "Si le jeu que vous voulez est dans le Catalogue, préférez sa fiche : elle sait enregistrer le monde avant un arrêt.",
+      "Si le jeu que vous voulez est dans le Catalogue, préférez sa fiche : elle dit comment le jeu enregistre son monde avant un arrêt.",
     pathFreeButton: "Continuer sans fiche",
     pathExistingTitle: "J'ai déjà un serveur de jeu sur {server}",
     pathExistingText:

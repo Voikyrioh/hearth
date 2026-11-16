@@ -13,7 +13,10 @@ import { useServersStore } from "@/stores/servers";
 const LABEL = "Lancer une action";
 const bridge = getLinkBridge();
 const sim = bridge instanceof SimulatedLinkBridge ? bridge : null;
-const hidden = new URLSearchParams(window.location.search).has("nodev");
+// Un outil de démonstration ne recouvre JAMAIS le contenu (revue UX du 17/11 : il couvrait « Aller au champ » et
+// « Suivant ») : il ne se montre que sur demande, `?devtools=1`.
+const query = new URLSearchParams(window.location.search);
+const hidden = query.has("nodev") || !query.has("devtools");
 const servers = useServersStore();
 const action = useServerAction(() => servers.current?.id ?? null);
 
