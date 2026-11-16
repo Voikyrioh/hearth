@@ -8,9 +8,11 @@ import {
   canCancel,
   canDismiss,
   canResume,
+  needsAction,
   progressText,
   ratioOf,
   statusText,
+  waitsForRoom,
 } from "@/transfers/messages";
 
 // Le panneau « Transferts » (HRT-96, BR-FILES-019, BR-MOD-015) : le lieu où retrouver un envoi de fichier
@@ -27,9 +29,12 @@ const emit = defineEmits<{
 
 const VISIBLE = 3;
 const expanded = ref(false);
-const shown = computed(() =>
-  expanded.value ? props.transfers : props.transfers.slice(0, VISIBLE),
-);
+// Les envois qui demandent un geste passent d'abord : ils ne se cachent jamais sous « +2 autres » (Nora, 16/11).
+const ordered = computed(() => [
+  ...props.transfers.filter((item) => needsAction(item)),
+  ...props.transfers.filter((item) => !needsAction(item)),
+]);
+const shown = computed(() => (expanded.value ? ordered.value : ordered.value.slice(0, VISIBLE)));
 const hidden = computed(() => Math.max(0, props.transfers.length - VISIBLE));
 watch(hidden, (n) => {
   if (n === 0) expanded.value = false;
@@ -49,8 +54,11 @@ watch(
       seen.set(item.id, item.status);
       if (before === undefined || before === item.status) continue;
       if (item.status === "done") message = t("transfers.announceDone", { name: item.name });
-      if (item.status === "interrupted")
-        message = t("transfers.announceInterrupted", { name: item.name });
+      if (item.status === "interrupted") {
+        message = waitsForRoom(item)
+          ? t("transfers.announceNoSpace", { name: item.name })
+          : t("transfers.announceInterrupted", { name: item.name });
+      }
     }
     if (message === "") return;
     clearTimeout(timer);
@@ -97,13 +105,17 @@ onBeforeUnmount(() => clearTimeout(timer));
         <div class="row__acts">
           <HButton
             v-if="canResume(transfer)"
-            variant="primary"
+            :variant="waitsForRoom(transfer) ? 'secondary' : 'primary'"
             size="sm"
-            :aria-label="t('transfers.actions.resumeLabel', { name: transfer.name })"
+            :aria-label="
+              waitsForRoom(transfer)
+                ? t('transfers.actions.retryLabel', { name: transfer.name })
+                : t('transfers.actions.resumeLabel', { name: transfer.name })
+            "
             data-transfer-resume
             @click="emit('resume', transfer)"
           >
-            {{ t("transfers.actions.resume") }}
+            {{ waitsForRoom(transfer) ? t("transfers.actions.retry") : t("transfers.actions.resume") }}
           </HButton>
           <HButton
             v-if="canCancel(transfer)"
@@ -163,6 +175,8 @@ onBeforeUnmount(() => clearTimeout(timer));
 }
 
 .strip__list {
+  max-height: var(--strip-list-max);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -172,6 +186,7 @@ onBeforeUnmount(() => clearTimeout(timer));
 }
 
 .row {
+  flex-shrink: 0;
   display: grid;
   grid-template-columns: var(--op-columns);
   align-items: center;

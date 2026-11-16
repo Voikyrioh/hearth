@@ -100,7 +100,7 @@ test("l'onglet range les réglages par thèmes en mots simples, du plus étroit 
     "Triche et sécurité",
   ]);
   await expect(row(page, "max_players")).toContainText("Nombre de joueurs");
-  await expect(row(page, "max_players")).toContainText("Nom dans le jeu : maxplayers");
+  await expect(row(page, "max_players")).toContainText("Nom technique : maxplayers");
   await expect(row(page, "world_name")).toContainText("Figé : ne peut plus changer");
   // Un mot de passe n'est jamais lu ni affiché.
   await expect(row(page, "password")).toContainText("Défini. Saisissez une nouvelle valeur");

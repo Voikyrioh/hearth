@@ -391,7 +391,11 @@ export const commands = {
 	 *  lien tombé avant la réponse donne `Unknown`. Sans le droit « gérer les services » : `MissingServicesRight`.
 	 */
 	startDeposit: (serverId: string, source: DepositSourceDto, adminPassword: string | null) => typedError<DepositOutcome, LinkFailure>(__TAURI_INVOKE("start_deposit", { serverId, source, adminPassword })),
-	/**  Les envois de cette session, sans lecture réseau : le panneau « Transferts » les relit tant que l'un envoie. */
+	/**
+	 *  Les envois de cette session : le panneau « Transferts » les relit tant que l'un envoie. La réponse n'attend
+	 *  jamais le réseau ; en tâche de fond, les envois réussis dont le fichier a quitté le serveur (consommé par une
+	 *  installation, ou expiré) sortent de la liste (HRT-222).
+	 */
 	listTransfers: () => typedError<TransferDto[], LinkFailure>(__TAURI_INVOKE("list_transfers")),
 	/**  Reprend un envoi interrompu : un geste du compte, jamais automatique. */
 	resumeTransfer: (transferId: string) => typedError<null, LinkFailure>(__TAURI_INVOKE("resume_transfer", { transferId })),
@@ -1163,7 +1167,9 @@ export type DeployRefusal = { kind: "wrong_password" } | { kind: "password_requi
  *  Le pack de mods est refusé : un code fixe de l'agent (`reason`), le nombre de mods d'une liste CurseForge
  *  (`mods`) ou l'hôte refusé (`host`), jamais un nom d'entrée (BR-MOD-008, BR-MOD-016).
  */
-{ kind: "pack_refused"; reason: string; mods: number | null; host: string | null } | 
+{ kind: "pack_refused"; reason: string; mods: number | null; host: string | null; 
+/**  La version de Minecraft que dit le pack, et celle que la demande a choisie (`PACK_VERSION_MISMATCH`). */
+pack_version: string | null; chosen_version: string | null } | 
 /**  La machine est trop petite pour un minimum MESURÉ (`cpu` en millicœurs, `memory` en octets). */
 { kind: "host_too_small"; lack: FicheLackDto; needed: number | null; has: number | null } | 
 /**  L'espace libre est sous le besoin mesuré de l'installation : aucune case ne permet de passer outre. */
@@ -1695,6 +1701,10 @@ export type GameViewDto = {
 	hasPassword: boolean,
 	/**  L'adresse que le propriétaire donne à ses joueurs (HRT-215, BR-JEU-022) ; `None` : pas renseignée. */
 	publicAddress: string | null,
+	/**  L'adresse de la machine sur le réseau maison (HRT-223) ; `None` : l'agent ne la connaît pas. */
+	lanAddress: string | null,
+	/**  L'adresse d'internet que la box a dite à l'agent (UPnP, HRT-223) ; `None` : la box n'a pas répondu. */
+	detectedAddress: string | null,
 };
 
 export type GapReasonDto = "slow" | "rotated" | "resume_lost" | "first_page" | "unknown";
@@ -2112,7 +2122,7 @@ export type PackRefusalDto =
  *  Le pack est refusé : `reason` est un code fixe (`PACK_IS_A_DOWNLOAD_LIST`, `PACK_HOST_FORBIDDEN`,
  *  `ARCHIVE_REFUSED`, ...), `mods` le nombre de mods listés par une liste CurseForge, `host` l'hôte refusé.
  */
-{ kind: "refused"; reason: string; mods: number | null; host: string | null };
+{ kind: "refused"; reason: string; mods: number | null; host: string | null; pack_version: string | null; chosen_version: string | null };
 
 /**
  *  Ce que l'agent exige du mot de passe pour un acte (HRT-194, BR-GRANT-017) : aucun, sauf élévation en

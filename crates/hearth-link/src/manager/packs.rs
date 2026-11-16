@@ -36,6 +36,8 @@ pub enum PackRefusal {
         reason: String,
         mods: Option<u32>,
         host: Option<String>,
+        pack_version: Option<String>,
+        chosen_version: Option<String>,
     },
 }
 
@@ -58,6 +60,15 @@ fn stable_host(text: &str) -> Option<String> {
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'.' || b == b'-');
     ok.then(|| text.to_owned())
+}
+
+/// Une version de Minecraft telle que l'agent la rend : un chiffre en tête, lettres, chiffres, points et tirets, 16 au plus.
+fn is_version(text: &str) -> bool {
+    text.bytes().next().is_some_and(|b| b.is_ascii_digit())
+        && text.len() <= 16
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
 }
 
 /// Lit le refus d'une lecture de pack : `404 PACK_UNKNOWN`, `422 PACK_REFUSED` et ses détails ; tout autre refus est
@@ -87,6 +98,16 @@ pub fn read_refusal(status: u16, body: &Value) -> Result<PackRefusal, LinkError>
                     .get("host")
                     .and_then(Value::as_str)
                     .and_then(stable_host),
+                pack_version: details
+                    .get("pack_version")
+                    .and_then(Value::as_str)
+                    .filter(|v| is_version(v))
+                    .map(str::to_owned),
+                chosen_version: details
+                    .get("chosen_version")
+                    .and_then(Value::as_str)
+                    .filter(|v| is_version(v))
+                    .map(str::to_owned),
             })
         }
         _ => Err(rejection_at(body, status)),
@@ -147,7 +168,9 @@ mod tests {
             PackRefusal::Refused {
                 reason: "PACK_IS_A_DOWNLOAD_LIST".into(),
                 mods: Some(652),
-                host: None
+                host: None,
+                pack_version: None,
+                chosen_version: None,
             }
         );
         let host = refused_body(
@@ -158,7 +181,9 @@ mod tests {
             PackRefusal::Refused {
                 reason: "PACK_HOST_FORBIDDEN".into(),
                 mods: None,
-                host: Some("evil.example".into())
+                host: Some("evil.example".into()),
+                pack_version: None,
+                chosen_version: None,
             }
         );
         // Un texte qui n'est pas un code, un hôte douteux : jamais répétés.
@@ -169,7 +194,9 @@ mod tests {
             PackRefusal::Refused {
                 reason: "PACK_REFUSED".into(),
                 mods: None,
-                host: None
+                host: None,
+                pack_version: None,
+                chosen_version: None,
             }
         );
     }

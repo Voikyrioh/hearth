@@ -77,3 +77,14 @@ describe("HMeter : barre indéterminée", () => {
     expect(empty.find(".meter__slide").exists()).toBe(false);
   });
 });
+
+// FIX:01M7GQRC6QSEZH39F7M4DD04B4
+describe("HMeter : barre arrondie (HRT-220)", () => {
+  it("n'est plus un SVG étiré : des éléments HTML, bouts arrondis par la feuille de style", () => {
+    const wrapper = mount(HMeter, { props: { ratio: 0.5, label: "Transfert" } });
+    expect(wrapper.element.tagName).toBe("DIV");
+    expect(wrapper.find("svg").exists()).toBe(false);
+    expect(wrapper.find("rect").exists()).toBe(false);
+    expect((wrapper.element as HTMLElement).style.getPropertyValue("--meter-fill")).toBe("50%");
+  });
+});

@@ -145,7 +145,15 @@ export type DeployRefusal =
   /** Le pack de mods joint n'est plus dans la zone d'attente de l'agent : à déposer de nouveau (HRT-124). */
   | { kind: "pack_unknown" }
   /** Le pack de mods est refusé : un code fixe de l'agent, le nombre de mods d'une liste CurseForge ou l'hôte refusé. */
-  | { kind: "pack_refused"; reason: string; mods: number | null; host: string | null }
+  | {
+      kind: "pack_refused";
+      reason: string;
+      mods: number | null;
+      host: string | null;
+      /** La version de Minecraft que dit le pack et celle qui a été choisie (`PACK_VERSION_MISMATCH`). */
+      packVersion?: string | null;
+      chosenVersion?: string | null;
+    }
   | { kind: "agreement_required"; ids: string[] }
   /** Une réponse est refusée : la question (si c'est une de la fiche), la raison (code) et au plus UN caractère. */
   | { kind: "answer_refused"; id: string | null; reason: string; character: string | null }

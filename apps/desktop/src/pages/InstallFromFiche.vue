@@ -27,6 +27,7 @@ import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { deployDoor } from "@/deploy/availability";
 import { minimumText } from "@/fiche/messages";
+import { packIssueText } from "@/fiche/pack";
 import { notEnoughRoom } from "@/fiche/world";
 import { t } from "@/i18n";
 import { resourcesIssue } from "@/resources";
@@ -145,6 +146,11 @@ const reason = computed<Reason | null>(() => {
     }
   }
   if (install.step.value === 1) {
+    // Le vrai motif d'un pack pas encore prêt : attendre la fin de l'envoi n'est pas « corriger un champ » (Nora, 16/11).
+    const pack = install.packProblem.value;
+    if (pack === "sending" || pack === "unsent" || pack === "unread") {
+      return { text: packIssueText(pack), fixable: false };
+    }
     return install.answersInvalid.value || serverBlocks.value
       ? { text: t("fiche.fixAnswers"), fixable: true }
       : null;
@@ -157,6 +163,16 @@ const reason = computed<Reason | null>(() => {
   return null;
 });
 const reasonId = "install-reason";
+
+/** Ramène à l'étape « Réponses » (le champ y est) puis met le curseur dans la question que le refus désigne. */
+async function goToRefusedQuestion() {
+  const question = flow.refusal.value?.question;
+  if (!question) return;
+  if (install.step.value !== 1) install.back();
+  await nextTick();
+  await nextTick();
+  answers.value?.focusQuestion(question);
+}
 
 async function goToFirstIssue() {
   install.touchAll();
@@ -299,6 +315,11 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
 
       <Callout v-if="refusalVisible" tone="error" role="alert" data-install-refusal>
         {{ flow.refusal.value?.text }}
+        <template v-if="flow.refusal.value?.question" #actions>
+          <HButton variant="secondary" size="sm" data-install-refusal-goto @click="goToRefusedQuestion">
+            {{ t("fiche.goToQuestion") }}
+          </HButton>
+        </template>
       </Callout>
       <Callout
         v-if="install.tooSmallVerdict.value"

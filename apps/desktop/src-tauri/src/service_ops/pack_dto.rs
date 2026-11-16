@@ -102,6 +102,8 @@ pub enum PackRefusalDto {
         reason: String,
         mods: Option<u32>,
         host: Option<String>,
+        pack_version: Option<String>,
+        chosen_version: Option<String>,
     },
 }
 
@@ -109,7 +111,19 @@ impl From<PackRefusal> for PackRefusalDto {
     fn from(refusal: PackRefusal) -> Self {
         match refusal {
             PackRefusal::Unknown => Self::Unknown,
-            PackRefusal::Refused { reason, mods, host } => Self::Refused { reason, mods, host },
+            PackRefusal::Refused {
+                reason,
+                mods,
+                host,
+                pack_version,
+                chosen_version,
+            } => Self::Refused {
+                reason,
+                mods,
+                host,
+                pack_version,
+                chosen_version,
+            },
         }
     }
 }
@@ -160,13 +174,17 @@ mod tests {
             reason: "PACK_IS_A_DOWNLOAD_LIST".into(),
             mods: Some(652),
             host: None,
+            pack_version: None,
+            chosen_version: None,
         });
         assert_eq!(
             dto,
             PackRefusalDto::Refused {
                 reason: "PACK_IS_A_DOWNLOAD_LIST".into(),
                 mods: Some(652),
-                host: None
+                host: None,
+                pack_version: None,
+                chosen_version: None,
             }
         );
         assert_eq!(

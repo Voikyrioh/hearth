@@ -346,6 +346,9 @@ export function ficheRefusalText(
         reason: refused.reason,
         mods: refused.mods,
         host: refused.host,
+        packVersion: refused.packVersion ?? null,
+        chosenVersion: refused.chosenVersion ?? null,
+        field: detail?.questions.find((question) => question.id === "version")?.label ?? null,
       }).join(" ");
     case "answer_refused": {
       const label = detail?.questions.find((question) => question.id === refused.id)?.label;
@@ -390,6 +393,18 @@ export function ficheRefusalText(
  * Le refus à montrer en tête de la page d'installation, ou `null` quand le refus n'est pas propre aux fiches (le
  * parcours d'un déploiement le juge). Un refus de réponse désigne la question ; les autres ramènent à la page.
  */
+/** La question que le refus désigne : la réponse refusée, ou la version de Minecraft quand le pack ne la dit pas ou la contredit. */
+function refusedQuestion(refused: DeployRefusal): string | null {
+  if (refused.kind === "answer_refused") return refused.id;
+  if (
+    refused.kind === "pack_refused" &&
+    (refused.reason === "PACK_VERSION_MISMATCH" || refused.reason === "PACK_VERSION_UNREADABLE")
+  ) {
+    return "version";
+  }
+  return null;
+}
+
 export function ficheFormRefusal(
   refused: DeployRefusal,
   detail: FicheDetail | null,
@@ -400,6 +415,6 @@ export function ficheFormRefusal(
   return {
     text,
     field: null,
-    question: refused.kind === "answer_refused" ? refused.id : null,
+    question: refusedQuestion(refused),
   };
 }

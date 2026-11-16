@@ -337,43 +337,77 @@ pub fn read_one<R: Read + Seek>(
     limits: &ArchiveLimits,
     cancel: Cancel<'_>,
 ) -> Result<Vec<u8>, ArchiveRefusal> {
-    let Some(position) = inspection
-        .entries
-        .iter()
-        .position(|e| e.kind == EntryKind::File && e.path.as_str() == wanted)
-    else {
-        return Err(ArchiveRefusal::EntryNotFound);
-    };
-    let size = inspection.entries[position].size;
-    if size > limits.max_single_read {
-        return Err(ArchiveRefusal::EntryTooLargeToRead {
-            max: limits.max_single_read,
-        });
+    let mut found = read_many(source, inspection, &[wanted], limits, cancel)?;
+    found.pop().ok_or(ArchiveRefusal::EntryNotFound)?
+}
+
+/// Lit plusieurs fichiers de l'archive inspectée EN UNE PASSE : l'empreinte de toute l'archive n'est revérifiée
+/// qu'une fois (et un tar.gz n'est rejoué qu'une fois), quel que soit le nombre de noms. Rend, dans l'ordre de
+/// `wanted`, le contenu ou le refus propre à chaque nom (absent, trop gros) ; seule une archive changée est un refus
+/// d'ensemble.
+pub fn read_many<R: Read + Seek>(
+    source: &mut R,
+    inspection: &Inspection,
+    wanted: &[&str],
+    limits: &ArchiveLimits,
+    cancel: Cancel<'_>,
+) -> Result<Vec<Result<Vec<u8>, ArchiveRefusal>>, ArchiveRefusal> {
+    let mut results: Vec<Result<Vec<u8>, ArchiveRefusal>> = Vec::with_capacity(wanted.len());
+    // (position dans l'archive, rang dans `wanted`) des noms à lire.
+    let mut todo: Vec<(usize, usize)> = Vec::new();
+    for (rank, name) in wanted.iter().enumerate() {
+        let position = inspection
+            .entries
+            .iter()
+            .position(|e| e.kind == EntryKind::File && e.path.as_str() == *name);
+        match position {
+            None => results.push(Err(ArchiveRefusal::EntryNotFound)),
+            Some(position) if inspection.entries[position].size > limits.max_single_read => {
+                results.push(Err(ArchiveRefusal::EntryTooLargeToRead {
+                    max: limits.max_single_read,
+                }));
+            }
+            Some(position) => {
+                results.push(Ok(Vec::new()));
+                todo.push((position, rank));
+            }
+        }
+    }
+    if todo.is_empty() {
+        return Ok(results);
     }
     assert_unchanged(source, inspection, limits, cancel)?;
-    let mut out = Vec::with_capacity(size as usize);
     match inspection.kind {
         ArchiveKind::Zip => {
-            let plan = &inspection.plans[position];
-            zip::read_entry(source, plan, cancel, &mut |chunk| {
-                out.extend_from_slice(chunk);
-                Ok(())
-            })?;
+            for (position, rank) in &todo {
+                let plan = &inspection.plans[*position];
+                let mut out = Vec::new();
+                zip::read_entry(source, plan, cancel, &mut |chunk| {
+                    out.extend_from_slice(chunk);
+                    Ok(())
+                })?;
+                results[*rank] = Ok(out);
+            }
         }
         ArchiveKind::Tar | ArchiveKind::TarGz => {
             let mut seen = 0usize;
             replay_tar(source, inspection, limits, cancel, &mut |info, walker| {
                 let here = seen;
                 seen += 1;
-                if here == position {
-                    walker.read_data(info.size, cancel, &mut |chunk| {
-                        out.extend_from_slice(chunk);
-                        Ok(())
-                    })?;
+                for (position, rank) in &todo {
+                    if *position == here {
+                        let mut out = Vec::new();
+                        walker.read_data(info.size, cancel, &mut |chunk| {
+                            out.extend_from_slice(chunk);
+                            Ok(())
+                        })?;
+                        results[*rank] = Ok(out);
+                        break;
+                    }
                 }
                 Ok(())
             })?;
         }
     }
-    Ok(out)
+    Ok(results)
 }

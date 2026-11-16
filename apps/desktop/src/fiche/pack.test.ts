@@ -187,3 +187,33 @@ describe("ce que l'écran dit", () => {
     expect(all).not.toMatch(/\b(tu|ton|ta|tes|toi)\b/i);
   });
 });
+
+describe("la version de Minecraft qui ne va pas avec le pack (HRT-225, revue de Nora)", () => {
+  it("nomme la version du pack, la version choisie et le champ à corriger, et dit qu'il n'y a rien à renvoyer", () => {
+    const [text] = packRefusalSentences({
+      kind: "refused",
+      reason: "PACK_VERSION_MISMATCH",
+      mods: null,
+      host: null,
+      packVersion: "1.20.1",
+      chosenVersion: "1.21.1",
+      field: "Version de Minecraft",
+    });
+    expect(text).toContain("fait pour Minecraft 1.20.1");
+    expect(text).toContain("vous avez choisi la version 1.21.1");
+    expect(text).toContain("« Version de Minecraft »");
+    expect(text).toContain("vous n'avez pas à le renvoyer");
+  });
+
+  it("dit où écrire la version quand le pack ne la dit pas, et que rien n'est lancé", () => {
+    const [text] = packRefusalSentences({
+      kind: "refused",
+      reason: "PACK_VERSION_UNREADABLE",
+      mods: null,
+      host: null,
+    });
+    expect(text).toContain("« Version de Minecraft »");
+    expect(text).toContain("rien n'est encore installé");
+    expect(text).toContain("pas à le renvoyer");
+  });
+});

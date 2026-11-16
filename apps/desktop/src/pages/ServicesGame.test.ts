@@ -131,9 +131,10 @@ describe("la carte « Adresse pour vos joueurs » (BR-JEU-020, BR-JEU-021, BR-JE
   it("dit {adresse}:{port}, que l'adresse ne marche que depuis le réseau et que Hearth ne vérifie pas", async () => {
     const { wrapper } = await open();
     const host = useServersStore().byId("forge")?.host ?? "";
-    expect(wrapper.get("[data-game-address-value]").text()).toBe(`${host}:7777`);
+    expect(wrapper.get("[data-game-address-lan-value]").text()).toBe(`${host}:7777`);
+    expect(wrapper.find("[data-game-address-value]").exists()).toBe(false);
     expect(wrapper.get("[data-game-address-local]").text()).toBe(
-      "Cette adresse ne marche que depuis votre réseau. Renseignez l'adresse publique de votre serveur pour afficher celle de vos joueurs.",
+      "Hearth ne connaît pas votre adresse d'internet : votre box ne l'a pas donnée. Renseignez-la avec « Modifier l'adresse d'internet » : un nom de domaine, ou l'adresse IP de votre box.",
     );
     expect(wrapper.get("[data-game-address-unverified]").text()).toBe(
       "Hearth ne peut pas vérifier que cette adresse est joignable.",
@@ -161,11 +162,11 @@ describe("la carte « Adresse pour vos joueurs » (BR-JEU-020, BR-JEU-021, BR-JE
     const write = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: write } });
     const { wrapper } = await open();
-    await wrapper.get("[data-game-address-copy]").trigger("click");
+    await wrapper.get("[data-game-address-lan-copy]").trigger("click");
     await flushPromises();
     const host = useServersStore().byId("forge")?.host ?? "";
     expect(write).toHaveBeenCalledWith(`${host}:7777`);
-    expect(wrapper.get("[data-game-address-copy]").text()).toContain("Copiée");
+    expect(wrapper.get("[data-game-address-lan-copy]").text()).toContain("Copiée");
     expect(toasts()).toContain("Adresse copiée.");
     wrapper.unmount();
   });
@@ -173,7 +174,7 @@ describe("la carte « Adresse pour vos joueurs » (BR-JEU-020, BR-JEU-021, BR-JE
   it("une copie qui échoue dit de copier à la main, sans rien bloquer", async () => {
     vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
     const { wrapper } = await open();
-    await wrapper.get("[data-game-address-copy]").trigger("click");
+    await wrapper.get("[data-game-address-lan-copy]").trigger("click");
     await flushPromises();
     expect(wrapper.get("[data-game-address-failed]").text()).toBe(
       "Impossible de copier. Sélectionnez le texte et copiez-le à la main.",
@@ -213,6 +214,22 @@ describe("l'adresse publique des joueurs (HRT-215, BR-JEU-022)", () => {
     await flushPromises();
   }
 
+  it("montre l'adresse du réseau maison lue par l'agent et celle d'internet dite par la box, chacune avec son port et son bouton copier", async () => {
+    const { wrapper } = await open((bridge) =>
+      bridge.games.patch("forge", "h_game", {
+        lanAddress: "192.168.1.20",
+        detectedAddress: "203.0.113.9",
+      }),
+    );
+    expect(wrapper.get("[data-game-address-lan-value]").text()).toBe("192.168.1.20:7777");
+    expect(wrapper.get("[data-game-address-value]").text()).toBe("203.0.113.9:7777");
+    expect(wrapper.find("[data-game-address-detected]").exists()).toBe(true);
+    expect(wrapper.find("[data-game-address-local]").exists()).toBe(false);
+    expect(wrapper.find("[data-game-address-lan-copy]").exists()).toBe(true);
+    expect(wrapper.find("[data-game-address-copy]").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
   it("montre l'adresse publique renseignée avec le port du jeu, sans la phrase « ne marche que depuis votre réseau »", async () => {
     const { wrapper } = await open((bridge) =>
       bridge.games.patch("forge", "h_game", { publicAddress: "jeu.example.org" }),
@@ -220,7 +237,7 @@ describe("l'adresse publique des joueurs (HRT-215, BR-JEU-022)", () => {
     expect(wrapper.get("[data-game-address-value]").text()).toBe("jeu.example.org:7777");
     expect(wrapper.find("[data-game-address-local]").exists()).toBe(false);
     expect(wrapper.get("[data-game-address-public]").text()).toBe(
-      "C'est l'adresse que vous avez renseignée pour vos joueurs.",
+      "C'est l'adresse que vous avez renseignée pour vos amis.",
     );
     wrapper.unmount();
   });

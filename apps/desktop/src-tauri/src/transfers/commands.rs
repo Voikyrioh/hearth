@@ -58,10 +58,18 @@ pub async fn start_deposit(
     .await
 }
 
-/// Les envois de cette session, sans lecture réseau : le panneau « Transferts » les relit tant que l'un envoie.
+/// Les envois de cette session : le panneau « Transferts » les relit tant que l'un envoie. La réponse n'attend
+/// jamais le réseau ; en tâche de fond, les envois réussis dont le fichier a quitté le serveur (consommé par une
+/// installation, ou expiré) sortent de la liste (HRT-222).
 #[tauri::command]
 #[specta::specta]
-pub async fn list_transfers(book: Book<'_>) -> Result<Vec<TransferDto>, LinkFailure> {
+pub async fn list_transfers(
+    link: Runtime_<'_>,
+    book: Book<'_>,
+) -> Result<Vec<TransferDto>, LinkFailure> {
+    let manager = link.manager().clone();
+    let tracked = Arc::clone(book.inner());
+    tauri::async_runtime::spawn(async move { service::reconcile(&manager, &tracked).await });
     Ok(book.list())
 }
 

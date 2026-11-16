@@ -526,7 +526,13 @@ export function useFicheInstall(
     wipe,
     refusal: (refused: DeployRefusal) => {
       // Le pack refusé (ou disparu) est retiré de la zone d'attente de l'agent : il est à choisir de nouveau.
-      if (refused.kind === "pack_unknown" || refused.kind === "pack_refused") {
+      // Une version ou un moteur qui ne vont pas avec le pack : le pack reste sur le serveur, c'est la réponse qui change.
+      const keepsPack =
+        refused.kind === "pack_refused" &&
+        ["PACK_VERSION_MISMATCH", "PACK_VERSION_UNREADABLE", "PACK_LOADER_MISMATCH"].includes(
+          refused.reason,
+        );
+      if (!keepsPack && (refused.kind === "pack_unknown" || refused.kind === "pack_refused")) {
         edit((current) => {
           current.pack = null;
         });

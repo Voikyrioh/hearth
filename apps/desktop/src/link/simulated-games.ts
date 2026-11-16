@@ -52,6 +52,8 @@ export class SimulatedGames {
         ports: [{ hostPort: 7777, protocol: "tcp", role: "game", changed: false }],
         hasPassword: password !== null && password !== "",
         publicAddress: null,
+        lanAddress: null,
+        detectedAddress: null,
         ...view,
       },
       password: password === "" ? null : password,

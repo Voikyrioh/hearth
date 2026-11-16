@@ -252,9 +252,19 @@ pub fn interpret_deploy(status: u16, body: &Value) -> Result<DeployOutcome, Link
         // Un pack de mods joint (HRT-124) : le code fixe de l'agent, jamais un texte ni un nom d'entrée.
         ErrorCode::PackUnknown => refused(DeployRefusal::PackUnknown),
         ErrorCode::PackRefused => match hearth_link::read_pack_refusal(status, body) {
-            Ok(hearth_link::PackRefusal::Refused { reason, mods, host }) => {
-                refused(DeployRefusal::PackRefused { reason, mods, host })
-            }
+            Ok(hearth_link::PackRefusal::Refused {
+                reason,
+                mods,
+                host,
+                pack_version,
+                chosen_version,
+            }) => refused(DeployRefusal::PackRefused {
+                reason,
+                mods,
+                host,
+                pack_version,
+                chosen_version,
+            }),
             Ok(hearth_link::PackRefusal::Unknown) => refused(DeployRefusal::PackUnknown),
             Err(_) => refused(DeployRefusal::Other),
         },

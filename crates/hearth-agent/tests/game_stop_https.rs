@@ -101,6 +101,14 @@ async fn bench_with(fiche: Fiche) -> Bench {
 
 /// Une « seconde de fiche » dure `unit_ms` millisecondes.
 async fn bench_timed(fiche: Fiche, unit_ms: u64) -> Bench {
+    bench_full(fiche, unit_ms, None).await
+}
+
+async fn bench_full(
+    fiche: Fiche,
+    unit_ms: u64,
+    network: Option<Arc<dyn hearth_agent::application::ports::NetworkAddresses>>,
+) -> Bench {
     let env = env().await;
     let engine = Arc::new(FakeEngine::new());
     // Les exécutions que le faux lance commencent une seconde APRÈS l'ordre (l'horloge de l'agent est figée).
@@ -119,6 +127,7 @@ async fn bench_timed(fiche: Fiche, unit_ms: u64) -> Bench {
     parts.free_space = Arc::new(FakeFreeSpace::new());
     parts.safe_fs = Some(Arc::new(FakeSafeFs::new()));
     parts.catalog.include_preview = true;
+    parts.catalog.network = network;
     parts.catalog.service = Some(Arc::new(CatalogService::from_parts(
         vec![fiche.clone()],
         Vec::new(),
@@ -1103,4 +1112,52 @@ async fn a_fiche_without_a_game_password_answers_200_without_one() {
     let reply = b.secret_as(&b.ada, server.key.as_str()).await;
     assert_eq!(reply.status, 200, "{}", reply.text);
     assert!(reply.body.get("password").is_none(), "{}", reply.text);
+}
+
+/// Une box de test : l'adresse du réseau maison et celle d'internet qu'elle dit.
+struct FakeNetwork {
+    external: Option<&'static str>,
+}
+
+#[async_trait::async_trait]
+impl hearth_agent::application::ports::NetworkAddresses for FakeNetwork {
+    fn lan_ip(&self) -> Option<String> {
+        Some("192.168.1.20".into())
+    }
+
+    async fn external_ip(&self) -> Option<String> {
+        self.external.map(str::to_owned)
+    }
+}
+
+/// HRT-223, BR-JEU-043 : la vue du jeu porte l'adresse du réseau maison et celle d'internet que la box a dite ; sans
+/// réponse de la box, seule la première est donnée (jamais une adresse inventée ni demandée à un tiers).
+#[tokio::test]
+async fn the_game_view_carries_the_home_network_address_and_the_one_the_box_gave() {
+    let b = bench_full(
+        terraria("tested", tested),
+        1,
+        Some(Arc::new(FakeNetwork {
+            external: Some("203.0.113.9"),
+        })),
+    )
+    .await;
+    let server = b.install().await;
+    let (status, body, text) = game_view(&b.agent, &b.dan.token, server.key.as_str()).await;
+    assert_eq!(status, 200, "{text}");
+    assert_eq!(body["lan_address"], "192.168.1.20", "{text}");
+    assert_eq!(body["detected_address"], "203.0.113.9", "{text}");
+    b.agent.shutdown().await;
+
+    let silent = bench_full(
+        terraria("tested", tested),
+        1,
+        Some(Arc::new(FakeNetwork { external: None })),
+    )
+    .await;
+    let server = silent.install().await;
+    let (_, body, text) = game_view(&silent.agent, &silent.dan.token, server.key.as_str()).await;
+    assert_eq!(body["lan_address"], "192.168.1.20", "{text}");
+    assert!(body.get("detected_address").is_none(), "{text}");
+    silent.agent.shutdown().await;
 }

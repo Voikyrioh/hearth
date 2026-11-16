@@ -70,17 +70,36 @@ pub struct PackIntake {
     deposits: Arc<dyn PackDeposits>,
 }
 
-/// Lit UN fichier (la description du pack) dans l'archive déjà inspectée.
-struct OneFile<'a> {
-    file: &'a mut Box<dyn DepositFile>,
-    inspection: &'a Inspection,
-    limits: &'a ArchiveLimits,
+/// Les fichiers de description qu'un jugement peut demander (un par nom, à la racine du pack).
+const DESCRIPTIONS: [&str; 5] = [
+    "modrinth.index.json",
+    "manifest.json",
+    "variables.txt",
+    "install.properties",
+    ".fabric-installer/install.properties",
+];
+
+/// Les descriptions du pack, lues TOUTES en une passe avant le jugement : l'empreinte de l'archive n'est revérifiée
+/// qu'une fois par jugement, pas une fois par fichier lu (HRT-225).
+struct Descriptions(Vec<(&'static str, Result<Vec<u8>, ArchiveRefusal>)>);
+
+impl Descriptions {
+    fn read_all(
+        file: &mut Box<dyn DepositFile>,
+        inspection: &Inspection,
+        limits: &ArchiveLimits,
+    ) -> Result<Self, ArchiveRefusal> {
+        let found = archive::read_many(file, inspection, &DESCRIPTIONS, limits, &|| false)?;
+        Ok(Self(DESCRIPTIONS.into_iter().zip(found).collect()))
+    }
 }
 
-impl DescriptionReader for OneFile<'_> {
+impl DescriptionReader for Descriptions {
     fn read(&mut self, name: &str) -> Result<Vec<u8>, DescriptionError> {
-        archive::read_one(self.file, self.inspection, name, self.limits, &|| false)
-            .map_err(|_| DescriptionError::Unreadable)
+        match self.0.iter().find(|(known, _)| *known == name) {
+            Some((_, Ok(bytes))) => Ok(bytes.clone()),
+            _ => Err(DescriptionError::Unreadable),
+        }
     }
 }
 
@@ -126,15 +145,9 @@ impl PackIntake {
                 size: entry.size,
             })
             .collect();
-        let report = judge_pack(
-            &entries,
-            &mut OneFile {
-                file,
-                inspection: &inspection,
-                limits: &limits,
-            },
-        )
-        .map_err(PackError::Refused)?;
+        let mut descriptions =
+            Descriptions::read_all(file, &inspection, &limits).map_err(PackError::Archive)?;
+        let report = judge_pack(&entries, &mut descriptions).map_err(PackError::Refused)?;
         let size = file_len(file)?;
         Ok(JudgedPack {
             id: id.clone(),

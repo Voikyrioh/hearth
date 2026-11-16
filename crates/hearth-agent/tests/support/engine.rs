@@ -84,6 +84,7 @@ pub fn parts_supervised(
             phases: None,
             world_fs: None,
             pack_deposits: None,
+            network: None,
         },
     }
 }

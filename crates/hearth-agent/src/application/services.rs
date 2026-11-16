@@ -2427,6 +2427,44 @@ impl ServicesRegistry {
         self.commit(&mut inner);
     }
 
+    /// Re-publie tel quel le service `key` (même vue, nouveau lot) : les projections qui ne viennent pas du
+    /// moteur (`busy`, `last_action`, lues au journal des opérations à l'envoi) sont relues par les abonnés.
+    /// Sans effet si le service n'est pas publié.
+    // FIX:01M7GQRDE4VBF9CMCJJMM6MK93 Une opération close sans changement d'état du service (arrêt d'un conteneur
+    // déjà arrêté) ne produisait aucun lot : `busy` restait affiché jusqu'au redémarrage de l'agent.
+    pub fn republish(&self, key: &ServiceKey) {
+        let mut inner = self.lock();
+        let Some(view) = inner.published.get(key).cloned() else {
+            return;
+        };
+        inner.rev += 1;
+        let change = ServicesChange {
+            rev: inner.rev,
+            engine: None,
+            upserts: vec![view],
+            removed: Vec::new(),
+        };
+        let _ = self.changes.send(Arc::new(change));
+    }
+
+    /// Re-publie tous les services publiés (un abonné aux opérations a perdu des changements).
+    pub fn republish_all(&self) {
+        let mut inner = self.lock();
+        if inner.published.is_empty() {
+            return;
+        }
+        let mut upserts: Vec<ServiceView> = inner.published.values().cloned().collect();
+        sort_views(&mut upserts);
+        inner.rev += 1;
+        let change = ServicesChange {
+            rev: inner.rev,
+            engine: None,
+            upserts,
+            removed: Vec::new(),
+        };
+        let _ = self.changes.send(Arc::new(change));
+    }
+
     /// Hearth a fini d'agir sur ce service : l'état redevient celui du moteur.
     pub fn end_transition(&self, key: &ServiceKey) {
         let mut inner = self.lock();

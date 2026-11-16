@@ -1267,10 +1267,19 @@ export const fr = {
       toast: "Adresse copiée.",
       copyFailed: "Impossible de copier. Sélectionnez le texte et copiez-le à la main.",
       others: "Ce jeu utilise d'autres ports : ils sont listés dans la carte « Ports à ouvrir ».",
+      lanTitle: "En réseau maison",
+      lanLabel: "Adresse pour les joueurs du réseau maison",
+      lanHelp: "Pour les joueurs qui sont chez vous, sur le même réseau que le serveur.",
+      internetTitle: "Depuis internet",
+      internetLabel: "Adresse pour les joueurs d'internet",
+      internetHelp:
+        "Pour vos amis : ouvrez ce port sur votre box (redirection de port) vers le serveur.",
+      detectedNote:
+        "Votre box a indiqué cette adresse. Elle peut changer : renseignez un nom de domaine pour la fixer.",
       localOnly:
-        "Cette adresse ne marche que depuis votre réseau. Renseignez l'adresse publique de votre serveur pour afficher celle de vos joueurs.",
-      publicNote: "C'est l'adresse que vous avez renseignée pour vos joueurs.",
-      edit: "Modifier l'adresse",
+        "Hearth ne connaît pas votre adresse d'internet : votre box ne l'a pas donnée. Renseignez-la avec « Modifier l'adresse d'internet » : un nom de domaine, ou l'adresse IP de votre box.",
+      publicNote: "C'est l'adresse que vous avez renseignée pour vos amis.",
+      edit: "Modifier l'adresse d'internet",
       editTitle: "Adresse pour vos joueurs",
       editSubmit: "Enregistrer l'adresse",
       editLabel: "Adresse à donner aux joueurs (facultatif)",
@@ -2122,8 +2131,16 @@ export const fr = {
     trust:
       "Cette fiche a été écrite par la personne qui publie Hearth. Elle fait tourner une image publique sur votre serveur, avec les droits d'un service ordinaire.",
     digest: "Empreinte de la fiche",
-    install: "Installer",
-    installProposed: "Installer avec les valeurs proposées",
+    goToQuestion: "Aller au champ",
+    install: "Installer…",
+    installHelp:
+      "Le formulaire des réglages s'affiche : vous choisissez, puis vous vérifiez avant de lancer.",
+    installProposed: "Installation rapide",
+    installProposedHelp:
+      "L'installation se fait avec les valeurs recommandées, sans remplir le formulaire. Vous vérifiez le récapitulatif avant de lancer.",
+    sectionNeeds: "Ce qu'il faut pour ce jeu",
+    sectionSettings: "Les réglages du jeu",
+    technicalDetails: "Détails techniques",
     // Les cartes de la fiche
     cardImage: "Image",
     cardPorts: "Ports",
@@ -2220,9 +2237,9 @@ export const fr = {
     resThisServerHas: "Votre serveur offre {cpu} et {memory} de mémoire.",
     // Téléchargements, premier démarrage
     downloadKnown:
-      "Au premier démarrage, ce programme télécharge environ {size} de {what} depuis {source}. Cela peut prendre longtemps.",
+      "Au premier démarrage, le jeu télécharge ce qui suit : {what} (environ {size}), depuis {source}. Cela peut prendre longtemps.",
     downloadUnknown:
-      "Au premier démarrage, ce programme télécharge des {what} depuis {source}. Hearth ne connaît pas leur taille. Cela peut prendre longtemps.",
+      "Au premier démarrage, le jeu télécharge ce qui suit : {what}, depuis {source}. Hearth ne connaît pas la taille du téléchargement. Cela peut prendre longtemps.",
     downloadNone: "Cette fiche ne déclare aucun téléchargement au premier démarrage.",
     firstStartLong:
       "Le premier démarrage peut prendre longtemps : Hearth attend jusqu'à {duration}.",
@@ -2298,8 +2315,9 @@ export const fr = {
     portRange: "Le port doit être compris entre 1024 et 65535.",
     portDuplicate: "Deux ports ne peuvent pas porter le même numéro.",
     portPlaceholder: "Numéro du port",
-    portLabel: "Port du serveur pour {role}",
-    versionFixed: "Version : {version} (la seule proposée par cette fiche).",
+    portLabel: "{role}",
+    versionFixed:
+      "Hearth installe toujours la même image du programme serveur : elle ne se choisit pas. La version du jeu, elle, se choisit plus haut.",
     noPassword:
       "Aucun mot de passe : toute personne qui peut joindre ce port peut rejoindre la partie.",
     tokenHelp:
@@ -2308,7 +2326,8 @@ export const fr = {
     tokenNeeded: "Ce jeu a besoin d'un jeton de serveur.",
     secretHint: "Il est masqué ici et n'est jamais écrit dans le journal d'activité.",
     charsetFileStem: "Lettres, chiffres, tirets et soulignés seulement.",
-    charsetArgSafe: "Lettres sans accent, chiffres, points, tirets, soulignés et deux-points.",
+    charsetArgSafe:
+      "Écrivez des lettres sans accent, des chiffres, des points, des tirets ou des tirets bas.",
     // Un caractère refusé dit en mots (`fiche/character.ts`) : une espace ne se voit pas.
     character: {
       accented: "la lettre accentuée « {character} »",
@@ -2522,6 +2541,15 @@ export const fr = {
     refusedWrapped:
       "Ce pack range tout dans un dossier. Refaites l'archive avec son contenu à la racine : les dossiers « mods » et « config » doivent être au premier niveau.",
     refusedUnrecognized: "Hearth ne reconnaît pas ce pack.",
+    versionField: "Version de Minecraft",
+    refusedVersionUnreadable:
+      "Hearth ne trouve pas, dans ce pack, pour quelle version de Minecraft il est fait. Écrivez cette version dans le champ « {field} » (la page du pack l'annonce, par exemple 1.20.1), puis continuez. Le pack reste sur le serveur : vous n'avez pas à le renvoyer, et rien n'est encore installé.",
+    refusedVersionMismatchNamed:
+      "Ce pack est fait pour Minecraft {pack}, mais vous avez choisi la version {chosen}. Écrivez {pack} dans le champ « {field} », ou laissez « LATEST » pour que Hearth prenne celle du pack. Le pack reste sur le serveur : vous n'avez pas à le renvoyer.",
+    refusedVersionMismatch:
+      "La version de Minecraft choisie n'est pas celle de ce pack. Corrigez-la avec celle de la page du pack, ou laissez « LATEST » : Hearth prendra celle que le pack annonce.",
+    refusedLoaderMismatch:
+      "Le type de serveur choisi n'est pas celui que ce pack demande. Choisissez le type que la page du pack annonce.",
     refusedHost:
       "Ce pack demande de télécharger depuis {host}, qui n'est pas permis par le format des packs Modrinth.",
     refusedHostUnknown:
@@ -2567,7 +2595,7 @@ export const fr = {
     tagModified: "Modifié",
     tagFrozen: "Figé",
     tagImposed: "Imposé par la fiche",
-    technicalName: "Nom dans le jeu : {key}",
+    technicalName: "Nom technique : {key}",
     gameDefault: "Défaut du jeu : {value}",
     gameDefaultEmpty: "Défaut du jeu : vide",
     gameDefaultUnverified: "Défaut du jeu : non vérifié.",
@@ -2812,6 +2840,8 @@ export const fr = {
     progressLabel: "Progression de l'envoi de {name}",
     announceDone: "{name} est arrivé sur le serveur.",
     announceInterrupted: "L'envoi de {name} est interrompu.",
+    announceNoSpace:
+      "{name} n'a pas pu être envoyé : le serveur manque de place. Libérez de la place, puis réessayez.",
     units: { byte: "o", kib: "Kio", mib: "Mio", gib: "Gio" },
     status: {
       sending: "Envoi en cours.",
@@ -2845,6 +2875,8 @@ export const fr = {
         "Le lien est tombé avant la réponse du serveur : l'envoi n'est peut-être pas ouvert. Regardez la liste des transferts avant de recommencer.",
     },
     actions: {
+      retry: "Réessayer",
+      retryLabel: "Réessayer l'envoi de {name}",
       resume: "Reprendre l'envoi",
       resumeLabel: "Reprendre l'envoi de {name}",
       cancel: "Annuler",

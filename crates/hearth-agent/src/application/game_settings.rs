@@ -282,6 +282,8 @@ pub struct GameSettings {
     /// plusieurs écritures de fichiers à la fois), il ne suffit donc pas à garder deux enregistrements de réglages
     /// l'un derrière l'autre.
     saving: StdMutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Les adresses de la machine pour les joueurs (HRT-223) ; posées par l'assemblage, absentes dans les essais.
+    network: std::sync::OnceLock<Arc<dyn super::ports::NetworkAddresses>>,
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -455,6 +457,7 @@ impl GameSettings {
             sink,
             clock,
             saving: StdMutex::new(HashMap::new()),
+            network: std::sync::OnceLock::new(),
         })
     }
 
@@ -1229,6 +1232,11 @@ impl GameSettings {
     // Ce que le détail d'un serveur de jeu montre (HRT-104, BR-JEU-017 à BR-JEU-021, BR-JEU-027)
     // -------------------------------------------------------------------------------------------------
 
+    /// Pose la source des adresses de la machine (une seule fois, à l'assemblage de l'agent).
+    pub fn set_network(&self, network: Arc<dyn super::ports::NetworkAddresses>) {
+        let _ = self.network.set(network);
+    }
+
     /// La vue d'un service de jeu : sa fiche, la façon dont son monde est enregistré à l'arrêt, ses ports publiés et
     /// s'il a un mot de passe. Aucune valeur secrète n'est lue ni descellée (`has_password` vient de l'état des
     /// réglages). Un service sans fiche (adopté, ordinaire) ou dont la fiche n'est plus connue de cette
@@ -1255,6 +1263,10 @@ impl GameSettings {
             .collect();
         let has_password = game_password_setting(fiche)
             .is_some_and(|setting| matches!(loaded.state.slot(&setting.id), Some(Slot::Secret)));
+        let (lan_address, detected_address) = match self.network.get() {
+            Some(network) => (network.lan_ip(), network.external_ip().await),
+            None => (None, None),
+        };
         Ok(GameView {
             fiche: fiche.id().to_owned(),
             name: fiche.file.name.clone(),
@@ -1268,6 +1280,8 @@ impl GameSettings {
             has_password,
             // L'adresse des joueurs est une donnée de la description durable, jamais un secret (BR-JEU-022).
             public_address: loaded.body.settings.public_address.clone(),
+            lan_address,
+            detected_address,
         })
     }
 

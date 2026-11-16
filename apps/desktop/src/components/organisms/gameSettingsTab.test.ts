@@ -151,7 +151,7 @@ describe("les thèmes en mots simples (BR-FICHE-041)", () => {
     const players = row(wrapper, "max_players");
     expect(players.text()).toContain("Nombre de joueurs");
     expect(players.text()).toContain("Combien de joueurs peuvent être connectés");
-    expect(players.get("[data-setting-key]").text()).toBe("Nom dans le jeu : maxplayers");
+    expect(players.get("[data-setting-key]").text()).toBe("Nom technique : maxplayers");
     const language = row(wrapper, "language");
     expect(language.get("[data-setting-default]").text()).toBe("Défaut du jeu : Anglais");
     // Défaut non vérifié : la ligne le dit, et Hearth n'écrit pas ce réglage.

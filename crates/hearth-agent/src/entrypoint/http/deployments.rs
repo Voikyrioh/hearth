@@ -160,6 +160,12 @@ pub(super) fn deploy_error(error: DeployError) -> ApiError {
                 PackRefusal::ModrinthHost { host } => {
                     serde_json::json!({ "reason": refusal.code(), "host": host })
                 }
+                // Deux versions de Minecraft déjà jugées par `is_game_version` : jamais un texte libre du pack.
+                PackRefusal::VersionMismatch { pack, chosen } => serde_json::json!({
+                    "reason": refusal.code(),
+                    "pack_version": pack,
+                    "chosen_version": chosen,
+                }),
                 _ => serde_json::json!({ "reason": refusal.code() }),
             };
             ApiError(ErrorBody::with_details(

@@ -829,7 +829,7 @@ impl Deployments {
                 machine,
                 free,
                 prep.as_ref(),
-                judged.as_ref().map(|j| j.report.genre),
+                judged.as_ref().map(|j| &j.report),
             )?;
             let pack = match (judged, prepared.pack) {
                 (Some(judged), Some(place)) => Some(JobPack {

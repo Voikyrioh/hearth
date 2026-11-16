@@ -35,6 +35,10 @@ export interface GameView {
   hasPassword: boolean;
   /** L'adresse que le propriétaire donne à ses joueurs (HRT-215, BR-JEU-022) ; `null` : pas renseignée. */
   publicAddress: string | null;
+  /** L'adresse de la machine sur le réseau maison (HRT-223) ; `null` : l'agent ne la connaît pas. */
+  lanAddress: string | null;
+  /** L'adresse d'internet que la box a dite à l'agent (HRT-223, UPnP) ; `null` : la box n'a pas répondu. */
+  detectedAddress: string | null;
 }
 
 export type GameRead = { kind: "found"; view: GameView } | { kind: "absent" };
@@ -57,6 +61,8 @@ export function toGameRead(dto: GameReadDto): GameRead {
       ports: view.ports.map((port) => ({ ...port })),
       hasPassword: view.hasPassword,
       publicAddress: view.publicAddress ?? null,
+      lanAddress: view.lanAddress ?? null,
+      detectedAddress: view.detectedAddress ?? null,
     },
   };
 }
