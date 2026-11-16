@@ -7,7 +7,7 @@ Le détail d'un serveur de jeu montrait une seule adresse. Les joueurs du résea
 
 ## Décision
 - L'agent lit l'adresse du réseau maison sur la machine (interface qu'utiliserait une connexion sortante ; aucun paquet envoyé).
-- L'agent demande l'adresse d'internet à la box du foyer par UPnP-IGD (recherche SSDP en multidiffusion locale, description de la box, requête SOAP `GetExternalIPAddress`), avec un module de quelques dizaines de lignes écrit à la main (pas de crate : surface réduite, aucune dépendance de plus). La réponse SSDP est hostile : description suivie seulement si elle vient de l'émetteur, privée, en `http`, chemin sûr ; lectures bornées en taille et en temps ; résultat gardé 10 minutes.
+- L'agent demande l'adresse d'internet à la box du foyer par UPnP-IGD (recherche SSDP en multidiffusion locale, description de la box, requête SOAP `GetExternalIPAddress`), avec un module de quelques dizaines de lignes écrit à la main (pas de crate : surface réduite, aucune dépendance de plus). Seule la passerelle par défaut (`/proc/net/route`) est interrogée : réponse et description ne sont crues que si leur hôte est exactement elle (aucune autre machine du réseau ne peut imposer une adresse ni faire viser une autre cible) ; description en `http`, chemin sûr, lectures bornées ; la découverte est unique, en tâche de fond, et son résultat gardé 10 minutes.
 - Le client montre les deux adresses ; l'adresse renseignée par le propriétaire (HRT-215) passe devant celle de la box.
 - Aucune requête vers un service tiers, sous aucun prétexte. Si la box ne répond pas, le propriétaire saisit un nom de domaine ou une adresse.
 

@@ -35,14 +35,51 @@ const WAN_SERVICES: [&str; 4] = [
     "urn:schemas-upnp-org:service:WANIPConnection:3",
 ];
 
+/// La découverte de l'adresse d'internet : rend l'adresse dite par la box, ou rien. Remplaçable dans les essais.
+type Probe = std::sync::Arc<
+    dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send>>
+        + Send
+        + Sync,
+>;
+
 #[derive(Default)]
+struct Known {
+    value: Option<String>,
+    at: Option<Instant>,
+    /// Une découverte est en cours : il n'y en a jamais deux.
+    running: bool,
+}
+
 pub struct SystemNetwork {
-    cache: Mutex<Option<(Instant, Option<String>)>>,
+    known: std::sync::Arc<Mutex<Known>>,
+    probe: Probe,
+}
+
+impl Default for SystemNetwork {
+    fn default() -> Self {
+        Self::with_probe(std::sync::Arc::new(|| {
+            Box::pin(async {
+                timeout(Duration::from_secs(6), ask_the_box())
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|ip| ip.to_string())
+            })
+        }))
+    }
 }
 
 impl SystemNetwork {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Une source de découverte donnée (les essais).
+    pub fn with_probe(probe: Probe) -> Self {
+        Self {
+            known: std::sync::Arc::default(),
+            probe,
+        }
     }
 }
 
@@ -57,39 +94,63 @@ impl NetworkAddresses for SystemNetwork {
         }
     }
 
+    /// La dernière adresse connue, TOUT DE SUITE (jamais d'attente de la box). Périmée ou jamais cherchée : une seule
+    /// découverte part en tâche de fond, quel que soit le nombre d'appels pendant qu'elle dure.
     async fn external_ip(&self) -> Option<String> {
-        if let Some((at, value)) = self
-            .cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
-        {
-            let keep = if value.is_some() {
+        let (value, start) = {
+            let mut known = self
+                .known
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let keep = if known.value.is_some() {
                 FOUND_FOR
             } else {
                 MISSED_FOR
             };
-            if at.elapsed() < keep {
-                return value;
+            let stale = known.at.is_none_or(|at| at.elapsed() >= keep);
+            let start = stale && !known.running;
+            if start {
+                known.running = true;
             }
+            (known.value.clone(), start)
+        };
+        if start {
+            let known = std::sync::Arc::clone(&self.known);
+            let discovery = (self.probe)();
+            tokio::spawn(async move {
+                let found = discovery.await;
+                let mut known = known
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                known.value = found;
+                known.at = Some(Instant::now());
+                known.running = false;
+            });
         }
-        let found = timeout(Duration::from_secs(6), ask_the_box())
-            .await
-            .ok()
-            .flatten()
-            .map(|ip| ip.to_string());
-        *self
-            .cache
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some((Instant::now(), found.clone()));
-        found
+        value
     }
 }
 
-/// Une adresse du réseau d'une maison : privée (RFC 1918) ou de lien local.
+/// Une adresse du réseau d'une maison : privée (RFC 1918) seulement, jamais de lien local (169.254.0.0/16 : services
+/// de métadonnées des nuages).
 fn is_home_network(ip: Ipv4Addr) -> bool {
-    ip.is_private() || ip.is_link_local()
+    ip.is_private()
+}
+
+/// La passerelle par défaut, lue dans la table de routage du système (`/proc/net/route`) : la route de destination
+/// `00000000` marquée « passerelle ». Absente ou illisible : `None`, et rien n'est interrogé.
+pub fn default_gateway(route_table: &str) -> Option<Ipv4Addr> {
+    route_table.lines().skip(1).find_map(|line| {
+        let columns: Vec<&str> = line.split_whitespace().collect();
+        let (destination, gateway, flags) = (columns.get(1)?, columns.get(2)?, columns.get(3)?);
+        let flags = u32::from_str_radix(flags, 16).ok()?;
+        if *destination != "00000000" || flags & 0x2 == 0 {
+            return None;
+        }
+        let raw = u32::from_str_radix(gateway, 16).ok()?;
+        let ip = Ipv4Addr::from(raw.to_le_bytes());
+        (!ip.is_unspecified()).then_some(ip)
+    })
 }
 
 /// Une adresse d'internet : ni privée, ni de lien local, ni de boucle, ni du partage d'adresses des opérateurs
@@ -119,7 +180,9 @@ pub fn is_public(ip: IpAddr) -> bool {
 }
 
 async fn ask_the_box() -> Option<IpAddr> {
-    let (gateway, path) = discover().await?;
+    let table = std::fs::read_to_string("/proc/net/route").ok()?;
+    let gateway = default_gateway(&table)?;
+    let (gateway, path) = discover(gateway).await?;
     let control = control_url(&fetch(gateway, &path).await?)?;
     let answer = soap(gateway, &control).await?;
     let ip: IpAddr = external_ip_of(&answer)?.parse().ok()?;
@@ -127,7 +190,7 @@ async fn ask_the_box() -> Option<IpAddr> {
 }
 
 /// Cherche la box : la première réponse dont la description est valable. Rend son adresse et le chemin de sa description.
-async fn discover() -> Option<(SocketAddr, String)> {
+async fn discover(gateway: Ipv4Addr) -> Option<(SocketAddr, String)> {
     let socket = AsyncUdp::bind("0.0.0.0:0").await.ok()?;
     let request = format!(
         "M-SEARCH * HTTP/1.1\r\nHOST: {SSDP_ADDR}\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n"
@@ -141,14 +204,20 @@ async fn discover() -> Option<(SocketAddr, String)> {
             .ok()?
             .ok()?;
         let text = String::from_utf8_lossy(&buffer[..len]);
-        if let Some(found) = location_of(&text, from) {
+        if let Some(found) = location_of(&text, from, gateway) {
             return Some(found);
         }
     }
 }
 
-/// L'en-tête `LOCATION` d'une réponse SSDP, jugé : `http`, l'adresse de l'émetteur, privée, un chemin sûr.
-pub fn location_of(response: &str, from: SocketAddr) -> Option<(SocketAddr, String)> {
+/// L'en-tête `LOCATION` d'une réponse SSDP, jugé : `http`, un chemin sûr, et la passerelle par défaut est À LA FOIS
+/// l'émetteur de la réponse et l'hôte de la description (une autre machine du réseau ne répond pas à sa place, et une
+/// réponse ne fait jamais viser une autre adresse).
+pub fn location_of(
+    response: &str,
+    from: SocketAddr,
+    gateway: Ipv4Addr,
+) -> Option<(SocketAddr, String)> {
     let line = response
         .lines()
         .find(|line| line.to_ascii_lowercase().starts_with("location:"))?;
@@ -162,7 +231,7 @@ pub fn location_of(response: &str, from: SocketAddr) -> Option<(SocketAddr, Stri
     let IpAddr::V4(ip) = addr.ip() else {
         return None;
     };
-    (addr.ip() == from.ip() && is_home_network(ip) && safe_path(path))
+    (from.ip() == IpAddr::V4(gateway) && ip == gateway && is_home_network(ip) && safe_path(path))
         .then(|| (addr, path.to_owned()))
 }
 
@@ -257,25 +326,67 @@ mod tests {
         format!("{ip}:1900").parse().unwrap()
     }
 
+    const GATEWAY: Ipv4Addr = Ipv4Addr::new(192, 168, 1, 1);
+
     #[test]
-    fn only_a_description_from_the_answering_private_host_on_a_safe_path_is_followed() {
-        let ok =
-            "HTTP/1.1 200 OK\r\nLOCATION: http://192.168.1.1:5000/rootDesc.xml\r\nST: x\r\n\r\n";
+    fn only_the_default_gateway_is_believed_and_followed() {
+        let ok = "HTTP/1.1 200 OK
+LOCATION: http://192.168.1.1:5000/rootDesc.xml
+ST: x
+
+";
         assert_eq!(
-            location_of(ok, from("192.168.1.1")),
+            location_of(ok, from("192.168.1.1"), GATEWAY),
             Some((
                 "192.168.1.1:5000".parse().unwrap(),
                 "/rootDesc.xml".to_owned()
             ))
         );
-        // Une autre machine du réseau qui désigne la box, ou un tiers, ou internet : jamais suivi.
-        assert_eq!(location_of(ok, from("192.168.1.50")), None);
-        let outside = "LOCATION: http://93.184.216.34:80/x.xml\r\n";
-        assert_eq!(location_of(outside, from("93.184.216.34")), None);
-        let https = "LOCATION: https://192.168.1.1/x.xml\r\n";
-        assert_eq!(location_of(https, from("192.168.1.1")), None);
-        let odd = "LOCATION: http://192.168.1.1:80/../etc;x\r\n";
-        assert_eq!(location_of(odd, from("192.168.1.1")), None);
+        // Un autre émetteur du réseau (même désignant la box) : refusé.
+        assert_eq!(location_of(ok, from("192.168.1.50"), GATEWAY), None);
+        // Un émetteur qui est la passerelle mais désigne une autre machine, ou le service de métadonnées : refusé.
+        let elsewhere = "LOCATION: http://192.168.1.50:5000/d.xml
+";
+        assert_eq!(location_of(elsewhere, from("192.168.1.1"), GATEWAY), None);
+        let metadata = "LOCATION: http://169.254.169.254:80/latest/meta-data
+";
+        assert_eq!(
+            location_of(metadata, from("169.254.169.254"), GATEWAY),
+            None
+        );
+        let outside = "LOCATION: http://93.184.216.34:80/x.xml
+";
+        assert_eq!(location_of(outside, from("93.184.216.34"), GATEWAY), None);
+        let https = "LOCATION: https://192.168.1.1/x.xml
+";
+        assert_eq!(location_of(https, from("192.168.1.1"), GATEWAY), None);
+        let odd = "LOCATION: http://192.168.1.1:80/../etc;x
+";
+        assert_eq!(location_of(odd, from("192.168.1.1"), GATEWAY), None);
+        // Le lien local n'est jamais un réseau maison.
+        assert!(!is_home_network(Ipv4Addr::new(169, 254, 169, 254)));
+    }
+
+    #[test]
+    fn the_default_gateway_is_read_from_the_routing_table_or_nothing() {
+        let table = "Iface	Destination	Gateway	Flags	RefCnt	Use	Metric	Mask	MTU	Window	IRTT
+            eth0	00000000	0101A8C0	0003	0	0	100	00000000	0	0	0
+            eth0	0001A8C0	00000000	0001	0	0	100	00FFFFFF	0	0	0
+";
+        assert_eq!(default_gateway(table), Some(GATEWAY));
+        // Aucune route par défaut, ou illisible : rien n'est interrogé.
+        let none = "Iface	Destination	Gateway	Flags
+eth0	0001A8C0	00000000	0001
+";
+        assert_eq!(default_gateway(none), None);
+        assert_eq!(default_gateway(""), None);
+        assert_eq!(
+            default_gateway(
+                "Iface
+n'importe quoi"
+            ),
+            None
+        );
     }
 
     #[test]
@@ -359,5 +470,47 @@ mod tests {
                 .unwrap();
         });
         assert_eq!(fetch(addr, "/x").await, None);
+    }
+
+    /// HRT-223 : N requêtes simultanées ne lancent qu'UNE découverte ; chacune reçoit tout de suite la dernière valeur
+    /// connue (rien au début), jamais l'attente de la box.
+    #[tokio::test]
+    async fn many_simultaneous_requests_start_one_discovery_and_never_wait_for_it() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let started = std::sync::Arc::new(AtomicUsize::new(0));
+        let gate = std::sync::Arc::new(tokio::sync::Notify::new());
+        let (counter, release) = (started.clone(), gate.clone());
+        let network =
+            std::sync::Arc::new(SystemNetwork::with_probe(std::sync::Arc::new(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let release = release.clone();
+                Box::pin(async move {
+                    release.notified().await;
+                    Some("203.0.113.9".to_owned())
+                })
+            })));
+        let calls: Vec<_> = (0..20)
+            .map(|_| {
+                let network = network.clone();
+                tokio::spawn(async move { network.external_ip().await })
+            })
+            .collect();
+        for call in calls {
+            // La découverte est bloquée : aucun appel n'attend, tous rendent « rien ».
+            assert_eq!(call.await.unwrap(), None);
+        }
+        assert_eq!(started.load(Ordering::SeqCst), 1);
+        gate.notify_one();
+        let mut seen = None;
+        for _ in 0..100 {
+            seen = network.external_ip().await;
+            if seen.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(seen.as_deref(), Some("203.0.113.9"));
+        // La valeur est fraîche : plus aucune découverte.
+        assert_eq!(started.load(Ordering::SeqCst), 1);
     }
 }

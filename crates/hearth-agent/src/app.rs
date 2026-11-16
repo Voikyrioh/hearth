@@ -1063,6 +1063,8 @@ pub async fn start_engined(
         adapters.clock.clone(),
     );
     if let Some(network) = engine.catalog.network.clone() {
+        // Lance la première découverte en tâche de fond : la première vue du jeu a déjà de quoi répondre.
+        let _ = network.external_ip().await;
         game_settings.set_network(network);
     }
     // L'arrêt des serveurs de jeu (HRT-103) : la suite d'étapes de la fiche, déroulée par le cas d'usage de pilotage.

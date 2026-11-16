@@ -226,7 +226,7 @@ fn neoforge_game(neoforge: &str) -> Option<String> {
     let mut nums = neoforge.split('.');
     let major: u32 = nums.next()?.parse().ok()?;
     let minor: u32 = nums.next()?.parse().ok()?;
-    Some(if minor == 0 {
+    version(&if minor == 0 {
         format!("1.{major}")
     } else {
         format!("1.{major}.{minor}")

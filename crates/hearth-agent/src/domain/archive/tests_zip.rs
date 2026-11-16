@@ -4,7 +4,7 @@
 use std::io::Cursor;
 
 use super::testkit::*;
-use super::{ArchiveLimits, ArchiveRefusal, MIB, inspect, read_one};
+use super::{ArchiveLimits, ArchiveRefusal, MIB, inspect, read_many, read_one};
 
 fn plain() -> Zip {
     Zip::of(vec![
@@ -588,4 +588,66 @@ fn a_partly_saturated_end_record_must_agree_with_the_zip64_record() {
     // Il dit autre chose, les deux autres champs étant saturés : deux lecteurs verraient deux archives.
     assert_eq!(code_of(two(Some(1))), "INDEX_LIES");
     assert_eq!(code_of(two(Some(3))), "INDEX_LIES");
+}
+
+/// Un lecteur qui compte les octets lus.
+struct Counting {
+    inner: Cursor<Vec<u8>>,
+    read: u64,
+}
+
+impl std::io::Read for Counting {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buffer)?;
+        self.read += n as u64;
+        Ok(n)
+    }
+}
+
+impl std::io::Seek for Counting {
+    fn seek(&mut self, to: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(to)
+    }
+}
+
+/// HRT-225 : lire plusieurs descriptions ne revérifie l'empreinte de toute l'archive qu'UNE fois, comme en lire une.
+#[test]
+fn reading_many_files_verifies_the_whole_archive_once() {
+    let pad = vec![7u8; 256 * 1024];
+    let bytes = Zip::of(vec![
+        ZEntry::file("pad.bin", &pad),
+        ZEntry::file("manifest.json", b"{}"),
+        ZEntry::file("variables.txt", b"A=1"),
+        ZEntry::file("install.properties", b"b=2"),
+    ])
+    .build();
+    let size = bytes.len() as u64;
+    let limits = ArchiveLimits::default();
+    let mut source = Counting {
+        inner: Cursor::new(bytes),
+        read: 0,
+    };
+    let inspection = inspect(&mut source, &limits, &never).unwrap();
+    let before = source.read;
+    let names = [
+        "manifest.json",
+        "variables.txt",
+        "install.properties",
+        "absent",
+    ];
+    let found = read_many(&mut source, &inspection, &names, &limits, &never).unwrap();
+    let passes = source.read - before;
+    assert_eq!(found[0].as_ref().unwrap(), b"{}");
+    assert_eq!(found[1].as_ref().unwrap(), b"A=1");
+    assert_eq!(found[2].as_ref().unwrap(), b"b=2");
+    assert_eq!(found[3], Err(ArchiveRefusal::EntryNotFound));
+    // Une passe d'empreinte (la taille de l'archive) et quelques octets : jamais deux passes.
+    assert!(
+        passes >= size && passes < size * 3 / 2,
+        "{passes} octets pour {size}"
+    );
+    // Un seul nom coûte la même chose : le coût ne dépend pas du nombre de noms.
+    let before = source.read;
+    read_one(&mut source, &inspection, "manifest.json", &limits, &never).unwrap();
+    assert!(source.read - before < size * 3 / 2);
 }
