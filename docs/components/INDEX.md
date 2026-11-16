@@ -103,6 +103,7 @@ Interface Vue 3, atomic design. Aucune logique réseau dans la vue : tout passe 
 - [`AttackModeBanner`](./AttackModeBanner.md) — Bandeau « Mode attaque actif » (et suspendu).
 - [`AttackModePanel`](./AttackModePanel.md) — Carte « Mode attaque » : état, bouton, raison d'indisponibilité.
 - [`AdminActDialog`](./AdminActDialog.md) — LA fenêtre de confirmation de tous les actes d'administration (mot de passe selon ce que l'agent annonce, délai de 5 minutes, poste sans clé).
+- [`AdminActPanel`](./AdminActPanel.md) — Le corps de la confirmation par mot de passe, sans fenêtre : la page de vérification et la fenêtre partagent `useAdminAct` (HRT-245).
 - [`ReauthField`](./ReauthField.md) — Le champ « Ton mot de passe » de la confirmation d'un acte.
 - [`ReauthSettingCard`](./ReauthSettingCard.md) — Ligne « Demander mon mot de passe » de la page Sécurité.
 - [`AttackModeDialog`](./AttackModeDialog.md) — Confirmation avec mot de passe de l'activation ou de la désactivation.

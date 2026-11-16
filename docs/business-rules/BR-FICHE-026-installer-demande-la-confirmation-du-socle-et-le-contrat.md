@@ -31,5 +31,6 @@ L'acte `ServiceDeploy` est confirmé comme pour toute image (preuve de clé du p
 - BR-FICHE-058, BR-DEPLOY-015
 
 ## Historique
+- 2026-11-16 — la confirmation par mot de passe peut se saisir dans la page : `AdminActPanel` et `useAdminAct` partagent l'état de la fenêtre (HRT-245).
 - 2026-10-24 — création (HRT-101).
 - 2026-10-24 — côté client (HRT-102).
