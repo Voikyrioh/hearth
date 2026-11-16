@@ -62,6 +62,7 @@ async function open(page: Page) {
   });
   await expect(page.locator("[data-row]").first()).toBeVisible();
   await page.locator("[data-deploy-open]").click();
+  await page.getByRole("button", { name: "Continuer sans fiche" }).click();
   await expect(page.locator("[data-deploy-form]")).toBeVisible();
   await expect(page.getByLabel("Nom du service")).toBeFocused();
 }

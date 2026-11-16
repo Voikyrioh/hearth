@@ -83,6 +83,21 @@ const toggleHint = computed(() => (settings.loaded ? undefined : t("settings.tog
               @update:model-value="settings.setNotifyOnSecurityAlert"
             />
           </SettingRow>
+          <SettingRow
+            :label="t('settings.remoteGameImages')"
+            :help="t('settings.remoteGameImagesHelp')"
+            v-slot="{ labelId }"
+          >
+            <HToggle
+              :aria-labelledby="labelId"
+              :model-value="settings.remoteGameImages"
+              :disabled="!settings.loaded"
+              :busy="settings.saving"
+              :hint="toggleHint"
+              data-setting-remote-images
+              @update:model-value="settings.setRemoteGameImages"
+            />
+          </SettingRow>
           <p class="settings__version">
             {{ t("settings.version") }}
             <span class="settings__mono">{{

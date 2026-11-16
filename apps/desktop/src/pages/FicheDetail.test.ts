@@ -18,7 +18,7 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
       .map((item) => item.text().toLowerCase());
     // Ce qu'il faut d'abord, puis les réglages, puis le détail technique (HRT-221).
     expect(titles).toEqual([
-      "ressources",
+      "ce qu'il faut pour ce jeu",
       "ports",
       "téléchargements",
       "image",
@@ -27,6 +27,8 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
       "questions",
       "ce que cette fiche impose",
     ]);
+    // Le tableau des chiffres et leurs preuves est replié sous « Ce qu'il faut pour ce jeu » (HRT-242).
+    expect(wrapper.find("[data-fiche-table]").exists()).toBe(false);
     // Plus de carte « Espace disque » : la ligne Espace disque de la carte Ressources le dit.
     expect(wrapper.find("[data-fiche-disk]").exists()).toBe(false);
     const tech = wrapper.get("[data-fiche-tech]");
@@ -38,6 +40,21 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
     expect(wrapper.get("[data-fiche-needs]").find("[data-fiche-image]").exists()).toBe(false);
     expect(wrapper.text()).not.toMatch(/compte exig|nom d'utilisateur/i);
     expect(wrapper.get(".nav__item.router-link-active").text()).toBe("Catalogue");
+    wrapper.unmount();
+  });
+
+  it("ouvre par un bandeau (image ou visuel neutre, nom, badges) puis quatre faits clés (HRT-242)", async () => {
+    const { wrapper } = await bootCatalogue(undefined, fiche("terraria"));
+    const banner = wrapper.get("[data-fiche-banner]");
+    expect(banner.find("[data-fiche-visual]").exists()).toBe(true);
+    expect(banner.get("[data-fiche-badge]").text()).toBe("Prêt à installer");
+    expect(banner.get("[data-fiche-delivered]").text()).toMatch(/^Livrée avec Hearth/);
+    expect(wrapper.get("[data-fiche-back]").text()).toBe("Retour au catalogue");
+    const facts = wrapper
+      .findAll("[data-fiche-facts] li")
+      .map((item) => item.attributes("data-fact"));
+    expect(facts).toEqual(["memory", "disk", "ports", "start"]);
+    expect(wrapper.get("[data-need-memory]").text()).toMatch(/^Mémoire/);
     wrapper.unmount();
   });
 
@@ -121,6 +138,7 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
 describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
   it("dit une seule fois que Hearth ne connaît pas les besoins d'un jeu, sans tableau d'absences", async () => {
     const { wrapper } = await bootCatalogue(undefined, fiche("terraria"));
+    await wrapper.get("[data-fiche-table-toggle]").trigger("click");
     expect(wrapper.get("[data-res-none]").text()).toBe(
       "Hearth ne connaît pas les besoins de ce jeu en processeur, en mémoire ni en espace disque.",
     );
@@ -146,6 +164,7 @@ describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
       };
       bridge.catalog.put(detail);
     }, fiche("terraria"));
+    await wrapper.get("[data-fiche-table-toggle]").trigger("click");
     const memory = wrapper.get('[data-res-row="memory"]');
     expect(memory.get("[data-res-min]").text()).toBe("Non vérifié");
     expect(memory.get("[data-res-recommended]").text()).toBe("Non vérifié");
@@ -166,6 +185,7 @@ describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
 
   it("montre chaque preuve de la fiche d'essai et dit si la machine couvre le recommandé", async () => {
     const { wrapper } = await bootCatalogue((bridge) => bridge.catalog.addRich(), fiche("essai"));
+    await wrapper.get("[data-fiche-table-toggle]").trigger("click");
     expect(wrapper.get('[data-res-row="cpu"] [data-proof]').attributes("data-proof")).toBe(
       "measured",
     );
@@ -189,6 +209,7 @@ describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
 
   it("ouvre la source d'un chiffre de l'éditeur dans le navigateur, par la coquille et non par l'adresse", async () => {
     const { wrapper, bridge } = await bootCatalogue((b) => b.catalog.addRich(), fiche("essai"));
+    await wrapper.get("[data-fiche-table-toggle]").trigger("click");
     await wrapper.get('[data-res-row="disk"] [data-proof-source]').trigger("click");
     await flushPromises();
     expect(bridge.openedLinks).toEqual([
@@ -226,6 +247,7 @@ describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
       };
       bridge.catalog.put(rich);
     }, fiche("essai"));
+    await wrapper.get("[data-fiche-table-toggle]").trigger("click");
     expect(wrapper.get('[data-res-verdict="publisher_above"]').text()).toContain(
       "L'éditeur du jeu annonce au moins 32 Go de mémoire et votre serveur en a 16 Go. Hearth n'a pas mesuré ce chiffre.",
     );

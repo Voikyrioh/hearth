@@ -63,12 +63,13 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   await open(page, "#/servers/forge/catalogue");
   const list = page.locator("[data-catalogue-list]");
   await expect(list).toContainText("Terraria");
-  await expect(list).toContainText("Livrée avec Hearth");
+  await expect(page.locator("[data-catalogue-footer]")).toContainText("Fiches livrées avec Hearth");
   await expect(page.locator(".nav__item.router-link-active")).toHaveText("Catalogue");
   await shoot(page, page, "catalogue-liste");
 
   await page.getByRole("button", { name: "Voir la fiche de Terraria" }).click();
   await expect(page.locator("[data-page-title]")).toHaveText("Terraria");
+  await page.locator("[data-fiche-table-toggle]").click();
   await expect(page.locator("[data-fiche-resources] [data-res-none]")).toContainText(
     "Hearth ne connaît pas les besoins de ce jeu",
   );
@@ -79,6 +80,7 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   await expect(page.locator("[data-page-title]")).toHaveText("Installer Terraria");
   await expect(page.locator('[data-field="name"] input')).toHaveValue("terraria");
   await page.getByLabel("Mot de passe du serveur").fill("hunter2-jeu");
+  await page.locator("[data-install-advanced-summary]").click();
   await page.getByLabel("Nombre de joueurs").fill("12");
   await shoot(page, page, "installer-reponses");
   await page.locator("[data-install-next]").click();
@@ -130,6 +132,7 @@ test("la fiche d'essai : preuves, variante, jeton, contrat à accepter dans sa f
   page,
 }) => {
   await open(page, "#/servers/forge/catalogue/essai", (s) => s.catalog.addRich());
+  await page.locator("[data-fiche-table-toggle]").click();
   await expect(page.locator('[data-res-row="memory"] [data-proof]')).toContainText(
     "Mesuré au repos",
   );

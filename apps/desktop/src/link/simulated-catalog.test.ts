@@ -112,6 +112,33 @@ describe("lire le catalogue", () => {
   });
 });
 
+describe("un agent de publication liste les fiches en cours de preuve (HRT-236)", () => {
+  it("les montre avec leur raison, non installables, sans détail ni installation", async () => {
+    const sim = bridge();
+    sim.catalog.addWaiting();
+    const catalog = await sim.readCatalog("forge");
+    const waiting = catalog.fiches.filter((card) => !card.installable);
+    expect(waiting.map((card) => card.id).sort()).toEqual(
+      [
+        "7dtd",
+        "corekeeper",
+        "factorio",
+        "palworld",
+        "rust",
+        "satisfactory",
+        "vrising",
+        "zomboid",
+      ].sort(),
+    );
+    for (const card of waiting) {
+      expect(card.installable).toBe(false);
+      expect(card.previewReason).toMatch(/^.{20,200}\.$/);
+      expect(card.previewReason).not.toMatch(/—|–/);
+      expect(await sim.readFiche("forge", card.id)).toEqual({ kind: "unknown" });
+    }
+  });
+});
+
 describe("accepter une installation", () => {
   it("accepte une demande juste : le service apparaît « Déploiement en cours » et l'agent garde la demande", async () => {
     const sim = bridge();

@@ -19,6 +19,7 @@ import type {
   SaveOutcome,
   SaveSettingsRequest,
 } from "./gameSettings";
+import { agentIllustrationUrl, isSteamAppId } from "./illustrations";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
 import type { PackCheck } from "./packs";
@@ -1362,6 +1363,28 @@ export class SimulatedLinkBridge implements LinkBridge {
 
   async openEngineDocs(): Promise<void> {
     this.services.docsOpened += 1;
+  }
+
+  /** Compte les ouvertures de la page d'installation de l'agent (test de l'assistant). */
+  agentInstallDocsOpened = 0;
+
+  async openAgentInstallDocs(): Promise<void> {
+    this.agentInstallDocsOpened += 1;
+  }
+
+  /**
+   * Images du mode simulé (HRT-239) : des fixtures NEUTRES générées (`scripts/build-fixture-illustrations.py`), aucune
+   * image d'éditeur, aucune requête vers Steam. Seuls Terraria et Valheim (Steam) et Minecraft (agent) en ont une ; tout
+   * autre jeu n'a volontairement aucun fichier : la page montre son repli neutre.
+   */
+  steamHeaderUrl(appId: number): string {
+    return isSteamAppId(appId) ? `/fixtures/illustrations/steam-${appId}.jpg` : "";
+  }
+
+  agentIllustrationUrl(serverId: string, ficheId: string, digest: string): string {
+    return agentIllustrationUrl("", serverId, ficheId, digest) === ""
+      ? ""
+      : `/fixtures/illustrations/agent-${ficheId}.jpg`;
   }
 
   async retryNow(serverId: string): Promise<void> {

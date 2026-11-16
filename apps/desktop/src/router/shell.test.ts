@@ -320,6 +320,7 @@ describe("hors ligne (HRT-12)", () => {
       "fiche-install",
       "security",
       "services",
+      "services-add",
       "services-deploy",
     ]);
     wrapper.unmount();

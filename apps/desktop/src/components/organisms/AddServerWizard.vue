@@ -9,6 +9,7 @@ import StepTrail from "@/components/molecules/StepTrail.vue";
 import LoginForm from "@/components/organisms/LoginForm.vue";
 import { ADD_STEPS, useAddServer } from "@/composables/useAddServer";
 import { t } from "@/i18n";
+import { getLinkBridge } from "@/link";
 
 // Assistant d'ajout de serveur en 3 temps (adresse, empreinte, connexion). La logique est dans
 // `useAddServer` ; ici, seulement l'affichage. « Refuser » et « Annuler » rendent la main à la
@@ -59,6 +60,11 @@ const address = computed(() => {
   return port ? `${wizard.host.value.trim()}:${port}` : wizard.host.value.trim();
 });
 
+/** « Voir comment l'installer » : la coquille ouvre la page d'installation de l'agent du site Hearth (adresse fixée dans la coquille). */
+function openInstallDocs() {
+  void getLinkBridge().openAgentInstallDocs();
+}
+
 function refuse() {
   wizard.refuse();
   emit("cancel");
@@ -77,9 +83,11 @@ function refuse() {
       @submit.prevent="submitAddress"
     >
       <h1 id="wizard-title" class="wizard__title">{{ t("connect.addTitle") }}</h1>
+      <p class="wizard__intro" data-wizard-intro>{{ t("connect.intro") }}</p>
       <HInput
         v-model="wizard.name.value"
         :label="t('connect.name')"
+        :help="t('connect.nameHelp')"
         :placeholder="t('connect.namePlaceholder')"
         :disabled="checking"
         :error="wizard.errors.value.name ?? undefined"
@@ -90,6 +98,7 @@ function refuse() {
           <HInput
             v-model="wizard.host.value"
             :label="t('connect.host')"
+            :help="t('connect.hostHelp')"
             :placeholder="t('connect.hostPlaceholder')"
             :disabled="checking"
             :error="wizard.errors.value.host ?? undefined"
@@ -100,6 +109,7 @@ function refuse() {
           <HInput
             v-model="wizard.port.value"
             :label="t('connect.port')"
+            :help="t('connect.portHelp')"
             :placeholder="t('connect.portPlaceholder')"
             :disabled="checking"
             :error="wizard.errors.value.port ?? undefined"
@@ -112,6 +122,17 @@ function refuse() {
         <span class="wizard__colors-label">{{ t("connect.color") }}</span>
         <ColorSwatches v-model="wizard.color.value" :label="t('connect.color')" :disabled="checking" />
       </div>
+      <aside class="wizard__aside" data-wizard-aside :aria-label="t('connect.asideTitle')">
+        <h2 class="wizard__aside-title">{{ t("connect.asideTitle") }}</h2>
+        <p class="wizard__aside-line">{{ t("connect.asideSecond") }}</p>
+        <p class="wizard__aside-line">{{ t("connect.asideThird") }}</p>
+      </aside>
+      <p class="wizard__install" data-wizard-install>
+        {{ t("connect.installAsk") }}
+        <button type="button" class="wizard__link" data-open-install-docs @click="openInstallDocs">
+          {{ t("connect.installLink") }}
+        </button>
+      </p>
       <p v-if="wizard.existing.value" class="wizard__info" role="status" data-existing>
         {{ t("connect.existing") }}
         <RouterLink
@@ -238,8 +259,41 @@ function refuse() {
 }
 
 .wizard__link {
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--ac);
+  font: inherit;
   text-decoration: underline;
+  cursor: pointer;
+}
+
+.wizard__intro {
+  margin: 0;
+  color: var(--tx-secondary);
+}
+
+.wizard__aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--card-edge);
+}
+
+.wizard__aside-title {
+  margin: 0;
+  font-family: var(--font-title);
+  font-size: var(--fs-lead);
+  font-weight: var(--fw-semibold);
+}
+
+.wizard__aside-line,
+.wizard__install {
+  margin: 0;
+  color: var(--tx-secondary);
 }
 
 .wizard__error {
@@ -260,6 +314,7 @@ function refuse() {
 
 .wizard__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-3);
 }

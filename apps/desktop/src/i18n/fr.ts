@@ -37,7 +37,7 @@ export const fr = {
     createTitle: "Créer un compte",
     create: "Créer",
     username: "Identifiant",
-    usernamePlaceholder: "ton-identifiant",
+    usernamePlaceholder: "votre-identifiant",
     newUsernamePlaceholder: "ex. camille",
     newPassword: "Mot de passe du nouveau compte",
     newPasswordPlaceholder: "Celui que ce compte utilisera",
@@ -308,7 +308,7 @@ export const fr = {
     skipToContent: "Aller au contenu",
     label: "Serveurs",
     home: "Accueil",
-    addServer: "Ajouter un serveur",
+    addServer: "Relier un serveur",
     servers: "Mes serveurs",
     settings: "Réglages",
   },
@@ -405,7 +405,8 @@ export const fr = {
   pages: {
     dashboard: "Tableau de bord",
     services: "Services",
-    deployService: "Déployer un service",
+    addGameServer: "Ajouter un serveur de jeu",
+    deployService: "Installer un programme de votre choix",
     catalogue: "Catalogue",
     ficheDetail: "Fiche d'un jeu",
     installFiche: "Installer un serveur de jeu",
@@ -421,7 +422,7 @@ export const fr = {
   welcome: {
     title: "Bienvenue dans Hearth",
     text: "Ajoute ton premier serveur pour commencer.",
-    addServer: "Ajouter un serveur",
+    addServer: "Relier un serveur",
   },
   bridge: {
     loadFailed: "Hearth n'arrive pas à lire la liste de tes serveurs.",
@@ -433,38 +434,45 @@ export const fr = {
   connect: {
     booksTitle: "Mes serveurs",
     empty: "Aucun serveur enregistré",
-    emptyText: "Ajoute un serveur pour le surveiller depuis ce PC.",
-    add: "Ajouter un serveur",
-    stepsLabel: "Étapes de l'ajout d'un serveur",
-    stepAddress: "Adresse",
-    stepFingerprint: "Empreinte",
-    stepLogin: "Connexion",
+    emptyText: "Reliez un serveur pour le surveiller depuis ce PC.",
+    add: "Relier un serveur",
+    stepsLabel: "Étapes pour relier un serveur",
+    stepAddress: "Où est le serveur",
+    stepFingerprint: "Vérifier que c'est bien lui",
+    stepLogin: "Se connecter",
     stepDone: "terminée",
     stepCurrent: "en cours",
-    addTitle: "Ajouter un serveur",
-    name: "Nom du serveur",
+    addTitle: "Relier un serveur à ce PC",
+    intro:
+      "Un serveur, c'est un ordinateur de chez vous sur lequel l'agent Hearth est installé. Indiquez où le trouver sur votre réseau : rien n'est enregistré avant que la connexion ait réussi.",
+    name: "Comment voulez-vous l'appeler ?",
+    nameHelp: "Ce nom ne sert qu'à vous, dans la barre de gauche.",
     // FIX:01M4EPX99456BPK54R5JHE4JPA : exemples neutres, rien de la machine de Voiky.
     namePlaceholder: "ex. salon",
-    host: "Adresse IP ou nom",
+    host: "Adresse du serveur sur votre réseau",
+    hostHelp:
+      "Elle s'affiche à la fin de l'installation de l'agent. Vous pouvez aussi la lire dans l'interface de votre box, dans la liste des appareils connectés.",
     hostPlaceholder: "ex. 192.168.1.10 ou serveur.local",
-    port: "Port (optionnel)",
+    port: "Port",
+    portHelp: "Gardez 7341 sauf si vous l'avez changé.",
     portPlaceholder: "7341",
-    color: "Couleur",
+    color: "Couleur du serveur dans la barre de gauche",
     colorOption: "Couleur {n}",
     next: "Suivant",
     previous: "Précédent",
     cancel: "Annuler",
     checking: "Vérification en cours…",
-    verifyTitle: "Vérifie l'identité du serveur",
+    verifyTitle: "Vérifiez que c'est bien lui",
     fingerprintLabel: "Empreinte du serveur :",
-    fingerprintHelp: "Compare avec l'empreinte affichée à la fin de l'installation de l'agent.",
+    fingerprintHelp:
+      "Comparez cette empreinte avec celle affichée à la fin de l'installation de l'agent.",
     fingerprintWhere:
-      "Pour la relire plus tard, lance « sudo hearth-agent fingerprint » sur le serveur.",
+      "Pour la relire plus tard, lancez « sudo hearth-agent fingerprint » sur le serveur.",
     fingerprintRefuseHelp:
-      "Refuser annule l'ajout : rien n'est enregistré. « Précédent » te ramène à l'adresse pour la corriger.",
+      "Refuser annule l'ajout : rien n'est enregistré. « Précédent » vous ramène à l'adresse pour la corriger.",
     confirmFingerprint: "Confirmer",
     refuseFingerprint: "Refuser",
-    loginTitle: "Connecte-toi",
+    loginTitle: "Connectez-vous",
     username: "Identifiant",
     password: "Mot de passe",
     remember: "Se souvenir de moi sur ce PC",
@@ -481,13 +489,20 @@ export const fr = {
     forgotten: "Identifiants oubliés pour {name}.",
     editTitle: "Modifier le serveur",
     save: "Enregistrer",
-    moved: "Tu as changé l'adresse : l'identité du serveur doit être vérifiée de nouveau.",
+    moved: "Vous avez changé l'adresse : l'identité du serveur doit être vérifiée de nouveau.",
     removeTitle: "Supprimer {name} ?",
     removeText: "Ses identifiants mémorisés seront aussi supprimés.",
     removeConfirm: "Supprimer",
     removeCancel: "Annuler",
     rememberedBadge: "Identifiants mémorisés",
-    reconnectTitle: "Connecte-toi à {name}",
+    reconnectTitle: "Connectez-vous à {name}",
+    asideTitle: "Ce qui va suivre",
+    asideSecond:
+      "2. Vérifier que c'est bien lui. Hearth vous montrera l'empreinte du serveur, une suite de lettres et de chiffres. Comparez-la avec celle affichée à la fin de l'installation de l'agent. Si elles diffèrent, refusez : rien ne sera enregistré.",
+    asideThird:
+      "3. Se connecter. Avec l'identifiant et le mot de passe créés sur le serveur. Vous pourrez demander à ce PC de s'en souvenir.",
+    installAsk: "Vous n'avez pas encore installé l'agent Hearth sur un ordinateur ?",
+    installLink: "Voir comment l'installer",
     readonlyInfo:
       "Ce compte a accès en lecture seule. Les actions d'administration sont désactivées.",
   },
@@ -817,6 +832,9 @@ export const fr = {
     lastAccount: "Dernier compte utilisé : {username}",
     notifyOnLinkChange: "Notifier quand un serveur devient hors ligne ou revient",
     notifyOnLinkChangeHelp: "Une notification Windows au plus par minute et par serveur.",
+    remoteGameImages: "Images des jeux depuis Steam",
+    remoteGameImagesHelp:
+      "Pour afficher l'image d'un jeu présent sur Steam, Hearth la demande au serveur d'images de Steam (Valve). Ce serveur voit l'adresse internet de ce PC et l'identifiant du jeu demandé, rien d'autre : ni compte, ni cookie, ni nom de serveur. Les images sont gardées sur ce PC pour ne pas être redemandées. Désactivez ce réglage pour ne plus jamais contacter Steam : un visuel neutre s'affiche à la place.",
     notifyOnSecurityAlert: "Alertes de sécurité",
     notifyOnSecurityAlertHelp:
       "Une notification Windows quand une attaque probable vise ton identifiant, et quand le mode attaque s'arrête tout seul.",
@@ -2000,10 +2018,32 @@ export const fr = {
   // Le Catalogue et l'installation d'un serveur de jeu depuis une fiche (HRT-102, BR-FICHE-*). Les libellés, bornes et
   // choix d'une fiche viennent de la fiche ; ici ne sont que les phrases autour.
   catalogue: {
-    subtitle: "Serveurs de jeu prêts à installer",
     label: "Fiches de serveurs de jeu",
     deliveredWith: "Livrée avec Hearth {version}",
     deliveredWithBare: "Livrée avec Hearth",
+    subtitle:
+      "Choisissez un jeu. Hearth installe son serveur sur {server} et vous donne l'adresse à transmettre à vos joueurs.",
+    searchLabel: "Chercher un jeu",
+    filtersLabel: "Filtrer les jeux",
+    filterAll: "Tous les jeux {n}",
+    filterReady: "Prêts à installer {n}",
+    filterSoon: "Bientôt {n}",
+    haveServer: "J'ai déjà un serveur de jeu",
+    readyTitle: "Prêts à installer",
+    readyText:
+      "Essayés par Hearth sur une vraie machine : ils démarrent, enregistrent et s'arrêtent proprement.",
+    soonTitle: "Bientôt dans Hearth",
+    soonText:
+      "Leur fiche existe, mais un point reste à régler avant de vous les proposer. Il est écrit sur chaque carte.",
+    badgeReady: "Prêt à installer",
+    badgeSoon: "Bientôt",
+    noMatch: "Aucun jeu ne correspond à « {text} ». Essayez un autre nom.",
+    emptyList: "Aucun jeu dans cette liste pour l'instant.",
+    footer:
+      "Fiches livrées avec Hearth {version}. Chaque fiche est écrite par la personne qui publie Hearth et installe une image publique sur votre serveur.",
+    footerBare:
+      "Fiches livrées avec Hearth. Chaque fiche est écrite par la personne qui publie Hearth et installe une image publique sur votre serveur.",
+    imageAlt: "Image du jeu {name}",
     see: "Voir la fiche",
     seeLabel: "Voir la fiche de {name}",
     refused:
@@ -2021,6 +2061,55 @@ export const fr = {
     waitingText: "Le catalogue s'affichera dès que ce serveur sera joignable.",
   },
   fiche: {
+    // Les quatre faits clés du bandeau et « Ce qu'il faut pour ce jeu » (HRT-242, BR-FICHE-004).
+    facts: {
+      disk: "{n} d'espace disque",
+      diskUnverified: "Espace disque non vérifié",
+      portsNone: "Aucun port à ouvrir",
+      portsOne: "Un seul port à ouvrir : {port}",
+      portsMany: "{k} ports à ouvrir : {list}",
+      start: "Premier démarrage : jusqu'à {d} minutes",
+      startUnknown: "Premier démarrage : durée non précisée",
+      proofMeasured: "Mesuré par Hearth.",
+      proofIdle: "Mesuré sans joueur : il en faut plus avec des joueurs.",
+      proofPublisher: "Selon l'éditeur, non mesuré par Hearth.",
+      proofNone: "Non vérifié par Hearth.",
+      sectionTitle: "Ce qu'il faut pour ce jeu",
+      placeTitle: "Place sur votre serveur",
+      lineMemory: "Mémoire : il faut {n}, {server} en a {m}. {proof}",
+      lineMemoryBare: "Mémoire : il faut {n}. {proof}",
+      lineMemoryUnverified:
+        "Mémoire : non vérifiée. Hearth ne peut pas dire combien ce jeu en demande.",
+      lineDisk: "Espace disque : {n}. {proof}",
+      lineDiskUnverified:
+        "Espace disque : non vérifié. Hearth ne peut pas dire quelle place ce jeu prend.",
+      lineCpu:
+        "Processeur : non vérifié. Hearth ne peut pas dire combien ce jeu en demande ; {server} a {c} cœurs.",
+      lineCpuBare: "Processeur : non vérifié. Hearth ne peut pas dire combien ce jeu en demande.",
+      tableShow: "Voir le tableau des chiffres et leurs preuves",
+      tableHide: "Masquer le tableau des chiffres",
+      playersTitle: "Pour que vos joueurs se connectent",
+      playersOne: "Un seul port sert au jeu : {port}. Vous pourrez le changer à l'installation.",
+      playersMany: "Ces ports servent au jeu : {list}. Vous pourrez les changer à l'installation.",
+      playersNone: "Aucun port n'est à ouvrir pour ce jeu.",
+      playersHome:
+        "Les joueurs de votre réseau maison se connectent directement. Pour vos amis d'internet, vous ouvrirez le port sur votre box, vers {server}. Hearth vous donnera l'adresse à leur envoyer.",
+      playersHomeBare:
+        "Les joueurs de votre réseau maison se connectent directement. Pour vos amis d'internet, vous ouvrirez le port sur votre box. Hearth vous donnera l'adresse à leur envoyer.",
+      startStopTitle: "Premier démarrage et arrêt",
+      settingsTitle: "Les réglages du jeu",
+      settingsCount:
+        "{n} questions à l'installation, {m} réglages modifiables ensuite dans l'onglet Réglages du serveur de jeu.",
+    },
+    // La mémoire d'une fiche en une phrase avec sa preuve (HRT-237, HRT-241, BR-FICHE-064).
+    memory: {
+      advised: "{n} de mémoire conseillés",
+      needs: "{n} de mémoire",
+      idle: "{n} de mémoire mesurés sans joueur",
+      publisher: "{n} de mémoire selon l'éditeur, non mesurés par Hearth",
+      unverified: "Mémoire nécessaire non vérifiée par Hearth",
+      serverHas: ", {server} en a {m}",
+    },
     // Reprendre un monde existant (HRT-106, BR-MONDE-*). Vouvoiement, phrases complètes.
     // L'aide « J'ai déjà un serveur de jeu » (HRT-106, BR-MONDE-021) : aucun jeu ni dossier nommé.
     help: {
@@ -2292,8 +2381,8 @@ export const fr = {
     installTitle: "Installer {name}",
     close: "Fermer",
     stepsLabel: "Étapes de l'installation",
-    stepAnswers: "Réponses",
-    stepResources: "Ressources",
+    stepAnswers: "Réglages",
+    stepResources: "Mémoire et processeur",
     stepVerify: "Vérifiez avant de lancer",
     loading: "Lecture de la fiche en cours.",
     next: "Continuer",
@@ -2304,7 +2393,11 @@ export const fr = {
     cardName: "Nom du service",
     nameHelp:
       "Lettres, chiffres, tirets et points. Un même jeu peut être installé plusieurs fois sous des noms différents.",
-    cardQuestionsAsk: "Questions du jeu",
+    cardQuestionsAsk: "L'essentiel",
+    advancedList: "Réglages avancés : {list}",
+    advancedMore: "Réglages avancés : {list}, et {k} autres",
+    advancedHelp: "Les valeurs proposées conviennent à la plupart des parties.",
+    backToFiche: "Retour à la fiche",
     cardPort: "Port du jeu",
     cardPorts2: "Ports du jeu",
     portHelp: "Le port que vos joueurs utiliseront pour se connecter.",
@@ -2885,9 +2978,40 @@ export const fr = {
       dismissLabel: "Retirer {name} de la liste",
     },
   },
+  // « Ajouter un serveur de jeu » : l'écran des trois chemins (HRT-243, BR-DEPLOY-039).
+  addGame: {
+    intro:
+      "Trois chemins, selon votre situation. Dans les trois cas, rien n'est créé sur {server} avant que vous ayez vérifié et confirmé.",
+    and: "et",
+    pathCatalogTitle: "Choisir un jeu dans le Catalogue",
+    pathCatalogTag: "Conseillé",
+    pathCatalogNames: "{names} et d'autres bientôt.",
+    pathCatalogNoNames: "Le Catalogue propose des jeux prêts à installer.",
+    pathCatalogText:
+      "Hearth connaît déjà ce qu'il faut à chaque jeu : la place, le port, la façon d'enregistrer le monde avant un arrêt. Vous choisissez un nom, quelques réglages, et vous vérifiez avant de lancer.",
+    pathCatalogNote: "Comptez dix minutes, le premier démarrage compris.",
+    pathCatalogButton: "Ouvrir le Catalogue",
+    pathFreeTitle: "Installer un programme de votre choix",
+    pathFreeTag: "Pour les habitués",
+    pathFreeText:
+      "Pour un serveur de jeu ou un outil qui n'a pas encore de fiche. Vous indiquez le nom de son image publique, sa version et ses réglages. Hearth vérifie ce qu'il peut, mais il ne connaît pas ce programme : c'est vous qui savez ce qu'il lui faut.",
+    pathFreeNote:
+      "Si le jeu que vous voulez est dans le Catalogue, préférez sa fiche : elle sait enregistrer le monde avant un arrêt.",
+    pathFreeButton: "Continuer sans fiche",
+    pathExistingTitle: "J'ai déjà un serveur de jeu sur {server}",
+    pathExistingText:
+      "Il tourne déjà, lancé sans Hearth. Deux possibilités : Hearth le suit tel quel (vous le voyez, l'arrêtez, le relancez, lisez ses journaux) ou vous le réinstallez depuis sa fiche en reprenant une copie de votre monde, pour essayer sans rien casser.",
+    pathExistingNote: "Votre monde d'origine n'est jamais lu, déplacé ni effacé sans votre choix.",
+    pathExistingButton: "Voir comment faire",
+    rightYes: "Vous avez le droit de gérer les services de {server}.",
+    engineReady: "Le moteur de conteneurs est prêt.",
+    engineNotReady:
+      "Le moteur de conteneurs n'est pas prêt : seul le Catalogue et l'aide sont ouverts pour l'instant.",
+    comeBack: "Vous pourrez revenir sur votre saisie à tout moment avant de lancer.",
+  },
   deploy: {
-    open: "Déployer un service",
-    pageTitle: "Déployer un service",
+    open: "Ajouter un serveur de jeu",
+    pageTitle: "Installer un programme de votre choix",
     close: "Fermer",
     backToList: "Retour à la liste",
     formLabel: "Formulaire de déploiement",

@@ -450,7 +450,7 @@ const SCROLL_PAGES = [
   ["Comptes", "#/servers/forge/accounts"],
   ["Sécurité", "#/servers/forge/security"],
   ["Mes serveurs", "#/servers"],
-  ["Ajouter un serveur", "#/servers/new"],
+  ["Relier un serveur", "#/servers/new"],
   ["Réglages", "#/settings"],
 ] as const;
 
@@ -528,9 +528,9 @@ for (const size of SIZES) {
     const rail = page.getByRole("navigation", { name: "Serveurs" });
     const targets = [
       {
-        link: rail.getByRole("link", { name: "Ajouter un serveur", exact: true }),
-        text: "Ajouter un serveur",
-        name: "Ajouter un serveur",
+        link: rail.getByRole("link", { name: "Relier un serveur", exact: true }),
+        text: "Relier un serveur",
+        name: "Relier un serveur",
         shot: "ajouter",
       },
       {
@@ -643,9 +643,9 @@ for (const size of SIZES) {
   }) => {
     await page.setViewportSize(size);
     await page.goto("/?nodev#/servers/new");
-    await page.getByLabel("Nom du serveur").fill("Atelier");
-    await page.getByLabel("Adresse IP ou nom").fill("10.0.0.5");
-    await page.getByLabel("Port (optionnel)").fill("99999");
+    await page.getByLabel("Comment voulez-vous l'appeler ?").fill("Atelier");
+    await page.getByLabel("Adresse du serveur sur votre réseau").fill("10.0.0.5");
+    await page.getByLabel("Port", { exact: true }).fill("99999");
     await expect(page.getByText("Port invalide. Plage admise : 1–⁠65535")).toBeVisible();
     await shoot(page, "hrt46-port", size.width, size.height);
   });

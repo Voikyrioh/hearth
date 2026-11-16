@@ -22,46 +22,48 @@ async function shoot(page: Page, name: string) {
 }
 
 async function fillAddress(page: Page, name: string, host: string) {
-  await page.getByLabel("Nom du serveur").fill(name);
-  await page.getByLabel("Adresse IP ou nom").fill(host);
+  await page.getByLabel("Comment voulez-vous l'appeler ?").fill(name);
+  await page.getByLabel("Adresse du serveur sur votre réseau").fill(host);
 }
 
 test("ajout d'un serveur en trois temps, de l'accueil au tableau de bord", async ({ page }) => {
   await page.goto("/?servers=none&nodev");
-  await page.getByRole("button", { name: "Ajouter un serveur" }).click();
+  await page.getByRole("button", { name: "Relier un serveur" }).click();
   await expect(page).toHaveURL(/#\/servers\/new$/);
 
   // Temps 1 : « Suivant » n'est jamais grisé sans raison (C1) ; le curseur est dans le nom (C2).
-  await expect(page.getByRole("heading", { name: "Ajouter un serveur" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Relier un serveur à ce PC" })).toBeVisible();
   const next = page.getByRole("button", { name: "Suivant" });
-  await expect(page.getByLabel("Nom du serveur")).toBeFocused();
+  await expect(page.getByLabel("Comment voulez-vous l'appeler ?")).toBeFocused();
   await expect(next).not.toHaveAttribute("aria-disabled", "true");
-  await expect(page.getByLabel("Port (optionnel)")).toHaveAttribute("placeholder", "7341");
+  await expect(page.getByLabel("Port", { exact: true })).toHaveAttribute("placeholder", "7341");
   await fillAddress(page, "Atelier", "pas une adresse");
   await expect(page.getByText("Cette adresse n'est pas valide")).toBeVisible();
-  await page.getByLabel("Adresse IP ou nom").fill("10.9.9.9");
+  await page.getByLabel("Adresse du serveur sur votre réseau").fill("10.9.9.9");
   await next.click();
   await expect(
     page.getByText("Cette adresse n'est pas joignable. Vérifie l'adresse et essaie de nouveau."),
   ).toBeVisible();
-  await page.getByLabel("Adresse IP ou nom").fill("192.168.1.50");
+  await page.getByLabel("Adresse du serveur sur votre réseau").fill("192.168.1.50");
   await page.getByRole("radio", { name: "Couleur 3" }).click();
   await shoot(page, "ajout-1-adresse");
   await next.click();
 
   // Temps 2 : l'empreinte en 8 groupes de 4, rien d'enregistré avant « Confirmer ».
-  await expect(page.getByRole("heading", { name: "Vérifie l'identité du serveur" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Vérifiez que c'est bien lui" })).toBeVisible();
   await expect(page.locator("[data-fingerprint] span")).toHaveCount(8);
   await expect(page.locator("[data-fingerprint]")).toContainText("A1B2");
   await expect(
-    page.getByText("Compare avec l'empreinte affichée à la fin de l'installation de l'agent."),
+    page.getByText(
+      "Comparez cette empreinte avec celle affichée à la fin de l'installation de l'agent.",
+    ),
   ).toBeVisible();
   await expect(page.locator("a[data-server]")).toHaveCount(0);
   await shoot(page, "ajout-2-empreinte");
   await page.getByRole("button", { name: "Confirmer" }).click();
 
   // Temps 3 : connexion ; un mauvais mot de passe reste générique, puis le bon.
-  await expect(page.getByRole("heading", { name: "Connecte-toi" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connectez-vous" })).toBeVisible();
   await expect(page.getByLabel("Se souvenir de moi sur ce PC")).toBeChecked();
   await page.getByLabel("Identifiant").fill("marie");
   await page.getByLabel("Mot de passe", { exact: true }).fill("faux-faux-1");
@@ -89,11 +91,11 @@ test("empreinte refusée : aucun serveur n'est enregistré ; acceptée ensuite :
   await expect(page.locator("a[data-server]")).toHaveCount(0);
 
   // Une deuxième tentative : cette fois l'utilisateur confirme.
-  await page.getByRole("button", { name: "Ajouter un serveur" }).click();
+  await page.getByRole("button", { name: "Relier un serveur" }).click();
   await fillAddress(page, "Atelier", "192.168.1.50");
   await page.getByRole("button", { name: "Suivant" }).click();
   await page.getByRole("button", { name: "Confirmer" }).click();
-  await expect(page.getByRole("heading", { name: "Connecte-toi" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connectez-vous" })).toBeVisible();
   await page.getByLabel("Identifiant").fill("marie");
   await page.getByLabel("Mot de passe", { exact: true }).fill(PASSWORD);
   await page.getByRole("button", { name: "Se connecter" }).click();
@@ -105,7 +107,7 @@ test("quitter l'assistant avant la connexion ne laisse aucun serveur", async ({ 
   await fillAddress(page, "Atelier", "192.168.1.50");
   await page.getByRole("button", { name: "Suivant" }).click();
   await page.getByRole("button", { name: "Confirmer" }).click();
-  await expect(page.getByRole("heading", { name: "Connecte-toi" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connectez-vous" })).toBeVisible();
   // Rien n'existe encore : ni dans la barre, ni au carnet, ni au coffre simulé.
   await expect(page.locator("a[data-server]")).toHaveCount(0);
   await page.getByRole("link", { name: "Accueil" }).click();

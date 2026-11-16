@@ -103,6 +103,13 @@
   --wide-dialog-width: 640px;
   --notes-max-height: 320px;
   --toast-width: 340px;
+  /* Images des jeux (HRT-239) : hauteur du bandeau d'une fiche, flou de son fond, lueur du visuel neutre. */
+  --banner-height: 215px;
+  --search-min: 240px;
+  --search-max: 360px;
+  --card-min: 280px;
+  --banner-blur: 24px;
+  --ember-glow: color-mix(in srgb, var(--ac) 22%, transparent);
   --tooltip-max: 260px;
   --avatar-size: 38px;
   --status-dot: 11px;

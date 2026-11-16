@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import DashCard from "@/components/molecules/DashCard.vue";
 import ProofTag from "@/components/molecules/ProofTag.vue";
 import FicheResourcesCard from "@/components/organisms/FicheResourcesCard.vue";
+import { needLines, publishedPorts } from "@/fiche/facts";
 import { noFigureAtAll } from "@/fiche/fit";
 import { registryOf } from "@/fiche/image";
 import {
@@ -33,6 +34,7 @@ import type { EngineCapacity } from "@/resources";
 const props = defineProps<{
   detail: FicheDetail;
   capacity: EngineCapacity | null;
+  serverName: string;
 }>();
 
 const emit = defineEmits<{
@@ -48,7 +50,12 @@ const firstStart = computed(() => props.detail.firstStart);
 const nothingKnown = computed(() => noFigureAtAll(props.detail));
 const stop = computed(() => (props.detail.stop ? stopTexts(props.detail.stop) : []));
 /** Les ports que voit un joueur : jamais ceux qui ne sont jamais publiés (console à distance). */
-const shownPorts = computed(() => props.detail.ports.filter((port) => port.publish !== "never"));
+const shownPorts = computed(() => publishedPorts(props.detail));
+const lines = computed(() => needLines(props.detail, props.capacity, safeText(props.serverName)));
+const portList = computed(() =>
+  shownPorts.value.map((port) => port.defaultHost ?? port.container).join(", "),
+);
+const tableOpen = ref(false);
 const downloads = computed(() => firstStart.value?.downloads ?? []);
 </script>
 
@@ -67,8 +74,59 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
     </section>
 
     <!-- Ce qu'il faut : ressources, ports à ouvrir, espace, téléchargements, arrêt (HRT-221) -->
+    <section class="sheet__needs" data-fiche-needs-sentences>
+      <h2 class="sheet__h2">{{ t("fiche.facts.sectionTitle") }}</h2>
+      <div class="sheet__sub">
+        <h3 class="sheet__h3">{{ t("fiche.facts.placeTitle") }}</h3>
+        <p class="sheet__line" data-need-memory>{{ lines.memory }}</p>
+        <p class="sheet__line" data-need-disk>{{ lines.disk }}</p>
+        <p class="sheet__line" data-need-cpu>{{ lines.cpu }}</p>
+        <HButton
+          variant="ghost"
+          class="sheet__link"
+          data-fiche-table-toggle
+          :aria-expanded="tableOpen"
+          @click="tableOpen = !tableOpen"
+        >
+          {{ tableOpen ? t("fiche.facts.tableHide") : t("fiche.facts.tableShow") }}
+        </HButton>
+        <FicheResourcesCard
+          v-if="tableOpen"
+          :detail="detail"
+          :capacity="capacity"
+          :nothing-known="nothingKnown"
+          data-fiche-table
+          @source="emit('source', $event)"
+        />
+      </div>
+      <div class="sheet__sub" data-need-players>
+        <h3 class="sheet__h3">{{ t("fiche.facts.playersTitle") }}</h3>
+        <p class="sheet__line">
+          {{
+            shownPorts.length === 0
+              ? t("fiche.facts.playersNone")
+              : shownPorts.length === 1
+                ? t("fiche.facts.playersOne", { port: portList })
+                : t("fiche.facts.playersMany", { list: portList })
+          }}
+        </p>
+        <p v-if="shownPorts.length > 0" class="sheet__line">
+          {{ serverName === "" ? t("fiche.facts.playersHomeBare") : t("fiche.facts.playersHome", { server: safeText(serverName) }) }}
+        </p>
+      </div>
+      <div class="sheet__sub" data-need-start>
+        <h3 class="sheet__h3">{{ t("fiche.facts.startStopTitle") }}</h3>
+        <p v-for="line in stop" :key="line" class="sheet__line">{{ line }}</p>
+      </div>
+      <div class="sheet__sub" data-need-settings>
+        <h3 class="sheet__h3">{{ t("fiche.facts.settingsTitle") }}</h3>
+        <p class="sheet__line">
+          {{ t("fiche.facts.settingsCount", { n: detail.questions.length, m: detail.settings.length }) }}
+        </p>
+      </div>
+    </section>
+
     <section class="sheet__grid" :aria-label="t('fiche.sectionNeeds')" data-fiche-needs>
-      <FicheResourcesCard :detail="detail" :capacity="capacity" :nothing-known="nothingKnown" @source="emit('source', $event)" />
       <DashCard :title="t('fiche.cardPorts')" data-fiche-ports>
         <div class="sheet__scroll">
           <table class="sheet__table" :aria-label="t('fiche.portsHead')">
@@ -216,6 +274,42 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
   gap: var(--card-gap);
   align-items: start;
   min-width: 0;
+}
+
+.sheet__needs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sheet__sub {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--card-edge);
+}
+
+.sheet__h2,
+.sheet__h3 {
+  margin: 0;
+  font-family: var(--font-title);
+  font-weight: var(--fw-semibold);
+}
+
+.sheet__h2 {
+  font-size: var(--fs-h3);
+}
+
+.sheet__h3 {
+  font-size: var(--fs-lead);
+}
+
+.sheet__link {
+  align-self: flex-start;
+  color: var(--ac);
 }
 
 .sheet__tech {

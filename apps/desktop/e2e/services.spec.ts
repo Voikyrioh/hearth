@@ -272,13 +272,13 @@ test("aucun moteur : NixOS donne une ligne de configuration, une distribution in
   expect(await sim(page, (s) => s.services.docsOpened)).toBe(1);
 });
 
-test("moteur prêt sans service : l'état vide, avec le bouton « Déployer un service » (HRT-69)", async ({
+test("moteur prêt sans service : l'état vide, avec le bouton « Ajouter un serveur de jeu » (HRT-69)", async ({
   page,
 }) => {
   await open(page);
   await sim(page, (s) => s.services.seed("forge", []));
   await expect(page.getByRole("heading", { name: "Aucun service pour l'instant" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Déployer un service" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Ajouter un serveur de jeu" })).toHaveCount(1);
   await shoot(page, "services-vide");
 });
 

@@ -1,5 +1,5 @@
 import { GIB } from "@/resources";
-import type { FicheDetail, FicheQuestion, FicheSetting, FicheTheme } from "./catalog";
+import type { FicheCard, FicheDetail, FicheQuestion, FicheSetting, FicheTheme } from "./catalog";
 import {
   TERRARIA_DIGEST,
   TERRARIA_SETTINGS,
@@ -471,5 +471,73 @@ function richQuestions(): FicheQuestion[] {
       maxLen: 30,
       variants: ["modded"],
     }),
+  ];
+}
+
+/** Les huit fiches en cours de preuve d'un agent de publication, telles que sa liste les montre (HRT-236) : raison écrite pour le joueur, jamais installables. */
+export function waitingCards(): FicheCard[] {
+  const waiting = (
+    id: string,
+    name: string,
+    summary: string,
+    previewReason: string,
+  ): FicheCard => ({
+    id,
+    name,
+    summary,
+    version: 1,
+    status: "preview",
+    installable: false,
+    previewReason,
+  });
+  return [
+    waiting(
+      "zomboid",
+      "Project Zomboid",
+      "Le serveur officiel de Project Zomboid (Build 42), sans mod.",
+      "Le mot de passe d'administration apparaîtrait dans les journaux du jeu. Hearth attend une correction de l'image.",
+    ),
+    waiting(
+      "vrising",
+      "V Rising",
+      "Le serveur officiel de V Rising, sans mod, par Wine.",
+      "Tout fonctionne sauf un point : l'enregistrement du monde avant l'arrêt n'est pas encore vérifié.",
+    ),
+    waiting(
+      "factorio",
+      "Factorio",
+      "Le serveur officiel de Factorio, avec ou sans l'extension Space Age, sans mod.",
+      "Le nom de la partie, son mot de passe et le nombre de joueurs ne se règlent pas encore depuis Hearth.",
+    ),
+    waiting(
+      "corekeeper",
+      "Core Keeper",
+      "Le serveur officiel de Core Keeper, en connexion directe, sans mod.",
+      "Le mot de passe du serveur apparaîtrait dans les journaux du jeu, et le jeu ne s'arrête pas encore proprement.",
+    ),
+    waiting(
+      "7dtd",
+      "7 Days to Die",
+      "Le serveur officiel de 7 Days to Die, sans mod.",
+      "Le jeu ne démarre pas encore avec les protections que Hearth impose à tout serveur.",
+    ),
+    waiting(
+      "palworld",
+      "Palworld",
+      "Le serveur officiel de Palworld, sans mod.",
+      "Le jeu ne s'arrête pas encore proprement : Hearth ne peut pas garantir votre monde à l'arrêt.",
+    ),
+    waiting(
+      "rust",
+      "Rust",
+      "Le serveur officiel de Rust, sans mod.",
+      "Pas encore essayé sur une vraie machine par Hearth, et sa console à distance n'est pas prise en charge : son mot de passe passerait par la ligne de commande.",
+    ),
+    waiting(
+      "satisfactory",
+      "Satisfactory",
+      "Le serveur officiel de Satisfactory, sans mod.",
+      "Le premier joueur qui se connecte pourrait s'approprier le serveur, et le jeu ne s'arrête pas encore proprement.",
+    ),
   ];
 }

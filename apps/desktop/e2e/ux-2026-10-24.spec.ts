@@ -40,6 +40,7 @@ async function openDeploy(page: Page) {
   await boot(page);
   await expect(page.locator("[data-row]").first()).toBeVisible();
   await page.locator("[data-deploy-open]").click();
+  await page.getByRole("button", { name: "Continuer sans fiche" }).click();
   await expect(page.locator("[data-deploy-form]")).toBeVisible();
   await expect(page.getByLabel("Nom du service")).toBeFocused();
   // Les bornes de la machine sont lues : le formulaire est prêt.
@@ -75,6 +76,7 @@ test("constat 3 : le tableau de bord, les curseurs et la fiche disent les mêmes
   await page.evaluate(() => {
     window.location.hash = "#/servers/forge/catalogue/terraria";
   });
+  await page.locator("[data-fiche-table-toggle]").click();
   await expect(page.locator("[data-fiche-resources]")).toContainText("16 cœurs");
   await expect(page.locator("[data-fiche-resources]")).toContainText("64 Go");
 });
@@ -92,6 +94,7 @@ test.describe("fiche et installation", () => {
     await expect(page.locator("[data-fiche-questions]")).toContainText(
       "La valeur proposée est Grand.",
     );
+    await page.locator("[data-fiche-table-toggle]").click();
     await expect(page.locator("[data-res-none]")).toHaveText(
       "Hearth ne connaît pas les besoins de ce jeu en processeur, en mémoire ni en espace disque.",
     );

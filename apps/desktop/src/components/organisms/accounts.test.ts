@@ -404,7 +404,7 @@ describe("CreateAccountDialog", () => {
       ...document.querySelectorAll<HTMLInputElement>("dialog input[type=password]"),
     ].map((input) => input.placeholder);
     expect(new Set(placeholders).size).toBe(placeholders.length);
-    expect(field("ton-identifiant")).toBeNull();
+    expect(field("votre-identifiant")).toBeNull();
     wrapper.unmount();
   });
 });
@@ -514,11 +514,11 @@ describe("OwnAccountCard (réglages, tous les rôles)", () => {
     await flushPromises();
     expect(text()).toContain("Supprimer ton compte ?");
     expect(text()).toContain("Retape ton identifiant pour confirmer");
-    typeInto(field("ton-identifiant"), "paul");
+    typeInto(field("votre-identifiant"), "paul");
     await flushPromises();
     await confirmDialog("Supprimer mon compte");
     expect(text()).toContain("L'identifiant ne correspond pas, réessaye");
-    typeInto(field("ton-identifiant"), "marie");
+    typeInto(field("votre-identifiant"), "marie");
     await flushPromises();
     await confirmDialog("Supprimer mon compte");
     expect(text()).toContain(

@@ -2,11 +2,14 @@
 import { computed, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { safeText } from "@/audit/text";
+import FicheVisual from "@/components/atoms/FicheVisual.vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
+import HTag from "@/components/atoms/HTag.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
+import KeyFacts from "@/components/molecules/KeyFacts.vue";
 import ServiceRightReason from "@/components/molecules/ServiceRightReason.vue";
 import EnginePanel from "@/components/organisms/EnginePanel.vue";
 import FicheSheet from "@/components/organisms/FicheSheet.vue";
@@ -20,6 +23,7 @@ import { usePageData } from "@/composables/usePageData";
 import { usePageTitle } from "@/composables/usePageTitle";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { deployDoor } from "@/deploy/availability";
+import { keyFacts } from "@/fiche/facts";
 import { minimumVerdicts, tooSmall } from "@/fiche/fit";
 import { minimumText } from "@/fiche/messages";
 import { t } from "@/i18n";
@@ -96,6 +100,13 @@ function install(proposed: boolean) {
 const links = useFicheLinks(serverId, ficheId);
 
 const imposedOpen = ref(false);
+const serverName = computed(() => safeText(server.value?.name ?? ""));
+const facts = computed(() =>
+  detail.value ? keyFacts(detail.value, capacity.value?.memoryBytes ?? null, serverName.value) : [],
+);
+const soon = computed(
+  () => detail.value?.card.status === "preview" && detail.value.card.installable !== true,
+);
 const delivered = computed(() =>
   agentVersion.value === null
     ? t("catalogue.deliveredWithBare")
@@ -140,10 +151,21 @@ const delivered = computed(() =>
     </div>
 
     <template v-else>
+      <div class="fiche__banner" data-fiche-banner>
+        <FicheVisual :server-id="serverId()" :card="detail.card" variant="banner" />
+        <div class="fiche__badges">
+          <HTag :tone="soon ? 'warn' : 'ok'" data-fiche-badge>
+            {{ soon ? t("catalogue.badgeSoon") : t("catalogue.badgeReady") }}
+          </HTag>
+          <HTag tone="neutral" data-fiche-delivered>{{ delivered }}</HTag>
+        </div>
+      </div>
+
+      <KeyFacts :facts="facts" />
+
       <header class="fiche__head">
         <div class="fiche__title">
           <p class="fiche__summary">{{ safeText(detail.card.summary) }}</p>
-          <p class="fiche__delivered" data-fiche-delivered>{{ delivered }}</p>
         </div>
         <div v-if="showButtons" class="fiche__actions">
           <div class="fiche__action">
@@ -195,6 +217,7 @@ const delivered = computed(() =>
       <FicheSheet
         :detail="detail"
         :capacity="capacity"
+        :server-name="serverName"
         @source="links.open('evidence', $event)"
         @agreement="links.open('agreement', $event)"
         @imposed="imposedOpen = true"
@@ -228,6 +251,20 @@ const delivered = computed(() =>
   align-self: flex-start;
   color: var(--ac);
   text-decoration: underline;
+}
+
+.fiche__banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow: hidden;
+  border-radius: var(--radius-card);
+}
+
+.fiche__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .fiche__skeleton {

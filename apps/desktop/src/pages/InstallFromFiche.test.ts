@@ -50,14 +50,31 @@ const running = (bridge: SimulatedLinkBridge) => {
 };
 
 describe("la page (BR-FICHE-014, 015)", () => {
-  it("s'ouvre sur « Réponses » avec le nom proposé par la fiche et les valeurs que la fiche propose", async () => {
+  it("montre l'essentiel et replie le reste dans « Réglages avancés » (BR-FICHE-065)", async () => {
+    const { wrapper } = await bootCatalogue(undefined, installPath("terraria"));
+    // Le nom du monde, le mot de passe (secret, sans valeur proposée) restent à l'écran ; les autres sont repliés.
+    const advanced = wrapper.get("[data-install-advanced]");
+    expect(advanced.element.hasAttribute("open")).toBe(false);
+    expect(wrapper.get("[data-install-advanced-summary]").text()).toMatch(/^Réglages avancés : /);
+    expect(advanced.find('[data-question="max_players"]').exists()).toBe(true);
+    expect(
+      wrapper.get("[data-install-answers]").find('[data-question="world_name"]').exists(),
+    ).toBe(true);
+    expect(advanced.find('[data-question="world_name"]').exists()).toBe(false);
+    expect(advanced.find('[data-question="password"]').exists()).toBe(false);
+    // « Retour à la fiche » à gauche de la barre du bas.
+    expect(wrapper.get("[data-install-to-fiche]").text()).toBe("Retour à la fiche");
+    wrapper.unmount();
+  });
+
+  it("s'ouvre sur « Réglages » avec le nom proposé par la fiche et les valeurs que la fiche propose", async () => {
     const { wrapper, router } = await bootCatalogue(undefined, installPath("terraria"));
     expect(router.currentRoute.value.name).toBe("fiche-install");
     expect(wrapper.get("[data-page-title]").text()).toBe("Installer Terraria");
     expect(wrapper.get(".nav__item.router-link-active").text()).toBe("Catalogue");
     const steps = wrapper.findAll(".trail__step").map((item) => item.text());
-    expect(steps[0]).toContain("Réponses");
-    expect(steps[1]).toContain("Ressources");
+    expect(steps[0]).toContain("Réglages");
+    expect(steps[1]).toContain("Mémoire et processeur");
     expect(steps[2]).toContain("Vérifiez avant de lancer");
     expect(wrapper.get<HTMLInputElement>('[data-field="name"] input').element.value).toBe(
       "terraria",
@@ -293,7 +310,7 @@ describe("l'étape « Ressources » (BR-FICHE-020 à 023, BR-RES-037)", () => {
     wrapper.unmount();
   });
 
-  it("revient à l'étape « Réponses » sans rien perdre", async () => {
+  it("revient à l'étape « Réglages » sans rien perdre", async () => {
     const { wrapper } = await bootCatalogue(undefined, installPath("terraria"));
     await answer(wrapper, "motd", "Bonjour");
     await goNext(wrapper);
@@ -522,7 +539,7 @@ describe("les refus de l'agent ramènent à la page, la saisie reste (BR-FICHE-0
     wrapper.unmount();
   });
 
-  it("« Aller au champ » d'un refus de version ramène à l'étape « Réponses » et met le curseur dans le champ", async () => {
+  it("« Aller au champ » d'un refus de version ramène à l'étape « Réglages » et met le curseur dans le champ", async () => {
     const { wrapper, bridge } = await bootCatalogue((b) => {
       const detail = b.catalog.get("terraria");
       const motd = detail?.questions.find((item) => item.id === "motd");
@@ -733,7 +750,7 @@ describe("le contrat de licence (BR-FICHE-026, 058)", () => {
       },
       installPath("essai", "?proposees=1"),
     );
-    // Le jeton manque : la page reste sur « Réponses » et le dit, aucune fenêtre ne s'ouvre.
+    // Le jeton manque : la page reste sur « Réglages » et le dit, aucune fenêtre ne s'ouvre.
     await settle();
     expect(dialog()).toBeNull();
     expect(bridge.catalog.received).toHaveLength(0);

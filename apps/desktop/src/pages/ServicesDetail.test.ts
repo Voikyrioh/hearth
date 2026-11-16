@@ -670,7 +670,7 @@ describe("la liste (HRT-137)", () => {
     const empty = wrapper.get("[data-services-empty]").text();
     expect(empty).toContain("Aucun service pour l'instant");
     expect(empty).toContain("Hearth affiche ici les services qu'il a créés");
-    expect(empty).toContain("Déployer un service");
+    expect(empty).toContain("Ajouter un serveur de jeu");
     wrapper.unmount();
   });
 

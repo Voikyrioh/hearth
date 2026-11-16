@@ -339,6 +339,11 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
       <InstallResources v-if="install.step.value === 2" :install="install" />
 
       <div class="inst__bar" data-install-bar>
+        <div class="inst__left">
+          <HButton variant="ghost" size="lg" data-install-to-fiche @click="guard.requestClose">
+            {{ t("fiche.backToFiche") }}
+          </HButton>
+        </div>
         <div class="inst__reason">
           <p v-if="reason" :id="reasonId" class="inst__reason-text" data-install-reason>
             {{ reason.text }}
@@ -460,6 +465,7 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
   bottom: 0;
   z-index: var(--z-raised);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
@@ -467,6 +473,11 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
   border-radius: var(--radius-card);
   background: var(--card);
   box-shadow: var(--card-edge);
+}
+
+.inst__left {
+  display: flex;
+  align-items: center;
 }
 
 .inst__reason {
@@ -484,6 +495,7 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
 
 .inst__buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-3);
 }
 </style>

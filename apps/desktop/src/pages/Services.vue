@@ -223,7 +223,7 @@ const barShown = computed(
     !(opened.value && tab.value === "logs"),
 );
 function openDeploy() {
-  if (server.value) void router.push({ name: "services-deploy", params: { id: server.value.id } });
+  if (server.value) void router.push({ name: "services-add", params: { id: server.value.id } });
 }
 
 /** Les opérations en cours de CE serveur, la plus ancienne d'abord (visibles de tous les comptes, BR-SVC-029). */

@@ -30,7 +30,7 @@ describe("la route (BR-DEPLOY-001, 027)", () => {
   it("s'ouvre pour un compte qui a le droit, moteur prêt, avec le focus sur « Nom du service »", async () => {
     const { wrapper, router } = await boot();
     expect(router.currentRoute.value.name).toBe("services-deploy");
-    expect(wrapper.get("h1").text()).toBe("Déployer un service");
+    expect(wrapper.get("h1").text()).toBe("Installer un programme de votre choix");
     expect(wrapper.find("[data-deploy-form]").exists()).toBe(true);
     expect(document.activeElement).toBe(field(wrapper, "name").element);
     // L'entrée « Services » reste marquée.
@@ -165,7 +165,7 @@ describe("le bouton de la section Services (BR-DEPLOY-001, BR-GRANT-014)", () =>
     expect(button.attributes("aria-disabled")).toBeUndefined();
     await button.trigger("click");
     await settle();
-    expect(router.currentRoute.value.name).toBe("services-deploy");
+    expect(router.currentRoute.value.name).toBe("services-add");
     wrapper.unmount();
   });
 

@@ -14,6 +14,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const notifyOnLinkChange = ref(true);
   /** Alertes de sécurité (BR-TRUST-033) : réglage séparé, activé par défaut ; ne touche jamais les bandeaux. */
   const notifyOnSecurityAlert = ref(true);
+  /** Images des jeux depuis Steam (HRT-239, BR-CLIENT-015) : activées par défaut ; coupées, ce PC ne contacte plus Steam. */
+  const remoteGameImages = ref(true);
   const loaded = ref(false);
   const saving = ref(false);
   const version = ref<string | null>(null);
@@ -46,6 +48,14 @@ export const useSettingsStore = defineStore("settings", () => {
       const security = await commands.getNotifyOnSecurityAlert();
       if (security.status === "ok" && typeof security.data === "boolean") {
         notifyOnSecurityAlert.value = security.data;
+      }
+    } catch {
+      // Le réglage garde sa valeur par défaut (activé).
+    }
+    try {
+      const images = await commands.getRemoteGameImages();
+      if (images.status === "ok" && typeof images.data === "boolean") {
+        remoteGameImages.value = images.data;
       }
     } catch {
       // Le réglage garde sa valeur par défaut (activé).
@@ -111,6 +121,24 @@ export const useSettingsStore = defineStore("settings", () => {
     }
   }
 
+  async function setRemoteGameImages(enabled: boolean) {
+    if (saving.value) return;
+    saving.value = true;
+    try {
+      const result = await commands.setRemoteGameImages(enabled);
+      if (result.status === "ok") {
+        remoteGameImages.value = result.data;
+        error.value = null;
+      } else {
+        error.value = errorKey(result.error.kind);
+      }
+    } catch {
+      error.value = "settings.saveError";
+    } finally {
+      saving.value = false;
+    }
+  }
+
   async function openLogsFolder() {
     try {
       const result = await commands.openLogsFolder();
@@ -126,6 +154,8 @@ export const useSettingsStore = defineStore("settings", () => {
     setNotifyOnLinkChange,
     notifyOnSecurityAlert,
     setNotifyOnSecurityAlert,
+    remoteGameImages,
+    setRemoteGameImages,
     loaded,
     saving,
     version,

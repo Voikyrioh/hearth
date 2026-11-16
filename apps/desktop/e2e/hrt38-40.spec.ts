@@ -84,7 +84,7 @@ for (const size of SIZES) {
     await expect(page.getByText("il a pu être supprimé ou désactivé")).toBeVisible();
     await expect(page.getByText("Demande à l'administrateur du serveur")).toBeVisible();
     await expect(page.getByRole("button", { name: "Utiliser un autre compte" })).toBeVisible();
-    await expect(page.getByText("Connecte-toi à forge")).toHaveCount(0);
+    await expect(page.getByText("Connectez-vous à forge")).toHaveCount(0);
     await shoot(page, "hrt38-acces-revoque", size);
   });
 
@@ -93,13 +93,11 @@ for (const size of SIZES) {
   }) => {
     await page.setViewportSize(size);
     await page.goto("/?servers=none&nodev");
-    await page.getByRole("button", { name: "Ajouter un serveur" }).click();
-    await page.getByLabel("Nom du serveur").fill("Atelier");
-    await page.getByLabel("Adresse IP ou nom").fill("192.168.1.50");
+    await page.getByRole("button", { name: "Relier un serveur" }).click();
+    await page.getByLabel("Comment voulez-vous l'appeler ?").fill("Atelier");
+    await page.getByLabel("Adresse du serveur sur votre réseau").fill("192.168.1.50");
     await page.getByRole("button", { name: "Suivant" }).click();
-    await expect(
-      page.getByRole("heading", { name: "Vérifie l'identité du serveur" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Vérifiez que c'est bien lui" })).toBeVisible();
     await expect(page.locator("[data-fingerprint-server]")).toContainText("Atelier");
     await expect(page.locator("[data-fingerprint-server]")).toContainText("192.168.1.50");
     await expect(page.locator("[data-fingerprint-where]")).toContainText(
@@ -108,7 +106,7 @@ for (const size of SIZES) {
     await expect(page.locator("[data-fingerprint-refuse]")).toContainText("rien n'est enregistré");
     await shoot(page, "hrt40-empreinte", size);
     await page.getByRole("button", { name: "Précédent" }).click();
-    await expect(page.getByLabel("Nom du serveur")).toHaveValue("Atelier");
+    await expect(page.getByLabel("Comment voulez-vous l'appeler ?")).toHaveValue("Atelier");
   });
 
   test(`agent trop ancien à ${size.width}×${size.height} : « Mise à jour requise » et un bouton vers les réglages`, async ({

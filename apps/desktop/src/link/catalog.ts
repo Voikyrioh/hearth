@@ -33,8 +33,22 @@ export interface FicheCard {
   summary: string;
   version: number;
   status: FicheStatus;
-  /** `false` : la fiche est listée mais ne s'installe pas sur ce serveur. */
+  /** `false` : la fiche est listée mais ne s'installe pas sur ce serveur (plateforme absente, ou fiche en cours de preuve). */
   installable: boolean;
+  /** Ce qui retient une fiche en cours de preuve, en une ou deux phrases pour le joueur (BR-FICHE-061) ; `null` si publiée. */
+  previewReason?: string | null;
+  /** La mémoire recommandée et sa preuve (BR-FICHE-064) ; absente quand la fiche ne recommande aucun chiffre. */
+  memory?: { recommendedBytes: number | null; evidence: Evidence } | null;
+  /** L'identifiant du JEU dans le magasin Steam (BR-FICHE-062) ; absent d'un jeu hors Steam ou d'un agent ancien. */
+  steamAppId?: number | null;
+  /** L'illustration originale livrée avec l'agent, pour un jeu absent de Steam (BR-FICHE-062). */
+  illustration?: {
+    digest: string;
+    bytes: number;
+    width: number;
+    height: number;
+    mediaType: string;
+  } | null;
 }
 
 /** La liste des fiches que CET agent propose. */

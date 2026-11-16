@@ -17,11 +17,11 @@ test("assistant d'ajout : curseur dans le nom, Entrée dit ce qui manque, curseu
   page,
 }) => {
   await page.goto("/?servers=none&nodev#/servers/new");
-  const name = page.getByLabel("Nom du serveur");
+  const name = page.getByLabel("Comment voulez-vous l'appeler ?");
   await expect(name).toBeFocused();
   // Tab : l'adresse ; on la tape, le nom reste vide.
   await page.keyboard.press("Tab");
-  await expect(page.getByLabel("Adresse IP ou nom")).toBeFocused();
+  await expect(page.getByLabel("Adresse du serveur sur votre réseau")).toBeFocused();
   await page.keyboard.type("192.168.1.50");
   // « Suivant » n'est pas grisé ; Entrée dit ce qui manque et ramène le curseur au nom.
   await expect(page.getByRole("button", { name: "Suivant" })).not.toHaveAttribute(
@@ -34,7 +34,7 @@ test("assistant d'ajout : curseur dans le nom, Entrée dit ce qui manque, curseu
   await page.keyboard.type("Atelier");
   await page.keyboard.press("Enter");
   // Étape 2 puis 3 : le curseur est dans l'identifiant, sans clic.
-  await expect(page.getByRole("heading", { name: "Vérifie l'identité du serveur" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Vérifiez que c'est bien lui" })).toBeVisible();
   await page.getByRole("button", { name: "Confirmer" }).click();
   await expect(page.getByLabel("Identifiant")).toBeFocused();
 });
