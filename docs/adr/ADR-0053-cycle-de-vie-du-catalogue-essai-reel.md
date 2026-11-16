@@ -126,7 +126,7 @@ Banc générique `tests/fiche_live_game.rs` lancé en local (Docker Desktop, mac
 |---|---|---|---|
 | Terraria | `ryshe/terraria:vanilla-1.4.5.8` | banc spécifique (HRT-114) rejoué : tout tient | publiée (v5) |
 | Valheim | `lloesche/valheim-server:sha-0ab6cdcc16dd` | prêt 158 s, arrêt code 0 en 8 s, 1,57 Gio au repos | publiée |
-| Project Zomboid | `danixu86/project-zomboid-dedicated-server:42.20.4-release-2` | prêt 74 s, arrêt code 0 en 23 à 71 s, 2,9 Gio au repos | publiée |
+| Project Zomboid | `danixu86/project-zomboid-dedicated-server:42.20.4-release-2` | prêt 74 s, arrêt code 0 en 23 à 71 s, 2,9 Gio au repos | preview (HRT-231 : mot de passe d'administration en clair dans les journaux) |
 | 7 Days to Die | `vinanrra/7dtd-server:v0.10.0` | le conteneur ne démarre pas sous `no-new-privileges` (`crontab` setgid) | preview (HRT-227) |
 | Factorio | `factoriotools/factorio:2.1.24` | tout tient (405 Mio au repos) mais le JSON de réglages n'est pas lu | preview (HRT-229) |
 | Core Keeper | `escaping/core-keeper-dedicated:v2.8.1` | arrêt en code 143 | preview (HRT-230) |
