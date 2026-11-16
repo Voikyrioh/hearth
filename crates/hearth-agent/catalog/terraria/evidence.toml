@@ -1,17 +1,17 @@
-# Relevé du banc d'essai réel (HRT-114, HRT-226). Engendré par `tests/fiche_live.rs`, jamais écrit à la main.
+# Relevé du banc d'essai réel (HRT-114). Engendré par `tests/fiche_live.rs`, jamais écrit à la main.
 fiche = "terraria"
-fiche_version = 4
+fiche_version = 5
 image = "ryshe/terraria:vanilla-1.4.5.8"
 image_digest = "ryshe/terraria@sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677"
 disk_image_bytes = 50068911
 ready = true
-ready_after_s = 14
+ready_after_s = 16
 tcp_accepts = true
 world_named_as_set = true
 config_kept = true
-memory_usage_raw = "592.9MiB / 2GiB"
-memory_idle_bytes = 621700710
-disk_install_bytes = 52932316
+memory_usage_raw = "586.8MiB / 2GiB"
+memory_idle_bytes = 615304396
+disk_install_bytes = 53092752
 stdin_orders_sent = 2
 stdin_accepted = true
 stop_took_s = 0
@@ -23,3 +23,4 @@ no_auto_restart = true
 world_exists_after_stop = true
 restart_ready = true
 restart_keeps_world = true
+secret_lines_in_logs = 0

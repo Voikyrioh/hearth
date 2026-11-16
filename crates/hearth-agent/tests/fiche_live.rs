@@ -309,6 +309,7 @@ async fn the_terraria_fiche_starts_takes_a_setting_stops_by_its_orders_and_keeps
     answers.insert("world_size".to_owned(), "1".to_owned());
     answers.insert("max_players".to_owned(), "3".to_owned());
     answers.insert("motd".to_owned(), MOTD.to_owned());
+    answers.insert("password".to_owned(), "probesecret1".to_owned());
     let agreements = BTreeSet::new();
     let host_ports = BTreeMap::from([("game".to_owned(), HOST_PORT)]);
     let optional = BTreeSet::new();
@@ -507,6 +508,26 @@ async fn the_terraria_fiche_starts_takes_a_setting_stops_by_its_orders_and_keeps
             .map(|w| &w.0)
             .eq(kept.iter().map(|w| &w.0));
     evidence.raw("restart_keeps_world", second.is_ok() && same_world);
+
+    // 8 bis. Le mot de passe repère ne doit figurer nulle part dans le journal ENTIER du conteneur (démarrage et arrêt compris).
+    let logs = {
+        let output = Command::new("docker")
+            .args(["logs", &id])
+            .output()
+            .expect("docker logs");
+        format!(
+            "{}
+{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    };
+    evidence.raw(
+        "secret_lines_in_logs",
+        logs.lines()
+            .filter(|line| line.contains("probesecret1"))
+            .count(),
+    );
 
     // 9. Nettoyage de ce que ce test a lancé, puis le relevé.
     let _ = engine.stop(&id, Duration::from_secs(10)).await;

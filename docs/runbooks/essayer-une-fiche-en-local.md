@@ -27,7 +27,7 @@ MSYS_NO_PATHCONV=1 docker run --rm --network host \
   cargo test -p hearth-agent --test fiche_live_game -- --ignored --nocapture --test-threads=1
 ```
 
-L'image de test est `rust@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1` (`rust:1.95-bookworm` au 16/11/2026, à tirer par cette empreinte) plus la CLI `docker` copiée depuis `docker:27-cli` (à épingler de même). Variables : `HEARTH_LIVE_GAME` (entrée du tableau `GAMES`), `HEARTH_LIVE_SCENARIOS` (par exemple `min`), `HEARTH_LIVE_MEM_GIB` (limite du premier scénario), `HEARTH_LIVE_PRESEED` (dossier contenant un sous-dossier par identifiant de dossier de la fiche, déplacé à la place du dossier géré pour éviter de retélécharger un gros jeu). Le relevé est écrit dans `<out>/<id>/evidence.toml` ; le copier à côté de la fiche, avec `golden.toml` (`docker image inspect` de l'image épinglée).
+L'image de test est `rust@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1` (`rust:1.95-bookworm` au 16/11/2026, à tirer par cette empreinte) plus la CLI `docker` copiée depuis `docker@sha256:851f91d241214e7c6db86513b270d58776379aacc5eb9c4a87e5b47115e3065c` (`docker:27-cli` au 16/11/2026, tirée par cette empreinte). Variables : `HEARTH_LIVE_GAME` (entrée du tableau `GAMES`), `HEARTH_LIVE_SCENARIOS` (par exemple `min`), `HEARTH_LIVE_MEM_GIB` (limite du premier scénario), `HEARTH_LIVE_PRESEED` (dossier contenant un sous-dossier par identifiant de dossier de la fiche, déplacé à la place du dossier géré pour éviter de retélécharger un gros jeu). Le relevé est écrit dans `<out>/<id>/evidence.toml` ; le copier à côté de la fiche, avec `golden.toml` (`docker image inspect` de l'image épinglée).
 
 ## Limites de la machine
 

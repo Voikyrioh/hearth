@@ -464,6 +464,25 @@ struct Outcome {
     restart_ok: bool,
 }
 
+/// Le journal ENTIER du conteneur (sortie standard et d'erreur, démarrage et arrêt compris).
+fn full_logs(id: &str) -> String {
+    let output = Command::new("docker")
+        .args(["logs", id])
+        .output()
+        .expect("docker logs");
+    format!(
+        "{}
+{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
+/// Le nombre de lignes du journal qui portent `needle` (le mot de passe repère).
+fn lines_with(logs: &str, needle: &str) -> usize {
+    logs.lines().filter(|line| line.contains(needle)).count()
+}
+
 fn read_u64(text: Option<String>) -> u64 {
     text.and_then(|t| t.trim().parse().ok()).unwrap_or(0)
 }
@@ -859,6 +878,18 @@ async fn run_scenario(
         evidence.raw(&p("restart_ready"), second.is_ok());
         evidence.raw(&p("restart_keeps_world"), restart_ok);
     }
+
+    // 8 bis. Aucun mot de passe repère (réponse « password » ou secret tiré) ne doit figurer dans le journal ENTIER du conteneur.
+    let logs = full_logs(&id);
+    let mut needles: Vec<String> = game
+        .answers
+        .iter()
+        .filter(|(key, _)| key.contains("pass"))
+        .map(|(_, value)| (*value).to_owned())
+        .collect();
+    needles.extend(generated.values().map(|s| s.expose().to_owned()));
+    let leaked: usize = needles.iter().map(|n| lines_with(&logs, n)).sum();
+    evidence.raw(&p("secret_lines_in_logs"), leaked);
 
     // 9. Nettoyage de ce que ce scénario a lancé (l'image reste : `docker rmi` précis, à la main).
     let _ = engine.stop(&id, Duration::from_secs(60)).await;
