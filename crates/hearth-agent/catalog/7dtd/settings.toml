@@ -1,0 +1,984 @@
+# Réglages de 7 Days to Die : thèmes et catalogue (HRT-115, HRT-226). Tous les réglages du `serverconfig.xml` livré avec la version
+# stable installée le 16/11/2026 (l'image `vinanrra/7dtd-server`, serveur téléchargé par SteamCMD) sont classés : réglables, imposés avec leur
+# raison, ou écartés avec leur raison (`[[not_exposed]]` de la fiche). Les défauts sont ceux LUS dans ce fichier (`source = "verified"`).
+# Libellés et aides : vouvoiement, mots simples.
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "players"
+label = "Joueurs"
+order = 2
+
+[[theme]]
+id = "world"
+label = "Monde"
+order = 3
+
+[[theme]]
+id = "rules"
+label = "Règles de jeu"
+order = 4
+
+[[theme]]
+id = "claims"
+label = "Territoires"
+order = 5
+
+[[theme]]
+id = "performance"
+label = "Performances"
+order = 6
+
+[[theme]]
+id = "network"
+label = "Réseau"
+order = 7
+
+[[theme]]
+id = "security"
+label = "Sécurité"
+order = 8
+
+[[setting]]
+id = "server_name"
+key = "ServerName"
+channel = "config"
+theme = "game"
+level = "essential"
+label = "Nom du serveur"
+help = "Le nom que vos joueurs voient dans la liste des serveurs."
+type = "text"
+charset = "line"
+max_len = 100
+game_default = "My Game Host"
+proposed = "Mon serveur 7 Days to Die"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "server_description"
+key = "ServerDescription"
+channel = "config"
+theme = "game"
+level = "common"
+label = "Description"
+help = "Le texte qui accompagne le nom du serveur dans la liste."
+type = "text"
+charset = "line"
+max_len = 200
+game_default = "A 7 Days to Die server"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "server_website"
+key = "ServerWebsiteURL"
+channel = "config"
+theme = "game"
+level = "advanced"
+label = "Site web"
+help = "L'adresse d'un site, montrée comme un lien dans la liste des serveurs. Laissez vide pour n'en montrer aucune."
+type = "text"
+charset = "line"
+max_len = 200
+game_default = ""
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "server_password"
+key = "ServerPassword"
+channel = "config"
+theme = "game"
+level = "essential"
+label = "Mot de passe du serveur"
+help = "Ce que vos joueurs tapent pour entrer sur le serveur. Laissez vide pour que tout le monde puisse entrer. Hearth ne l'affiche jamais."
+type = "secret"
+max_len = 100
+secret_kind = "game_password"
+game_default = ""
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "login_text"
+key = "ServerLoginConfirmationText"
+channel = "config"
+theme = "game"
+level = "advanced"
+label = "Message à confirmer en arrivant"
+help = "Un message que chaque joueur doit confirmer avant d'entrer. Laissez vide pour n'en demander aucun."
+type = "text"
+charset = "line"
+max_len = 300
+game_default = ""
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "region"
+key = "Region"
+channel = "config"
+theme = "game"
+level = "common"
+label = "Région du serveur"
+help = "La région où se trouve le serveur, pour la liste des serveurs."
+type = "choice"
+choices = [
+  { value = "NorthAmericaEast", label = "Amérique du Nord, est" },
+  { value = "NorthAmericaWest", label = "Amérique du Nord, ouest" },
+  { value = "CentralAmerica", label = "Amérique centrale" },
+  { value = "SouthAmerica", label = "Amérique du Sud" },
+  { value = "Europe", label = "Europe" },
+  { value = "Russia", label = "Russie" },
+  { value = "Asia", label = "Asie" },
+  { value = "MiddleEast", label = "Moyen-Orient" },
+  { value = "Africa", label = "Afrique" },
+  { value = "Oceania", label = "Océanie" },
+]
+game_default = "NorthAmericaEast"
+proposed = "Europe"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "language"
+key = "Language"
+channel = "config"
+theme = "game"
+level = "common"
+label = "Langue des joueurs"
+help = "La langue principale de vos joueurs, en anglais (par exemple French). Elle sert à trouver le serveur dans la liste."
+type = "text"
+charset = "line"
+max_len = 40
+game_default = "English"
+proposed = "French"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "visibility"
+key = "ServerVisibility"
+channel = "config"
+theme = "game"
+level = "common"
+label = "Visibilité"
+help = "Qui voit le serveur dans la liste. « Non listé » : on s'y connecte seulement avec l'adresse."
+type = "choice"
+choices = [
+  { value = "2", label = "Public" },
+  { value = "1", label = "Amis seulement" },
+  { value = "0", label = "Non listé" },
+]
+game_default = "2"
+proposed = "0"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "max_players"
+key = "ServerMaxPlayerCount"
+channel = "config"
+theme = "players"
+level = "essential"
+label = "Nombre de joueurs"
+help = "Combien de joueurs peuvent être connectés en même temps. Plus il y en a, plus le serveur travaille."
+type = "int"
+min = 1
+max = 64
+game_default = "8"
+proposed = "8"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "reserved_slots"
+key = "ServerReservedSlots"
+channel = "config"
+theme = "players"
+level = "advanced"
+label = "Places réservées"
+help = "Parmi les places, combien ne servent qu'aux joueurs d'un niveau de permission suffisant."
+type = "int"
+min = 0
+game_default = "0"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "reserved_slots_permission"
+key = "ServerReservedSlotsPermission"
+channel = "config"
+theme = "players"
+level = "advanced"
+label = "Permission des places réservées"
+help = "Le niveau de permission demandé pour prendre une place réservée."
+type = "int"
+min = 0
+max = 2000
+game_default = "100"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "admin_slots"
+key = "ServerAdminSlots"
+channel = "config"
+theme = "players"
+level = "advanced"
+label = "Places des administrateurs"
+help = "Combien d'administrateurs peuvent entrer même si le serveur est plein."
+type = "int"
+min = 0
+game_default = "0"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "admin_slots_permission"
+key = "ServerAdminSlotsPermission"
+channel = "config"
+theme = "players"
+level = "advanced"
+label = "Permission des places d'administrateur"
+help = "Le niveau de permission demandé pour prendre une place d'administrateur."
+type = "int"
+min = 0
+max = 2000
+game_default = "0"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "kill_mode"
+key = "PlayerKillingMode"
+channel = "config"
+theme = "players"
+level = "common"
+label = "Combat entre joueurs"
+help = "Qui peut blesser qui entre les joueurs."
+type = "choice"
+choices = [
+  { value = "0", label = "Personne" },
+  { value = "1", label = "Les alliés seulement" },
+  { value = "2", label = "Les inconnus seulement" },
+  { value = "3", label = "Tout le monde" },
+]
+game_default = "3"
+proposed = "0"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "persistent_profiles"
+key = "PersistentPlayerProfiles"
+channel = "config"
+theme = "players"
+level = "advanced"
+label = "Profil gardé par joueur"
+help = "Un joueur retrouve toujours le dernier profil avec lequel il est entré. Sinon, il peut entrer avec n'importe quel profil."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "party_kill_range"
+key = "PartySharedKillRange"
+channel = "config"
+theme = "players"
+level = "advanced"
+label = "Distance de partage des éliminations"
+help = "La distance à laquelle il faut se trouver pour partager l'expérience d'une élimination avec son groupe."
+type = "int"
+min = 0
+game_default = "100"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "spawn_near_friend"
+key = "AllowSpawnNearFriend"
+channel = "config"
+theme = "players"
+level = "advanced"
+label = "Apparition près d'un ami"
+help = "Un nouveau joueur peut-il choisir d'apparaître près d'un ami connecté en même temps."
+type = "choice"
+choices = [
+  { value = "0", label = "Jamais" },
+  { value = "1", label = "Toujours" },
+  { value = "2", label = "Seulement dans la forêt" },
+]
+game_default = "2"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "safe_zone_level"
+key = "PlayerSafeZoneLevel"
+channel = "config"
+theme = "players"
+level = "advanced"
+label = "Niveau de la zone sûre"
+help = "Un joueur de ce niveau ou moins crée une zone sans ennemis en apparaissant."
+type = "int"
+min = 0
+game_default = "5"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "safe_zone_hours"
+key = "PlayerSafeZoneHours"
+channel = "config"
+theme = "players"
+level = "advanced"
+label = "Durée de la zone sûre"
+help = "Combien d'heures de jeu dure cette zone sûre."
+type = "int"
+min = 0
+game_default = "5"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "game_world"
+key = "GameWorld"
+channel = "config"
+theme = "world"
+level = "essential"
+label = "Carte"
+help = "Navezgane (la carte faite à la main), RWG (une carte générée au hasard, longue à créer) ou le nom d'une carte déjà présente. Elle fait partie de la sauvegarde : la changer ouvre une autre partie."
+type = "text"
+charset = "file_stem"
+max_len = 100
+game_default = "Navezgane"
+proposed = "Navezgane"
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "world_gen_seed"
+key = "WorldGenSeed"
+channel = "config"
+theme = "world"
+level = "common"
+label = "Graine de la carte générée"
+help = "Le texte qui sert à générer la carte quand la carte est RWG. Elle ne change plus une fois la carte créée."
+type = "text"
+charset = "file_stem"
+max_len = 100
+game_default = "MyGame"
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "world_gen_size"
+key = "WorldGenSize"
+channel = "config"
+theme = "world"
+level = "common"
+label = "Taille de la carte générée"
+help = "La largeur et la hauteur de la carte quand la carte est RWG. Elle ne change plus une fois la carte créée."
+type = "choice"
+choices = [
+  { value = "6144", label = "6144" },
+  { value = "8192", label = "8192" },
+  { value = "10240", label = "10240" },
+]
+game_default = "6144"
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "game_name"
+key = "GameName"
+channel = "config"
+theme = "world"
+level = "essential"
+label = "Nom de la partie"
+help = "Le nom de la sauvegarde. Le changer ouvre une autre partie."
+type = "text"
+charset = "file_stem"
+max_len = 60
+game_default = "MyGame"
+proposed = "Partie"
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "sandbox_code"
+key = "SandboxCode"
+channel = "config"
+theme = "world"
+level = "advanced"
+label = "Code de difficulté"
+help = "Le code qui règle la difficulté du monde, copié depuis l'écran « options du bac à sable » du jeu. Hearth le garde tel quel."
+type = "opaque"
+max_len = 200
+game_default = "AAAJABJACJADJARFBNC"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "max_chunk_age"
+key = "MaxChunkAge"
+channel = "config"
+theme = "world"
+level = "advanced"
+label = "Remise à zéro des zones"
+help = "Le nombre de jours de jeu après lesquels une zone non revisitée et non protégée revient à son état d'origine. -1 : jamais."
+type = "int"
+min = -1
+game_default = "-1"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "save_data_limit"
+key = "SaveDataLimit"
+channel = "config"
+theme = "world"
+level = "advanced"
+label = "Place maximale d'une sauvegarde"
+help = "La place maximale d'une sauvegarde, en mégaoctets. Au-delà, des zones peuvent être remises à zéro. -1 : aucune limite."
+type = "int"
+min = -1
+game_default = "-1"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "map_chunks"
+key = "MaxUncoveredMapChunksPerPlayer"
+channel = "config"
+theme = "world"
+level = "advanced"
+label = "Zones découvertes par joueur"
+help = "Le nombre de zones qu'un joueur peut découvrir sur sa carte. Cela fixe la taille maximale de son fichier de carte."
+type = "int"
+min = 0
+game_default = "131072"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "build_create"
+key = "BuildCreate"
+channel = "config"
+theme = "rules"
+level = "common"
+label = "Mode création"
+help = "Active le mode création (tricher) sur le serveur."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "bedroll_dead_zone"
+key = "BedrollDeadZoneSize"
+channel = "config"
+theme = "rules"
+level = "advanced"
+label = "Zone sans ennemis autour d'un sac de couchage"
+help = "Le rayon de la zone où aucun zombie n'apparaît autour d'un sac de couchage."
+type = "int"
+min = 0
+game_default = "15"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "bedroll_expiry"
+key = "BedrollExpiryTime"
+channel = "config"
+theme = "rules"
+level = "advanced"
+label = "Durée d'un sac de couchage"
+help = "Combien de jours réels un sac de couchage reste actif après la dernière connexion de son propriétaire."
+type = "int"
+min = 0
+game_default = "45"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "camera_mode"
+key = "CameraRestrictionMode"
+channel = "config"
+theme = "rules"
+level = "common"
+label = "Caméra des joueurs"
+help = "Les joueurs peuvent-ils passer de la vue à la première à la troisième personne."
+type = "choice"
+choices = [
+  { value = "0", label = "Libre" },
+  { value = "1", label = "Première personne seulement" },
+  { value = "2", label = "Troisième personne seulement" },
+]
+game_default = "0"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "twitch_permission"
+key = "TwitchServerPermission"
+channel = "config"
+theme = "rules"
+level = "advanced"
+label = "Permission pour Twitch"
+help = "Le niveau de permission demandé pour utiliser l'intégration de Twitch sur le serveur."
+type = "int"
+min = 0
+max = 2000
+game_default = "90"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "twitch_blood_moon"
+key = "TwitchBloodMoonAllowed"
+channel = "config"
+theme = "rules"
+level = "advanced"
+label = "Twitch pendant la lune de sang"
+help = "Autorise les actions de Twitch pendant une lune de sang. Elles peuvent ralentir le serveur."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "claim_count"
+key = "LandClaimCount"
+channel = "config"
+theme = "claims"
+level = "common"
+label = "Territoires par joueur"
+help = "Le nombre maximal de territoires protégés par joueur."
+type = "int"
+min = 0
+game_default = "5"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "claim_size"
+key = "LandClaimSize"
+channel = "config"
+theme = "claims"
+level = "advanced"
+label = "Taille d'un territoire"
+help = "La taille, en blocs, de la zone protégée par une pierre de territoire."
+type = "int"
+min = 1
+game_default = "41"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "claim_dead_zone"
+key = "LandClaimDeadZone"
+channel = "config"
+theme = "claims"
+level = "advanced"
+label = "Écart entre deux territoires"
+help = "La distance minimale, en blocs, entre deux pierres de territoire (sauf entre amis)."
+type = "int"
+min = 0
+game_default = "30"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "claim_expiry"
+key = "LandClaimExpiryTime"
+channel = "config"
+theme = "claims"
+level = "advanced"
+label = "Expiration des territoires"
+help = "Combien de jours réels un joueur peut rester absent avant que ses territoires ne soient plus protégés."
+type = "int"
+min = 0
+game_default = "7"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "claim_decay"
+key = "LandClaimDecayMode"
+channel = "config"
+theme = "claims"
+level = "advanced"
+label = "Usure des territoires d'un absent"
+help = "Comment la protection des territoires d'un joueur absent s'use."
+type = "choice"
+choices = [
+  { value = "0", label = "Lente" },
+  { value = "1", label = "Rapide" },
+  { value = "2", label = "Aucune jusqu'à l'expiration" },
+]
+game_default = "0"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "claim_online_hardness"
+key = "LandClaimOnlineDurabilityModifier"
+channel = "config"
+theme = "claims"
+level = "advanced"
+label = "Solidité quand le joueur est là"
+help = "De combien la solidité des blocs protégés augmente quand leur propriétaire est connecté. 0 : indestructibles."
+type = "int"
+min = 0
+game_default = "4"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "claim_offline_hardness"
+key = "LandClaimOfflineDurabilityModifier"
+channel = "config"
+theme = "claims"
+level = "advanced"
+label = "Solidité quand le joueur est absent"
+help = "De combien la solidité des blocs protégés augmente quand leur propriétaire est absent. 0 : indestructibles."
+type = "int"
+min = 0
+game_default = "4"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "claim_offline_delay"
+key = "LandClaimOfflineDelay"
+channel = "config"
+theme = "claims"
+level = "advanced"
+label = "Délai avant le mode absent"
+help = "Combien de minutes après la déconnexion d'un joueur ses blocs passent à la solidité d'un absent."
+type = "int"
+min = 0
+game_default = "0"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "max_zombies"
+key = "MaxSpawnedZombies"
+channel = "config"
+theme = "performance"
+level = "common"
+label = "Zombies au maximum"
+help = "Le nombre de zombies sur tout le monde. Le changer pèse beaucoup sur les performances."
+type = "int"
+min = 0
+game_default = "64"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "max_animals"
+key = "MaxSpawnedAnimals"
+channel = "config"
+theme = "performance"
+level = "common"
+label = "Animaux au maximum"
+help = "Le nombre d'animaux sur tout le monde. Ils pèsent moins sur le serveur que les zombies."
+type = "int"
+min = 0
+game_default = "50"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "view_distance"
+key = "ServerMaxAllowedViewDistance"
+channel = "config"
+theme = "performance"
+level = "common"
+label = "Distance de vue maximale"
+help = "La plus grande distance de vue qu'un joueur peut demander. Elle pèse beaucoup sur la mémoire."
+type = "int"
+min = 6
+max = 12
+game_default = "12"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "queued_mesh_layers"
+key = "MaxQueuedMeshLayers"
+channel = "config"
+theme = "performance"
+level = "advanced"
+label = "Couches de terrain en attente"
+help = "Le nombre maximal de couches de terrain en attente de calcul. Moins, c'est moins de mémoire mais un terrain plus long à apparaître."
+type = "int"
+min = 1
+game_default = "1000"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "dynamic_mesh"
+key = "DynamicMeshEnabled"
+channel = "config"
+theme = "performance"
+level = "advanced"
+label = "Maillage dynamique"
+help = "Active le système de maillage dynamique du terrain."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "true"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "dynamic_mesh_claims"
+key = "DynamicMeshLandClaimOnly"
+channel = "config"
+theme = "performance"
+level = "advanced"
+label = "Maillage dynamique dans les territoires seulement"
+help = "Limite le maillage dynamique aux zones des territoires des joueurs."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "true"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "dynamic_mesh_buffer"
+key = "DynamicMeshLandClaimBuffer"
+channel = "config"
+theme = "performance"
+level = "advanced"
+label = "Rayon du maillage autour d'un territoire"
+help = "Le rayon, en zones, du maillage dynamique autour d'un territoire."
+type = "int"
+min = 0
+game_default = "3"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "dynamic_mesh_cache"
+key = "DynamicMeshMaxItemCache"
+channel = "config"
+theme = "performance"
+level = "advanced"
+label = "Éléments traités en même temps"
+help = "Combien d'éléments le maillage dynamique traite en même temps. Plus, c'est plus de mémoire."
+type = "int"
+min = 1
+game_default = "3"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "transfer_speed"
+key = "ServerMaxWorldTransferSpeedKiBs"
+channel = "config"
+theme = "performance"
+level = "advanced"
+label = "Vitesse d'envoi du monde"
+help = "La vitesse maximale, en kio par seconde, à laquelle le monde est envoyé à un joueur qui ne l'a pas encore. Environ 1300 au plus."
+type = "int"
+min = 1
+game_default = "512"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "crossplay"
+key = "ServerAllowCrossplay"
+channel = "config"
+theme = "network"
+level = "common"
+label = "Jeu entre plateformes"
+help = "Autorise les joueurs d'autres plateformes. Le serveur n'accepte alors que le nombre de places par défaut ou moins."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "eac"
+key = "EACEnabled"
+channel = "config"
+theme = "security"
+level = "common"
+label = "Protection EasyAntiCheat"
+help = "Active la protection contre la triche. Désactivez-la si des joueurs honnêtes sont refusés."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "true"
+proposed = "true"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "ignore_eos"
+key = "IgnoreEOSSanctions"
+channel = "config"
+theme = "security"
+level = "advanced"
+label = "Ignorer les sanctions d'Epic"
+help = "Laisse entrer les joueurs même s'ils sont sanctionnés par Epic Online Services."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "hide_log"
+key = "HideCommandExecutionLog"
+channel = "config"
+theme = "security"
+level = "advanced"
+label = "Journal des commandes"
+help = "Ce que le journal montre des commandes exécutées."
+type = "choice"
+choices = [
+  { value = "0", label = "Tout montrer" },
+  { value = "1", label = "Cacher à la console du serveur" },
+  { value = "2", label = "Cacher aussi aux joueurs" },
+  { value = "3", label = "Tout cacher" },
+]
+game_default = "0"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "server_port"
+key = "ServerPort"
+channel = "config"
+theme = "network"
+level = "advanced"
+label = "Port du jeu"
+help = "Le port sur lequel le jeu écoute dans le service. Il suit le port choisi dans « Modifier » : vous ne pouvez pas le changer ici."
+type = "int"
+min = 1024
+max = 65535
+game_default = "26900"
+change = "anytime"
+imposed = { port = "game", why = "Le jeu annonce son port : il suit celui que Hearth relie au service." }
+source = "verified"
+
+[[setting]]
+id = "game_mode"
+key = "GameMode"
+channel = "config"
+theme = "world"
+level = "advanced"
+label = "Mode de jeu"
+help = "Le seul mode que le serveur propose : la survie. Vous ne pouvez pas le changer."
+type = "text"
+charset = "line"
+max_len = 40
+game_default = "GameModeSurvival"
+change = "anytime"
+imposed = { value = "GameModeSurvival", why = "La documentation du fichier ne liste que ce mode." }
+source = "verified"
+
+[[setting]]
+id = "telnet_enabled"
+key = "TelnetEnabled"
+channel = "config"
+theme = "network"
+level = "advanced"
+label = "Console distante"
+help = "La console distante sert à arrêter proprement le jeu. Elle reste active et n'est jamais publiée : vous ne pouvez pas la changer."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "true"
+change = "anytime"
+imposed = { value = "true", why = "L'arrêt propre du jeu passe par cette console (l'image envoie l'ordre d'arrêt par elle)." }
+source = "verified"
+
+[[setting]]
+id = "telnet_port"
+key = "TelnetPort"
+channel = "config"
+theme = "network"
+level = "advanced"
+label = "Port de la console distante"
+help = "Le port de la console, à l'intérieur du service. Il n'est jamais publié : vous ne pouvez pas le changer."
+type = "int"
+min = 1024
+max = 65535
+game_default = "8081"
+change = "anytime"
+imposed = { port = "telnet", why = "L'image et la fiche attendent la console sur ce port, jamais publié." }
+source = "verified"
+
+[[setting]]
+id = "telnet_password"
+key = "TelnetPassword"
+channel = "config"
+theme = "network"
+level = "advanced"
+label = "Mot de passe de la console"
+help = "Tiré par Hearth à l'installation. Il n'est jamais affiché et vous ne pouvez pas le changer."
+type = "secret"
+max_len = 100
+secret_kind = "admin_password"
+game_default = ""
+change = "anytime"
+imposed = { secret = "telnet", why = "L'arrêt propre en dépend : Hearth le tire et le garde." }
+source = "verified"
+
+[[setting]]
+id = "terminal_window"
+key = "TerminalWindowEnabled"
+channel = "config"
+theme = "network"
+level = "advanced"
+label = "Fenêtre de terminal"
+help = "Une fenêtre de terminal n'existe pas dans un service : ce réglage reste désactivé."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "true"
+change = "anytime"
+imposed = { value = "false", why = "Réglage de Windows : sans effet dans un service." }
+source = "verified"
+
+[[setting]]
+id = "web_dashboard"
+key = "WebDashboardEnabled"
+channel = "config"
+theme = "network"
+level = "advanced"
+label = "Tableau de bord web"
+help = "Le tableau de bord web n'est pas publié par Hearth : ce réglage reste désactivé."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+change = "anytime"
+imposed = { value = "false", why = "Son port n'est pas publié ; le service n'en a pas besoin." }
+source = "verified"

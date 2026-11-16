@@ -1,0 +1,235 @@
+# 7 Days to Die, serveur officiel (branche Steam « stable »), sans mod. Fiche en `preview` (HRT-115, HRT-226, ADR-0050 version 2, ADR-0053).
+#
+# Construite depuis le `serverconfig.xml` livré avec la version installée par l'image `vinanrra/7dtd-server` (LinuxGSM + SteamCMD), lu
+# sur le serveur téléchargé le 16/11/2026, et depuis la configuration de la forge (`products/forge/forge-nixos/jeux/7dtd.nix`, image et
+# reprise de l'arrêt propre). Essayée sur la vraie image par `tests/fiche_live_game.rs` en local (voir `evidence.toml`, `golden.toml`).
+#
+# RESTE `preview` (HRT-227) : sous le durcissement `no-new-privileges` de Hearth (ADR-0036, obligatoire pour tout conteneur), le
+# conteneur sort en erreur au démarrage (essai réel du banc, 16/11/2026) : le script de l'image installe une tâche planifiée avec
+# `crontab`, binaire setgid (`-rwxr-sr-x root crontab`), et obtient « /var/spool/cron/: mkstemp: Permission denied ». Sans ce
+# durcissement le même serveur démarre (signe « StartGame done » après 48 s), s'arrête par le signal en 9 s (code 0) et pèse 2,1 Gio au
+# repos. Aucune mémoire, aucun disque n'est donc écrit : rien n'a été mesuré par le banc sur cette fiche.
+#
+# Ce que cette fiche ne fait pas : les ports 26901 et 26902 (UDP) ne servent qu'à SteamNetworking, que le défaut du jeu coupe
+# (`ServerDisabledNetworkProtocols`) ; ils ne sont pas publiés. Les mods (MODS_URLS, Undead Legacy, Darkness Falls...) sont hors fiche.
+
+format = 2
+id = "7dtd"
+version = 1
+family = "7dtd"
+name = "7 Days to Die"
+summary = "Le serveur officiel de 7 Days to Die, sans mod."
+status = "preview"
+platform = "linux"
+
+[image]
+repository = "vinanrra/7dtd-server"
+tag = "v0.10.0"                           # build du 2026-10-18 ; la forge tourne encore sur un build plus ancien du tag `latest` (2026-09-23, sans étiquette de version)
+digest = "sha256:dfd94fe7abd234c6ff42596fec3ff55b0e5fdb66b62c66a2275fce5cbd576efe"
+game_updates = "at_install"               # START_MODE=1 : l'image ne met le jeu à jour qu'à l'installation ; START_MODE=3 le ferait à chaque démarrage
+
+[owner]
+uid = 1000                                # l'image perd ses droits de root pour cet utilisateur (PUID et PGID)
+gid = 1000
+
+# Les sauvegardes : `Saves/<carte>/<partie>`, `serveradmin.xml` et les profils des joueurs.
+[[folder]]
+id = "saves"
+role = "world"
+target = "/home/sdtdserver/.local/share/7DaysToDie"
+read_only = false
+backup = true
+
+# Le serveur téléchargé (17,8 Go) et son fichier de réglages `sdtdserver.xml` : jamais sauvegardé, il se retélécharge.
+[[folder]]
+id = "serverfiles"
+role = "game_files"
+target = "/home/sdtdserver/serverfiles"
+read_only = false
+backup = false
+
+[[folder]]
+id = "lgsm"
+role = "config"
+target = "/home/sdtdserver/lgsm/config-lgsm/sdtdserver"
+read_only = false
+backup = true
+
+[[folder]]
+id = "logs"
+role = "logs"
+target = "/home/sdtdserver/log"
+read_only = false
+backup = false
+
+# Le jeu écoute son port en TCP et en UDP (le même numéro) ; il annonce ce numéro : le réglage `server_port` le suit.
+[[port]]
+id = "game"
+container = 26900
+protocol = "tcp"
+role = "game"
+publish = "always"
+default_host = 26900
+group = "base"
+mapping = "same_number"
+game_setting = "server_port"
+
+[[port]]
+id = "game_udp"
+container = 26900
+protocol = "udp"
+role = "game"
+publish = "always"
+default_host = 26900
+group = "base"
+mapping = "same_number"
+game_setting = "server_port"
+
+# La console distante (telnet) : l'image l'utilise pour arrêter le jeu proprement. Jamais publiée.
+[[port]]
+id = "telnet"
+container = 8081
+protocol = "tcp"
+role = "remote_console"
+publish = "never"
+mapping = "nat"
+
+[[channel]]
+id = "config"
+kind = "file"
+format = "xml_properties"
+folder = "serverfiles"
+path = "sdtdserver.xml"
+mode = "0644"
+written_by_game = "unverified"
+raw_edit = true
+
+[channel.xml]
+root = "ServerSettings"
+element = "property"
+key_attr = "name"
+value_attr = "value"
+
+[[channel]]
+id = "env"
+kind = "env"
+
+[[env]]
+name = "PUID"
+owner = "uid"
+
+[[env]]
+name = "PGID"
+owner = "gid"
+
+[[env]]
+name = "START_MODE"
+value = "1"                               # démarrer (installe au premier lancement) ; 0, 2 et 4 arrêtent le conteneur aussitôt
+
+[[env]]
+name = "VERSION"
+value = "stable"
+
+# Le contrôle de santé de l'image relance le jeu sans que le moteur le voie ; la sauvegarde de l'image copie les 17,8 Go du serveur.
+[[env]]
+name = "MONITOR"
+value = "NO"
+
+[[env]]
+name = "BACKUP"
+value = "NO"
+
+[[env]]
+name = "TEST_ALERT"
+value = "NO"
+
+[[env]]
+name = "UPDATE_MODS"
+value = "NO"
+
+[[secret]]
+id = "telnet"
+origin = "generated"
+length = 32
+alphabet = "alnum"
+
+[remote_console]
+protocol = "telnet_line"
+port = "telnet"
+password = "telnet"
+
+[first_start]
+ready_timeout_s = 5400                    # téléchargement de 17,8 Go (mesuré : 13 min à 180 Mbit/s) puis chargement de la carte : marge pour une ligne lente
+world_generation = true                   # une carte RWG se génère au premier lancement
+
+[[first_start.download]]
+what = "Le serveur du jeu"
+source_label = "Steam"
+bytes = 17803449012
+evidence = "measured"
+
+[[first_start.stage]]
+label = "Installation du serveur"
+log_contains = "Installing 7 Days To Die Server"
+
+[[first_start.stage]]
+label = "Téléchargement du serveur"
+log_contains = "downloading, progress"
+
+[ready]
+log_contains = "StartGame done"           # vu sur la vraie image (16/11/2026) : 48 s après le lancement du jeu, carte Navezgane
+status = "tested"
+
+# L'image intercepte le signal d'arrêt, envoie « shutdown » au jeu par la console distante (le jeu enregistre) puis sort.
+# Vérifié à la main (16/11/2026, 4 min de jeu) : « Stopping sdtdserver: Graceful: telnet ... OK », code 0, 9 s.
+[stop]
+grace_s = 150
+signal = "SIGTERM"
+world_saved = "by_image_on_signal"
+
+[resources]
+cpu = { evidence = "unmeasured" }
+memory = { evidence = "unmeasured" }
+disk = { evidence = "unmeasured" }
+
+[worlds]
+folder = "saves"
+unit = "dir"
+depth = 3
+names_setting = "game_name"
+carried_by_world = ["game_world", "world_gen_seed", "world_gen_size", "sandbox_code"]
+
+[[not_exposed]]
+key = "WebDashboardPort"
+channel = "config"
+why = "Port du tableau de bord web : le tableau de bord reste désactivé et son port n'est pas publié."
+
+[[not_exposed]]
+key = "WebDashboardUrl"
+channel = "config"
+why = "Adresse externe du tableau de bord web : il reste désactivé."
+
+[[not_exposed]]
+key = "EnableMapRendering"
+channel = "config"
+why = "Ne sert qu'au tableau de bord web, qui reste désactivé."
+
+[[not_exposed]]
+key = "TelnetFailedLoginLimit"
+channel = "config"
+why = "La console distante n'est jamais publiée : seul l'arrêt propre du jeu s'y connecte."
+
+[[not_exposed]]
+key = "TelnetFailedLoginsBlocktime"
+channel = "config"
+why = "La console distante n'est jamais publiée : seul l'arrêt propre du jeu s'y connecte."
+
+[[not_exposed]]
+key = "AdminFileName"
+channel = "config"
+why = "Nom du fichier des administrateurs : les administrateurs se nomment par leur compte, que Hearth ne garde pas (BR-FICHE-011). Le fichier se modifie dans l'onglet Fichiers."
+
+[[not_exposed]]
+key = "ServerDisabledNetworkProtocols"
+channel = "config"
+why = "Protocoles réseau désactivés : le défaut du jeu (SteamNetworking coupé) évite d'ouvrir les ports 26901 et 26902. Laissé au défaut."
