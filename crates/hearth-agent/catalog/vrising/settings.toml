@@ -1,0 +1,141 @@
+# Réglages de V Rising (HRT-232) : tous reçus par variable d'environnement de l'image `trueosiris/vrising` (canal `env`). Les variables
+# `HOST_SETTINGS_<clé>` et `GAME_SETTINGS_<clé>` modifient `ServerHostSettings.json` et `ServerGameSettings.json` (script `start.sh` de
+# l'image, par `jq`, sans tenir compte de la casse). Un changement recrée le service (BR-FICHE-042).
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "players"
+label = "Joueurs"
+order = 2
+
+[[theme]]
+id = "network"
+label = "Réseau"
+order = 3
+
+[[setting]]
+id = "server_name"
+key = "SERVERNAME"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Nom du serveur"
+help = "Le nom que vos joueurs voient dans la liste des serveurs."
+type = "text"
+charset = "line"
+max_len = 60
+game_default = "trueosiris-V"
+proposed = "Mon serveur V Rising"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "description"
+key = "HOST_SETTINGS_DESCRIPTION"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Description"
+help = "Le texte qui accompagne le nom du serveur dans la liste."
+type = "text"
+charset = "line"
+max_len = 200
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "password"
+key = "HOST_SETTINGS_PASSWORD"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Mot de passe du serveur"
+help = "Ce que vos joueurs tapent pour entrer. Laissez vide pour que tout le monde puisse entrer. Hearth ne l'affiche jamais."
+type = "secret"
+secret_kind = "game_password"
+max_len = 100
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "difficulty"
+key = "HOST_SETTINGS_GAMEDIFFICULTYPRESET"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Difficulté"
+help = "Le préréglage de difficulté : il règle ensemble les dégâts, les points de vie, les boss et le butin. Il l'emporte sur le fichier des réglages de partie."
+type = "choice"
+choices = [
+  { value = "Difficulty_Easy", label = "Facile" },
+  { value = "Difficulty_Normal", label = "Normale" },
+  { value = "Difficulty_Brutal", label = "Brutale" },
+]
+proposed = "Difficulty_Normal"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "game_mode"
+key = "GAME_SETTINGS_GAMEMODETYPE"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Mode de jeu"
+help = "PvE : les joueurs ne se battent pas entre eux. PvP : ils le peuvent."
+type = "choice"
+choices = [
+  { value = "PvE", label = "Joueurs contre le monde" },
+  { value = "PvP", label = "Joueurs contre joueurs" },
+]
+proposed = "PvE"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "max_users"
+key = "HOST_SETTINGS_MAXCONNECTEDUSERS"
+channel = "env"
+theme = "players"
+level = "essential"
+label = "Nombre de joueurs"
+help = "Combien de joueurs peuvent être connectés en même temps."
+type = "int"
+min = 1
+proposed = "10"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "list_on_steam"
+key = "HOST_SETTINGS_LISTONSTEAM"
+channel = "env"
+theme = "network"
+level = "common"
+label = "Serveur dans la liste de Steam"
+help = "Montre le serveur dans la liste des serveurs de Steam. Sinon, on s'y connecte seulement avec l'adresse."
+type = "bool"
+on = "true"
+off = "false"
+proposed = "false"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "list_on_eos"
+key = "HOST_SETTINGS_LISTONEOS"
+channel = "env"
+theme = "network"
+level = "common"
+label = "Serveur dans la liste d'Epic"
+help = "Montre le serveur dans la liste des serveurs d'Epic Online Services. Sinon, on s'y connecte seulement avec l'adresse."
+type = "bool"
+on = "true"
+off = "false"
+proposed = "false"
+change = "anytime"
+source = "partial"

@@ -326,6 +326,24 @@ mod tests {
     const SETTINGS: &str = include_str!("../../crates/hearth-agent/catalog/terraria/settings.toml");
     const LOCK: &str = include_str!("../../crates/hearth-agent/catalog/terraria/ids.lock");
 
+    /// La fiche de Terraria telle qu'elle était avant sa publication : `preview`, mémoire mesurée au repos seulement.
+    fn check_preview(settings: &str, lock: &str, release: bool) -> Vec<String> {
+        let text = std::str::from_utf8(FICHE)
+            .expect("utf-8")
+            .replace("status = \"published\"", "status = \"preview\"")
+            .replace(
+                "memory = { min_bytes = 2147483648, recommended_bytes = 2147483648, evidence = \"measured\" }",
+                "memory = { min_bytes = 591187148, evidence = \"measured_idle\" }",
+            );
+        check_texts(
+            "terraria",
+            text.as_bytes(),
+            settings.as_bytes(),
+            Some(lock.as_bytes()),
+            release,
+        )
+    }
+
     fn check(settings: &str, lock: &str, release: bool) -> Vec<String> {
         check_texts(
             "terraria",
@@ -415,14 +433,16 @@ mod tests {
 
     #[test]
     fn the_release_profile_refuses_a_preview_fiche() {
-        let problems = check(SETTINGS, LOCK, true);
+        let problems = check_preview(SETTINGS, LOCK, true);
         assert!(problems[0].contains("preview"), "{problems:?}");
+        // Terraria est publiée (HRT-226) : le profil de publication ne lui reproche rien.
+        assert!(check(SETTINGS, LOCK, true).is_empty());
     }
 
     #[test]
     fn the_release_profile_names_the_missing_recommended_memory() {
-        // Terraria n'a pas encore de mémoire mesurée (HRT-149) : elle reste en préparation, et le dit.
-        let problems = check(SETTINGS, LOCK, true);
+        // Terraria avant HRT-226 : une mémoire mesurée au repos seulement, en préparation (`preview`), et le dit.
+        let problems = check_preview(SETTINGS, LOCK, true);
         assert_eq!(problems.len(), 2, "{problems:?}");
         assert!(
             problems[1].contains("mémoire recommandée manque"),

@@ -1,0 +1,47 @@
+# Relevé du banc d'essai réel (HRT-226). Engendré par `tests/fiche_live_game.rs`, jamais écrit à la main.
+fiche = "zomboid"
+fiche_version = 1
+min.memory_limit_bytes = 4294967296
+min.image = "danixu86/project-zomboid-dedicated-server:42.20.4-release-2@sha256:f86d62f0455a67950a96042580d12d1bdb3acbd8ca2b027ed6794619dbd73833"
+min.image_digest = "danixu86/project-zomboid-dedicated-server@sha256:f86d62f0455a67950a96042580d12d1bdb3acbd8ca2b027ed6794619dbd73833"
+min.disk_image_bytes = 2504883027
+min.ready = true
+min.ready_after_s = 77
+min.memory_peak_startup_bytes = 3650158592
+min.port_game_listens = true
+min.port_direct_listens = true
+min.ports_listen = true
+min.setting_taken = true
+min.memory_usage_raw = "2.894GiB / 4GiB"
+min.memory_idle_bytes = 3524993024
+min.memory_peak_bytes = 3650158592
+min.disk_install_bytes = 2507934102
+min.stop_took_s = 71
+min.stop_exit_code = "0"
+min.world_saved_on_stop = true
+min.stop_log_tail = "*** INFO: Server stopped cleanly with exit code 0 *** | LOG  : General      f:0 st:41,165,424> Shutdown handling finished | LOG  : General      f:0 st:41,163,741> waiting for UdpEngine thread termination | LOG  : General      f:0 st:41,163,741> ObjectID type=Vehicle last=0 new=0 | LOG  : General      f:0 st:41,163,741> ObjectID type=DeadBody last=0 new=0 | LOG  : General      f:0 st:41,163,741> ObjectID type=Container last=0 new=0"
+min.stop_clean = true
+min.no_auto_restart = true
+min.restart_ready = true
+min.restart_keeps_world = true
+rec.memory_limit_bytes = 6442450944
+rec.image = "danixu86/project-zomboid-dedicated-server:42.20.4-release-2@sha256:f86d62f0455a67950a96042580d12d1bdb3acbd8ca2b027ed6794619dbd73833"
+rec.image_digest = "danixu86/project-zomboid-dedicated-server@sha256:f86d62f0455a67950a96042580d12d1bdb3acbd8ca2b027ed6794619dbd73833"
+rec.disk_image_bytes = 2504883027
+rec.ready = true
+rec.ready_after_s = 74
+rec.memory_peak_startup_bytes = 3498991616
+rec.port_game_listens = true
+rec.port_direct_listens = true
+rec.ports_listen = true
+rec.setting_taken = true
+rec.memory_usage_raw = "2.831GiB / 6GiB"
+rec.memory_idle_bytes = 3349614592
+rec.memory_peak_bytes = 3498991616
+rec.disk_install_bytes = 2507934759
+rec.stop_took_s = 23
+rec.stop_exit_code = "0"
+rec.world_saved_on_stop = true
+rec.stop_log_tail = "*** INFO: Server stopped cleanly with exit code 0 *** | LOG  : General      f:0 st:41,490,318> Shutdown handling finished | LOG  : General      f:0 st:41,488,831> waiting for UdpEngine thread termination | LOG  : General      f:0 st:41,488,831> ObjectID type=Vehicle last=0 new=0 | LOG  : General      f:0 st:41,488,831> ObjectID type=DeadBody last=0 new=0 | LOG  : General      f:0 st:41,488,830> ObjectID type=Container last=0 new=0"
+rec.stop_clean = true
+rec.no_auto_restart = true

@@ -1,0 +1,14 @@
+# Relevé de référence de l'image (ADR-0053, HRT-226). Engendré par `docker image inspect` sur l'image épinglée, jamais écrit à la main.
+# Le fichier de réglages par défaut du jeu n'est pas dans l'image (le jeu l'écrit au premier démarrage) : voir evidence.toml.
+image = "ryshe/terraria@sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677"
+id = "sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677"
+created = "2026-08-24T16:54:12.221627938Z"
+architecture = "amd64"
+user = ""
+workdir = "/terraria-server"
+entrypoint = ["/bin/sh","bootstrap.sh"]
+cmd = []
+exposed_ports = ["7777/tcp",]
+volumes = ["/config","/root/.local/share/Terraria/Worlds","/terraria-server/logs",]
+stop_signal = ""
+env = ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","LOGPATH=/terraria-server/logs","WORLDPATH=/root/.local/share/Terraria/Worlds","WORLD_FILENAME=","CONFIGPATH=/config","CONFIG_FILENAME=serverconfig.txt","TARGETARCH=amd64"]

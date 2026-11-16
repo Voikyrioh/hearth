@@ -1,0 +1,14 @@
+# Relevé de référence de l'image (ADR-0053, HRT-226). Engendré par `docker image inspect` sur l'image épinglée, jamais écrit à la main.
+# Le fichier de réglages par défaut du jeu n'est pas dans l'image (le jeu l'écrit au premier démarrage) : voir evidence.toml.
+image = "mornedhels/enshrouded-server@sha256:002a8ac3387eddc5151b18ab5e7c02f9382f8e941dcfc75e56fa5134bd18f283"
+id = "sha256:002a8ac3387eddc5151b18ab5e7c02f9382f8e941dcfc75e56fa5134bd18f283"
+created = "2026-10-23T17:35:30.615894741Z"
+architecture = "amd64"
+user = ""
+workdir = "/usr/local/etc/enshrouded"
+entrypoint = []
+cmd = ["/usr/local/etc/enshrouded/bootstrap"]
+exposed_ports = []
+volumes = []
+stop_signal = ""
+env = ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","USER=root","HOME=/root","LANG=en_US.UTF-8","LANGUAGE=en_US:en"]

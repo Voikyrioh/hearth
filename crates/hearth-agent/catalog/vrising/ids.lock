@@ -1,0 +1,14 @@
+# Registre des identifiants de réglage de la fiche `vrising` (HRT-226, conception technique 12.4).
+# Un identifiant publié ne disparaît pas par oubli : retiré de la fiche, il passe en [[retired]] avec sa raison,
+# et son état ici devient `retired` (avec `retired_in`). `cargo xtask catalog-check` le vérifie.
+
+ids = [
+  { id = "server_name", key = "SERVERNAME", channel = "env", state = "active", since = 1 },
+  { id = "description", key = "HOST_SETTINGS_DESCRIPTION", channel = "env", state = "active", since = 1 },
+  { id = "password", key = "HOST_SETTINGS_PASSWORD", channel = "env", state = "active", since = 1 },
+  { id = "difficulty", key = "HOST_SETTINGS_GAMEDIFFICULTYPRESET", channel = "env", state = "active", since = 1 },
+  { id = "game_mode", key = "GAME_SETTINGS_GAMEMODETYPE", channel = "env", state = "active", since = 1 },
+  { id = "max_users", key = "HOST_SETTINGS_MAXCONNECTEDUSERS", channel = "env", state = "active", since = 1 },
+  { id = "list_on_steam", key = "HOST_SETTINGS_LISTONSTEAM", channel = "env", state = "active", since = 1 },
+  { id = "list_on_eos", key = "HOST_SETTINGS_LISTONEOS", channel = "env", state = "active", since = 1 },
+]

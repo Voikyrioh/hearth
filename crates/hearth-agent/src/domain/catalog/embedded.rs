@@ -72,15 +72,26 @@ mod tests {
             .iter()
             .map(|f| f.id().to_owned())
             .collect();
+        let previews: Vec<String> = offered_with(true)
+            .iter()
+            .filter(|f| {
+                f.file.status == crate::domain::catalog::loading::schema::fiche::Status::Preview
+            })
+            .map(|f| f.id().to_owned())
+            .collect();
         assert!(
-            !published.iter().any(|id| id == "terraria"),
+            !previews.is_empty(),
+            "le catalogue embarque au moins une fiche preview"
+        );
+        assert!(
+            !published.iter().any(|id| previews.contains(id)),
             "une fiche preview n'est pas proposée par une publication"
         );
         let trial: Vec<String> = offered_with(true)
             .iter()
             .map(|f| f.id().to_owned())
             .collect();
-        assert!(trial.iter().any(|id| id == "terraria"));
+        assert!(previews.iter().all(|id| trial.contains(id)));
         for id in &published {
             assert!(
                 trial.contains(id),

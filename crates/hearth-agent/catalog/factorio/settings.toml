@@ -1,0 +1,82 @@
+# Réglages de Factorio (HRT-229) : reçus par variable d'environnement de l'image `factoriotools/factorio` (canal `env`). Les noms et les
+# défauts viennent du README et du script d'entrée de l'image épinglée. Un changement recrée le service (BR-FICHE-042).
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "network"
+label = "Réseau"
+order = 2
+
+[[setting]]
+id = "save_name"
+key = "SAVE_NAME"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Nom de la sauvegarde"
+help = "Le nom de la sauvegarde que le jeu crée au premier lancement. Il nomme aussi son fichier : le changer plus tard ne renomme rien."
+type = "text"
+charset = "file_stem"
+max_len = 60
+game_default = "_autosave1"
+proposed = "Monde"
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "preset"
+key = "PRESET"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Préréglage de la carte"
+help = "Le préréglage de génération de la carte créée au premier lancement. Sans choix, la carte standard est générée."
+type = "choice"
+choices = [
+  { value = "rich-resources", label = "Ressources riches" },
+  { value = "marathon", label = "Marathon" },
+  { value = "death-world", label = "Monde de la mort" },
+  { value = "death-world-marathon", label = "Monde de la mort, marathon" },
+  { value = "rail-world", label = "Monde des rails" },
+  { value = "ribbon-world", label = "Monde en ruban" },
+  { value = "lakes", label = "Lacs" },
+  { value = "island", label = "Île" },
+]
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "space_age"
+key = "DLC_SPACE_AGE"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Extension Space Age"
+help = "Active les éléments de l'extension Space Age. Vos joueurs doivent la posséder."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "true"
+proposed = "true"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "port"
+key = "PORT"
+channel = "env"
+theme = "network"
+level = "advanced"
+label = "Port d'écoute dans le service"
+help = "Le port sur lequel le jeu écoute à l'intérieur du service. Le port que vos joueurs utilisent se règle dans « Modifier » : vous ne pouvez pas le modifier ici."
+type = "int"
+min = 1024
+max = 65535
+game_default = "34197"
+change = "anytime"
+imposed = { port = "game", why = "Il doit rester celui que Hearth relie au port du serveur." }
+source = "verified"

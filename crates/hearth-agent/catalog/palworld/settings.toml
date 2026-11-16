@@ -1,0 +1,269 @@
+# Réglages de Palworld (HRT-233) : variables d'environnement de l'image `thijsvanloef/palworld-server-docker` (canal `env`). Les noms, les
+# valeurs permises et les défauts viennent du README de l'image. Un changement recrée le service (BR-FICHE-042).
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "players"
+label = "Joueurs"
+order = 2
+
+[[theme]]
+id = "rules"
+label = "Règles de jeu"
+order = 3
+
+[[theme]]
+id = "network"
+label = "Réseau"
+order = 4
+
+[[setting]]
+id = "server_name"
+key = "SERVER_NAME"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Nom du serveur"
+help = "Le nom que vos joueurs voient dans la liste des serveurs."
+type = "text"
+charset = "line"
+max_len = 60
+proposed = "Mon serveur Palworld"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "server_description"
+key = "SERVER_DESCRIPTION"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Description"
+help = "Le texte qui accompagne le nom du serveur dans la liste."
+type = "text"
+charset = "line"
+max_len = 200
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "server_password"
+key = "SERVER_PASSWORD"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Mot de passe du serveur"
+help = "Ce que vos joueurs tapent pour entrer. Laissez vide pour que tout le monde puisse entrer. Hearth ne l'affiche jamais."
+type = "secret"
+secret_kind = "game_password"
+max_len = 100
+game_default = ""
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "players"
+key = "PLAYERS"
+channel = "env"
+theme = "players"
+level = "essential"
+label = "Nombre de joueurs"
+help = "Combien de joueurs peuvent être connectés en même temps."
+type = "int"
+min = 1
+max = 32
+game_default = "16"
+proposed = "16"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "community"
+key = "COMMUNITY"
+channel = "env"
+theme = "network"
+level = "common"
+label = "Serveur dans la liste communautaire"
+help = "Montre le serveur dans la liste des serveurs communautaires. Sinon, on s'y connecte seulement avec l'adresse."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+proposed = "false"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "difficulty"
+key = "DIFFICULTY"
+channel = "env"
+theme = "rules"
+level = "common"
+label = "Difficulté"
+help = "Le préréglage de difficulté du monde."
+type = "choice"
+choices = [
+  { value = "None", label = "Aucun préréglage" },
+  { value = "Normal", label = "Normale" },
+  { value = "Difficult", label = "Difficile" },
+]
+game_default = "None"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "death_penalty"
+key = "DEATH_PENALTY"
+channel = "env"
+theme = "rules"
+level = "common"
+label = "Perte à la mort"
+help = "Ce qu'un joueur perd quand il meurt."
+type = "choice"
+choices = [
+  { value = "None", label = "Rien" },
+  { value = "Item", label = "Les objets" },
+  { value = "ItemAndEquipment", label = "Les objets et l'équipement" },
+  { value = "All", label = "Tout, Pals compris" },
+]
+game_default = "Item"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "is_pvp"
+key = "IS_PVP"
+channel = "env"
+theme = "rules"
+level = "common"
+label = "Combat entre joueurs"
+help = "Les joueurs peuvent-ils se battre entre eux ?"
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "exp_rate"
+key = "EXP_RATE"
+channel = "env"
+theme = "rules"
+level = "common"
+label = "Expérience gagnée"
+help = "Le multiplicateur d'expérience, avec un point décimal (1.0 : normal)."
+type = "text"
+charset = "arg_safe"
+max_len = 10
+game_default = "1.000000"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "pal_capture_rate"
+key = "PAL_CAPTURE_RATE"
+channel = "env"
+theme = "rules"
+level = "advanced"
+label = "Chance de capture"
+help = "Le multiplicateur de la chance de capturer un Pal, avec un point décimal (1.0 : normal)."
+type = "text"
+charset = "arg_safe"
+max_len = 10
+game_default = "1.000000"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "pal_spawn_num_rate"
+key = "PAL_SPAWN_NUM_RATE"
+channel = "env"
+theme = "rules"
+level = "advanced"
+label = "Nombre de Pals qui apparaissent"
+help = "Le multiplicateur du nombre de Pals, avec un point décimal (1.0 : normal). Plus il est haut, plus le serveur travaille."
+type = "text"
+charset = "arg_safe"
+max_len = 10
+game_default = "1.000000"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "daytime_speed"
+key = "DAYTIME_SPEEDRATE"
+channel = "env"
+theme = "rules"
+level = "advanced"
+label = "Vitesse du jour"
+help = "Le multiplicateur de vitesse du jour, avec un point décimal (1.0 : normal)."
+type = "text"
+charset = "arg_safe"
+max_len = 10
+game_default = "1.000000"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "nighttime_speed"
+key = "NIGHTTIME_SPEEDRATE"
+channel = "env"
+theme = "rules"
+level = "advanced"
+label = "Vitesse de la nuit"
+help = "Le multiplicateur de vitesse de la nuit, avec un point décimal (1.0 : normal)."
+type = "text"
+charset = "arg_safe"
+max_len = 10
+game_default = "1.000000"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "base_camp_max_num"
+key = "BASE_CAMP_MAX_NUM"
+channel = "env"
+theme = "rules"
+level = "advanced"
+label = "Camps de base au maximum"
+help = "Le nombre de camps de base sur tout le serveur."
+type = "int"
+min = 1
+game_default = "128"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "drop_item_max_num"
+key = "DROP_ITEM_MAX_NUM"
+channel = "env"
+theme = "rules"
+level = "advanced"
+label = "Objets posés au sol au maximum"
+help = "Le nombre d'objets que le monde garde au sol. Plus il est haut, plus le serveur travaille."
+type = "int"
+min = 1
+game_default = "3000"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "game_port"
+key = "PORT"
+channel = "env"
+theme = "network"
+level = "advanced"
+label = "Port du jeu dans le service"
+help = "Le port de connexion du jeu, à l'intérieur du service. Celui de vos joueurs se règle dans « Modifier » : vous ne pouvez pas le modifier ici."
+type = "int"
+min = 1024
+max = 65535
+game_default = "8211"
+change = "anytime"
+imposed = { port = "game", why = "Le jeu annonce son port : il suit celui que Hearth relie au service." }
+source = "verified"

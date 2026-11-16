@@ -1,0 +1,157 @@
+# Palworld, serveur officiel sans mod. Fiche en `preview` (HRT-233, ADR-0050 version 2, ADR-0053).
+#
+# Construite depuis le README de l'image `thijsvanloef/palworld-server-docker` (https://github.com/thijsvanloef/palworld-server-docker).
+# Rien n'a été ajouté de mémoire. RESTE `preview` : le banc d'essai réel n'a pas pu tourner, la machine d'essai (Docker Desktop, 8 Gio)
+# est sous le minimum de 16 Gio que l'éditeur de l'image annonce. Un essai manuel (16/11/2026, 6 Gio, sans joueur, `docker run` simple)
+# a pourtant démarré le serveur : prêt en 2 min 50 s avec le téléchargement (4,6 Go sur le disque), 1,26 Gio au repos, MAIS l'arrêt par
+# signal sort en code 143 en 8 s (« Shutdown handler: cleanup », puis envoi d'un rapport à sentry.io) : la règle d'arrêt propre n'est pas tenue.
+
+format = 2
+id = "palworld"
+version = 1
+family = "palworld"
+name = "Palworld"
+summary = "Le serveur officiel de Palworld, sans mod."
+status = "preview"
+platform = "linux"
+
+[image]
+repository = "thijsvanloef/palworld-server-docker"
+tag = "v2.8.1"
+digest = "sha256:86fc7470949f6fcc931cb6443f61facc79bacc09e3f40d46e628d9e1ef6e56cd"
+game_updates = "every_start"              # UPDATE_ON_BOOT vaut `true` par défaut : l'image met le jeu à jour à chaque démarrage
+
+[owner]
+uid = 1000                                # PUID et PGID : l'image refuse 0
+gid = 1000
+
+# Tout vit dans `/palworld` : le serveur téléchargé (plusieurs Go) et `Pal/Saved` (le monde, les réglages).
+[[folder]]
+id = "data"
+role = "world"
+target = "/palworld"
+read_only = false
+backup = true
+
+[[port]]
+id = "game"
+container = 8211
+protocol = "udp"
+role = "game"
+publish = "always"
+default_host = 8211
+group = "base"
+mapping = "same_number"
+game_setting = "game_port"
+
+[[port]]
+id = "query"
+container = 27015
+protocol = "udp"
+role = "query"
+publish = "always"
+default_host = 27015
+group = "base"
+mapping = "nat"
+
+# La console distante (RCON) : l'image s'en sert pour enregistrer le monde avant l'arrêt (« RCON must be enabled for graceful saves »).
+[[port]]
+id = "rcon"
+container = 25575
+protocol = "tcp"
+role = "remote_console"
+publish = "never"
+mapping = "nat"
+
+[[channel]]
+id = "env"
+kind = "env"
+
+[[env]]
+name = "PUID"
+owner = "uid"
+
+[[env]]
+name = "PGID"
+owner = "gid"
+
+[[env]]
+name = "RCON_ENABLED"
+value = "true"
+
+[[env]]
+name = "RCON_PORT"
+value = "25575"
+
+[[env]]
+name = "ADMIN_PASSWORD"
+secret = "rcon"
+
+# Hearth garde la main sur les sauvegardes, les mises à jour automatiques et les redémarrages.
+[[env]]
+name = "BACKUP_ENABLED"
+value = "false"
+
+[[env]]
+name = "AUTO_UPDATE_ENABLED"
+value = "false"
+
+[[env]]
+name = "AUTO_REBOOT_ENABLED"
+value = "false"
+
+[[secret]]
+id = "rcon"
+origin = "generated"
+length = 32
+alphabet = "alnum"
+
+[remote_console]
+protocol = "source_rcon"
+port = "rcon"
+password = "rcon"
+
+[first_start]
+ready_timeout_s = 3600
+world_generation = true
+
+[[first_start.download]]
+what = "Le serveur du jeu"
+source_label = "Steam"
+evidence = "unmeasured"
+
+[ready]
+log_contains = "Running Palworld dedicated server"   # vu en essai manuel (16/11/2026) : « Running Palworld dedicated server on :18211 » ; pas essayé par le banc
+status = "untested"
+
+# README : « stop_grace_period: 30s (configurable) », RCON obligatoire pour enregistrer avant l'arrêt. Non essayé.
+[stop]
+grace_s = 60
+signal = "SIGTERM"
+world_saved = "by_image_on_signal"
+
+# Chiffres de l'éditeur de l'image (README) : au moins 16 Gio de mémoire, 32 Gio et plus recommandés, 8 Gio de disque au moins.
+[resources]
+cpu = { evidence = "unmeasured" }
+memory = { min_bytes = 17179869184, recommended_bytes = 34359738368, evidence = { publisher = "https://github.com/thijsvanloef/palworld-server-docker" } }
+disk = { install_bytes = 8589934592, evidence = { publisher = "https://github.com/thijsvanloef/palworld-server-docker" } }
+
+[[not_exposed]]
+key = "PUBLIC_IP"
+channel = "env"
+why = "Adresse annoncée au jeu : l'adresse publique se renseigne dans « Modifier l'adresse » de Hearth."
+
+[[not_exposed]]
+key = "PUBLIC_PORT"
+channel = "env"
+why = "Port annoncé au jeu : le port du jeu suit celui que Hearth relie au service."
+
+[[not_exposed]]
+key = "RCON_ENABLED"
+channel = "env"
+why = "L'arrêt propre en dépend : la console reste active (variable fixe de la fiche)."
+
+[[not_exposed]]
+key = "UPDATE_ON_BOOT"
+channel = "env"
+why = "Le défaut de l'image (mise à jour à chaque démarrage) est celui que la fiche déclare (`game_updates = every_start`)."

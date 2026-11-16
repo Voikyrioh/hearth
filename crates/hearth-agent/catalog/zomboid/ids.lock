@@ -1,0 +1,20 @@
+# Registre des identifiants de réglage de la fiche `zomboid` (HRT-226, conception technique 12.4).
+# Un identifiant publié ne disparaît pas par oubli : retiré de la fiche, il passe en [[retired]] avec sa raison,
+# et son état ici devient `retired` (avec `retired_in`). `cargo xtask catalog-check` le vérifie.
+
+ids = [
+  { id = "display_name", key = "DISPLAYNAME", channel = "env", state = "active", since = 1 },
+  { id = "preset", key = "SERVERPRESET", channel = "env", state = "active", since = 1 },
+  { id = "admin_username", key = "ADMINUSERNAME", channel = "env", state = "active", since = 1 },
+  { id = "admin_password", key = "ADMINPASSWORD", channel = "env", state = "active", since = 1 },
+  { id = "password", key = "PASSWORD", channel = "env", state = "active", since = 1 },
+  { id = "public", key = "PUBLIC", channel = "env", state = "active", since = 1 },
+  { id = "steam_vac", key = "STEAMVAC", channel = "env", state = "active", since = 1 },
+  { id = "memory", key = "MEMORY", channel = "env", state = "active", since = 1 },
+  { id = "max_players", key = "MaxPlayers", channel = "ini", state = "active", since = 1 },
+  { id = "pvp", key = "PVP", channel = "ini", state = "active", since = 1 },
+  { id = "pause_empty", key = "PauseEmpty", channel = "ini", state = "active", since = 1 },
+  { id = "open", key = "Open", channel = "ini", state = "active", since = 1 },
+  { id = "game_port", key = "PORT", channel = "env", state = "active", since = 1 },
+  { id = "direct_port", key = "UDPPORT", channel = "env", state = "active", since = 1 },
+]

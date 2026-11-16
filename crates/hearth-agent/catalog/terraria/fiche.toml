@@ -1,4 +1,5 @@
-# Terraria, serveur officiel sans mod. Fiche en `preview` (HRT-113, ADR-0050 version 2).
+# Terraria, serveur officiel sans mod. Fiche publiée (HRT-113, HRT-226, ADR-0050 version 2, ADR-0053) : essayée sur sa vraie image
+# par le banc `tests/fiche_live.rs` en local (Docker Desktop, 16/11/2026), voir `evidence.toml` et `golden.toml`.
 #
 # Construite depuis un inventaire des réglages (repères T01 à T41) et la configuration d'une installation de référence.
 # Tout ce qui est marqué « non vérifié » l'est dans cet inventaire : rien n'a été ajouté de mémoire. Elle n'est
@@ -6,11 +7,11 @@
 
 format = 2
 id = "terraria"
-version = 4
+version = 5
 family = "terraria"
 name = "Terraria"
 summary = "Le serveur officiel de Terraria, sans mod."
-status = "preview"
+status = "published"
 platform = "linux"
 
 [image]
@@ -114,7 +115,7 @@ seconds = 15
 
 [resources]
 cpu = { evidence = "unmeasured" }
-memory = { min_bytes = 591187148, evidence = "measured_idle" }   # HRT-114 : mémoire au repos, 60 s après « Server started » (un plancher, pas une recommandation)
+memory = { min_bytes = 2147483648, recommended_bytes = 2147483648, evidence = "measured" }   # HRT-226 : LIMITE essayée (2 Gio) : démarre, répond, enregistre, s'arrête ; 593 Mio au repos 60 s après « Server started », sans joueur. Aucun plancher plus bas essayé, donc aucun affirmé.
 disk = { install_bytes = 53014364, evidence = "measured_idle" }   # HRT-114 : image (50 068 911 octets) + dossiers gérés après un premier démarrage, petit monde
 
 [worlds]

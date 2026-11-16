@@ -1,0 +1,108 @@
+# Factorio, serveur officiel sans mod. Fiche en `preview` (HRT-229, ADR-0050 version 2, ADR-0053).
+#
+# Construite depuis le README de l'image `factoriotools/factorio` et son script `docker-entrypoint.sh`, lus DANS l'image épinglée.
+# Rien n'a été ajouté de mémoire. RESTE `preview` : le nom du serveur, son mot de passe, la visibilité, le nombre de joueurs et
+# l'intervalle de sauvegarde automatique vivent dans `server-settings.json`, et le format de fiche ne sait lire que les fichiers de
+# lignes et de propriétés XML (pas de JSON). Hearth ne peut donc pas les régler pour le moment (voir HRT-229). Le banc d'essai réel
+# (`tests/fiche_live_game.rs`, local, 16/11/2026) a pourtant tout validé : démarrage, port, arrêt, monde, mémoire (`evidence.toml`, `golden.toml`).
+
+format = 2
+id = "factorio"
+version = 1
+family = "factorio"
+name = "Factorio"
+summary = "Le serveur officiel de Factorio, avec ou sans l'extension Space Age, sans mod."
+status = "preview"
+platform = "linux"
+
+[image]
+repository = "factoriotools/factorio"
+tag = "2.1.24"
+digest = "sha256:a0c019b7608975a58f1694de54a2326e13a5aa2d123c18f48e5396181e366e28"
+game_updates = "never"                    # la version du jeu est celle de l'étiquette
+
+[owner]
+uid = 845                                 # PUID et PGID : l'image perd ses droits de root pour cet utilisateur
+gid = 845
+
+# Tout vit dans `/factorio` : `saves/`, `config/` (réglages du serveur, mot de passe de la console), `mods/`.
+[[folder]]
+id = "data"
+role = "data"
+target = "/factorio"
+read_only = false
+backup = true
+
+[[port]]
+id = "game"
+container = 34197
+protocol = "udp"
+role = "game"
+publish = "always"
+default_host = 34197
+mapping = "same_number"
+game_setting = "port"
+
+[[channel]]
+id = "env"
+kind = "env"
+
+[[env]]
+name = "PUID"
+owner = "uid"
+
+[[env]]
+name = "PGID"
+owner = "gid"
+
+[first_start]
+ready_timeout_s = 900
+world_generation = true
+
+[ready]
+log_contains = "changing state from(CreatingGame) to(InGame)"   # vu sur la vraie image par le banc d'essai (16/11/2026) : 2 à 4 s après le lancement, petite carte
+status = "tested"
+
+# README de l'image : « Allow enough time for the world to save before Docker sends SIGKILL » (`--timeout 120`). Vérifié par le banc
+# (16/11/2026) : code 0 en moins d'une seconde, sauvegarde réécrite, service qui reste arrêté, redémarrage sur la même sauvegarde.
+[stop]
+grace_s = 120
+signal = "SIGTERM"
+world_saved = "by_image_on_signal"
+
+[resources]
+cpu = { evidence = "unmeasured" }
+# Banc d'essai réel, 16/11/2026, sans joueur, petite carte : les LIMITES essayées. 1 Gio : 405 Mio au repos (compteur du moteur), pic 437 Mo.
+# 2 Gio : 386 Mio, pic 442 Mo. Aucun plancher plus bas n'a été essayé : il n'est pas affirmé.
+memory = { min_bytes = 1073741824, recommended_bytes = 2147483648, evidence = "measured" }
+disk = { install_bytes = 136289388, evidence = "measured_idle" }   # image (134 429 115 octets) + dossiers gérés après un premier démarrage
+
+[[not_exposed]]
+key = "server-settings.json"
+channel = "env"
+why = "Nom, description, mot de passe de la partie, visibilité, joueurs, sauvegarde automatique : ce fichier est du JSON, que le format de fiche ne lit pas encore. Il se modifie dans l'onglet Fichiers (`config/server-settings.json`)."
+
+[[not_exposed]]
+key = "BIND"
+channel = "env"
+why = "Adresse d'écoute à l'intérieur du conteneur : la changer coupe le port publié."
+
+[[not_exposed]]
+key = "RCON_PORT"
+channel = "env"
+why = "La console distante (port 27015) n'est pas publiée et son mot de passe vit dans `config/rconpw`, un fichier que l'image tire elle-même : Hearth ne la déclare pas."
+
+[[not_exposed]]
+key = "UPDATE_MODS_ON_START"
+channel = "env"
+why = "Les mods sont hors de cette fiche (il faut un compte factorio.com : USERNAME et TOKEN)."
+
+[[not_exposed]]
+key = "LOAD_LATEST_SAVE"
+channel = "env"
+why = "Le défaut de l'image (charger la dernière sauvegarde) est celui qu'il faut : le nom de la sauvegarde ne sert qu'à la créer."
+
+[[not_exposed]]
+key = "GENERATE_NEW_SAVE"
+channel = "env"
+why = "L'image crée la sauvegarde d'elle-même quand il n'y en a aucune."

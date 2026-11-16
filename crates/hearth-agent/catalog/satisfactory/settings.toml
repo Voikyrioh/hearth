@@ -1,0 +1,126 @@
+# Réglages de Satisfactory (HRT-234) : variables d'environnement de l'image `wolveix/satisfactory-server` (canal `env`). Les noms et les
+# défauts viennent du tableau du README de l'image. Un changement recrée le service (BR-FICHE-042).
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "players"
+label = "Joueurs"
+order = 2
+
+[[theme]]
+id = "performance"
+label = "Performances"
+order = 3
+
+[[theme]]
+id = "network"
+label = "Réseau"
+order = 4
+
+[[setting]]
+id = "max_players"
+key = "MAXPLAYERS"
+channel = "env"
+theme = "players"
+level = "essential"
+label = "Nombre de joueurs"
+help = "Combien de joueurs peuvent être connectés en même temps."
+type = "int"
+min = 1
+game_default = "4"
+proposed = "4"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "autosave_num"
+key = "AUTOSAVENUM"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Sauvegardes automatiques gardées"
+help = "Combien de fichiers de sauvegarde automatique le jeu fait tourner."
+type = "int"
+min = 1
+game_default = "5"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "disable_seasonal_events"
+key = "DISABLESEASONALEVENTS"
+channel = "env"
+theme = "game"
+level = "common"
+label = "Couper les événements de saison"
+help = "Désactive l'événement de fin d'année (FICSMAS)."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "false"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "max_tick_rate"
+key = "MAXTICKRATE"
+channel = "env"
+theme = "performance"
+level = "advanced"
+label = "Cadence de la simulation"
+help = "Le nombre de mises à jour de la simulation par seconde. Plus il est haut, plus le serveur travaille."
+type = "int"
+min = 1
+game_default = "30"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "timeout"
+key = "TIMEOUT"
+channel = "env"
+theme = "network"
+level = "advanced"
+label = "Délai avant de lâcher un joueur"
+help = "Le nombre de secondes sans nouvelles d'un joueur avant de le déconnecter."
+type = "int"
+min = 1
+game_default = "30"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "game_port"
+key = "SERVERGAMEPORT"
+channel = "env"
+theme = "network"
+level = "advanced"
+label = "Port du jeu dans le service"
+help = "Le port de connexion du jeu, à l'intérieur du service. Celui de vos joueurs se règle dans « Modifier » : vous ne pouvez pas le modifier ici."
+type = "int"
+min = 1024
+max = 65535
+game_default = "7777"
+change = "anytime"
+imposed = { port = "game", why = "Le jeu annonce son port : il suit celui que Hearth relie au service." }
+source = "verified"
+
+[[setting]]
+id = "messaging_port"
+key = "SERVERMESSAGINGPORT"
+channel = "env"
+theme = "network"
+level = "advanced"
+label = "Port des messages dans le service"
+help = "Le port des messages du jeu, à l'intérieur du service. Celui de vos joueurs se règle dans « Modifier » : vous ne pouvez pas le modifier ici."
+type = "int"
+min = 1024
+max = 65535
+game_default = "8888"
+change = "anytime"
+imposed = { port = "messaging", why = "Le jeu annonce ce port : il suit celui que Hearth relie au service." }
+source = "verified"

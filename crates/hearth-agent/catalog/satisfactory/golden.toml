@@ -1,0 +1,14 @@
+# Relevé de référence de l'image (ADR-0053, HRT-226). Engendré par `docker image inspect` sur l'image épinglée, jamais écrit à la main.
+# Le fichier de réglages par défaut du jeu n'est pas dans l'image (le jeu l'écrit au premier démarrage) : voir evidence.toml.
+image = "wolveix/satisfactory-server@sha256:ac252dba41653eb21c6feed94b577f98fa152f5792b1aeff2ce11fe364355137"
+id = "sha256:ac252dba41653eb21c6feed94b577f98fa152f5792b1aeff2ce11fe364355137"
+created = "2026-10-06T19:00:51.227066238Z"
+architecture = "amd64"
+user = ""
+workdir = "/config"
+entrypoint = ["/init.sh"]
+cmd = []
+exposed_ports = ["7777/tcp","7777/udp","8888/tcp",]
+volumes = []
+stop_signal = "SIGINT"
+env = ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","USER=root","HOME=/root","LANG=en_US.UTF-8","LANGUAGE=en_US:en","AUTOSAVENUM=5","DEBIAN_FRONTEND=noninteractive","DEBUG=false","DISABLESEASONALEVENTS=false","GAMECONFIGDIR=/config/gamefiles/FactoryGame/Saved","GAMESAVESDIR=/home/steam/.config/Epic/FactoryGame/Saved/SaveGames","LOG=false","MAXOBJECTS=2162688","MAXPLAYERS=4","MAXTICKRATE=30","MULTIHOME=::","PGID=1000","PUID=1000","SERVERGAMEPORT=7777","SERVERMESSAGINGPORT=8888","SERVERSTREAMING=true","SKIPUPDATE=false","STEAMAPPID=1690800","STEAMBETA=false","STEAMBETAID=","STEAMBETAKEY=","TIMEOUT=30","VMOVERRIDE=false","VERSION=v1.9.11"]
