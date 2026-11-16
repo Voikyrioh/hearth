@@ -2,7 +2,9 @@
 #
 # Construite depuis le README de l'image `thijsvanloef/palworld-server-docker` (https://github.com/thijsvanloef/palworld-server-docker).
 # Rien n'a été ajouté de mémoire. RESTE `preview` : le banc d'essai réel n'a pas pu tourner, la machine d'essai (Docker Desktop, 8 Gio)
-# est sous le minimum de 16 Gio que l'éditeur de l'image annonce ; aucun signe « prêt », aucune mémoire ni aucun disque n'ont été vus.
+# est sous le minimum de 16 Gio que l'éditeur de l'image annonce. Un essai manuel (16/11/2026, 6 Gio, sans joueur, `docker run` simple)
+# a pourtant démarré le serveur : prêt en 2 min 50 s avec le téléchargement (4,6 Go sur le disque), 1,26 Gio au repos, MAIS l'arrêt par
+# signal sort en code 143 en 8 s (« Shutdown handler: cleanup », puis envoi d'un rapport à sentry.io) : la règle d'arrêt propre n'est pas tenue.
 
 format = 2
 id = "palworld"
@@ -119,7 +121,7 @@ source_label = "Steam"
 evidence = "unmeasured"
 
 [ready]
-log_contains = "Running Palworld dedicated server"   # NON VU : à confirmer par un essai réel
+log_contains = "Running Palworld dedicated server"   # vu en essai manuel (16/11/2026) : « Running Palworld dedicated server on :18211 » ; pas essayé par le banc
 status = "untested"
 
 # README : « stop_grace_period: 30s (configurable) », RCON obligatoire pour enregistrer avant l'arrêt. Non essayé.
