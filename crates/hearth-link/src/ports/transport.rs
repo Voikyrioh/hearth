@@ -152,6 +152,9 @@ pub enum TransportError {
     FingerprintMismatch { presented: Fingerprint },
     #[error("réponse inattendue : {0}")]
     Protocol(String),
+    /// La réponse dépasse la borne que l'appelant a fixée.
+    #[error("réponse trop volumineuse")]
+    TooLarge,
     #[error("le serveur a répondu {}", .0.status)]
     Api(ApiError),
 }

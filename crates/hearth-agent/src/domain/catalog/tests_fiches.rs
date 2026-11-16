@@ -2117,3 +2117,14 @@ fn the_embedded_illustration_of_minecraft_is_a_920_by_430_jpeg_under_300_kib() {
             .all(|e| e.illustration.is_none())
     );
 }
+
+#[test]
+fn the_digest_ignores_the_image_keys_at_top_level_only() {
+    use super::loading::model::fiche_digest;
+    let base = b"version = 1\nsteam_app_id = 105600\n[[port]]\nid = \"game\"\n";
+    let without = b"version = 1\n[[port]]\nid = \"game\"\n";
+    assert_eq!(fiche_digest(base, b""), fiche_digest(without, b""));
+    // La même clé dans un tableau n'est pas une clé d'image : l'empreinte la couvre.
+    let inside = b"version = 1\n[[port]]\nid = \"game\"\nillustration = \"x\"\n";
+    assert_ne!(fiche_digest(inside, b""), fiche_digest(without, b""));
+}

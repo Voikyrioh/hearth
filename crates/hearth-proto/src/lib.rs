@@ -7,6 +7,7 @@ pub mod device_proof;
 pub mod error;
 pub mod fingerprint;
 pub mod headers;
+pub mod ids;
 pub mod jpeg;
 pub mod lenient;
 pub mod log_text;

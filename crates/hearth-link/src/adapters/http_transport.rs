@@ -46,8 +46,7 @@ use crate::domain::pending_ops::OperationId;
 use crate::domain::secret::Secret;
 use crate::ports::transport::{
     ApiError, ApiRequest, ApiResponse, AuditExport, BinaryBody, Frame, LogsConn, LogsFrame, Method,
-    Pin, Probed, RESPONSE_TOO_LARGE, StreamConn, Target, Transport, TransportError, UploadConn,
-    UploadFrame,
+    Pin, Probed, StreamConn, Target, Transport, TransportError, UploadConn, UploadFrame,
 };
 
 /// Taille maximale d'une réponse HTTP lue (un `GET /metrics/history` en tient largement).
@@ -200,7 +199,7 @@ impl HttpTransport {
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|e| map_error(e, &state))? {
             if bytes.len().saturating_add(chunk.len()) > max_body {
-                return Err(TransportError::Protocol(RESPONSE_TOO_LARGE.into()));
+                return Err(TransportError::TooLarge);
             }
             bytes.extend_from_slice(&chunk);
         }
@@ -804,7 +803,7 @@ async fn read_body(
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| map_error(e, state))? {
         if bytes.len().saturating_add(chunk.len()) > MAX_BODY_BYTES {
-            return Err(TransportError::Protocol(RESPONSE_TOO_LARGE.into()));
+            return Err(TransportError::TooLarge);
         }
         bytes.extend_from_slice(&chunk);
     }

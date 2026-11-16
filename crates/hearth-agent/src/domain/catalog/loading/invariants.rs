@@ -1895,13 +1895,28 @@ pub fn check_cross(fiche: &Fiche) -> Result<(), FicheRefusee> {
             Some(_) => {}
         }
         for id in &worlds.carried_by_world {
-            if fiche.setting(id).is_none() {
+            let Some(setting) = fiche.setting(id) else {
                 return Err(refuse(
                     f,
                     "worlds.carried_by_world",
                     Motif::ReferenceInconnue {
                         genre: "réglage",
                         id: id.clone(),
+                    },
+                ));
+            };
+            // Un réglage porté par le monde repris n'est ni posé ni écrit : un argument de lancement, lui, serait posé
+            // quand même par la traduction (HRT-266). Seuls les canaux fichier et variable d'environnement le portent.
+            if fiche
+                .channel(&setting.channel)
+                .is_some_and(|channel| channel.kind == ChannelKind::Args)
+            {
+                return Err(refuse(
+                    f,
+                    "worlds.carried_by_world",
+                    Motif::ChampIncoherent {
+                        champ: "carried_by_world".into(),
+                        avec: "pour un réglage passé en argument de lancement".into(),
                     },
                 ));
             }

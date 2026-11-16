@@ -9,23 +9,12 @@ use super::LinkManager;
 use super::parse::parse;
 use crate::domain::server::ServerId;
 use crate::error::LinkError;
-use crate::ports::transport::{BinaryBody, RESPONSE_TOO_LARGE, TransportError};
+use crate::ports::transport::{BinaryBody, TransportError};
 
 const CATALOG_PATH: &str = "/catalog";
 
-/// Longueur maximale de l'identifiant d'une fiche (comme `MAX_FICHE_TOKEN_CHARS` du fil).
-const STABLE_ID_MAX_LEN: usize = 64;
-
-/// Un identifiant stable (de fiche, de question, de contrat, de port) est un mot court : minuscules, chiffres, tiret et souligné ;
-/// tout autre texte n'est pas un identifiant, ne part pas et n'est jamais répété. UNE seule définition, pour la
-/// liaison et pour la coquille.
-pub fn is_stable_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= STABLE_ID_MAX_LEN
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
-}
+/// Un identifiant stable : la définition est UNE seule, dans `hearth_proto::ids` (agent, liaison et coquille).
+pub use hearth_proto::ids::is_stable_id;
 
 /// Le chemin du détail d'une fiche, ou `None` si l'identifiant n'en est pas un.
 pub fn fiche_path(id: &str) -> Option<String> {
@@ -117,7 +106,7 @@ impl LinkManager {
         .await
         .map_err(|_| LinkError::Timeout)?
         .map_err(|error| match error {
-            TransportError::Protocol(text) if text == RESPONSE_TOO_LARGE => LinkError::TooLarge,
+            TransportError::TooLarge => LinkError::TooLarge,
             other => LinkError::from(other),
         })?;
         check_illustration_body(&body, expected_hex)?;

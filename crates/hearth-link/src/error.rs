@@ -188,6 +188,7 @@ impl From<TransportError> for LinkError {
             TransportError::Closed(_) => Self::Unreachable("flux fermé".into()),
             TransportError::FingerprintMismatch { .. } => Self::FingerprintChanged,
             TransportError::Protocol(reason) => Self::Protocol(reason),
+            TransportError::TooLarge => Self::TooLarge,
             TransportError::Api(error) => Self::from_api(&error),
         }
     }

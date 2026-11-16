@@ -130,8 +130,12 @@ fn is_image_source_line(line: &[u8]) -> bool {
 /// `fiche.toml` sans les lignes qui disent d'où vient l'image : ce que l'empreinte couvre.
 fn digest_view(fiche_toml: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(fiche_toml.len());
+    // Seules les clés de premier niveau (avant le premier `[tableau]`) disent d'où vient l'image : une clé de même nom
+    // dans un tableau garde sa ligne, l'empreinte la couvre.
+    let mut top_level = true;
     for line in fiche_toml.split_inclusive(|byte| *byte == b'\n') {
-        if !is_image_source_line(line) {
+        top_level &= !line.trim_ascii_start().starts_with(b"[");
+        if !(top_level && is_image_source_line(line)) {
             out.extend_from_slice(line);
         }
     }

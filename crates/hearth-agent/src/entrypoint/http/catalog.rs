@@ -14,6 +14,7 @@ use axum::response::{IntoResponse, Response};
 use hearth_proto::api::catalog::{CatalogView, FicheDetail};
 use hearth_proto::api::worlds::{WorldInspection, WorldRef, WorldsView};
 use hearth_proto::error::ErrorCode;
+use hearth_proto::ids::is_stable_id;
 
 use super::{ApiError, AppState};
 use crate::application::catalog::CatalogError;
@@ -52,6 +53,12 @@ pub async fn illustration(
             "Cette fiche n'est pas listée par ce serveur.",
         )
     };
+    let internal = || {
+        ApiError::new(
+            ErrorCode::InternalError,
+            "L'illustration n'a pas pu être servie.",
+        )
+    };
     if !is_stable_id(&id) {
         return Err(unknown());
     }
@@ -82,24 +89,14 @@ pub async fn illustration(
         return out
             .status(StatusCode::NOT_MODIFIED)
             .body(Body::empty())
-            .map_err(|_| unknown());
+            .map_err(|_| internal());
     }
     out = out
         .header(header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg"))
         .header(header::CONTENT_LENGTH, found.bytes.len());
     out.body(Body::from(found.bytes))
         .map(IntoResponse::into_response)
-        .map_err(|_| unknown())
-}
-
-/// Un identifiant stable de fiche : minuscules, chiffres, tiret et souligné, 64 caractères au plus (même règle que
-/// `hearth_link::is_stable_id`, que l'agent ne peut pas importer).
-fn is_stable_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 64
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+        .map_err(|_| internal())
 }
 
 /// Une consultation de monde refusée : un code stable, jamais un chemin ni un nom de monde (`BR-MONDE-023`).

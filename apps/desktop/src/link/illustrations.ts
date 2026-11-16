@@ -12,8 +12,8 @@ export function illustrationBase(windows: boolean): string {
 }
 
 const U32_MAX = 4_294_967_295;
-const STABLE_ID = /^[a-z0-9-]{1,64}$/;
-const SERVER_ID = /^[A-Za-z0-9._-]{1,128}$/;
+const STABLE_ID = /^[a-z0-9_-]{1,64}$/;
+const SERVER_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const HEX_DIGEST = /^[0-9a-f]{64}$/;
 
 /** L'identifiant Steam d'un jeu : un entier de 1 à 4 294 967 295 (jamais une chaîne, jamais 0). */
