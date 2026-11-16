@@ -155,8 +155,6 @@ const REASONS: Record<string, MessageKey> = {
   PACK_INDEX_INVALID: "pack.refusedIndex",
   PACK_WRAPPED_IN_FOLDER: "pack.refusedWrapped",
   PACK_UNRECOGNIZED: "pack.refusedUnrecognized",
-  PACK_VERSION_UNREADABLE: "pack.refusedVersionUnreadable",
-  PACK_VERSION_MISMATCH: "pack.refusedVersionMismatch",
   PACK_LOADER_MISMATCH: "pack.refusedLoaderMismatch",
 };
 
@@ -179,6 +177,28 @@ export function packRefusalSentences(refusal: PackRefusal): string[] {
         ? t("pack.refusedHostUnknown")
         : t("pack.refusedHost", { host: safeText(refusal.host) }),
     ];
+  }
+  if (refusal.reason === "PACK_VERSION_MISMATCH") {
+    const field =
+      refusal.field === null || refusal.field === undefined
+        ? t("pack.versionField")
+        : safeText(refusal.field);
+    return refusal.packVersion && refusal.chosenVersion
+      ? [
+          t("pack.refusedVersionMismatchNamed", {
+            pack: safeText(refusal.packVersion),
+            chosen: safeText(refusal.chosenVersion),
+            field,
+          }),
+        ]
+      : [t("pack.refusedVersionMismatch")];
+  }
+  if (refusal.reason === "PACK_VERSION_UNREADABLE") {
+    const field =
+      refusal.field === null || refusal.field === undefined
+        ? t("pack.versionField")
+        : safeText(refusal.field);
+    return [t("pack.refusedVersionUnreadable", { field })];
   }
   const key = REASONS[refusal.reason];
   return [key === undefined ? t("pack.refusedOther") : t(key)];

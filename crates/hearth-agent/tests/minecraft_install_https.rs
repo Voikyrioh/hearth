@@ -393,6 +393,9 @@ async fn a_version_that_contradicts_the_pack_or_an_unreadable_one_left_on_latest
         "{}",
         reply.text
     );
+    // Les deux versions sont dites (déjà jugées comme des versions), pour que l'écran les nomme.
+    assert_eq!(reply.body["error"]["details"]["pack_version"], "1.20.1");
+    assert_eq!(reply.body["error"]["details"]["chosen_version"], "1.21.1");
     // Le moteur choisi n'est pas celui du pack.
     let reply = b
         .install(b.request("mauvais-moteur", Some("vanilla"), Some("fab"), true))

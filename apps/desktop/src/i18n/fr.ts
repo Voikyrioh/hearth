@@ -1273,13 +1273,13 @@ export const fr = {
       internetTitle: "Depuis internet",
       internetLabel: "Adresse pour les joueurs d'internet",
       internetHelp:
-        "Pour vos amis : ouvrez ce port sur votre box (redirection de port) vers le serveur. Hearth ne peut pas vérifier qu'il est ouvert.",
+        "Pour vos amis : ouvrez ce port sur votre box (redirection de port) vers le serveur.",
       detectedNote:
         "Votre box a indiqué cette adresse. Elle peut changer : renseignez un nom de domaine pour la fixer.",
       localOnly:
-        "Hearth ne connaît pas votre adresse d'internet : votre box ne l'a pas donnée. Renseignez-la avec « Modifier l'adresse » : un nom de domaine, ou l'adresse IP de votre box.",
+        "Hearth ne connaît pas votre adresse d'internet : votre box ne l'a pas donnée. Renseignez-la avec « Modifier l'adresse d'internet » : un nom de domaine, ou l'adresse IP de votre box.",
       publicNote: "C'est l'adresse que vous avez renseignée pour vos amis.",
-      edit: "Modifier l'adresse",
+      edit: "Modifier l'adresse d'internet",
       editTitle: "Adresse pour vos joueurs",
       editSubmit: "Enregistrer l'adresse",
       editLabel: "Adresse à donner aux joueurs (facultatif)",
@@ -2131,6 +2131,7 @@ export const fr = {
     trust:
       "Cette fiche a été écrite par la personne qui publie Hearth. Elle fait tourner une image publique sur votre serveur, avec les droits d'un service ordinaire.",
     digest: "Empreinte de la fiche",
+    goToQuestion: "Aller au champ",
     install: "Installer…",
     installHelp:
       "Le formulaire des réglages s'affiche : vous choisissez, puis vous vérifiez avant de lancer.",
@@ -2540,8 +2541,11 @@ export const fr = {
     refusedWrapped:
       "Ce pack range tout dans un dossier. Refaites l'archive avec son contenu à la racine : les dossiers « mods » et « config » doivent être au premier niveau.",
     refusedUnrecognized: "Hearth ne reconnaît pas ce pack.",
+    versionField: "Version de Minecraft",
     refusedVersionUnreadable:
-      "Ce pack ne dit pas pour quelle version de Minecraft il est fait. Choisissez la version que la page du pack annonce, par exemple 1.20.1, puis relancez l'installation.",
+      "Hearth ne trouve pas, dans ce pack, pour quelle version de Minecraft il est fait. Écrivez cette version dans le champ « {field} » (la page du pack l'annonce, par exemple 1.20.1), puis continuez. Le pack reste sur le serveur : vous n'avez pas à le renvoyer, et rien n'est encore installé.",
+    refusedVersionMismatchNamed:
+      "Ce pack est fait pour Minecraft {pack}, mais vous avez choisi la version {chosen}. Écrivez {pack} dans le champ « {field} », ou laissez « LATEST » pour que Hearth prenne celle du pack. Le pack reste sur le serveur : vous n'avez pas à le renvoyer.",
     refusedVersionMismatch:
       "La version de Minecraft choisie n'est pas celle de ce pack. Corrigez-la avec celle de la page du pack, ou laissez « LATEST » : Hearth prendra celle que le pack annonce.",
     refusedLoaderMismatch:

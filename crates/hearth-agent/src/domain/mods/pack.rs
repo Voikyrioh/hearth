@@ -84,7 +84,7 @@ pub enum PackRefusal {
     /// Le pack ne dit pas sa version de Minecraft et la demande est restée « LATEST » (HRT-225).
     VersionUnreadable,
     /// La version choisie contredit celle que dit le pack (HRT-225).
-    VersionMismatch,
+    VersionMismatch { pack: String, chosen: String },
     /// Le moteur choisi n'est pas celui que dit le pack (HRT-225).
     LoaderMismatch,
 }
@@ -99,7 +99,7 @@ impl PackRefusal {
             Self::WrappedInFolder => "PACK_WRAPPED_IN_FOLDER",
             Self::Unrecognized => "PACK_UNRECOGNIZED",
             Self::VersionUnreadable => "PACK_VERSION_UNREADABLE",
-            Self::VersionMismatch => "PACK_VERSION_MISMATCH",
+            Self::VersionMismatch { .. } => "PACK_VERSION_MISMATCH",
             Self::LoaderMismatch => "PACK_LOADER_MISMATCH",
         }
     }

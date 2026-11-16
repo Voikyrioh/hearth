@@ -482,6 +482,9 @@ pub enum DeployRefusal {
         reason: String,
         mods: Option<u32>,
         host: Option<String>,
+        /// La version de Minecraft que dit le pack, et celle que la demande a choisie (`PACK_VERSION_MISMATCH`).
+        pack_version: Option<String>,
+        chosen_version: Option<String>,
     },
     /// La machine est trop petite pour un minimum MESURÉ (`cpu` en millicœurs, `memory` en octets).
     HostTooSmall {

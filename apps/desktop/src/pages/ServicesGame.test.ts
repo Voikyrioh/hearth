@@ -134,7 +134,7 @@ describe("la carte « Adresse pour vos joueurs » (BR-JEU-020, BR-JEU-021, BR-JE
     expect(wrapper.get("[data-game-address-lan-value]").text()).toBe(`${host}:7777`);
     expect(wrapper.find("[data-game-address-value]").exists()).toBe(false);
     expect(wrapper.get("[data-game-address-local]").text()).toBe(
-      "Hearth ne connaît pas votre adresse d'internet : votre box ne l'a pas donnée. Renseignez-la avec « Modifier l'adresse » : un nom de domaine, ou l'adresse IP de votre box.",
+      "Hearth ne connaît pas votre adresse d'internet : votre box ne l'a pas donnée. Renseignez-la avec « Modifier l'adresse d'internet » : un nom de domaine, ou l'adresse IP de votre box.",
     );
     expect(wrapper.get("[data-game-address-unverified]").text()).toBe(
       "Hearth ne peut pas vérifier que cette adresse est joignable.",

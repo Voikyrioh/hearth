@@ -1167,7 +1167,9 @@ export type DeployRefusal = { kind: "wrong_password" } | { kind: "password_requi
  *  Le pack de mods est refusé : un code fixe de l'agent (`reason`), le nombre de mods d'une liste CurseForge
  *  (`mods`) ou l'hôte refusé (`host`), jamais un nom d'entrée (BR-MOD-008, BR-MOD-016).
  */
-{ kind: "pack_refused"; reason: string; mods: number | null; host: string | null } | 
+{ kind: "pack_refused"; reason: string; mods: number | null; host: string | null; 
+/**  La version de Minecraft que dit le pack, et celle que la demande a choisie (`PACK_VERSION_MISMATCH`). */
+pack_version: string | null; chosen_version: string | null } | 
 /**  La machine est trop petite pour un minimum MESURÉ (`cpu` en millicœurs, `memory` en octets). */
 { kind: "host_too_small"; lack: FicheLackDto; needed: number | null; has: number | null } | 
 /**  L'espace libre est sous le besoin mesuré de l'installation : aucune case ne permet de passer outre. */
@@ -2120,7 +2122,7 @@ export type PackRefusalDto =
  *  Le pack est refusé : `reason` est un code fixe (`PACK_IS_A_DOWNLOAD_LIST`, `PACK_HOST_FORBIDDEN`,
  *  `ARCHIVE_REFUSED`, ...), `mods` le nombre de mods listés par une liste CurseForge, `host` l'hôte refusé.
  */
-{ kind: "refused"; reason: string; mods: number | null; host: string | null };
+{ kind: "refused"; reason: string; mods: number | null; host: string | null; pack_version: string | null; chosen_version: string | null };
 
 /**
  *  Ce que l'agent exige du mot de passe pour un acte (HRT-194, BR-GRANT-017) : aucun, sauf élévation en

@@ -111,7 +111,16 @@ fn apply_pack_game(
             answers.insert(VERSION_SETTING.to_owned(), said.clone());
         }
         (Some(said), Some(asked)) if asked != *said => {
-            return Err(refuse(PackRefusal::VersionMismatch));
+            // La version choisie vient du client : elle n'est rendue que si elle a la forme d'une version.
+            let chosen = if crate::domain::mods::game::is_game_version(&asked) {
+                asked
+            } else {
+                String::new()
+            };
+            return Err(refuse(PackRefusal::VersionMismatch {
+                pack: said.clone(),
+                chosen,
+            }));
         }
         (None, None) => return Err(refuse(PackRefusal::VersionUnreadable)),
         _ => {}

@@ -23,6 +23,8 @@ const width = computed(() =>
 const root = ref<HTMLElement | null>(null);
 function fill() {
   root.value?.style.setProperty("--meter-fill", `${width.value}%`);
+  // Un remplissage non nul ne devient jamais plus étroit que la barre n'est haute : toujours un bout arrondi lisible.
+  root.value?.style.setProperty("--meter-min", width.value > 0 ? "var(--space-2)" : "0");
 }
 onMounted(fill);
 watch(width, fill, { flush: "post" });
@@ -48,6 +50,7 @@ watch(width, fill, { flush: "post" });
 
 .meter__value {
   width: var(--meter-fill, 0%);
+  min-width: var(--meter-min, 0);
   height: 100%;
   border-radius: var(--radius-pill);
   transition: width var(--motion-base) var(--ease);
