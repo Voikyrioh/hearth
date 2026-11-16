@@ -30,6 +30,7 @@ mod known_address_repo;
 mod login_attempt_repo;
 mod machine_info;
 mod monotonic_clock;
+mod network;
 mod op_journal;
 mod operation_repo;
 mod pack_deposits;
@@ -95,6 +96,7 @@ pub use known_address_repo::{KnownAddressRepo, KnownAddressTx};
 pub use login_attempt_repo::{LoginAttemptRepo, LoginAttemptTx};
 pub use machine_info::MachineInfo;
 pub use monotonic_clock::MonotonicClock;
+pub use network::NetworkAddresses;
 pub use op_journal::{
     CreatedObjects, DecisionOffer, JournalError, NewOp, OpJournal, OpRecord, Progress,
     RecordedContainers, RecordedService, RemoveOutcome, ServiceObserver, StepGuard,

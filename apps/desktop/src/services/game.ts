@@ -186,6 +186,50 @@ export function addressOf(
   return { text: `${shown}:${base.hostPort}`, public: given !== "", others: distinct.size > 1 };
 }
 
+export interface Addresses {
+  /** « {adresse}:{port} » pour les joueurs du réseau maison : l'adresse que l'agent lit sur la machine, sinon celle que ce client utilise. */
+  lan: string;
+  /** « {adresse}:{port} » pour les joueurs d'internet, ou `null` : ni renseignée, ni dite par la box. */
+  internet: { text: string; source: "entered" | "detected" } | null;
+  /** Le jeu utilise d'autres ports que celui-ci (BR-JEU-020). */
+  others: boolean;
+}
+
+function shownHost(clean: string): string {
+  return clean.includes(":") && !clean.startsWith("[") ? `[${clean}]` : clean;
+}
+
+/**
+ * Les deux adresses d'un serveur de jeu (HRT-223, BR-JEU-043) : celle du réseau maison, et celle d'internet. Pour
+ * internet, l'adresse renseignée par le propriétaire passe devant celle que la box a dite ; sans l'une ni l'autre,
+ * `internet` est `null` et la carte invite à la renseigner. Le port est celui de base du jeu (comme `addressOf`).
+ */
+export function addressesOf(
+  host: string,
+  ports: readonly GamePort[],
+  publicAddress: string | null = null,
+  lanAddress: string | null = null,
+  detectedAddress: string | null = null,
+): Addresses | null {
+  const rows = [...ports]
+    .filter((port) => protocolText(port.protocol) !== null)
+    .sort((a, b) => a.hostPort - b.hostPort);
+  const base = rows.find((port) => port.role === "game") ?? rows[0];
+  if (!base) return null;
+  const clean = (value: string | null) => (value === null ? "" : safeText(value).trim());
+  const lan = clean(lanAddress) === "" ? safeText(host) : clean(lanAddress);
+  const entered = clean(publicAddress);
+  const detected = clean(detectedAddress);
+  const source: "entered" | "detected" = entered !== "" ? "entered" : "detected";
+  const chosen = entered !== "" ? entered : detected;
+  const distinct = new Set(rows.map((port) => port.hostPort));
+  return {
+    lan: `${shownHost(lan)}:${base.hostPort}`,
+    internet: chosen === "" ? null : { text: `${shownHost(chosen)}:${base.hostPort}`, source },
+    others: distinct.size > 1,
+  };
+}
+
 /** La longueur maximale d'une adresse publique (BR-JEU-022) : celle d'un nom de domaine. */
 export const MAX_PUBLIC_ADDRESS_CHARS = 253;
 

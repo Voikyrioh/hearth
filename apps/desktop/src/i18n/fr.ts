@@ -1267,9 +1267,18 @@ export const fr = {
       toast: "Adresse copiée.",
       copyFailed: "Impossible de copier. Sélectionnez le texte et copiez-le à la main.",
       others: "Ce jeu utilise d'autres ports : ils sont listés dans la carte « Ports à ouvrir ».",
+      lanTitle: "En réseau maison",
+      lanLabel: "Adresse pour les joueurs du réseau maison",
+      lanHelp: "Pour les joueurs qui sont chez vous, sur le même réseau que le serveur.",
+      internetTitle: "Depuis internet",
+      internetLabel: "Adresse pour les joueurs d'internet",
+      internetHelp:
+        "Pour vos amis : ouvrez ce port sur votre box (redirection de port) vers le serveur. Hearth ne peut pas vérifier qu'il est ouvert.",
+      detectedNote:
+        "Votre box a indiqué cette adresse. Elle peut changer : renseignez un nom de domaine pour la fixer.",
       localOnly:
-        "Cette adresse ne marche que depuis votre réseau. Renseignez l'adresse publique de votre serveur pour afficher celle de vos joueurs.",
-      publicNote: "C'est l'adresse que vous avez renseignée pour vos joueurs.",
+        "Hearth ne connaît pas votre adresse d'internet : votre box ne l'a pas donnée. Renseignez-la avec « Modifier l'adresse » : un nom de domaine, ou l'adresse IP de votre box.",
+      publicNote: "C'est l'adresse que vous avez renseignée pour vos amis.",
       edit: "Modifier l'adresse",
       editTitle: "Adresse pour vos joueurs",
       editSubmit: "Enregistrer l'adresse",
@@ -2527,7 +2536,7 @@ export const fr = {
     refusedVersionMismatch:
       "La version de Minecraft choisie n'est pas celle de ce pack. Corrigez-la avec celle de la page du pack, ou laissez « LATEST » : Hearth prendra celle que le pack annonce.",
     refusedLoaderMismatch:
-      "Le type de serveur choisi n'est pas celui de ce pack (Fabric, Forge, Quilt ou NeoForge). Choisissez le type que la page du pack annonce.",
+      "Le type de serveur choisi n'est pas celui que ce pack demande. Choisissez le type que la page du pack annonce.",
     refusedHost:
       "Ce pack demande de télécharger depuis {host}, qui n'est pas permis par le format des packs Modrinth.",
     refusedHostUnknown:

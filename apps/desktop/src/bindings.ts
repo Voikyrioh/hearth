@@ -1699,6 +1699,10 @@ export type GameViewDto = {
 	hasPassword: boolean,
 	/**  L'adresse que le propriétaire donne à ses joueurs (HRT-215, BR-JEU-022) ; `None` : pas renseignée. */
 	publicAddress: string | null,
+	/**  L'adresse de la machine sur le réseau maison (HRT-223) ; `None` : l'agent ne la connaît pas. */
+	lanAddress: string | null,
+	/**  L'adresse d'internet que la box a dite à l'agent (UPnP, HRT-223) ; `None` : la box n'a pas répondu. */
+	detectedAddress: string | null,
 };
 
 export type GapReasonDto = "slow" | "rotated" | "resume_lost" | "first_page" | "unknown";

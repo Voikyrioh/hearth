@@ -286,6 +286,8 @@ pub struct CatalogParts {
     /// La zone d'attente des packs de mods déposés (HRT-124). `None` : aucune, une installation qui porte un pack
     /// est refusée. Les tests y posent la leur.
     pub pack_deposits: Option<Arc<dyn PackDeposits>>,
+    /// Les adresses de la machine pour les joueurs (HRT-223). `None` : aucune n'est cherchée (les essais).
+    pub network: Option<Arc<dyn crate::application::ports::NetworkAddresses>>,
 }
 
 impl CatalogParts {
@@ -298,6 +300,9 @@ impl CatalogParts {
             phases: None,
             world_fs: None,
             pack_deposits: None,
+            network: Some(Arc::new(
+                crate::infrastructure::network::SystemNetwork::new(),
+            )),
         }
     }
 }
@@ -1057,6 +1062,9 @@ pub async fn start_engined(
         services.audit_sink.clone(),
         adapters.clock.clone(),
     );
+    if let Some(network) = engine.catalog.network.clone() {
+        game_settings.set_network(network);
+    }
     // L'arrêt des serveurs de jeu (HRT-103) : la suite d'étapes de la fiche, déroulée par le cas d'usage de pilotage.
     service_lifecycle.set_game_stop(GameStop::new(
         foundations.specs.clone(),

@@ -33,6 +33,10 @@ pub struct GameViewDto {
     pub has_password: bool,
     /// L'adresse que le propriétaire donne à ses joueurs (HRT-215, BR-JEU-022) ; `None` : pas renseignée.
     pub public_address: Option<String>,
+    /// L'adresse de la machine sur le réseau maison (HRT-223) ; `None` : l'agent ne la connaît pas.
+    pub lan_address: Option<String>,
+    /// L'adresse d'internet que la box a dite à l'agent (UPnP, HRT-223) ; `None` : la box n'a pas répondu.
+    pub detected_address: Option<String>,
 }
 
 impl From<&GameView> for GameViewDto {
@@ -45,6 +49,8 @@ impl From<&GameView> for GameViewDto {
             ports,
             has_password,
             public_address,
+            lan_address,
+            detected_address,
         } = view;
         Self {
             fiche: fiche.clone(),
@@ -70,6 +76,8 @@ impl From<&GameView> for GameViewDto {
                 .collect(),
             has_password: *has_password,
             public_address: public_address.clone(),
+            lan_address: lan_address.clone(),
+            detected_address: detected_address.clone(),
         }
     }
 }
@@ -138,6 +146,8 @@ mod tests {
             }],
             has_password: true,
             public_address: Some("jeu.example.org".into()),
+            lan_address: Some("192.168.1.20".into()),
+            detected_address: None,
         };
         let json = serde_json::to_value(GameViewDto::from(&view)).expect("json");
         assert_eq!(json["ficheVersion"], 1);

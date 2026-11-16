@@ -48,6 +48,14 @@ pub struct GameView {
     /// tant qu'il n'en a pas renseigné (`BR-JEU-022`). Un changement passe par `PUT /services/{key}/spec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_address: Option<String>,
+    /// L'adresse de la machine sur le réseau maison (HRT-223) : pour les joueurs chez vous. Absente si l'agent ne la
+    /// connaît pas ; ce n'est jamais une adresse publique.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lan_address: Option<String>,
+    /// L'adresse d'internet que la box du foyer a dite à l'agent (UPnP, HRT-223), sans service tiers : absente si la
+    /// box ne répond pas. L'adresse renseignée par le propriétaire (`public_address`) passe devant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detected_address: Option<String>,
 }
 
 #[cfg(test)]
@@ -74,6 +82,8 @@ mod tests {
             }],
             has_password: true,
             public_address: Some("jeu.example.org".into()),
+            lan_address: Some("192.168.1.20".into()),
+            detected_address: Some("203.0.113.9".into()),
         };
         let json = serde_json::to_value(&view).expect("json");
         assert_eq!(json["stop"]["world_saved"], "by_sequence");
