@@ -16,16 +16,24 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
     const titles = wrapper
       .findAll("[data-fiche-sheet] h2")
       .map((item) => item.text().toLowerCase());
+    // Ce qu'il faut d'abord, puis les réglages, puis le détail technique (HRT-221).
     expect(titles).toEqual([
-      "image",
-      "ports",
-      "dossiers",
       "ressources",
+      "ports",
       "téléchargements",
       "arrêt du jeu",
       "questions",
       "ce que cette fiche impose",
+      "image",
+      "dossiers",
     ]);
+    const tech = wrapper.get("[data-fiche-tech]");
+    expect(tech.element.hasAttribute("open")).toBe(false);
+    expect(tech.get("summary").text()).toBe("Détails techniques");
+    expect(tech.find("[data-fiche-image]").exists()).toBe(true);
+    expect(tech.find("[data-fiche-folders]").exists()).toBe(true);
+    expect(tech.find("[data-fiche-digest]").exists()).toBe(true);
+    expect(wrapper.get("[data-fiche-needs]").find("[data-fiche-image]").exists()).toBe(false);
     expect(wrapper.text()).not.toMatch(/compte exig|nom d'utilisateur/i);
     expect(wrapper.get(".nav__item.router-link-active").text()).toBe("Catalogue");
     wrapper.unmount();
@@ -226,6 +234,19 @@ describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
 });
 
 describe("« Installer » (BR-FICHE-012, 033, 039)", () => {
+  it("nomme les deux boutons et dit en une phrase ce que chacun fait", async () => {
+    const { wrapper } = await bootCatalogue(undefined, fiche("terraria"));
+    expect(wrapper.get("[data-fiche-install]").text()).toBe("Installer…");
+    expect(wrapper.get("[data-fiche-install-help]").text()).toBe(
+      "Le formulaire des réglages s'affiche : vous choisissez, puis vous vérifiez avant de lancer.",
+    );
+    expect(wrapper.get("[data-fiche-install-proposed]").text()).toBe("Installation rapide");
+    expect(wrapper.get("[data-fiche-install-proposed-help]").text()).toBe(
+      "L'installation se fait avec les valeurs recommandées, sans remplir le formulaire. Vous vérifiez le récapitulatif avant de lancer.",
+    );
+    wrapper.unmount();
+  });
+
   it("ouvre l'installation, ou l'installation avec les valeurs proposées", async () => {
     const { wrapper, router } = await bootCatalogue(undefined, fiche("terraria"));
     await wrapper.get("[data-fiche-install]").trigger("click");

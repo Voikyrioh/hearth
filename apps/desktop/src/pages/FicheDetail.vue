@@ -32,6 +32,7 @@ import { useServicesStore } from "@/stores/services";
 // (moteur inutilisable : absent). « Installer avec les valeurs proposées » ouvre directement « Vérifiez avant de
 // lancer ». Une machine trop petite pour un minimum MESURÉ désactive les deux sans case pour passer outre. Le contrat
 // et la source d'un chiffre de l'éditeur s'ouvrent dans le navigateur de l'utilisateur, jamais dans Hearth.
+// FIX:01M7GV3QBKS9TJNSSAP2XBR4FX : pleine largeur, trois groupes, détail technique replié, deux boutons expliqués (HRT-221).
 const route = useRoute();
 const router = useRouter();
 const { server, isConnected } = useCurrentServer();
@@ -145,6 +146,7 @@ const delivered = computed(() =>
           <p class="fiche__delivered" data-fiche-delivered>{{ delivered }}</p>
         </div>
         <div v-if="showButtons" class="fiche__actions">
+          <div class="fiche__action">
           <HButton
             size="md"
             data-fiche-install
@@ -156,6 +158,9 @@ const delivered = computed(() =>
           >
             {{ t("fiche.install") }}
           </HButton>
+          <p class="fiche__action-help" data-fiche-install-help>{{ t("fiche.installHelp") }}</p>
+          </div>
+          <div class="fiche__action">
           <HButton
             variant="secondary"
             size="md"
@@ -168,6 +173,8 @@ const delivered = computed(() =>
           >
             {{ t("fiche.installProposed") }}
           </HButton>
+          <p class="fiche__action-help" data-fiche-install-proposed-help>{{ t("fiche.installProposedHelp") }}</p>
+          </div>
         </div>
       </header>
 
@@ -191,12 +198,14 @@ const delivered = computed(() =>
         @source="links.open('evidence', $event)"
         @agreement="links.open('agreement', $event)"
         @imposed="imposedOpen = true"
-      />
-
-      <p class="fiche__digest" data-fiche-digest>
-        {{ t("fiche.digest") }} :
-        <span class="fiche__mono">{{ detail.digest }}</span>
-      </p>
+      >
+        <template #technical>
+          <p class="fiche__digest" data-fiche-digest>
+            {{ t("fiche.digest") }} :
+            <span class="fiche__mono">{{ detail.digest }}</span>
+          </p>
+        </template>
+      </FicheSheet>
 
       <ImposedDialog :open="imposedOpen" :settings="detail.imposed" @close="imposedOpen = false" />
     </template>
@@ -209,7 +218,6 @@ const delivered = computed(() =>
   flex-direction: column;
   gap: var(--card-gap);
   width: 100%;
-  max-width: var(--column-max);
   min-width: 0;
 }
 
@@ -257,7 +265,21 @@ const delivered = computed(() =>
 .fiche__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--space-5);
+}
+
+.fiche__action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  max-width: var(--sheet-col-min);
+}
+
+.fiche__action-help {
+  margin: 0;
+  color: var(--tx-secondary);
+  font-size: var(--fs-small);
 }
 
 .fiche__reason {

@@ -2131,8 +2131,15 @@ export const fr = {
     trust:
       "Cette fiche a été écrite par la personne qui publie Hearth. Elle fait tourner une image publique sur votre serveur, avec les droits d'un service ordinaire.",
     digest: "Empreinte de la fiche",
-    install: "Installer",
-    installProposed: "Installer avec les valeurs proposées",
+    install: "Installer…",
+    installHelp:
+      "Le formulaire des réglages s'affiche : vous choisissez, puis vous vérifiez avant de lancer.",
+    installProposed: "Installation rapide",
+    installProposedHelp:
+      "L'installation se fait avec les valeurs recommandées, sans remplir le formulaire. Vous vérifiez le récapitulatif avant de lancer.",
+    sectionNeeds: "Ce qu'il faut pour ce jeu",
+    sectionSettings: "Les réglages du jeu",
+    technicalDetails: "Détails techniques",
     // Les cartes de la fiche
     cardImage: "Image",
     cardPorts: "Ports",
