@@ -1,0 +1,12 @@
+# Registre des identifiants de réglage de la fiche `enshrouded` (HRT-226, conception technique 12.4).
+# Un identifiant publié ne disparaît pas par oubli : retiré de la fiche, il passe en [[retired]] avec sa raison,
+# et son état ici devient `retired` (avec `retired_in`). `cargo xtask catalog-check` le vérifie.
+
+ids = [
+  { id = "server_name", key = "SERVER_NAME", channel = "env", state = "active", since = 1 },
+  { id = "password", key = "SERVER_ROLE_0_PASSWORD", channel = "env", state = "active", since = 1 },
+  { id = "slot_count", key = "SERVER_SLOT_COUNT", channel = "env", state = "active", since = 1 },
+  { id = "enable_voice_chat", key = "SERVER_ENABLE_VOICE_CHAT", channel = "env", state = "active", since = 1 },
+  { id = "enable_text_chat", key = "SERVER_ENABLE_TEXT_CHAT", channel = "env", state = "active", since = 1 },
+  { id = "query_port", key = "SERVER_QUERYPORT", channel = "env", state = "active", since = 1 },
+]

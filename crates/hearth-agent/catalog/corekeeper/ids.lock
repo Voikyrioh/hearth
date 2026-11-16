@@ -1,0 +1,13 @@
+# Registre des identifiants de réglage de la fiche `corekeeper` (HRT-226, conception technique 12.4).
+# Un identifiant publié ne disparaît pas par oubli : retiré de la fiche, il passe en [[retired]] avec sa raison,
+# et son état ici devient `retired` (avec `retired_in`). `cargo xtask catalog-check` le vérifie.
+
+ids = [
+  { id = "world_name", key = "WORLD_NAME", channel = "env", state = "active", since = 1 },
+  { id = "world_seed", key = "WORLD_SEED", channel = "env", state = "active", since = 1 },
+  { id = "world_mode", key = "WORLD_MODE", channel = "env", state = "active", since = 1 },
+  { id = "season", key = "SEASON", channel = "env", state = "active", since = 1 },
+  { id = "password", key = "PASSWORD", channel = "env", state = "active", since = 1 },
+  { id = "max_players", key = "MAX_PLAYERS", channel = "env", state = "active", since = 1 },
+  { id = "server_port", key = "SERVER_PORT", channel = "env", state = "active", since = 1 },
+]

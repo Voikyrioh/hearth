@@ -1,0 +1,13 @@
+# Registre des identifiants de réglage de la fiche `satisfactory` (HRT-226, conception technique 12.4).
+# Un identifiant publié ne disparaît pas par oubli : retiré de la fiche, il passe en [[retired]] avec sa raison,
+# et son état ici devient `retired` (avec `retired_in`). `cargo xtask catalog-check` le vérifie.
+
+ids = [
+  { id = "max_players", key = "MAXPLAYERS", channel = "env", state = "active", since = 1 },
+  { id = "autosave_num", key = "AUTOSAVENUM", channel = "env", state = "active", since = 1 },
+  { id = "disable_seasonal_events", key = "DISABLESEASONALEVENTS", channel = "env", state = "active", since = 1 },
+  { id = "max_tick_rate", key = "MAXTICKRATE", channel = "env", state = "active", since = 1 },
+  { id = "timeout", key = "TIMEOUT", channel = "env", state = "active", since = 1 },
+  { id = "game_port", key = "SERVERGAMEPORT", channel = "env", state = "active", since = 1 },
+  { id = "messaging_port", key = "SERVERMESSAGINGPORT", channel = "env", state = "active", since = 1 },
+]

@@ -1,0 +1,142 @@
+# Satisfactory, serveur officiel sans mod. Fiche en `preview` (HRT-234, ADR-0050 version 2, ADR-0053).
+#
+# Construite depuis le README de l'image `wolveix/satisfactory-server` (https://github.com/wolveix/satisfactory-server). Rien n'a été
+# ajouté de mémoire. RESTE `preview` : le banc d'essai réel n'a pas tourné (mémoire recommandée de 8 à 16 Gio sur une machine d'essai de
+# 8 Gio). Un essai manuel a montré que le serveur démarre, mais qu'il sort en code 130 à l'arrêt (voir plus bas) et qu'il n'a pas de monde
+# avant qu'un client n'en crée un. Le nom du serveur, son mot de
+# passe et le mot de passe d'administration se règlent dans le jeu (le client de Satisfactory), pas par l'image.
+
+format = 2
+id = "satisfactory"
+version = 1
+family = "satisfactory"
+name = "Satisfactory"
+summary = "Le serveur officiel de Satisfactory, sans mod."
+status = "preview"
+platform = "linux"
+
+[image]
+repository = "wolveix/satisfactory-server"
+tag = "v1.9.11"
+digest = "sha256:ac252dba41653eb21c6feed94b577f98fa152f5792b1aeff2ce11fe364355137"
+game_updates = "every_start"              # SKIPUPDATE vaut `false` par défaut : l'image met le jeu à jour à chaque démarrage
+
+# PUID et PGID : l'image tourne en root et lance le jeu sous 1000:1000.
+[owner]
+uid = 1000
+gid = 1000
+
+# `/config` : `gamefiles` (le serveur téléchargé, 8 Go et plus), `saved` (le monde), `backups`, `logs`.
+[[folder]]
+id = "config"
+role = "world"
+target = "/config"
+read_only = false
+backup = true
+
+[[port]]
+id = "game"
+container = 7777
+protocol = "udp"
+role = "game"
+publish = "always"
+default_host = 7777
+group = "base"
+mapping = "same_number"
+game_setting = "game_port"
+
+[[port]]
+id = "game_tcp"
+container = 7777
+protocol = "tcp"
+role = "game"
+publish = "always"
+default_host = 7777
+group = "base"
+mapping = "same_number"
+game_setting = "game_port"
+
+[[port]]
+id = "messaging"
+container = 8888
+protocol = "tcp"
+role = "other"
+publish = "always"
+default_host = 8888
+group = "base"
+mapping = "same_number"
+game_setting = "messaging_port"
+
+[[channel]]
+id = "env"
+kind = "env"
+
+[[env]]
+name = "PUID"
+owner = "uid"
+
+[[env]]
+name = "PGID"
+owner = "gid"
+
+[first_start]
+ready_timeout_s = 3600
+world_generation = false
+
+[[first_start.download]]
+what = "Le serveur du jeu"
+source_label = "Steam"
+evidence = "unmeasured"
+
+[ready]
+log_contains = "Server API listening on"  # vu en essai manuel (16/11/2026, docker run simple) : 20 s après le lancement, sans monde ; pas essayé par le banc
+status = "untested"
+
+# Essai manuel (16/11/2026, docker run simple, sans monde, 6 Gio) : le jeu sort sur le signal en 0,6 s avec le code 130 (SIGINT reçu), pas 0 ;
+# aucun monde n'existe tant qu'un client n'en a pas créé un, l'enregistrement à l'arrêt n'a donc pas pu être jugé. Le premier démarrage
+# échoue une fois (« Failed to install app 1690800 (Missing configuration) » de SteamCMD) et réussit au second : `unless-stopped` le rejoue.
+[stop]
+grace_s = 60
+signal = "SIGTERM"
+world_saved = "by_image_on_signal"
+
+# Chiffres de l'éditeur de l'image (README) : « may run on less than 8GB of RAM, though 8GB - 16GB is still recommended », « 8GB+ » de téléchargement.
+[resources]
+cpu = { evidence = "unmeasured" }
+memory = { min_bytes = 8589934592, recommended_bytes = 17179869184, evidence = { publisher = "https://github.com/wolveix/satisfactory-server" } }
+disk = { install_bytes = 8589934592, evidence = { publisher = "https://github.com/wolveix/satisfactory-server" } }
+
+[[not_exposed]]
+key = "STEAMBETA"
+channel = "env"
+why = "Version expérimentale du jeu : Hearth n'installe que la version publique."
+
+[[not_exposed]]
+key = "SKIPUPDATE"
+channel = "env"
+why = "Le défaut de l'image (mise à jour à chaque démarrage) est celui que la fiche déclare."
+
+[[not_exposed]]
+key = "MULTIHOME"
+channel = "env"
+why = "Interface d'écoute dans le conteneur : la changer coupe les ports publiés."
+
+[[not_exposed]]
+key = "VMOVERRIDE"
+channel = "env"
+why = "Contourne le contrôle du processeur de l'image : Hearth ne le propose pas."
+
+[[not_exposed]]
+key = "MAXOBJECTS"
+channel = "env"
+why = "Limite d'objets du jeu : réglage de spécialiste, laissé au défaut de l'image (2162688)."
+
+[[not_exposed]]
+key = "SERVERSTREAMING"
+channel = "env"
+why = "Diffusion des ressources du jeu : laissée au défaut de l'image."
+
+[[not_exposed]]
+key = "CRASHREPORT"
+channel = "env"
+why = "Envoi de rapports de plantage à l'éditeur : laissé au défaut de l'image."

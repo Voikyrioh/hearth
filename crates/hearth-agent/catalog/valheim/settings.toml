@@ -1,0 +1,75 @@
+# Réglages de Valheim (HRT-226) : tous reçus par variable d'environnement de l'image `lloesche/valheim-server` (canal `env`). Les noms
+# et les défauts viennent du fichier `defaults` de l'image épinglée. Un changement recrée le service (BR-FICHE-042).
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "network"
+label = "Réseau"
+order = 2
+
+[[setting]]
+id = "server_name"
+key = "SERVER_NAME"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Nom du serveur"
+help = "Le nom que vos joueurs voient dans la liste des serveurs."
+type = "text"
+charset = "line"
+max_len = 60
+game_default = "My Server"
+proposed = "Mon serveur Valheim"
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "world_name"
+key = "WORLD_NAME"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Nom du monde"
+help = "Le nom du monde. Il nomme aussi ses fichiers : le changer ouvre un autre monde."
+type = "text"
+charset = "file_stem"
+max_len = 40
+game_default = "Dedicated"
+proposed = "Monde"
+change = "world_creation"
+source = "verified"
+
+[[setting]]
+id = "server_pass"
+key = "SERVER_PASS"
+channel = "env"
+theme = "game"
+level = "essential"
+label = "Mot de passe du serveur"
+help = "Ce que vos joueurs tapent pour entrer. Le serveur refuse de démarrer avec un mot de passe trop court. Hearth ne l'affiche pas, mais le jeu la reçoit dans sa ligne de commande : elle se lit dans les processus du serveur."
+type = "secret"
+secret_kind = "game_password"
+min_len = 5
+max_len = 100
+change = "anytime"
+source = "verified"
+
+[[setting]]
+id = "server_public"
+key = "SERVER_PUBLIC"
+channel = "env"
+theme = "network"
+level = "common"
+label = "Serveur dans la liste publique"
+help = "Montre le serveur dans la liste des serveurs de Valheim. Sinon, on s'y connecte seulement avec l'adresse."
+type = "bool"
+on = "true"
+off = "false"
+game_default = "true"
+proposed = "false"
+change = "anytime"
+source = "verified"

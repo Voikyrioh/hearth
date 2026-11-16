@@ -1,0 +1,187 @@
+# Project Zomboid (Build 42), serveur officiel sans mod. Fiche en `preview` (HRT-231, ADR-0050 version 2, ADR-0053) : essayée sur sa vraie
+# image par `tests/fiche_live_game.rs` en local (Docker Desktop, 16/11/2026), voir `evidence.toml` et `golden.toml`.
+#
+# Construite depuis le README et le script `entry.sh` de l'image `danixu86/project-zomboid-dedicated-server` (lu DANS l'image épinglée) et
+# depuis le `servertest.ini` écrit par le jeu au premier démarrage (relevé du 16/11/2026, `golden.toml`). L'image `renegademaster/...`,
+# plus répandue, n'est plus construite depuis 2024-06 : elle n'est pas retenue. Le jeu est DANS l'image (2,5 Go) : pas de téléchargement
+# RESTE `preview` : l'image écrit `ADMINPASSWORD` en clair dans ses journaux (README de l'image) et les journaux d'un service sont lisibles par
+# tout compte qui le voit (BR-SLOG-018) : même blocage que Core Keeper (HRT-230). Aucune option documentée de l'image ne coupe cet affichage ;
+# seul retirer la variable après le premier démarrage l'évite, ce que Hearth ne fait pas.
+# au premier démarrage. Les mods (`MOD_IDS`, `WORKSHOP_IDS`), la carte, le mode coopératif et les ports du mode sans Steam sont hors fiche.
+
+format = 2
+id = "zomboid"
+version = 1
+family = "zomboid"
+name = "Project Zomboid"
+summary = "Le serveur officiel de Project Zomboid (Build 42), sans mod."
+status = "preview"
+platform = "linux"
+
+[image]
+repository = "danixu86/project-zomboid-dedicated-server"
+tag = "42.20.4-release-2"
+digest = "sha256:f86d62f0455a67950a96042580d12d1bdb3acbd8ca2b027ed6794619dbd73833"
+game_updates = "never"                    # le jeu est celui de l'image ; FORCEUPDATE n'est pas posé
+
+# L'image tourne en root puis passe à l'utilisateur `steam` (1000:1000, lu dans l'image) avec `runuser` : aucune variable PUID.
+[owner]
+uid = 1000
+gid = 1000
+
+# `Saves/Multiplayer/<serveur>` (le monde), `Server/<serveur>.ini` (les réglages), `db/` (comptes des joueurs), `Logs/`.
+[[folder]]
+id = "data"
+role = "world"
+target = "/home/steam/Zomboid"
+read_only = false
+backup = true
+
+# Les deux ports du jeu, chacun annoncé sous son numéro (réglage de même nom). Les ports de Steam 8766 et 8767 ne sont pas publiés : le
+# banc d'essai réel n'y a vu aucun socket en écoute (16/11/2026), dans le conteneur sans client Steam.
+[[port]]
+id = "game"
+container = 16261
+protocol = "udp"
+role = "game"
+publish = "always"
+default_host = 16261
+group = "base"
+mapping = "same_number"
+game_setting = "game_port"
+
+[[port]]
+id = "direct"
+container = 16262
+protocol = "udp"
+role = "game"
+publish = "always"
+default_host = 16262
+group = "base"
+mapping = "same_number"
+game_setting = "direct_port"
+
+# La console distante (RCON), jamais publiée ; son mot de passe est tiré à l'installation.
+[[port]]
+id = "rcon"
+container = 27015
+protocol = "tcp"
+role = "remote_console"
+publish = "never"
+mapping = "nat"
+
+[[channel]]
+id = "env"
+kind = "env"
+
+[[channel]]
+id = "ini"
+kind = "file"
+format = "kv_lines"
+folder = "data"
+path = "Server/servertest.ini"
+mode = "0644"
+written_by_game = "unverified"
+raw_edit = true
+
+[channel.kv]
+separator = "="
+comment = "#"
+quote = "none"
+
+# Le nom du serveur fixe le dossier de la sauvegarde et celui du fichier de réglages : la fiche le garde à son défaut.
+[[env]]
+name = "SERVERNAME"
+value = "servertest"
+
+[[env]]
+name = "RCONPASSWORD"
+secret = "rcon"
+
+[[secret]]
+id = "rcon"
+origin = "generated"
+length = 32
+alphabet = "alnum"
+
+[remote_console]
+protocol = "source_rcon"
+port = "rcon"
+password = "rcon"
+
+[first_start]
+ready_timeout_s = 1800
+world_generation = true
+
+[ready]
+log_contains = "SERVER STARTED"           # vu sur la vraie image par le banc (16/11/2026) : ligne « *** SERVER STARTED **** » 74 à 77 s après le lancement
+status = "tested"
+
+# L'image intercepte le signal d'arrêt et attend la fin du serveur (« Server stopped cleanly with exit code 0 »). Vérifié par le banc
+# (16/11/2026) : code 0 en 23 à 71 s, monde réécrit, service qui reste arrêté, redémarrage sur le même monde.
+[stop]
+grace_s = 180
+signal = "SIGTERM"
+world_saved = "by_image_on_signal"
+
+[resources]
+cpu = { evidence = "unmeasured" }
+# Banc d'essai réel, 16/11/2026, sans joueur, avec MEMORY=2048m : les LIMITES essayées. 4 Gio : 2,89 Gio au repos (compteur du moteur),
+# pic 3,65 Go (cgroupe, cache compris). 6 Gio : 2,83 Gio, pic 3,50 Go. Aucun plancher plus bas n'a été essayé : il n'est pas affirmé.
+memory = { min_bytes = 4294967296, recommended_bytes = 6442450944, evidence = "measured" }
+disk = { install_bytes = 2507934102, evidence = "measured_idle" }   # image (2 504 883 027 octets, le jeu est dedans) + dossiers gérés après un premier démarrage
+
+[[not_exposed]]
+key = "Map"
+channel = "ini"
+why = "La carte et les mods vont ensemble : hors de cette fiche (Muldraugh, KY seule)."
+
+[[not_exposed]]
+key = "Mods"
+channel = "ini"
+why = "Les mods sont hors de cette fiche (l'image les écrit d'après MOD_IDS, vide ici)."
+
+[[not_exposed]]
+key = "WorkshopItems"
+channel = "ini"
+why = "Les mods sont hors de cette fiche."
+
+[[not_exposed]]
+key = "RCONPort"
+channel = "ini"
+why = "La console distante n'est jamais publiée ; son port reste celui de l'image."
+
+[[not_exposed]]
+key = "ResetID"
+channel = "ini"
+why = "Numéro de remise à zéro tiré par le jeu : ne se règle pas à la main."
+
+[[not_exposed]]
+key = "NOSTEAM"
+channel = "env"
+why = "Le mode sans Steam demande une plage de ports TCP de la taille des places : hors de cette fiche."
+
+[[not_exposed]]
+key = "COOP"
+channel = "env"
+why = "Le mode coopératif n'est pas un serveur dédié."
+
+[[not_exposed]]
+key = "FORCEUPDATE"
+channel = "env"
+why = "Hearth ne met pas le jeu à jour à chaque démarrage : la version est celle de l'image."
+
+[[not_exposed]]
+key = "SOFTRESET"
+channel = "env"
+why = "Le README de l'image dit que cette fonction plante le serveur."
+
+[[not_exposed]]
+key = "STEAMPORT1"
+channel = "env"
+why = "Premier port de Steam (8766) : aucun socket en écoute dans l'essai réel, le port n'est pas publié."
+
+[[not_exposed]]
+key = "STEAMPORT2"
+channel = "env"
+why = "Second port de Steam (8767) : aucun socket en écoute dans l'essai réel, le port n'est pas publié."

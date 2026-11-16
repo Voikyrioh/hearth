@@ -1,0 +1,14 @@
+# Relevé de référence de l'image (ADR-0053, HRT-226). Engendré par `docker image inspect` sur l'image épinglée, jamais écrit à la main.
+# Le fichier de réglages par défaut du jeu n'est pas dans l'image (le jeu l'écrit au premier démarrage) : voir evidence.toml.
+image = "trueosiris/vrising@sha256:9356f98ad56139cccf4cfc7a62331d02e4216e8156d990792f5050252405bc7d"
+id = "sha256:9356f98ad56139cccf4cfc7a62331d02e4216e8156d990792f5050252405bc7d"
+created = "2026-04-23T10:38:52.20093629Z"
+architecture = "amd64"
+user = ""
+workdir = ""
+entrypoint = []
+cmd = ["/start.sh"]
+exposed_ports = []
+volumes = ["/mnt/vrising/persistentdata","/mnt/vrising/server",]
+stop_signal = ""
+env = ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"]
