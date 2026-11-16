@@ -2840,6 +2840,8 @@ export const fr = {
     progressLabel: "Progression de l'envoi de {name}",
     announceDone: "{name} est arrivé sur le serveur.",
     announceInterrupted: "L'envoi de {name} est interrompu.",
+    announceNoSpace:
+      "{name} n'a pas pu être envoyé : le serveur manque de place. Libérez de la place, puis réessayez.",
     units: { byte: "o", kib: "Kio", mib: "Mio", gib: "Gio" },
     status: {
       sending: "Envoi en cours.",
@@ -2873,6 +2875,8 @@ export const fr = {
         "Le lien est tombé avant la réponse du serveur : l'envoi n'est peut-être pas ouvert. Regardez la liste des transferts avant de recommencer.",
     },
     actions: {
+      retry: "Réessayer",
+      retryLabel: "Réessayer l'envoi de {name}",
       resume: "Reprendre l'envoi",
       resumeLabel: "Reprendre l'envoi de {name}",
       cancel: "Annuler",
