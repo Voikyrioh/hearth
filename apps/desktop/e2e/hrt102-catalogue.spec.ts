@@ -121,7 +121,7 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   expect(received).toMatchObject({
     name: "terraria",
     fiche: "terraria",
-    version: 4,
+    version: 5,
     ports: [{ id: "game", hostPort: 7777 }],
   });
 });
