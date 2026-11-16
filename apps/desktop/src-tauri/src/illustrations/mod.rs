@@ -124,7 +124,17 @@ impl Illustrations {
             return Reply::image(bytes.clone());
         }
         let validator = cached.as_ref().and_then(|c| c.meta.etag.clone());
-        match self.steam.fetch(app_id, validator.as_deref()).await {
+        let since = cached.as_ref().and_then(|c| c.meta.last_modified.clone());
+        let result = self
+            .steam
+            .fetch(app_id, validator.as_deref(), since.as_deref())
+            .await;
+        // FIX:01M7KAB5SMMQ1BB0EW8QBR4SA4
+        // Le réglage a pu être coupé PENDANT la lecture : rien n'est écrit ni rafraîchi, rien n'est servi (BR-FICHE-062).
+        if !(self.enabled)() {
+            return Reply::status(404);
+        }
+        match result {
             Ok(Fetched::NotModified) => match cached {
                 Some(Cached { bytes, meta }) => {
                     self.cache.refresh_steam(app_id, &meta, now);
@@ -300,6 +310,33 @@ mod tests {
             0,
             "Steam n'est jamais contacté quand le réglage est coupé"
         );
+    }
+
+    #[tokio::test]
+    async fn a_setting_cut_during_the_fetch_writes_nothing_and_serves_nothing() {
+        // Le réglage est lu deux fois : actif au début de la demande, coupé quand la réponse de Steam arrive.
+        let reply = Arc::new(Mutex::new(Canned {
+            status: 200,
+            headers: vec![("Content-Type".into(), "image/jpeg".into())],
+            body: jpeg(460, 215, 3000),
+        }));
+        let server = serve(reply).await;
+        let root = temp_root();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counter = reads.clone();
+        let ill = Illustrations::new(
+            Cache::new(root.clone()),
+            SteamClient::for_test(server.base.clone()),
+            Arc::new(move || counter.fetch_add(1, Ordering::SeqCst) == 0),
+            Arc::new(NoAgentImages),
+        );
+        let answer = ill.handle("GET", "/steam/105600/header").await;
+        assert_eq!(answer.status, 404);
+        assert!(
+            Cache::new(root.clone()).read_steam(105_600).is_none(),
+            "rien n'est gardé après la coupure du réglage"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[tokio::test]

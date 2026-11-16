@@ -10,7 +10,9 @@
 use std::time::Duration;
 
 use hearth_proto::jpeg::jpeg_dimensions;
-use reqwest::header::{CONTENT_TYPE, ETAG, IF_NONE_MATCH, LAST_MODIFIED, USER_AGENT};
+use reqwest::header::{
+    CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED, USER_AGENT,
+};
 use reqwest::{Client, StatusCode, redirect};
 use tokio::sync::Semaphore;
 
@@ -53,14 +55,15 @@ pub enum SteamError {
 }
 
 pub struct SteamClient {
-    http: Client,
+    /// `None` : aucun client sûr n'a pu être construit (toute lecture est « injoignable »).
+    http: Option<Client>,
     base: String,
     gate: Semaphore,
 }
 
 /// Le client HTTP : TLS 1.3 par le fournisseur `ring` (le reqwest du dépôt n'en embarque aucun), autorités du système
 /// pour l'hôte public de Steam, AUCUNE redirection suivie. `system_roots` faux (tests) : aucune autorité, jamais de TLS.
-fn build(https_only: bool, system_roots: bool) -> Client {
+fn build(https_only: bool, system_roots: bool) -> Option<Client> {
     let mut roots = rustls::RootCertStore::empty();
     if system_roots {
         let loaded = rustls_native_certs::load_native_certs();
@@ -75,15 +78,23 @@ fn build(https_only: bool, system_roots: bool) -> Client {
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
         .map(|builder| builder.with_root_certificates(roots).with_no_client_auth());
-    let builder = Client::builder()
+    // FIX:01M7KAB5SMMQ1BB0EW8QBR4SA4
+    // Jamais un client par défaut : il suivrait les redirections et ne porterait pas ce TLS. Sans configuration valable,
+    // il n'y a pas de client et toute lecture dit « injoignable ».
+    let Ok(config) = config else {
+        tracing::warn!("configuration TLS refusée : les images Steam ne se chargeront pas");
+        return None;
+    };
+    let built = Client::builder()
         .redirect(redirect::Policy::none())
         .https_only(https_only)
-        .timeout(TIMEOUT);
-    let builder = match config {
-        Ok(config) => builder.use_preconfigured_tls(config),
-        Err(_) => builder,
-    };
-    builder.build().unwrap_or_default()
+        .timeout(TIMEOUT)
+        .use_preconfigured_tls(config)
+        .build();
+    if built.is_err() {
+        tracing::warn!("client HTTP refusé : les images Steam ne se chargeront pas");
+    }
+    built.ok()
 }
 
 impl SteamClient {
@@ -119,16 +130,23 @@ impl SteamClient {
         &self,
         app_id: u32,
         if_none_match: Option<&str>,
+        if_modified_since: Option<&str>,
     ) -> Result<Fetched, SteamError> {
+        let Some(http) = &self.http else {
+            return Err(SteamError::Unreachable);
+        };
         let Ok(_permit) = self.gate.acquire().await else {
             return Err(SteamError::Unreachable);
         };
-        let mut request = self
-            .http
+        let mut request = http
             .get(self.header_url(app_id))
             .header(USER_AGENT, concat!("Hearth/", env!("CARGO_PKG_VERSION")));
         if let Some(etag) = if_none_match {
             request = request.header(IF_NONE_MATCH, etag);
+        }
+        // Une copie sans validateur d'entité se relit par sa date.
+        if let Some(date) = if_modified_since {
+            request = request.header(IF_MODIFIED_SINCE, date);
         }
         let mut response = request.send().await.map_err(|_| SteamError::Unreachable)?;
         match response.status() {
@@ -175,6 +193,11 @@ impl SteamClient {
 
 /// Signature JPEG et dimensions dans les bornes : ce que Hearth accepte de servir et de garder.
 pub fn check_image(bytes: &[u8]) -> Result<(), SteamError> {
+    // FIX:01M7KAB5SMMQ1BB0EW8QBR4SA4
+    // Un JPEG complet finit par son marqueur de fin : un fichier coupé n'est ni servi ni gardé.
+    if !bytes.ends_with(&[0xFF, 0xD9]) {
+        return Err(SteamError::BadImage);
+    }
     let Some((width, height)) = jpeg_dimensions(bytes) else {
         return Err(SteamError::BadImage);
     };
@@ -269,6 +292,10 @@ pub mod test_server {
         if out.len() < total {
             out.resize(total, 0);
         }
+        // Le marqueur de fin d'un JPEG complet, sans changer la taille demandée.
+        let end = out.len();
+        out[end - 2] = 0xFF;
+        out[end - 1] = 0xD9;
         out
     }
 }
@@ -299,7 +326,8 @@ mod tests {
     #[tokio::test]
     async fn reads_a_valid_header_with_its_validators_and_sends_the_hearth_user_agent() {
         let (steam, server) = client(ok(jpeg(460, 215, 2000))).await;
-        let Fetched::Image { bytes, etag, .. } = steam.fetch(105_600, None).await.unwrap() else {
+        let Fetched::Image { bytes, etag, .. } = steam.fetch(105_600, None, None).await.unwrap()
+        else {
             panic!("une image");
         };
         assert_eq!(bytes.len(), 2000);
@@ -325,7 +353,10 @@ mod tests {
             body: Vec::new(),
         };
         let (steam, server) = client(redirect).await;
-        assert_eq!(steam.fetch(1, None).await.unwrap_err(), SteamError::Refused);
+        assert_eq!(
+            steam.fetch(1, None, None).await.unwrap_err(),
+            SteamError::Refused
+        );
         assert_eq!(server.calls(), 1);
         assert_eq!(target.calls(), 0, "l'autre hôte n'est jamais contacté");
     }
@@ -334,11 +365,11 @@ mod tests {
     async fn a_body_over_512_kib_is_cut() {
         let (steam, _server) = client(ok(jpeg(460, 215, MAX_BODY + 1))).await;
         assert_eq!(
-            steam.fetch(1, None).await.unwrap_err(),
+            steam.fetch(1, None, None).await.unwrap_err(),
             SteamError::TooLarge
         );
         let (steam, _server) = client(ok(jpeg(460, 215, MAX_BODY))).await;
-        assert!(steam.fetch(1, None).await.is_ok());
+        assert!(steam.fetch(1, None, None).await.is_ok());
     }
 
     #[tokio::test]
@@ -349,7 +380,7 @@ mod tests {
             body: b"<html>".to_vec(),
         };
         assert_eq!(
-            client(html).await.0.fetch(1, None).await.unwrap_err(),
+            client(html).await.0.fetch(1, None, None).await.unwrap_err(),
             SteamError::WrongType
         );
         let png = Canned {
@@ -358,11 +389,15 @@ mod tests {
             body: b"\x89PNG\r\n\x1a\n....".to_vec(),
         };
         assert_eq!(
-            client(png).await.0.fetch(1, None).await.unwrap_err(),
+            client(png).await.0.fetch(1, None, None).await.unwrap_err(),
             SteamError::BadImage
         );
         for (w, h) in [(63, 215), (460, 63), (2049, 215), (460, 2049)] {
-            let wrong = client(ok(jpeg(w, h, 500))).await.0.fetch(1, None).await;
+            let wrong = client(ok(jpeg(w, h, 500)))
+                .await
+                .0
+                .fetch(1, None, None)
+                .await;
             assert_eq!(wrong.unwrap_err(), SteamError::BadImage, "{w}x{h}");
         }
         let missing = Canned {
@@ -371,7 +406,12 @@ mod tests {
             body: Vec::new(),
         };
         assert_eq!(
-            client(missing).await.0.fetch(1, None).await.unwrap_err(),
+            client(missing)
+                .await
+                .0
+                .fetch(1, None, None)
+                .await
+                .unwrap_err(),
             SteamError::Refused
         );
     }
@@ -385,7 +425,7 @@ mod tests {
         })
         .await;
         assert!(matches!(
-            steam.fetch(7, Some("\"abc\"")).await.unwrap(),
+            steam.fetch(7, Some("\"abc\""), None).await.unwrap(),
             Fetched::NotModified
         ));
         let head = server.requests.lock().unwrap()[0].to_ascii_lowercase();
@@ -396,8 +436,17 @@ mod tests {
     async fn an_unreachable_host_is_a_failure_not_a_panic() {
         let steam = SteamClient::for_test("http://127.0.0.1:1".to_owned());
         assert_eq!(
-            steam.fetch(1, None).await.unwrap_err(),
+            steam.fetch(1, None, None).await.unwrap_err(),
             SteamError::Unreachable
         );
+    }
+
+    #[test]
+    fn a_jpeg_without_its_end_marker_is_refused() {
+        let mut cut = jpeg(460, 215, 500);
+        let end = cut.len();
+        cut[end - 1] = 0;
+        assert_eq!(check_image(&cut), Err(SteamError::BadImage));
+        assert_eq!(check_image(&jpeg(460, 215, 500)), Ok(()));
     }
 }

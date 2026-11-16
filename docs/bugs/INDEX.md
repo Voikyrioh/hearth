@@ -8,6 +8,7 @@ Fiches d'anomalies découvertes et corrigées : marquage `// FIX:{ULID}` dans le
 | [FIX-01M7GQRC6QSEZH39F7M4DD04B4](./FIX-01M7GQRC6QSEZH39F7M4DD04B4.md) | Les barres de progression étaient en fuseau effilé au lieu d'une barre arrondie (HRT-220) | 2026-11-16 |
 | [FIX-01M7GV3QBKS9TJNSSAP2XBR4FX](./FIX-01M7GV3QBKS9TJNSSAP2XBR4FX.md) | La page de fiche du catalogue ne remplissait pas la largeur et ses deux boutons étaient incompréhensibles (HRT-221) | 2026-11-16 |
 | [FIX-01M7KAB43G8ZFZ2RN8YEQ0QC30](./FIX-01M7KAB43G8ZFZ2RN8YEQ0QC30.md) | Une recréation refusée laissait les anciens scellés perdus, le journal « réussi » et un enregistrement mixte écrit à moitié (HRT-266) | 2026-11-17 |
+| [FIX-01M7KAB5SMMQ1BB0EW8QBR4SA4](./FIX-01M7KAB5SMMQ1BB0EW8QBR4SA4.md) | Les images Steam : réglage coupé pendant la lecture, client sans TLS, écritures simultanées et JPEG coupé (HRT-239) | 2026-11-17 |
 | [FIX-01M7GSNNTE0GP22STY1VRJ56YG](./FIX-01M7GSNNTE0GP22STY1VRJ56YG.md) | Un pack Fabric 1.20.1 installé en LATEST faisait planter le conteneur en boucle (HRT-225) | 2026-11-16 |
 | [FIX-01M5PYVP4V48YGH36AYS43Q31V](./FIX-01M5PYVP4V48YGH36AYS43Q31V.md) | Le message d'un caractère refusé s'arrêtait sur deux points quand le caractère était une espace (HRT-102) | 2026-10-24 |
 | [FIX-01M5PYVP4WFPG3YMVV68T041R4](./FIX-01M5PYVP4WFPG3YMVV68T041R4.md) | Le récapitulatif « Vérifiez avant de lancer » s'ouvrait défilé tout en bas (HRT-69, HRT-102) | 2026-10-24 |

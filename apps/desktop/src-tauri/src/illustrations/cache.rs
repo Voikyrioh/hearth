@@ -174,7 +174,11 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .ok_or_else(|| std::io::Error::other("dossier"))?;
     fs::create_dir_all(dir)?;
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("x");
-    let temp = dir.join(format!(".{name}.tmp"));
+    // FIX:01M7KAB5SMMQ1BB0EW8QBR4SA4
+    // Un nom propre à CET appel : deux écritures simultanées du même fichier ne se marchent jamais dessus.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temp = dir.join(format!(".{name}.{}.{unique}.tmp", std::process::id()));
     {
         let mut file = fs::File::create(&temp)?;
         file.write_all(bytes)?;
@@ -310,5 +314,27 @@ mod tests {
         assert!(!root.join("steam").join("1-header.jpg").exists());
         assert!(root.join("steam").join("3-header.jpg").exists());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn two_simultaneous_writes_of_the_same_file_never_share_a_temporary_name() {
+        let (cache, root) = cache();
+        let bytes = jpeg(460, 215, 3000);
+        let meta = Meta {
+            etag: None,
+            last_modified: None,
+            fetched_s: 0,
+        };
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for _ in 0..20 {
+                        assert!(cache.write_steam(105_600, &bytes, &meta).is_ok());
+                    }
+                });
+            }
+        });
+        assert_eq!(cache.read_steam(105_600).map(|c| c.bytes), Some(bytes));
+        let _ = std::fs::remove_dir_all(root);
     }
 }
