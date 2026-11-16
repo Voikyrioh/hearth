@@ -427,7 +427,7 @@ describe("lancer, suivre, terminer (BR-FICHE-013, 027, 034)", () => {
     expect(received).toMatchObject({
       name: "mon-terraria",
       fiche: "terraria",
-      version: 4,
+      version: 5,
       variant: null,
       agreements: [],
       ports: [{ id: "game", hostPort: 7777 }],
