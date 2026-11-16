@@ -15,6 +15,7 @@ import {
   reasonText,
   setName,
   settle,
+  tickAttention,
   toasts,
   topButton,
   useFicheTestClock,
@@ -433,7 +434,18 @@ describe("« Vérifiez avant de lancer » (BR-FICHE-025, 026, 036)", () => {
       /^En réseau maison : .+:\d+\./,
     );
     expect(review?.querySelector("[data-review-internet]")?.textContent).toContain("sur votre box");
-    // Le mot de passe manque : la barre le dit, le bouton est inactif.
+    // Les choix irréversibles et les risques se rappellent ici (frozen, processeur non vérifié) : un point à cocher.
+    expect(review?.querySelector('[data-attention="frozen_settings"]')?.textContent).toContain(
+      "ne pourront plus être changés",
+    );
+    expect(review?.querySelector('[data-attention="cpu_unverified"]')?.textContent).toContain(
+      "ne peut pas vérifier combien de processeur",
+    );
+    // Rien n'est coché, le mot de passe manque : la barre dit les deux, le bouton est inactif.
+    expect(review?.querySelector("[data-review-reason]")?.textContent).toBe(
+      "Cochez les points d'attention et saisissez votre mot de passe pour lancer.",
+    );
+    await tickAttention();
     expect(review?.querySelector("[data-review-reason]")?.textContent).toBe(
       "Saisissez votre mot de passe pour lancer.",
     );
@@ -780,6 +792,7 @@ describe("le contrat de licence (BR-FICHE-026, 058)", () => {
     );
     typeInto(field, "Correct-Horse-9");
     await flushPromises();
+    await tickAttention();
     topButton("Installer le serveur de jeu")?.click();
     await flushPromises();
     const agreement = document.querySelector("[data-agreement-dialog]");
@@ -807,6 +820,7 @@ describe("le contrat de licence (BR-FICHE-026, 058)", () => {
       "Correct-Horse-9",
     );
     await flushPromises();
+    await tickAttention();
     topButton("Installer le serveur de jeu")?.click();
     await flushPromises();
     (document.querySelector("[data-agreement-refuse]") as HTMLElement).click();
@@ -825,6 +839,7 @@ describe("le contrat de licence (BR-FICHE-026, 058)", () => {
       "Correct-Horse-9",
     );
     await flushPromises();
+    await tickAttention();
     topButton("Installer le serveur de jeu")?.click();
     await flushPromises();
     (
@@ -962,6 +977,7 @@ describe("le récapitulatif suit la variante et le mapping des ports (BR-FICHE-0
       "Correct-Horse-9",
     );
     await flushPromises();
+    await tickAttention();
     topButton("Installer le serveur de jeu")?.click();
     await flushPromises();
     (

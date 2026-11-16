@@ -305,6 +305,14 @@ export function attentionText(point: AttentionPoint): string | null {
       });
     case "world_version":
       return t("fiche.world.versionWarning");
+    case "frozen_settings":
+      return t("fiche.attention.frozenSettings", {
+        labels: point.labels.map((label) => safeText(label)).join(", "),
+      });
+    case "cpu_unverified":
+      return t("fiche.attention.cpuUnverified");
+    case "no_password":
+      return t("fiche.attention.noPassword");
     case "publisher_minimum":
       return t(point.lack === "memory" ? "fiche.publisherAboveMemory" : "fiche.publisherAboveCpu", {
         needed: amount(point.lack, point.needed),

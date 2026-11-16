@@ -2596,6 +2596,12 @@ export const fr = {
         "Ce serveur de jeu peut prendre {chosen} de mémoire alors qu'il en reste {available} de disponible : les services risquent de ralentir ou de s'arrêter.",
       belowMinimum:
         "Cette limite ({chosen}) est sous le minimum de la fiche ({minimum}) : le jeu risque de ne pas démarrer ou d'être coupé.",
+      frozenSettings:
+        "Ces réglages sont gravés dans le monde à sa création et ne pourront plus être changés : {labels}. Il faudrait créer un autre monde.",
+      cpuUnverified:
+        "Hearth ne peut pas vérifier combien de processeur ce jeu demande : si le serveur ralentit, montez la limite plus tard.",
+      noPassword:
+        "Aucun mot de passe : toute personne qui peut joindre ce port peut rejoindre la partie.",
     },
     // Le contrat
     agreementLead: "Lisez le contrat avant de répondre.",

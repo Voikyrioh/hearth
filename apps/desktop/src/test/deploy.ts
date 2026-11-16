@@ -110,6 +110,19 @@ export function topButton(label: string): HTMLButtonElement | undefined {
   );
 }
 
+/**
+ * Accepte tous les points d'attention de la vérification en page (HRT-246) : un test qui lance l'installation les accepte
+ * tous ; ceux qui prouvent qu'un point bloque le lancement cliquent eux-mêmes.
+ */
+export async function tickAttention() {
+  for (const box of document.querySelectorAll<HTMLInputElement>(
+    "[data-review] [data-sum-attention] input[type=checkbox]",
+  )) {
+    if (!box.checked) box.click();
+  }
+  await flushPromises();
+}
+
 /** Comme `confirmDialog`, mais dans la fenêtre la plus récente : saisit le mot de passe puis clique. */
 export async function confirmTop(label: string, password: string | null = OWN) {
   await flushPromises();
@@ -120,6 +133,7 @@ export async function confirmTop(label: string, password: string | null = OWN) {
     typeInto(field, password);
     await flushPromises();
   }
+  await tickAttention();
   topButton(label)?.click();
   await flushPromises();
 }

@@ -104,6 +104,8 @@ const points = computed<AttentionPoint[]>(() =>
     resources: props.draft.resources,
     forceLowDisk: props.forceLowDisk,
     resumesWorld: props.draft.world.resume,
+    questions: props.questions,
+    answers: props.draft.answers,
   }),
 );
 

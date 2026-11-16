@@ -532,7 +532,9 @@ describe("les points d'attention (BR-FICHE-026)", () => {
       resources: null,
       forceLowDisk: { freeBytes: null },
     });
-    expect(points).toEqual([{ key: "low_disk", freeBytes: null, neededBytes: null }]);
+    // Terraria n'a aucun chiffre de processeur prouvé : ce point s'ajoute (HRT-246), la case du disque est exigée.
+    expect(points).toContainEqual({ key: "low_disk", freeBytes: null, neededBytes: null });
+    expect(points.map((point) => point.key)).toEqual(["cpu_unverified", "low_disk"]);
   });
 
   it("demande « Je comprends » pour un minimum de l'éditeur que la machine n'atteint pas", () => {
