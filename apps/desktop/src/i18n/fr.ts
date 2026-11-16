@@ -2390,9 +2390,17 @@ export const fr = {
     cardVariant: "Variante",
     variantLabel: "Variante du serveur",
     variantFrozen: "Ne pourra plus être changée : il faudrait installer un autre serveur.",
-    cardName: "Nom du service",
+    cardName: "Nom de votre serveur de jeu",
     nameHelp:
-      "Lettres, chiffres, tirets et points. Un même jeu peut être installé plusieurs fois sous des noms différents.",
+      "C'est le nom que vous verrez dans Hearth. Lettres, chiffres, tirets et points. Un même jeu peut être installé plusieurs fois sous des noms différents.",
+    // L'encart de résumé de l'étape « Réglages » (HRT-244)
+    aside: {
+      heading: "{game} sur {server}",
+      address: "Adresse prévue pour vos joueurs :",
+      nothingCreated: "Rien n'est créé avant l'étape « Vérifiez avant de lancer ».",
+    },
+    fixField: "Corrigez le champ « {label} » pour continuer.",
+    portFieldLabel: "Port du jeu",
     cardQuestionsAsk: "L'essentiel",
     advancedList: "Réglages avancés : {list}",
     advancedMore: "Réglages avancés : {list}, et {k} autres",

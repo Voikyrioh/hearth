@@ -67,6 +67,35 @@ describe("la page (BR-FICHE-014, 015)", () => {
     wrapper.unmount();
   });
 
+  it("résume dans un encart le jeu, le serveur, la mémoire, l'adresse prévue et la promesse de ne rien créer (HRT-244)", async () => {
+    const { wrapper } = await bootCatalogue(undefined, installPath("terraria"));
+    const aside = wrapper.get("[data-install-aside]");
+    expect(aside.get("h2").text()).toMatch(/^Terraria sur /);
+    expect(aside.find("[data-aside-summary]").text().length).toBeGreaterThan(0);
+    expect(aside.find("[data-aside-memory]").text().length).toBeGreaterThan(0);
+    expect(aside.get("[data-aside-address]").text()).toMatch(
+      /^Adresse prévue pour vos joueurs : .+:\d+$/,
+    );
+    expect(aside.get("[data-aside-note]").text()).toBe(
+      "Rien n'est créé avant l'étape « Vérifiez avant de lancer ».",
+    );
+    wrapper.unmount();
+  });
+
+  it("déplie « Réglages avancés » et y met le curseur quand « Aller au champ » désigne un réglage avancé (HRT-244)", async () => {
+    const { wrapper } = await bootCatalogue(undefined, installPath("terraria"));
+    const advanced = wrapper.get("[data-install-advanced]");
+    expect(advanced.element.hasAttribute("open")).toBe(false);
+    await answer(wrapper, "max_players", "999");
+    await questionInput(wrapper, "max_players").trigger("blur");
+    await settle();
+    expect(advanced.element.hasAttribute("open")).toBe(true);
+    expect(reasonText(wrapper)).toBe("Corrigez le champ « Nombre de joueurs » pour continuer.");
+    expect(wrapper.get("[data-install-first-issue]").text()).toBe("Aller au champ");
+    expect(next(wrapper).attributes("aria-disabled")).toBe("true");
+    wrapper.unmount();
+  });
+
   it("s'ouvre sur « Réglages » avec le nom proposé par la fiche et les valeurs que la fiche propose", async () => {
     const { wrapper, router } = await bootCatalogue(undefined, installPath("terraria"));
     expect(router.currentRoute.value.name).toBe("fiche-install");
@@ -166,7 +195,7 @@ describe("les défauts de forme, jugés sur la fiche", () => {
       "Ce texte contient un caractère que ce jeu ne sait pas lire : l'espace. Essayez « Mon_monde ».",
     );
     expect(next(wrapper).attributes("aria-disabled")).toBe("true");
-    expect(reasonText(wrapper)).toBe("Corrigez les champs signalés pour continuer.");
+    expect(reasonText(wrapper)).toBe("Corrigez le champ « Nom du monde » pour continuer.");
     await answer(wrapper, "world_name", "Monde_2");
     expect(next(wrapper).attributes("aria-disabled")).not.toBe("true");
     wrapper.unmount();

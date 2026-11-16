@@ -108,6 +108,7 @@
   --search-min: 240px;
   --search-max: 360px;
   --card-min: 280px;
+  --form-min: 420px;
   --banner-blur: 24px;
   --ember-glow: color-mix(in srgb, var(--ac) 22%, transparent);
   --tooltip-max: 260px;

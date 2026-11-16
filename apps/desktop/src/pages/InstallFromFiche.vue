@@ -7,6 +7,7 @@ import HSkeleton from "@/components/atoms/HSkeleton.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import ConfirmDialog from "@/components/molecules/ConfirmDialog.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
+import InstallAside from "@/components/molecules/InstallAside.vue";
 import StepTrail from "@/components/molecules/StepTrail.vue";
 import DeployProgressDialog from "@/components/organisms/DeployProgressDialog.vue";
 import EnginePanel from "@/components/organisms/EnginePanel.vue";
@@ -26,6 +27,8 @@ import { usePageTitle } from "@/composables/usePageTitle";
 import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { deployDoor } from "@/deploy/availability";
+import { shownHostPort } from "@/fiche/draft";
+import { memorySentence } from "@/fiche/memory";
 import { minimumText } from "@/fiche/messages";
 import { packIssueText } from "@/fiche/pack";
 import { notEnoughRoom } from "@/fiche/world";
@@ -127,6 +130,29 @@ interface Reason {
   fixable: boolean;
 }
 
+type IssueTarget =
+  | { kind: "name" }
+  | { kind: "question"; id: string }
+  | { kind: "port"; id: string };
+
+/** Le premier champ en défaut, dans l'ordre de la page : le nom, les questions, les ports. */
+const firstIssue = computed<{ label: string; target: IssueTarget } | null>(() => {
+  if (install.nameProblem.value !== null) {
+    return { label: t("fiche.cardName"), target: { kind: "name" } };
+  }
+  for (const question of install.questions.value) {
+    if (install.answerProblems.value.has(question.id)) {
+      return { label: question.label, target: { kind: "question", id: question.id } };
+    }
+  }
+  for (const port of install.published.value) {
+    if (install.portProblems.value.has(port.id)) {
+      return { label: t("fiche.portFieldLabel"), target: { kind: "port", id: port.id } };
+    }
+  }
+  return null;
+});
+
 /** Le motif du blocage par priorité : le lien, le moteur ou le droit, la fiche, la machine, la saisie. */
 const reason = computed<Reason | null>(() => {
   if (linkReason.value) return { text: linkReason.value, fixable: false };
@@ -151,9 +177,13 @@ const reason = computed<Reason | null>(() => {
     if (pack === "sending" || pack === "unsent" || pack === "unread") {
       return { text: packIssueText(pack), fixable: false };
     }
-    return install.answersInvalid.value || serverBlocks.value
-      ? { text: t("fiche.fixAnswers"), fixable: true }
-      : null;
+    if (!install.answersInvalid.value && !serverBlocks.value) return null;
+    // Le premier champ en défaut est nommé (HRT-244) ; sans champ à nommer (monde, pack, nom pris), la phrase générale.
+    const first = firstIssue.value;
+    return {
+      text: first ? t("fiche.fixField", { label: safeText(first.label) }) : t("fiche.fixAnswers"),
+      fixable: true,
+    };
   }
   if (install.capacity.value === null) return { text: t("deploy.capacityPending"), fixable: false };
   if (resourcesBad.value) return { text: t("fiche.fixAnswers"), fixable: false };
@@ -177,6 +207,15 @@ async function goToRefusedQuestion() {
 async function goToFirstIssue() {
   install.touchAll();
   await nextTick();
+  const first = firstIssue.value;
+  if (first?.target.kind === "question") {
+    // Un réglage avancé refusé déplie son bloc avant de recevoir le curseur (BR-FICHE-065).
+    if (await answers.value?.focusQuestion(first.target.id)) return;
+  }
+  if (first?.target.kind === "name") {
+    answers.value?.focusName();
+    return;
+  }
   const target = document.querySelector<HTMLElement>(
     '[data-install-answers] [aria-invalid="true"]',
   );
@@ -269,6 +308,27 @@ const steps = computed(() => [
 ]);
 const progressOpen = computed(() => flow.launch.value !== null);
 const name = computed(() => safeText(detail.value?.card.name ?? ""));
+
+// L'encart de résumé (HRT-244) : des phrases composées par les règles pures de la fiche, jamais calculées dans le composant.
+const serverName = computed(() => safeText(server.value?.name ?? ""));
+const asideMemory = computed(() =>
+  memorySentence(
+    detail.value?.card.memory ?? null,
+    install.capacity.value?.memoryBytes ?? null,
+    serverName.value,
+    "card",
+  ),
+);
+const asideAddress = computed(() => {
+  const current = draft.value;
+  const host = server.value?.host;
+  if (!current || !host) return null;
+  const port =
+    install.published.value.find((entry) => entry.role === "game") ?? install.published.value[0];
+  if (!port) return null;
+  const shown = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  return `${safeText(shown)}:${shownHostPort(current, port)}`;
+});
 // Un seul titre, à chaque étape : « Installer Terraria » (revue UX 2026-10-24, constat 17).
 usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value }) : null));
 </script>
@@ -330,13 +390,25 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
         {{ minimumText(install.tooSmallVerdict.value) }}
       </Callout>
 
-      <InstallAnswers
-        v-show="install.step.value === 1"
-        ref="answers"
-        :install="install"
-        @link="(kind, key) => links.open(kind, key)"
-      />
-      <InstallResources v-if="install.step.value === 2" :install="install" />
+      <div class="inst__cols">
+        <div class="inst__main">
+          <InstallAnswers
+            v-show="install.step.value === 1"
+            ref="answers"
+            :install="install"
+            @link="(kind, key) => links.open(kind, key)"
+          />
+          <InstallResources v-if="install.step.value === 2" :install="install" />
+        </div>
+        <InstallAside
+          v-if="install.step.value === 1"
+          class="inst__aside"
+          :heading="t('fiche.aside.heading', { game: name, server: serverName })"
+          :summary="safeText(detail.card.summary)"
+          :memory="asideMemory"
+          :address="asideAddress"
+        />
+      </div>
 
       <div class="inst__bar" data-install-bar>
         <div class="inst__left">
@@ -355,7 +427,7 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
             data-install-first-issue
             @click="goToFirstIssue"
           >
-            {{ t("deploy.goToField") }}
+            {{ t("fiche.goToQuestion") }}
           </HButton>
         </div>
         <div class="inst__buttons">
@@ -458,6 +530,22 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
   display: flex;
   flex-direction: column;
   gap: var(--card-gap);
+}
+
+.inst__cols {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.inst__main {
+  flex: 3 1 var(--form-min);
+  min-width: 0;
+}
+
+.inst__aside {
+  flex: 1 1 var(--card-min);
 }
 
 .inst__bar {
