@@ -22,6 +22,7 @@ pub mod host;
 pub mod ids;
 pub mod install;
 pub mod logging;
+pub mod network;
 pub mod ops_observer;
 pub mod pack_deposits;
 pub mod random;

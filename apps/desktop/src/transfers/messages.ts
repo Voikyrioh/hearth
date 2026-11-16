@@ -47,6 +47,16 @@ export function canResume(transfer: Transfer): boolean {
   return transfer.status === "interrupted" && transfer.refusal?.kind !== "gone";
 }
 
+/** L'envoi attend de la place sur le serveur : « Réessayer » après avoir libéré de la place, pas une simple reprise. */
+export function waitsForRoom(transfer: Transfer): boolean {
+  return transfer.status === "interrupted" && transfer.refusal?.kind === "no_space";
+}
+
+/** Un envoi qui demande un geste du compte (reprendre, réessayer, retirer un échec) : il passe avant les autres. */
+export function needsAction(transfer: Transfer): boolean {
+  return transfer.status === "interrupted" || transfer.status === "failed";
+}
+
 /** Annuler : un envoi qui envoie ou qui attend sa reprise (la partie reçue est retirée du serveur). */
 export function canCancel(transfer: Transfer): boolean {
   return isOpen(transfer.status);

@@ -10,7 +10,7 @@ import type { ActReport } from "@/composables/useReauth";
 import { useServerAction } from "@/composables/useServerAction";
 import { t } from "@/i18n";
 import { getLinkBridge, type ServiceInfo } from "@/link";
-import { addressOf, mayBeGame } from "@/services/game";
+import { addressesOf, mayBeGame } from "@/services/game";
 import { canAct, type RightsGate } from "@/services/rights";
 import { useServersStore } from "@/stores/servers";
 import { useToastsStore } from "@/stores/toasts";
@@ -91,8 +91,16 @@ async function performAddress(address: string, adminPassword: string | null): Pr
   return { kind: "refused", refusal: outcome.refusal };
 }
 const host = computed(() => servers.byId(props.serverId)?.host ?? "");
-const address = computed(() =>
-  view.value ? addressOf(host.value, view.value.ports, view.value.publicAddress) : null,
+const addresses = computed(() =>
+  view.value
+    ? addressesOf(
+        host.value,
+        view.value.ports,
+        view.value.publicAddress,
+        view.value.lanAddress,
+        view.value.detectedAddress,
+      )
+    : null,
 );
 const stopped = computed(
   () => props.service.state === "stopped" || props.service.state === "error",
@@ -102,7 +110,7 @@ const stopped = computed(
 <template>
   <template v-if="view">
     <GameAddressCard
-      :address="address"
+      :addresses="addresses"
       :stopped="stopped"
       :can-edit="canEditAddress"
       @edit="addressOpen = true"

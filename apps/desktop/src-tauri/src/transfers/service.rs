@@ -15,12 +15,15 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use hearth_link::domain::secret::Secret;
 use hearth_link::domain::server::ServerId;
 use hearth_link::{ActionOutcome, LinkError, LinkManager, UploadEnd, UploadRefusal, UploadSource};
-use hearth_proto::api::transfers::{CHUNK_BYTES, DepositOpened, DepositRequest, chunk_len};
+use hearth_proto::api::transfers::{
+    CHUNK_BYTES, DepositOpened, DepositRequest, DepositView, chunk_len,
+};
 use hearth_proto::error::{ErrorBody, ErrorCode};
 use serde_json::Value;
 
@@ -36,7 +39,12 @@ struct Entry {
     path: PathBuf,
     cancel: Arc<AtomicBool>,
     running: bool,
+    /// La dernière fois que le serveur a été interrogé sur ce transfert fini (HRT-222).
+    checked_at: Option<Instant>,
 }
+
+/// Un envoi réussi est relu au plus aussi souvent : la liste est relue plus vite que cela, le serveur n'a pas à l'être.
+const RECHECK_EVERY: Duration = Duration::from_secs(30);
 
 /// Les envois de cette session, du plus ancien au plus récent. Rien n'est écrit sur le disque : un redémarrage de
 /// l'application oublie la liste (la partie reçue reste reprenable 24 heures côté serveur, mais plus depuis ici).
@@ -81,6 +89,32 @@ impl TransferBook {
             .retain(|entry| entry.dto.id != id || entry.running || is_open(entry.dto.status));
     }
 
+    /// Les envois réussis dont le serveur n'a pas été interrogé depuis [`RECHECK_EVERY`] (`(id, serveur)`) ; ils sont
+    /// marqués comme interrogés à `now`.
+    fn due_for_check(&self, now: Instant) -> Vec<(String, String)> {
+        self.lock()
+            .iter_mut()
+            .filter(|entry| {
+                !entry.running
+                    && entry.dto.status == TransferStatusDto::Done
+                    && entry
+                        .checked_at
+                        .is_none_or(|at| now.duration_since(at) >= RECHECK_EVERY)
+            })
+            .map(|entry| {
+                entry.checked_at = Some(now);
+                (entry.dto.id.clone(), entry.dto.server_id.clone())
+            })
+            .collect()
+    }
+
+    /// Le fichier n'est plus sur le serveur (consommé par une installation, ou expiré) : l'envoi réussi quitte la liste
+    /// de lui-même (HRT-222). Un envoi qui n'est pas réussi reste, c'est au compte de le retirer.
+    fn forget_gone(&self, id: &str) {
+        self.lock()
+            .retain(|entry| entry.dto.id != id || entry.dto.status != TransferStatusDto::Done);
+    }
+
     fn finish(&self, id: &str, end: &UploadEnd) {
         self.with(id, |entry| {
             entry.running = false;
@@ -115,6 +149,31 @@ impl TransferBook {
             entry.dto.status = status;
             entry.dto.refusal = refusal;
         });
+    }
+}
+
+/// Le serveur dit qu'il n'a plus ce dépôt : introuvable (consommé et retiré) ou expiré (24 heures). Toute autre
+/// réponse, un lien coupé comprise, ne dit rien : le transfert reste.
+fn gone_from_server(result: &Result<DepositView, LinkError>) -> bool {
+    matches!(
+        result,
+        Err(LinkError::Rejected(Some(
+            ErrorCode::NotFound | ErrorCode::TransferExpired
+        )))
+    )
+}
+
+/// Interroge le serveur sur les envois réussis qui n'ont pas été relus depuis un moment, et retire de la liste ceux
+/// dont le fichier n'y est plus (HRT-222, `BR-MOD-018`). Jamais bloquant pour la liste : lancé en tâche de fond.
+pub async fn reconcile(manager: &LinkManager, book: &Arc<TransferBook>) {
+    for (id, server) in book.due_for_check(Instant::now()) {
+        let Ok(server) = ServerId::parse(&server) else {
+            continue;
+        };
+        let seen = manager.deposit_view(&server, &id).await;
+        if gone_from_server(&seen) {
+            book.forget_gone(&id);
+        }
     }
 }
 
@@ -211,6 +270,7 @@ pub async fn start(
                     path,
                     cancel: Arc::new(AtomicBool::new(false)),
                     running: false,
+                    checked_at: None,
                 });
                 spawn(
                     manager.clone(),
@@ -451,6 +511,7 @@ mod tests {
             path: PathBuf::from("pack.zip"),
             cancel: Arc::new(AtomicBool::new(false)),
             running: false,
+            checked_at: None,
         };
         book.insert(entry("A", TransferStatusDto::Interrupted));
         book.insert(entry("B", TransferStatusDto::Sending));
@@ -472,6 +533,50 @@ mod tests {
     }
 
     #[test]
+    fn a_finished_upload_whose_file_left_the_server_leaves_the_list_by_itself() {
+        let book = TransferBook::default();
+        let entry = |id: &str, status: TransferStatusDto| Entry {
+            dto: TransferDto {
+                id: id.into(),
+                server_id: "s".into(),
+                name: "pack.zip".into(),
+                size: 100.0,
+                sent: 100.0,
+                status,
+                refusal: None,
+            },
+            path: PathBuf::from("pack.zip"),
+            cancel: Arc::new(AtomicBool::new(false)),
+            running: false,
+            checked_at: None,
+        };
+        book.insert(entry("DONE", TransferStatusDto::Done));
+        book.insert(entry("SENDING", TransferStatusDto::Sending));
+        book.insert(entry("FAILED", TransferStatusDto::Failed));
+        let now = Instant::now();
+        // Seul un envoi réussi est interrogé, et pas deux fois de suite.
+        let due = book.due_for_check(now);
+        assert_eq!(due, vec![("DONE".to_owned(), "s".to_owned())]);
+        assert!(book.due_for_check(now + Duration::from_secs(5)).is_empty());
+        assert_eq!(book.due_for_check(now + RECHECK_EVERY).len(), 1);
+        // Une réponse qui ne dit rien (lien coupé, refus d'un autre ordre) laisse la liste telle quelle.
+        assert!(!gone_from_server(&Err(LinkError::Timeout)));
+        assert!(!gone_from_server(&Err(LinkError::Rejected(None))));
+        // Introuvable ou expiré : l'envoi réussi part ; les autres restent (au compte de les retirer).
+        assert!(gone_from_server(&Err(LinkError::Rejected(Some(
+            ErrorCode::NotFound
+        )))));
+        assert!(gone_from_server(&Err(LinkError::Rejected(Some(
+            ErrorCode::TransferExpired
+        )))));
+        book.forget_gone("DONE");
+        book.forget_gone("SENDING");
+        book.forget_gone("FAILED");
+        let left: Vec<String> = book.list().into_iter().map(|t| t.id).collect();
+        assert_eq!(left, vec!["SENDING", "FAILED"]);
+    }
+
+    #[test]
     fn a_lack_of_space_leaves_the_transfer_resumable_and_a_rejection_does_not() {
         let book = TransferBook::default();
         book.insert(Entry {
@@ -487,6 +592,7 @@ mod tests {
             path: PathBuf::from("pack.zip"),
             cancel: Arc::new(AtomicBool::new(false)),
             running: true,
+            checked_at: None,
         });
         book.finish(
             "A",

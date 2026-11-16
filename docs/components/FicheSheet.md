@@ -10,3 +10,5 @@ Les cartes de lecture de la fiche d'un jeu (HRT-102, BR-FICHE-004, 008, 010) : I
 
 HRT-109 : la carte « Questions » dit « {n} réglages, dont {m} demandés à l'installation » et les thèmes de la fiche quand l'agent sert le catalogue complet.
 - Revue UX du 2026-10-24 : (constat 4) une valeur proposée se dit par son libellé (`fiche/messages.ts::valueLabel` : « Maître », « Oui », jamais le numéro de la fiche) ; (constat 19) la carte « Espace disque » disparaît quand `noFigureAtAll` : la carte Ressources le dit déjà.
+
+HRT-221 : trois groupes, sur toute la largeur utile (grille `--sheet-col-min`) : ce qu'il faut (Ressources, Ports, Espace disque, Téléchargements, Arrêt du jeu), les réglages (Questions, Ce que cette fiche impose, Contrat), puis « Détails techniques », replié (`<details>`) : Image, Dossiers et, par le slot `technical`, l'empreinte de la fiche.

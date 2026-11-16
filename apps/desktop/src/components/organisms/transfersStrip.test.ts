@@ -145,3 +145,28 @@ describe("le magasin", () => {
     ]);
   });
 });
+
+describe("ce qui demande un geste passe d'abord (revue de Nora, 16/11)", () => {
+  it("garde les envois à reprendre hors de « +n autres » et dit « Réessayer » quand la place manque", () => {
+    const done = (id: string) =>
+      item({ id, status: "done", sent: 600 * MIB, name: `fait-${id}.zip` });
+    const transfers = [
+      done("A"),
+      done("B"),
+      done("C"),
+      item({
+        id: "D",
+        name: "plein.zip",
+        status: "interrupted",
+        refusal: { kind: "no_space", missing: 5 * MIB, remaining: MIB },
+      }),
+    ];
+    const wrapper = mount(TransfersStrip, { props: { transfers } });
+    const rows = wrapper.findAll("[data-transfer]").map((row) => row.attributes("data-transfer"));
+    expect(rows[0]).toBe("D");
+    expect(rows).toHaveLength(3);
+    expect(wrapper.get("[data-transfers-more]").text()).toContain("1");
+    expect(wrapper.get("[data-transfer-resume]").text()).toBe("Réessayer");
+    wrapper.unmount();
+  });
+});

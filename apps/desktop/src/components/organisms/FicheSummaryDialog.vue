@@ -286,14 +286,6 @@ function refusal(refused: { kind: string }): string | undefined {
         <dt>{{ t("fiche.sumName") }}</dt>
         <dd class="sum__mono" data-sum-name>{{ draft.name }}</dd>
       </div>
-      <div class="sum__row">
-        <dt>{{ t("fiche.sumImage") }}</dt>
-        <dd data-sum-image>
-          <span class="sum__mono">{{ safeText(image.repository) }}:{{ safeText(image.tag) }}</span>
-          <span v-if="image.digest" class="sum__mono sum__block">{{ safeText(image.digest) }}</span>
-          <span class="sum__note">{{ registryText(registryOf(image.repository)) }}</span>
-        </dd>
-      </div>
       <div v-if="downloads.length > 0" class="sum__row">
         <dt>{{ t("fiche.sumDownloads") }}</dt>
         <dd data-sum-downloads>
@@ -328,17 +320,6 @@ function refusal(refused: { kind: string }): string | undefined {
             </li>
           </ul>
           <span class="sum__note" data-sum-exposed>{{ t("deploy.portExposed") }}</span>
-        </dd>
-      </div>
-      <div class="sum__row">
-        <dt>{{ t("fiche.sumFolders") }}</dt>
-        <dd data-sum-folders>
-          <ul class="sum__list">
-            <li v-for="folder in folders" :key="folder.id">
-              {{ folderRoleText(folder.role) }}
-              <span class="sum__mono sum__block">{{ safeText(folder.target) }}</span>
-            </li>
-          </ul>
         </dd>
       </div>
       <div class="sum__row">
@@ -386,6 +367,30 @@ function refusal(refused: { kind: string }): string | undefined {
         </dd>
       </div>
     </dl>
+    <details class="sum__tech" data-sum-tech>
+      <summary class="sum__tech-title">{{ t("fiche.technicalDetails") }}</summary>
+      <dl class="sum">
+        <div class="sum__row">
+          <dt>{{ t("fiche.sumImage") }}</dt>
+          <dd data-sum-image>
+            <span class="sum__mono">{{ safeText(image.repository) }}:{{ safeText(image.tag) }}</span>
+            <span v-if="image.digest" class="sum__mono sum__block">{{ safeText(image.digest) }}</span>
+            <span class="sum__note">{{ registryText(registryOf(image.repository)) }}</span>
+          </dd>
+        </div>
+        <div class="sum__row">
+          <dt>{{ t("fiche.sumFolders") }}</dt>
+          <dd data-sum-folders>
+            <ul class="sum__list">
+              <li v-for="folder in folders" :key="folder.id">
+                {{ folderRoleText(folder.role) }}
+                <span class="sum__mono sum__block">{{ safeText(folder.target) }}</span>
+              </li>
+            </ul>
+          </dd>
+        </div>
+      </dl>
+    </details>
 
     <Callout tone="info" data-sum-trust>{{ t("fiche.trust") }}</Callout>
 
@@ -435,6 +440,12 @@ function refusal(refused: { kind: string }): string | undefined {
 </template>
 
 <style scoped>
+.sum__tech-title {
+  color: var(--tx);
+  cursor: pointer;
+  font-weight: var(--fw-semibold);
+}
+
 .sum {
   display: flex;
   flex-direction: column;

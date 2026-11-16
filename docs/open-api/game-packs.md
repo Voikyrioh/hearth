@@ -43,6 +43,8 @@ Réponse `200` :
 | 404 | `PACK_UNKNOWN` | aucun dépôt complet de ce compte sous cet identifiant (inconnu, d'un autre compte, déjà rangé ou périmé) ; le dépôt d'un autre compte n'est jamais retiré |
 | 422 | `PACK_REFUSED` | `details.reason` : `ARCHIVE_REFUSED` (avec `details.archive`, le code de l'ADR-0055), `PACK_IS_A_DOWNLOAD_LIST` (avec `details.mods`), `PACK_HOST_FORBIDDEN` (avec `details.host`), `PACK_PATH_ESCAPES`, `PACK_INDEX_INVALID`, `PACK_WRAPPED_IN_FOLDER`, `PACK_UNRECOGNIZED` ; le dépôt est retiré aussitôt |
 
+À l'installation seulement (pas à la lecture), un pack serveur peut aussi donner `PACK_VERSION_UNREADABLE` (le pack ne dit pas sa version de Minecraft et la réponse « version » est restée « LATEST »), `PACK_VERSION_MISMATCH` (la version choisie contredit celle du pack) et `PACK_LOADER_MISMATCH` (la variante choisie n'est pas le moteur du pack) ; le dépôt est gardé (HRT-225, BR-MOD-019).
+
 Jamais un nom d'entrée de l'archive dans une réponse.
 
 ## `POST /api/v1/deployments` : `source.pack`

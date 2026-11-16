@@ -5,6 +5,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tokio::sync::broadcast::error::RecvError;
 use tokio::task::JoinHandle;
 use tokio::time::{MissedTickBehavior, interval};
 
@@ -111,6 +112,29 @@ pub fn spawn_services(registry: Arc<ServicesRegistry>) -> BackgroundTask {
             if let Err(error) = run.finished().await {
                 tracing::error!(%error, "détection du moteur interrompue, reprise dans 5 s");
                 tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }))
+}
+
+/// Re-publie un service dont une opération vient de se clore (HRT-219) : `busy` et `last_action` sont des
+/// projections du journal des opérations, lues à l'envoi d'un lot de la liste ; sans lot, un service qui ne
+/// change pas d'état (arrêt d'un conteneur déjà arrêté) resterait affiché « occupé » chez les abonnés.
+pub fn spawn_busy_projection(
+    ops: Arc<ServiceOps>,
+    registry: Arc<ServicesRegistry>,
+) -> BackgroundTask {
+    BackgroundTask(tokio::spawn(async move {
+        let mut feed = ops.subscribe();
+        loop {
+            match feed.recv().await {
+                Ok(snapshot) => {
+                    if snapshot.record.status.is_terminal() {
+                        registry.republish(&snapshot.record.service);
+                    }
+                }
+                Err(RecvError::Lagged(_)) => registry.republish_all(),
+                Err(RecvError::Closed) => return,
             }
         }
     }))

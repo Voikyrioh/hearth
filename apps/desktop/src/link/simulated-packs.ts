@@ -56,6 +56,8 @@ export class SimulatedPacks {
             reason: found.refusal.reason,
             mods: found.refusal.mods,
             host: found.refusal.host,
+            packVersion: found.refusal.packVersion ?? null,
+            chosenVersion: found.refusal.chosenVersion ?? null,
           };
     }
     const genre = detail.mods?.packGenres.find((item) => item.kind === found.pack.kind);

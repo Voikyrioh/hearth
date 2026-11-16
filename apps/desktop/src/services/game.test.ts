@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FicheStop, GamePort, GameView, ServiceOperation } from "@/link";
 import {
+  addressesOf,
   addressOf,
   decisionReason,
   gameEffectText,
@@ -30,6 +31,8 @@ const view = (patch: Partial<FicheStop> = {}): GameView => ({
   name: "Terraria",
   ficheVersion: 1,
   publicAddress: null,
+  lanAddress: null,
+  detectedAddress: null,
   stop: stop(patch),
   ports: [],
   hasPassword: false,
@@ -290,5 +293,27 @@ describe("l'adresse publique (HRT-215, BR-JEU-022)", () => {
   it("dit un refus de l'agent par son code, un code inconnu par le refus général", () => {
     expect(publicAddressRefusalText({ kind: "conflict" })).toContain("a changé entre-temps");
     expect(publicAddressRefusalText({ kind: "from_the_future" })).toContain("n'a pas enregistré");
+  });
+});
+
+describe("addressesOf : réseau maison et internet (HRT-223)", () => {
+  const ports = [port(7777)];
+  it("donne l'adresse lue par l'agent pour le réseau maison, sinon celle de ce client, avec le port du jeu", () => {
+    expect(addressesOf("forge.local", ports, null, "192.168.1.20")?.lan).toBe("192.168.1.20:7777");
+    expect(addressesOf("forge.local", ports)?.lan).toBe("forge.local:7777");
+  });
+
+  it("donne pour internet l'adresse renseignée, sinon celle de la box, sinon rien", () => {
+    expect(addressesOf("h", ports, "jeu.example.org", null, "203.0.113.9")?.internet).toEqual({
+      text: "jeu.example.org:7777",
+      source: "entered",
+    });
+    expect(addressesOf("h", ports, null, null, "203.0.113.9")?.internet).toEqual({
+      text: "203.0.113.9:7777",
+      source: "detected",
+    });
+    expect(addressesOf("h", ports, "  ", null, "  ")?.internet).toBeNull();
+    expect(addressesOf("h", [], "jeu.example.org")).toBeNull();
+    expect(addressesOf("h", ports, "2001:db8::1")?.internet?.text).toBe("[2001:db8::1]:7777");
   });
 });

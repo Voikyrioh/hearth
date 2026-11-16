@@ -10,6 +10,7 @@
 
 use serde::Deserialize;
 
+use super::game::{PackGame, detect};
 use crate::domain::catalog::loading::schema::fiche::PackGenre;
 use crate::domain::catalog::loading::value::is_risky_char;
 
@@ -49,6 +50,8 @@ pub struct PackReport {
     pub unpacked: u64,
     pub top_dirs: Vec<String>,
     pub modrinth: Option<ModrinthSummary>,
+    /// Ce que le pack serveur dit du jeu et de son moteur (HRT-225) ; vide pour un pack Modrinth (l'image lit le pack).
+    pub game: PackGame,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +81,12 @@ pub enum PackRefusal {
     WrappedInFolder,
     /// Ni pack Modrinth, ni pack serveur.
     Unrecognized,
+    /// Le pack ne dit pas sa version de Minecraft et la demande est restée « LATEST » (HRT-225).
+    VersionUnreadable,
+    /// La version choisie contredit celle que dit le pack (HRT-225).
+    VersionMismatch { pack: String, chosen: String },
+    /// Le moteur choisi n'est pas celui que dit le pack (HRT-225).
+    LoaderMismatch,
 }
 
 impl PackRefusal {
@@ -89,6 +98,9 @@ impl PackRefusal {
             Self::ModrinthIndexInvalid => "PACK_INDEX_INVALID",
             Self::WrappedInFolder => "PACK_WRAPPED_IN_FOLDER",
             Self::Unrecognized => "PACK_UNRECOGNIZED",
+            Self::VersionUnreadable => "PACK_VERSION_UNREADABLE",
+            Self::VersionMismatch { .. } => "PACK_VERSION_MISMATCH",
+            Self::LoaderMismatch => "PACK_LOADER_MISMATCH",
         }
     }
 }
@@ -141,6 +153,7 @@ pub fn judge_pack(
             unpacked,
             top_dirs: top_dirs(entries),
             modrinth: Some(modrinth),
+            game: PackGame::default(),
         });
     }
 
@@ -154,6 +167,7 @@ pub fn judge_pack(
             unpacked,
             top_dirs: top_dirs(entries),
             modrinth: None,
+            game: detect(entries, read),
         });
     }
 

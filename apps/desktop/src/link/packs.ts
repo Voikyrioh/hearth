@@ -43,7 +43,16 @@ export interface PackInspect {
 export type PackRefusal =
   /** Aucun dépôt complet sous cet identifiant : à déposer de nouveau. */
   | { kind: "unknown" }
-  | { kind: "refused"; reason: string; mods: number | null; host: string | null };
+  | {
+      kind: "refused";
+      reason: string;
+      mods: number | null;
+      host: string | null;
+      packVersion?: string | null;
+      chosenVersion?: string | null;
+      /** Le libellé du champ « version » du formulaire, pour le nommer dans la phrase. */
+      field?: string | null;
+    };
 
 /** L'issue de la lecture d'un pack. */
 export type PackCheck =

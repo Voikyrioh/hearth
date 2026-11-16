@@ -31,6 +31,7 @@ Partout où Hearth attend un fichier de l'utilisateur pour un service (pack de m
 - Un fichier étranger posé dans la zone n'a pas de ligne au registre : jamais touché, jamais retiré.
 
 ## Règles liées
+- BR-MOD-018 (consommation et liste du client)
 - BR-FILES-019
 - BR-ARCH-007
 - BR-GRANT-003

@@ -16,16 +16,26 @@ describe("les cartes de la fiche (BR-FICHE-004)", () => {
     const titles = wrapper
       .findAll("[data-fiche-sheet] h2")
       .map((item) => item.text().toLowerCase());
+    // Ce qu'il faut d'abord, puis les réglages, puis le détail technique (HRT-221).
     expect(titles).toEqual([
-      "image",
-      "ports",
-      "dossiers",
       "ressources",
+      "ports",
       "téléchargements",
+      "image",
+      "dossiers",
       "arrêt du jeu",
       "questions",
       "ce que cette fiche impose",
     ]);
+    // Plus de carte « Espace disque » : la ligne Espace disque de la carte Ressources le dit.
+    expect(wrapper.find("[data-fiche-disk]").exists()).toBe(false);
+    const tech = wrapper.get("[data-fiche-tech]");
+    expect(tech.element.hasAttribute("open")).toBe(false);
+    expect(tech.get("summary").text()).toBe("Détails techniques");
+    expect(tech.find("[data-fiche-image]").exists()).toBe(true);
+    expect(tech.find("[data-fiche-folders]").exists()).toBe(true);
+    expect(tech.find("[data-fiche-digest]").exists()).toBe(true);
+    expect(wrapper.get("[data-fiche-needs]").find("[data-fiche-image]").exists()).toBe(false);
     expect(wrapper.text()).not.toMatch(/compte exig|nom d'utilisateur/i);
     expect(wrapper.get(".nav__item.router-link-active").text()).toBe("Catalogue");
     wrapper.unmount();
@@ -148,7 +158,7 @@ describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
     expect(verdicts).toContain("Processeur nécessaire : non vérifié.");
     // Aucun verdict de couverture sur un chiffre qu'on n'a pas.
     expect(wrapper.find("[data-res-cover]").exists()).toBe(false);
-    expect(wrapper.get("[data-fiche-disk]").text()).toContain("2 Go nécessaires");
+    expect(wrapper.get('[data-res-row="disk"] [data-res-min]').text()).toBe("2 Go");
     // Le bouton reste actif : rien n'est bloqué par une preuve manquante.
     expect(wrapper.get("[data-fiche-install]").attributes("aria-disabled")).not.toBe("true");
     wrapper.unmount();
@@ -168,10 +178,10 @@ describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
     expect(wrapper.get('[data-res-row="memory"] [data-res-min]').text()).toBe("2 Go");
     expect(wrapper.get('[data-res-row="memory"] [data-res-recommended]').text()).toBe("4 Go");
     expect(wrapper.find('[data-res-cover="memory-covers"]').exists()).toBe(true);
-    expect(wrapper.get("[data-fiche-disk]").text()).toContain("8 Go nécessaires");
+    expect(wrapper.get('[data-res-row="disk"] [data-res-min]').text()).toBe("8 Go");
     // Le téléchargement du premier démarrage dit sa taille, sa source et sa preuve.
     const downloads = wrapper.get("[data-fiche-downloads]").text();
-    expect(downloads).toContain("environ 6 Go de fichiers de jeu depuis les serveurs de l'éditeur");
+    expect(downloads).toContain("fichiers de jeu (environ 6 Go), depuis les serveurs de l'éditeur");
     expect(downloads).toContain("Chiffre de l'éditeur");
     expect(downloads).toContain("Étapes que Hearth reconnaît");
     wrapper.unmount();
@@ -226,6 +236,19 @@ describe("les ressources et leurs preuves (BR-FICHE-008, 021)", () => {
 });
 
 describe("« Installer » (BR-FICHE-012, 033, 039)", () => {
+  it("nomme les deux boutons et dit en une phrase ce que chacun fait", async () => {
+    const { wrapper } = await bootCatalogue(undefined, fiche("terraria"));
+    expect(wrapper.get("[data-fiche-install]").text()).toBe("Installer…");
+    expect(wrapper.get("[data-fiche-install-help]").text()).toBe(
+      "Le formulaire des réglages s'affiche : vous choisissez, puis vous vérifiez avant de lancer.",
+    );
+    expect(wrapper.get("[data-fiche-install-proposed]").text()).toBe("Installation rapide");
+    expect(wrapper.get("[data-fiche-install-proposed-help]").text()).toBe(
+      "L'installation se fait avec les valeurs recommandées, sans remplir le formulaire. Vous vérifiez le récapitulatif avant de lancer.",
+    );
+    wrapper.unmount();
+  });
+
   it("ouvre l'installation, ou l'installation avec les valeurs proposées", async () => {
     const { wrapper, router } = await bootCatalogue(undefined, fiche("terraria"));
     await wrapper.get("[data-fiche-install]").trigger("click");

@@ -196,7 +196,9 @@ describe("ProgressSteps", () => {
         label: "x",
       },
     });
-    expect(over.get("rect.meter__value").attributes("width")).toBe("100");
+    expect((over.get(".meter").element as HTMLElement).style.getPropertyValue("--meter-fill")).toBe(
+      "100%",
+    );
     const unknown = mount(ProgressSteps, {
       props: {
         steps: [{ key: "pull", label: "Pull", state: "now", bar: { ratio: null, text: null } }],

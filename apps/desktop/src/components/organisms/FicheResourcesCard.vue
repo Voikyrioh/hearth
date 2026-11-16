@@ -97,35 +97,34 @@ const TONES = { too_small: "error", publisher_above: "warn", unproven: "info" } 
     </template>
     <div v-else class="res__scroll">
       <table class="res__table" :aria-label="t('fiche.resHead')">
-        <thead>
+        <thead class="sr-only">
           <tr>
             <th scope="col"><span class="sr-only">{{ t("fiche.cardResources") }}</span></th>
             <th scope="col">{{ t("fiche.colMin") }}</th>
             <th scope="col">{{ t("fiche.colRecommended") }}</th>
             <th scope="col">{{ t("fiche.colThisServer") }}</th>
-            <th scope="col">{{ t("fiche.colProof") }}</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="row in rows" :key="row.key" :data-res-row="row.key">
-            <th scope="row">{{ row.label }}</th>
-            <td data-res-min>
-              <template v-if="row.min !== null">{{ row.min }}</template>
-              <span v-else class="res__unproven">{{ t("fiche.notVerified") }}</span>
-            </td>
-            <td data-res-recommended>
-              <template v-if="row.recommended !== null">{{ row.recommended }}</template>
-              <span v-else class="res__unproven">{{ row.key === "disk" ? t("fiche.notApplicable") : t("fiche.notVerified") }}</span>
-            </td>
-            <td data-res-server>{{ row.server }}</td>
-            <td>
+            <th scope="row">
+              {{ row.label }}
               <ProofTag
                 :proof="proofOf(row.evidence)"
                 :source="proofUrl(row.evidence) !== null"
                 :subject="row.label"
                 @source="emit('source', row.key)"
               />
+            </th>
+            <td data-res-min :data-label="t('fiche.colMin')">
+              <template v-if="row.min !== null">{{ row.min }}</template>
+              <span v-else class="res__unproven">{{ t("fiche.notVerified") }}</span>
             </td>
+            <td data-res-recommended :data-label="t('fiche.colRecommended')">
+              <template v-if="row.recommended !== null">{{ row.recommended }}</template>
+              <span v-else class="res__unproven">{{ row.key === "disk" ? t("fiche.notApplicable") : t("fiche.notVerified") }}</span>
+            </td>
+            <td data-res-server :data-label="t('fiche.colThisServer')">{{ row.server }}</td>
           </tr>
         </tbody>
       </table>
@@ -156,30 +155,46 @@ const TONES = { too_small: "error", publisher_above: "warn", unproven: "info" } 
 
 <style scoped>
 .res__scroll {
-  overflow-x: auto;
+  min-width: 0;
 }
 
-.res__table {
-  width: 100%;
-  border-collapse: collapse;
+/* Une carte par ressource : jamais de colonne étroite, donc jamais un mot coupé en plein milieu. */
+.res__table,
+.res__table tbody,
+.res__table tr,
+.res__table th,
+.res__table td {
+  display: block;
   text-align: left;
+}
+
+.res__table tr {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) 0;
+  border-bottom: var(--border-width) solid var(--bd);
 }
 
 .res__table th,
 .res__table td {
-  padding: var(--space-2) var(--space-3);
-  border-bottom: var(--border-width) solid var(--bd);
-  vertical-align: top;
-}
-
-.res__table thead th {
-  color: var(--tx-secondary);
-  font-size: var(--fs-small);
-  font-weight: var(--fw-semibold);
+  padding: 0;
 }
 
 .res__table tbody th {
-  font-weight: var(--fw-medium);
+  font-weight: var(--fw-semibold);
+}
+
+.res__table td {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.res__table td::before {
+  color: var(--tx-secondary);
+  content: attr(data-label);
 }
 
 .res__none,

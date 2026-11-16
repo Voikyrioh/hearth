@@ -66,7 +66,7 @@ describe("la page (BR-FICHE-014, 015)", () => {
     expect(questionInput(wrapper, "max_players").element.value).toBe("8");
     expect(questionInput(wrapper, "password").element.value).toBe("");
     expect(wrapper.get("[data-install-version]").text()).toBe(
-      "Version : vanilla-1.4.5.8 (la seule proposée par cette fiche).",
+      "Hearth installe toujours la même image du programme serveur : elle ne se choisit pas. La version du jeu, elle, se choisit plus haut.",
     );
     // Aucun champ libre : ni image, ni variable, ni commande, ni dossier.
     expect(wrapper.find('[data-field="image"]').exists()).toBe(false);
@@ -519,6 +519,40 @@ describe("les refus de l'agent ramènent à la page, la saisie reste (BR-FICHE-0
     expect(refusal).toContain("La longueur de ce texte n'est pas permise.");
     expect(document.activeElement).toBe(questionInput(wrapper, "motd").element);
     expect(questionInput(wrapper, "motd").element.value).toBe("trop long");
+    wrapper.unmount();
+  });
+
+  it("« Aller au champ » d'un refus de version ramène à l'étape « Réponses » et met le curseur dans le champ", async () => {
+    const { wrapper, bridge } = await bootCatalogue((b) => {
+      const detail = b.catalog.get("terraria");
+      const motd = detail?.questions.find((item) => item.id === "motd");
+      if (detail && motd) {
+        detail.questions.push({ ...motd, id: "version", label: "Version de Minecraft" });
+      }
+    }, installPath("terraria"));
+    await openSummary(wrapper);
+    vi.spyOn(bridge, "installFiche").mockResolvedValue({
+      kind: "refused",
+      refusal: {
+        kind: "pack_refused",
+        reason: "PACK_VERSION_MISMATCH",
+        mods: null,
+        host: null,
+        packVersion: "1.20.1",
+        chosenVersion: "1.21.1",
+      },
+    });
+    await confirmTop("Installer le serveur de jeu");
+    await settle();
+    expect(wrapper.get("[data-install-refusal]").text()).toContain(
+      "Ce pack est fait pour Minecraft 1.20.1, mais vous avez choisi la version 1.21.1.",
+    );
+    // On est à l'étape « Ressources » : le champ est à l'étape précédente.
+    expect(wrapper.find("[data-install-back]").exists()).toBe(true);
+    (wrapper.get("[data-install-refusal-goto]").element as HTMLElement).click();
+    await settle();
+    expect(wrapper.find("[data-install-back]").exists()).toBe(false);
+    expect(document.activeElement).toBe(questionInput(wrapper, "version").element);
     wrapper.unmount();
   });
 
