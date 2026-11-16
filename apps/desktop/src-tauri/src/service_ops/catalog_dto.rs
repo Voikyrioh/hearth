@@ -45,7 +45,7 @@ impl From<FicheStatus> for FicheStatusDto {
 }
 
 /// Une fiche dans la liste.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FicheCardDto {
     pub id: String,
@@ -54,6 +54,33 @@ pub struct FicheCardDto {
     pub version: u32,
     pub status: FicheStatusDto,
     pub installable: bool,
+    /// Ce qui retient une fiche en cours de preuve, dit au joueur (BR-FICHE-061) ; `null` pour une fiche publiée.
+    pub preview_reason: Option<String>,
+    /// La mémoire recommandée et sa preuve (BR-FICHE-064) ; `null` quand la fiche ne recommande aucun chiffre.
+    pub memory: Option<FicheMemoryHintDto>,
+    /// L'identifiant du JEU dans le magasin Steam (BR-FICHE-062) ; `null` pour un jeu hors Steam.
+    pub steam_app_id: Option<u32>,
+    /// L'illustration embarquée de l'agent, pour un jeu absent de Steam (BR-FICHE-062) ; `null` sinon.
+    pub illustration: Option<FicheIllustrationDto>,
+}
+
+/// Ce qu'il faut pour demander l'illustration d'une fiche et réserver sa place dans la page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FicheIllustrationDto {
+    pub digest: String,
+    pub bytes: u32,
+    pub width: u16,
+    pub height: u16,
+    pub media_type: String,
+}
+
+/// La mémoire conseillée d'une carte : le chiffre et sa preuve.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FicheMemoryHintDto {
+    pub recommended_bytes: f64,
+    pub evidence: FicheEvidenceDto,
 }
 
 impl From<&FicheCard> for FicheCardDto {
@@ -65,6 +92,10 @@ impl From<&FicheCard> for FicheCardDto {
             version,
             status,
             installable,
+            preview_reason,
+            memory,
+            steam_app_id,
+            illustration,
         } = card;
         Self {
             id: id.clone(),
@@ -73,6 +104,19 @@ impl From<&FicheCard> for FicheCardDto {
             version: *version,
             status: (*status).into(),
             installable: *installable,
+            preview_reason: preview_reason.clone(),
+            steam_app_id: *steam_app_id,
+            illustration: illustration.as_ref().map(|view| FicheIllustrationDto {
+                digest: view.digest.clone(),
+                bytes: view.bytes,
+                width: view.width,
+                height: view.height,
+                media_type: view.media_type.clone(),
+            }),
+            memory: memory.as_ref().map(|hint| FicheMemoryHintDto {
+                recommended_bytes: hint.recommended_bytes as f64,
+                evidence: (&hint.evidence).into(),
+            }),
         }
     }
 }
@@ -86,7 +130,7 @@ pub struct RefusedFicheDto {
 }
 
 /// La réponse de `GET /catalog`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogDto {
     pub fiches: Vec<FicheCardDto>,

@@ -113,6 +113,15 @@ pub enum LinkError {
     /// Le disque n'a pas écrit le suivi à temps : l'action n'a PAS été lancée.
     #[error("disque trop lent : l'action n'a pas été lancée")]
     TrackingSlow,
+    /// Une lecture binaire dépasse la borne demandée (HRT-240) : coupée, rien n'est rendu.
+    #[error("réponse trop volumineuse")]
+    TooLarge,
+    /// Le type ou la signature de ce que l'agent a rendu n'est pas celui attendu (HRT-240).
+    #[error("contenu inattendu")]
+    UnexpectedContent,
+    /// Le contenu rendu n'a pas l'empreinte annoncée par la liste (HRT-240) : jamais servi ni gardé.
+    #[error("empreinte différente de celle annoncée")]
+    DigestMismatch,
     #[error("l'empreinte du serveur a changé")]
     FingerprintChanged,
     #[error("versions incompatibles")]

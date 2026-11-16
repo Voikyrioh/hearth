@@ -313,6 +313,9 @@ const EXPECTED: &[(&str, &str)] = &[
     ),
     ("getNotifyOnSecurityAlert", ""),
     ("setNotifyOnSecurityAlert", "enabled: boolean"),
+    // HRT-239 : le réglage « Images des jeux depuis Steam » (un booléen, aucun texte libre).
+    ("getRemoteGameImages", ""),
+    ("setRemoteGameImages", "enabled: boolean"),
     ("getAgentUpdate", "serverId: string"),
     (
         "updateAgent",
@@ -355,6 +358,8 @@ const EXPECTED: &[(&str, &str)] = &[
     ("ackServiceLogs", "session: string, batches: number"),
     ("keepServiceLogs", "page: number"),
     ("openEngineDocs", ""),
+    // HRT-248 : la page d'installation de l'agent du site Hearth ; aucun paramètre (adresse constante de la coquille).
+    ("openAgentInstallDocs", ""),
     // HRT-84 : le suivi des opérations de service. `listServiceOperations` rejoue l'état tenu côté Rust ;
     // `ackServiceOperations` dit quelles issues l'interface a annoncées ; `decideServiceOperation` est le SEUL
     // geste (un acte confirmé : la route est construite par la coquille, le choix est une liste fermée).
@@ -539,6 +544,8 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "listSecurityStates",
     "getNotifyOnSecurityAlert",
     "setNotifyOnSecurityAlert",
+    "getRemoteGameImages",
+    "setRemoteGameImages",
     "getAgentUpdate",
     "ackAgentResult",
     "getReauthState",
@@ -553,6 +560,7 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "ackServiceLogs",
     "keepServiceLogs",
     "openEngineDocs",
+    "openAgentInstallDocs",
     "listServiceOperations",
     "ackServiceOperations",
     "deletePreview",

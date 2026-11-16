@@ -9,6 +9,7 @@ use super::LinkManager;
 use super::parse::parse;
 use crate::domain::server::ServerId;
 use crate::error::LinkError;
+use crate::ports::transport::{BinaryBody, RESPONSE_TOO_LARGE, TransportError};
 
 const CATALOG_PATH: &str = "/catalog";
 
@@ -31,6 +32,40 @@ pub fn fiche_path(id: &str) -> Option<String> {
     is_stable_id(id).then(|| format!("{CATALOG_PATH}/{id}"))
 }
 
+/// Taille maximale d'une illustration lue chez l'agent : 512 Kio (l'agent en sert 300 Kio au plus).
+pub const ILLUSTRATION_MAX_BYTES: usize = 512 * 1024;
+
+/// Le chemin de l'illustration d'une fiche, ou `None` si l'identifiant n'en est pas un.
+pub fn illustration_path(fiche: &str) -> Option<String> {
+    fiche_path(fiche).map(|path| format!("{path}/illustration"))
+}
+
+/// Juge ce que l'agent a rendu (HRT-240, ADR-0061) : taille bornée, type `image/jpeg`, signature JPEG, SHA-256 égal à
+/// l'empreinte annoncée par la liste (`expected_hex`, 64 hexadécimaux minuscules). Fonction pure : un agent ou un
+/// intermédiaire ne peut pas substituer un contenu.
+pub fn check_illustration_body(body: &BinaryBody, expected_hex: &str) -> Result<(), LinkError> {
+    use sha2::{Digest, Sha256};
+    if body.bytes.len() > ILLUSTRATION_MAX_BYTES {
+        return Err(LinkError::TooLarge);
+    }
+    let typed = body
+        .content_type
+        .as_deref()
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("image/jpeg"));
+    if !typed || !hearth_proto::jpeg::has_jpeg_signature(&body.bytes) {
+        return Err(LinkError::UnexpectedContent);
+    }
+    let mut actual = String::with_capacity(64);
+    for byte in Sha256::digest(&body.bytes) {
+        use std::fmt::Write as _;
+        let _ = write!(actual, "{byte:02x}");
+    }
+    if actual != expected_hex {
+        return Err(LinkError::DigestMismatch);
+    }
+    Ok(())
+}
+
 impl LinkManager {
     /// Les fiches que CET agent propose (`GET /catalog`), plus le nombre de celles qu'il a écartées. Hors
     /// « Connecté » : `NotConnected`.
@@ -51,11 +86,103 @@ impl LinkManager {
         let body = self.typed_get(&target, &token, path).await?;
         parse(body, "fiche")
     }
+
+    /// L'illustration embarquée d'une fiche chez l'agent (`GET /catalog/{id}/illustration`, HRT-240) : lecture binaire
+    /// BORNÉE à 512 Kio, type et signature JPEG vérifiés, SHA-256 égal à `expected_hex` (l'empreinte de la liste). Rend
+    /// les octets, qui ne sont gardés par personne ici. Fiche inconnue : `Rejected(Some(FicheUnknown))` ; fiche listée sans
+    /// illustration : `Rejected(Some(IllustrationAbsent))` ; un identifiant ou une empreinte qui n'en sont pas :
+    /// `InvalidInput`, rien ne part. Hors « Connecté » : `NotConnected`.
+    pub async fn read_fiche_illustration(
+        &self,
+        id: &ServerId,
+        fiche: &str,
+        expected_hex: &str,
+    ) -> Result<Vec<u8>, LinkError> {
+        let path = illustration_path(fiche)
+            .ok_or(LinkError::InvalidInput(crate::error::InputField::Fiche))?;
+        let digest_ok = expected_hex.len() == 64
+            && expected_hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !digest_ok {
+            return Err(LinkError::InvalidInput(crate::error::InputField::Fiche));
+        }
+        let (target, token) = self.credentials(id)?;
+        let deps = &self.inner.deps;
+        let body = tokio::time::timeout(
+            deps.config.request_timeout,
+            deps.transport
+                .get_binary(&target, &token, &path, ILLUSTRATION_MAX_BYTES),
+        )
+        .await
+        .map_err(|_| LinkError::Timeout)?
+        .map_err(|error| match error {
+            TransportError::Protocol(text) if text == RESPONSE_TOO_LARGE => LinkError::TooLarge,
+            other => LinkError::from(other),
+        })?;
+        check_illustration_body(&body, expected_hex)?;
+        Ok(body.bytes)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn body(bytes: &[u8], content_type: Option<&str>) -> BinaryBody {
+        BinaryBody {
+            content_type: content_type.map(str::to_owned),
+            bytes: bytes.to_vec(),
+        }
+    }
+
+    fn hex_of(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    #[test]
+    fn an_illustration_is_judged_by_size_type_signature_and_digest() {
+        let image = [0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4];
+        let good = body(&image, Some("image/jpeg"));
+        assert_eq!(check_illustration_body(&good, &hex_of(&image)), Ok(()));
+        let wrong_hash = "00".repeat(32);
+        assert_eq!(
+            check_illustration_body(&good, &wrong_hash),
+            Err(LinkError::DigestMismatch)
+        );
+        for bad in [
+            body(&image, Some("text/html")),
+            body(&image, None),
+            body(b"\x89PNG\r\n\x1a\n", Some("image/jpeg")),
+        ] {
+            assert_eq!(
+                check_illustration_body(&bad, &hex_of(&bad.bytes)),
+                Err(LinkError::UnexpectedContent)
+            );
+        }
+        let mut big = image.to_vec();
+        big.resize(ILLUSTRATION_MAX_BYTES + 1, 0);
+        let big = body(&big, Some("image/jpeg"));
+        assert_eq!(
+            check_illustration_body(&big, &hex_of(&big.bytes)),
+            Err(LinkError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn an_illustration_path_never_becomes_another_path() {
+        assert_eq!(
+            illustration_path("minecraft").as_deref(),
+            Some("/catalog/minecraft/illustration")
+        );
+        for bad in ["", "../x", "a/b", "A", "a?x=1"] {
+            assert!(illustration_path(bad).is_none(), "{bad}");
+        }
+    }
 
     #[test]
     fn a_fiche_identifier_never_becomes_another_path() {

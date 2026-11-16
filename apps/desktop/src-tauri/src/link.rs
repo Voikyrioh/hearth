@@ -1019,3 +1019,27 @@ pub fn client_name(version: &str) -> String {
         .unwrap_or_else(|| "poste".to_owned());
     format!("{computer}/{version}")
 }
+
+/// La lecture de l'illustration embarquée d'une fiche chez l'agent d'un serveur du carnet (HRT-240), pour le protocole
+/// `hearth-illustration` : la liaison borne, type et vérifie le contenu contre l'empreinte annoncée.
+pub struct LinkAgentImages {
+    runtime: Arc<LinkRuntime>,
+}
+
+impl LinkAgentImages {
+    pub fn new(runtime: Arc<LinkRuntime>) -> Self {
+        Self { runtime }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::illustrations::AgentImages for LinkAgentImages {
+    async fn fetch(&self, server_id: &str, fiche_id: &str, hex: &str) -> Option<Vec<u8>> {
+        let id = hearth_link::domain::server::ServerId::parse(server_id).ok()?;
+        self.runtime
+            .manager()
+            .read_fiche_illustration(&id, fiche_id, hex)
+            .await
+            .ok()
+    }
+}
