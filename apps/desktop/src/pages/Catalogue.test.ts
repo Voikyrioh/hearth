@@ -147,6 +147,20 @@ describe("les sections, la recherche et les filtres (BR-FICHE-063, BR-FICHE-033)
     wrapper.unmount();
   });
 
+  it("une recherche cachée par le filtre ne dit pas que le jeu n'existe pas : elle propose de tout afficher (revue UX v2, N5)", async () => {
+    const { wrapper } = await bootCatalogue(withWaiting);
+    await wrapper.findAll("[data-catalogue-filters] [role=radio]")[1]?.trigger("click");
+    await wrapper.get("input[type=search]").setValue("palworld");
+    expect(wrapper.get("[data-catalogue-no-match]").text()).toContain(
+      "« palworld » existe, mais le filtre choisi le cache.",
+    );
+    await wrapper.get("[data-catalogue-show-all]").trigger("click");
+    expect(
+      wrapper.findAll("[data-fiche-card]").map((card) => card.attributes("data-fiche")),
+    ).toEqual(["palworld"]);
+    wrapper.unmount();
+  });
+
   it("sans fiche qui attend : ni filtre « Bientôt », ni section", async () => {
     const { wrapper } = await bootCatalogue();
     const labels = wrapper

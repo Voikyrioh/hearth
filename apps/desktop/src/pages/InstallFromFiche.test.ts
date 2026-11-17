@@ -1,6 +1,7 @@
 import { flushPromises, type VueWrapper } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import type { SimulatedLinkBridge } from "@/link";
+import { demoPublished } from "@/link/simulated-fiches";
 import { useServicesStore } from "@/stores/services";
 import { dialogButton, typeInto } from "@/test/confirm";
 import {
@@ -729,6 +730,19 @@ describe("les refus de l'agent ramènent à la page, la saisie reste (BR-FICHE-0
 });
 
 describe("la variante (BR-FICHE-060)", () => {
+  it("propose le moteur d'un serveur Minecraft par ses variantes, sans dire que « l'image ne se choisit pas » (revue UX v2, N4)", async () => {
+    const { wrapper } = await bootCatalogue((bridge) => {
+      const minecraft = demoPublished().find((fiche) => fiche.card.id === "minecraft");
+      if (minecraft) bridge.catalog.put(minecraft);
+    }, installPath("minecraft"));
+    const choice = wrapper.get("[data-variant-choice]").text();
+    for (const engine of ["Officiel", "Paper", "Fabric", "Forge", "NeoForge"]) {
+      expect(choice).toContain(engine);
+    }
+    expect(wrapper.find("[data-install-version]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("propose la variante par défaut, montre ses questions et pas celles d'une autre, et dit qu'elle ne se change plus", async () => {
     const { wrapper } = await bootCatalogue(rich, installPath("essai"));
     const cards = wrapper.findAll("[data-variant-card]");

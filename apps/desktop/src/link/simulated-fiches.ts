@@ -507,7 +507,7 @@ export function waitingCards(): FicheCard[] {
     waiting(
       "vrising",
       "V Rising",
-      "Le serveur officiel de V Rising, sans mod, par Wine.",
+      "Le serveur officiel de V Rising, sans mod, lancé avec Wine (une couche qui fait tourner un jeu Windows sur Linux).",
       "Tout fonctionne sauf un point : l'enregistrement du monde avant l'arrêt n'est pas encore vérifié.",
     ),
     waiting(
@@ -793,8 +793,9 @@ export function demoPublished(): FicheDetail[] {
     publishedGame({
       id: "enshrouded",
       name: "Enshrouded",
-      summary: "Le serveur officiel d'Enshrouded, sans mod, par Wine.",
-      version: 1,
+      summary:
+        "Le serveur officiel d'Enshrouded, sans mod, lancé avec Wine (une couche qui fait tourner un jeu Windows sur Linux).",
+      version: 2,
       digest: "c3e6a9b2d5f8c1e4a7b0d3f6c9e2a5b8d1f4c7a0e3b6d9f2c5a8e1b4d7f0c3a6",
       image: { repository: "mornedhels/enshrouded-server", tag: "latest" },
       ports: [{ id: "game", container: 15637, protocol: "udp", role: "game", publish: "always" }],

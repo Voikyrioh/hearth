@@ -260,6 +260,8 @@ test("« Voir tous les réglages » dans l'installation : replié, déplié dans
   await page.goto("/?nodev#/servers/forge/catalogue/terraria/installer");
   await expect(page.locator("[data-page-title]")).toHaveText("Installer Terraria");
   await expect(page.locator("[data-install-settings-body]")).toHaveCount(0);
+  // Un seul dépliant pour les réglages avancés ET tous les autres : on l'ouvre d'abord (revue UX v2, I7).
+  await page.locator("[data-install-advanced-summary]").click();
   await page.locator("[data-install-settings-toggle]").click();
   const body = page.locator("[data-install-settings-body]");
   await expect(body).toContainText("28 réglages, dont 6 demandés plus haut.");
