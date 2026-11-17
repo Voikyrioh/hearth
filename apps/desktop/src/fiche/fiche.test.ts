@@ -365,7 +365,7 @@ describe("la machine et la place (BR-FICHE-020 à 023)", () => {
     const clamped = placement(rich(), machine(4, 3));
     expect(clamped.memory.clamped).toBe(true);
     expect(clamped.resources.memoryBytes).toBeLessThanOrEqual(3 * GIB);
-    // Aucune preuve : proposition prudente, tous les processeurs.
+    // Aucune preuve : proposition prudente, deux cœurs au plus.
     const bare = placement(terraria(), machine(4, 16));
     expect(bare.memory.recommended).toBeNull();
     expect(bare.resources.cpuMillis).toBe(2000);

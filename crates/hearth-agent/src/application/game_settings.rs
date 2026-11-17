@@ -310,6 +310,75 @@ fn effect_wire(effect: Effect) -> SettingEffect {
     }
 }
 
+/// La réponse que demande un changement de réglage passé au conteneur (`None` : la réponse est oubliée). « Non écrit »
+/// n'existe pas pour un réglage que la fiche propose : la traduction pose toujours sa valeur proposée. Le dire plutôt
+/// que d'enregistrer autre chose que ce qui est demandé (`Reset` remet la proposition, donc oublie la réponse).
+fn wanted_answer(setting: &Setting, change: &Change) -> Result<Option<String>, SettingsError> {
+    match change {
+        Change::Set(value) => Ok(Some(value.clone())),
+        Change::Unset if setting.proposed.is_some() => Err(SettingsError::Invalid("action")),
+        Change::Unset | Change::Reset => Ok(None),
+    }
+}
+
+/// Ce qu'un refus tardif de la recréation partage : la partie fichier (enregistrée, journalisée telle quelle), la tentative
+/// sur le conteneur (journalisée à part, en échec) et les scellés à remettre. Une fonction pure, sans E/S (FIX:01M7KAB43G8ZFZ2RN8YEQ0QC30).
+#[derive(Debug)]
+struct RefusalSplit {
+    file_only: Vec<String>,
+    file_secrets: Vec<(String, Secret)>,
+    env_only: Vec<String>,
+    env_secrets: Vec<(String, Secret)>,
+    sealed_back: Vec<(String, SealedBlob)>,
+}
+
+fn split_after_refusal(
+    changed: &[String],
+    secrets: &[(String, Secret)],
+    env_ids: &[String],
+    stored_sealed: &[(String, SealedBlob)],
+) -> RefusalSplit {
+    let copy =
+        |(id, secret): &(String, Secret)| (id.clone(), Secret::new(secret.expose().to_owned()));
+    RefusalSplit {
+        file_only: changed
+            .iter()
+            .filter(|id| !env_ids.contains(id))
+            .cloned()
+            .collect(),
+        file_secrets: secrets
+            .iter()
+            .filter(|(id, _)| !env_ids.contains(id))
+            .map(copy)
+            .collect(),
+        env_only: changed
+            .iter()
+            .filter(|id| env_ids.contains(id))
+            .cloned()
+            .collect(),
+        env_secrets: secrets
+            .iter()
+            .filter(|(id, _)| env_ids.contains(id))
+            .map(copy)
+            .collect(),
+        sealed_back: stored_sealed
+            .iter()
+            .filter(|(id, _)| env_ids.contains(id))
+            .cloned()
+            .collect(),
+    }
+}
+
+/// La raison, au journal, d'une recréation refusée.
+fn reason_of(error: &UpdateError) -> crate::domain::audit::Reason {
+    use crate::domain::audit::Reason;
+    match error {
+        UpdateError::Busy { .. } => Reason::Busy,
+        UpdateError::Conflict { .. } => Reason::Conflict,
+        _ => Reason::Internal,
+    }
+}
+
 fn refused(refusal: &Refusal, fiche: &Fiche) -> SettingsError {
     SettingsError::Refused {
         // Un identifiant venu du client n'est rendu que s'il est celui d'un réglage de la fiche.
@@ -1110,7 +1179,6 @@ impl GameSettings {
         }));
 
         // FIX:01M7KAB43G8ZFZ2RN8YEQ0QC30
-        // FIX:01M7KAB43G8ZFZ2RN8YEQ0QC30
         // Si la recréation est refusée après l'enregistrement, les réglages passés par le conteneur reviennent à ce
         // qu'ils étaient (le fichier, lui, est déjà écrit et garde sa valeur).
         let revert = game_change.is_some().then(|| {
@@ -1123,18 +1191,11 @@ impl GameSettings {
             }
             // Les anciens scellés des réglages passés au conteneur reviennent ; sans ancien scellé, l'état « non
             // secret » du réglage fait supprimer le nouveau (le dépôt retire tout scellé que l'état ne réclame plus).
-            let old: Vec<(String, SealedBlob)> = loaded
+            let stored: &[(String, SealedBlob)] = loaded
                 .stored
                 .as_ref()
-                .map(|stored| {
-                    stored
-                        .sealed
-                        .iter()
-                        .filter(|(id, _)| env_ids.contains(id))
-                        .cloned()
-                        .collect()
-                })
-                .unwrap_or_default();
+                .map_or(&[], |stored| stored.sealed.as_slice());
+            let old = split_after_refusal(&changed, &secrets, &env_ids, stored).sealed_back;
             (back, old)
         });
         let rev = match self
@@ -1171,7 +1232,7 @@ impl GameSettings {
             drop(_lock);
             let partial =
                 changed.iter().any(|id| !env_ids.contains(id)) || !request.others.is_empty();
-            if let Err(error) = self
+            if let Err((error, reason)) = self
                 .recreate(
                     key,
                     loaded.spec_rev,
@@ -1202,29 +1263,29 @@ impl GameSettings {
                     );
                 }
                 // FIX:01M7KAB43G8ZFZ2RN8YEQ0QC30
-                // FIX:01M7KAB43G8ZFZ2RN8YEQ0QC30
-                // Le journal dit ce qui a vraiment été enregistré : seulement les réglages du fichier.
-                let file_only: Vec<String> = changed
-                    .iter()
-                    .filter(|id| !env_ids.contains(id))
-                    .cloned()
-                    .collect();
-                let file_secrets: Vec<(String, Secret)> = secrets
-                    .iter()
-                    .filter(|(id, _)| !env_ids.contains(id))
-                    .map(|(id, secret)| (id.clone(), Secret::new(secret.expose().to_owned())))
-                    .collect();
-                if !file_only.is_empty() || !request.others.is_empty() {
+                // Le journal dit ce qui s'est passé : la partie fichier a réussi et s'inscrit telle quelle ; la tentative
+                // sur le conteneur, refusée, s'inscrit à part, sans aucune valeur.
+                let split = split_after_refusal(&changed, &secrets, &env_ids, &[]);
+                if !split.file_only.is_empty() || !request.others.is_empty() {
                     self.record(
                         &loaded,
                         actor,
-                        &file_only,
-                        &file_secrets,
+                        &split.file_only,
+                        &split.file_secrets,
                         &request.others,
-                        Outcome::Failed(crate::domain::audit::Reason::Conflict),
+                        Outcome::Succeeded,
                     )
                     .await;
                 }
+                self.record(
+                    &loaded,
+                    actor,
+                    &split.env_only,
+                    &split.env_secrets,
+                    &[],
+                    Outcome::Failed(reason),
+                )
+                .await;
                 return Err(error);
             }
         }
@@ -1373,15 +1434,7 @@ impl GameSettings {
             let Some(setting) = fiche.setting(id) else {
                 return Err(SettingsError::Invalid("id"));
             };
-            let value = match change {
-                Change::Set(value) => Some(value.clone()),
-                // « Non écrit » n'existe pas pour un réglage que la fiche propose : la traduction pose toujours sa
-                // valeur proposée. Le dire plutôt que d'enregistrer autre chose que ce qui est demandé.
-                Change::Unset if setting.proposed.is_some() => {
-                    return Err(SettingsError::Invalid("action"));
-                }
-                Change::Unset | Change::Reset => None,
-            };
+            let value = wanted_answer(setting, change)?;
             // Un secret saisi arrive par la liste des secrets de l'enregistrement.
             let value = if setting.is_secret() {
                 secrets
@@ -1427,6 +1480,10 @@ impl GameSettings {
     /// acceptée ; son déroulement se suit comme celui de toute modification.
     fn recreate_error(failed: UpdateFailed, ids: Vec<String>, partial: bool) -> SettingsError {
         match failed.error {
+            // Un refus tardif d'une demande mixte dit toujours « le fichier est enregistré, le conteneur non ».
+            UpdateError::Busy { .. } | UpdateError::Conflict { .. } if partial => {
+                SettingsError::RecreateNotAvailable { ids, partial }
+            }
             UpdateError::Busy { .. } => SettingsError::Busy,
             UpdateError::NotFound | UpdateError::Adopted => SettingsError::NotAGameService,
             UpdateError::SecretsUnreadable => SettingsError::SecretsUnreadable,
@@ -1453,16 +1510,22 @@ impl GameSettings {
         actor: &Actor,
         ids: Vec<String>,
         partial: bool,
-    ) -> Result<(), SettingsError> {
+    ) -> Result<(), (SettingsError, crate::domain::audit::Reason)> {
         let Some(updates) = self.updates.get() else {
-            return Err(SettingsError::RecreateNotAvailable { ids, partial });
+            return Err((
+                SettingsError::RecreateNotAvailable { ids, partial },
+                crate::domain::audit::Reason::Internal,
+            ));
         };
         let op_key = format!("game-settings-{}", self.clock.now().unix_timestamp_nanos());
         updates
             .update_game(key, spec_rev, change, actor.clone(), &op_key)
             .await
             .map(|_| ())
-            .map_err(|failed| Self::recreate_error(failed, ids, partial))
+            .map_err(|failed| {
+                let reason = reason_of(&failed.error);
+                (Self::recreate_error(failed, ids, partial), reason)
+            })
     }
 
     fn account_of(actor: &Actor) -> String {
@@ -1804,5 +1867,85 @@ impl GameSettings {
             }
         }
         Ok((settings, generated))
+    }
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::*;
+
+    fn blob(byte: u8) -> SealedBlob {
+        SealedBlob {
+            nonce: [byte; crate::domain::sealed::NONCE_LEN],
+            bytes: vec![byte, byte],
+        }
+    }
+
+    #[test]
+    fn a_late_refusal_keeps_the_file_part_and_puts_the_container_part_back() {
+        let changed = vec!["motd".to_owned(), "password".to_owned(), "box".to_owned()];
+        let secrets = vec![
+            (
+                "password".to_owned(),
+                Secret::new("fichier-secret".to_owned()),
+            ),
+            (
+                "rcon".to_owned(),
+                Secret::new("conteneur-secret".to_owned()),
+            ),
+        ];
+        let env_ids = vec!["box".to_owned(), "rcon".to_owned()];
+        let stored = vec![
+            ("password".to_owned(), blob(1)),
+            ("rcon".to_owned(), blob(2)),
+        ];
+        let split = split_after_refusal(&changed, &secrets, &env_ids, &stored);
+        assert_eq!(split.file_only, ["motd", "password"]);
+        assert_eq!(split.env_only, ["box"]);
+        assert_eq!(split.file_secrets.len(), 1);
+        assert_eq!(split.file_secrets[0].0, "password");
+        assert_eq!(split.env_secrets.len(), 1);
+        assert_eq!(split.env_secrets[0].0, "rcon");
+        // Seuls les anciens scellés des réglages du conteneur reviennent ; celui du fichier reste tel qu'enregistré.
+        assert_eq!(split.sealed_back, vec![("rcon".to_owned(), blob(2))]);
+    }
+
+    #[test]
+    fn unsetting_a_container_setting_that_has_a_proposed_value_is_refused() {
+        let fiche = crate::domain::catalog::embedded::EMBEDDED
+            .iter()
+            .find(|entry| entry.dir == "minecraft")
+            .expect("minecraft")
+            .load()
+            .expect("chargée");
+        let motd = fiche.setting("motd").expect("motd");
+        assert!(motd.proposed.is_some());
+        assert!(matches!(
+            wanted_answer(motd, &Change::Unset),
+            Err(SettingsError::Invalid("action"))
+        ));
+        assert_eq!(wanted_answer(motd, &Change::Reset).ok(), Some(None));
+        assert_eq!(
+            wanted_answer(motd, &Change::Set("Salut".into())).ok(),
+            Some(Some("Salut".to_owned()))
+        );
+    }
+
+    #[test]
+    fn the_journal_reason_follows_the_refusal() {
+        use crate::domain::audit::Reason;
+        let busy = UpdateError::Busy {
+            by: String::new(),
+            kind: crate::domain::ops::OpKind::Update,
+        };
+        assert_eq!(reason_of(&busy), Reason::Busy);
+        assert_eq!(
+            reason_of(&UpdateError::Conflict {
+                current_rev: 2,
+                outside: false
+            }),
+            Reason::Conflict
+        );
+        assert_eq!(reason_of(&UpdateError::NotFound), Reason::Internal);
     }
 }

@@ -879,7 +879,7 @@ fn game_diff_never_carries_the_filler_of_a_generated_secret() {
 }
 
 #[test]
-fn game_diff_reports_a_variable_that_disappears_as_none() {
+fn game_diff_falls_back_to_the_proposed_value_when_an_answer_is_removed() {
     // Une réponse retirée revient à la valeur proposée ; une variable qui n'existe plus d'un côté est `None`.
     let changed = diff(&[("motd", "Salut")], &[]);
     let motd = changed.env.iter().find(|(name, _)| name == "MOTD");

@@ -123,8 +123,8 @@ export interface Placement {
 
 /**
  * Où placer les curseurs (BR-FICHE-020) : la mémoire sur la valeur recommandée de la fiche (ramenée au maximum de la
- * machine si elle le dépasse) ; le processeur sur la valeur recommandée quand elle est prouvée, sinon sur tous les
- * processeurs du serveur. Une valeur sans preuve n'est jamais utilisée.
+ * machine si elle le dépasse) ; le processeur sur la valeur recommandée quand elle est prouvée, sinon sur deux cœurs au
+ * plus (tous ceux du serveur s'il en a moins, BR-RES-039). Une valeur sans preuve n'est jamais utilisée.
  */
 export function placement(detail: FicheDetail, capacity: EngineCapacity): Placement {
   const memoryRecommended = proven(

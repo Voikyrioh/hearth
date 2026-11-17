@@ -1,20 +1,21 @@
 ---
 id: BR-RES-039
 domaine: RES
-titre: Application sans fiche : 2 Go, ou la moitié de la mémoire libre si elle est plus petite, jamais moins de 256 Mo ; deux cœurs au plus
+titre: Application sans fiche : 2 Go, ou la moitié de la mémoire libre si elle est plus petite, jamais moins de 256 Mo ; deux cœurs au plus, fiches sans chiffre de processeur comprises
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-paliers-de-memoire.md (BR-RES-038, BR-RES-039), HRT-146
 maj: 2026-11-17
 ---
 
-# BR-RES-039 — Application sans fiche : 2 Go, ou la moitié de la mémoire libre si elle est plus petite, jamais moins de 256 Mo ; deux cœurs au plus
+# BR-RES-039 — Application sans fiche : 2 Go, ou la moitié de la mémoire libre si elle est plus petite, jamais moins de 256 Mo ; deux cœurs au plus, fiches sans chiffre de processeur comprises
 
 ## Règle
 Pour une application sans fiche, Hearth n'a aucun chiffre. La mémoire proposée est 2 Go, ou la moitié de la mémoire encore disponible si cette moitié est plus petite, jamais moins de 256 Mo et jamais plus que la machine. « Disponible » : mémoire totale, moins la réserve, moins ce qui est déjà engagé par les services en marche. Le processeur proposé est deux cœurs au plus (tous ceux du serveur s'il en a moins) : un jeu inconnu ne reçoit jamais toute la machine, et l'utilisateur monte le curseur s'il le faut. Sous le curseur de mémoire, une seule phrase : « Hearth ne connaît pas cette application et propose {x}. Montez ce chiffre si elle en demande plus. ». Pour une fiche, le curseur part de la mémoire recommandée (`BR-RES-038`), ramenée au maximum de la machine si elle le dépasse, avec sa preuve (« mesuré » ou « chiffre de l'éditeur ») ; sous cette valeur, « Sous la mémoire recommandée : le serveur peut ralentir ou s'arrêter. » s'affiche sans bloquer. L'utilisateur change librement les deux valeurs.
 
 ## Application (code)
 - `apps/desktop/src/resources/start.ts::{proposedMemoryBytes, proposedCpuMillis, startingResources}`
+- `apps/desktop/src/fiche/fit.ts::placement` (une fiche sans chiffre de processeur prouvé reçoit la même proposition)
 - `apps/desktop/src/components/organisms/ResourceSliders.vue` (phrases sous le curseur de mémoire)
 
 ## Vérification
