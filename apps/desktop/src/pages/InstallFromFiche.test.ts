@@ -548,7 +548,7 @@ describe("lancer, suivre, terminer (BR-FICHE-013, 027, 034)", () => {
     expect(done.find("[data-game-address]").exists()).toBe(true);
     expect(done.find("[data-game-ports]").exists()).toBe(true);
     expect(done.get("[data-done-next]").text()).toContain(
-      "Il ne reste qu'à envoyer l'adresse à vos joueurs.",
+      "envoyer l'adresse à vos joueurs.",
     );
     expect(done.get("[data-done-steps] summary").text()).toMatch(
       /^Les étapes de l'installation : \d+ faites$/,

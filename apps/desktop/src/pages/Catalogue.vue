@@ -63,6 +63,13 @@ const limits = useEngineCapacity(
 );
 const capacityBytes = computed(() => limits.capacity.value?.memoryBytes ?? null);
 const serverName = computed(() => safeText(server.value?.name ?? ""));
+// Un jeu qui existe mais que le filtre cache : on le dit et on propose de tout afficher (jamais « il n'existe pas »).
+const elsewhere = computed(
+  () =>
+    filter.value !== "all" &&
+    query.value.trim() !== "" &&
+    counts(fiches.value, query.value).all > 0,
+);
 const nothingShown = computed(() => sections.value.ready.length + sections.value.soon.length === 0);
 const footer = computed(() =>
   agentVersion.value === null
@@ -153,8 +160,15 @@ function open(id: string) {
             {{
               query.trim() === ""
                 ? t("catalogue.emptyList")
-                : t("catalogue.noMatch", { text: safeText(query.trim()) })
+                : elsewhere
+                  ? t("catalogue.noMatchHere", { text: safeText(query.trim()) })
+                  : t("catalogue.noMatch", { text: safeText(query.trim()) })
             }}
+            <template v-if="elsewhere" #actions>
+              <HButton variant="secondary" size="sm" data-catalogue-show-all @click="filter = 'all'">
+                {{ t("catalogue.showAll") }}
+              </HButton>
+            </template>
           </Callout>
           <div v-else class="cat__sections" data-catalogue-list>
             <section

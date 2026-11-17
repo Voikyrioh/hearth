@@ -1,22 +1,28 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import GameAddressCard from "@/components/molecules/GameAddressCard.vue";
 import GamePortsCard from "@/components/molecules/GamePortsCard.vue";
 import ProgressSteps, { type ProgressStep } from "@/components/molecules/ProgressSteps.vue";
+import PublicAddressDialog from "@/components/organisms/PublicAddressDialog.vue";
+import { useCurrentServer } from "@/composables/useCurrentServer";
 import { useGameView } from "@/composables/useGameView";
+import type { ActReport } from "@/composables/useReauth";
+import { useServerAction } from "@/composables/useServerAction";
 import { t } from "@/i18n";
 import {
   DEPLOY_STEPS,
   DEPLOY_STEPS_WITH_WORLD,
   type FicheDetail,
+  getLinkBridge,
   type ServiceOperation,
 } from "@/link";
 import { stepName } from "@/serviceOps/messages";
 import { addressesOf } from "@/services/game";
 import { useServersStore } from "@/stores/servers";
+import { useToastsStore } from "@/stores/toasts";
 
 // L'écran de fin d'une installation par fiche (HRT-247, BR-FICHE-066) : le serveur de jeu est créé, il ne reste qu'à
 // donner l'adresse aux joueurs. Il dit « en marche » ou, quand la fiche déclare un premier démarrage long, « démarre » avec
@@ -60,6 +66,40 @@ const addresses = computed(() =>
 );
 const failed = computed(() => game.state.value.kind === "failed");
 
+// L'adresse d'internet des joueurs se renseigne ICI, sans quitter l'écran de fin (revue UX v2, N1) : la modification d'un
+// service qui ne change que cette adresse, un acte confirmé, jamais rejoué ; l'agent ne recrée rien.
+const { isConnected } = useCurrentServer();
+const toasts = useToastsStore();
+const action = useServerAction(() => props.serverId);
+const addressOpen = ref(false);
+async function performAddress(address: string, adminPassword: string | null): Promise<ActReport> {
+  const id = props.serverId;
+  const key = props.serviceKey;
+  const outcome = await action.run(
+    () => getLinkBridge().setPublicAddress(id, key, address, adminPassword),
+    { unknownMessage: "game.address.unknown", passwordMissingIsRefusal: true },
+  );
+  if (!outcome) {
+    if (action.passwordMissing.value) {
+      return { kind: "refused", refusal: { kind: "password_required" } };
+    }
+    return action.failedReport();
+  }
+  if (outcome.kind === "saved") {
+    toasts.push({
+      kind: "success",
+      message: t(address === "" ? "game.address.cleared" : "game.address.saved"),
+    });
+    void game.reload();
+    return { kind: "done" };
+  }
+  if (outcome.kind === "unknown") {
+    void game.reload();
+    return { kind: "unknown" };
+  }
+  return { kind: "refused", refusal: outcome.refusal };
+}
+
 const timeout = computed(() => props.detail.firstStart?.readyTimeoutSeconds ?? null);
 /** Une fiche qui déclare un premier démarrage long : le jeu démarre encore, la phase n'est pas lue. */
 const starting = computed(() => timeout.value !== null);
@@ -73,11 +113,13 @@ const text = computed(() => {
   }
   return null;
 });
-const next = computed(() =>
-  props.world === null
-    ? t("fiche.done.next")
-    : t("fiche.done.nextWorld", { world: safeText(props.world) }),
-);
+// Tant que le jeu démarre, on n'annonce pas un monde créé : il le sera au premier démarrage (revue UX v2, N3).
+const next = computed(() => {
+  if (props.world === null) return t("fiche.done.next");
+  return t(starting.value ? "fiche.done.nextWorldStarting" : "fiche.done.nextWorld", {
+    world: safeText(props.world),
+  });
+});
 /** La fiche déclare une console à distance : Hearth ne la publie jamais, il le dit. */
 const consoleUnpublished = computed(() =>
   props.detail.ports.some((port) => port.publish === "never"),
@@ -118,7 +160,21 @@ const stepsTitle = computed(() =>
         </HButton>
       </template>
     </Callout>
-    <GameAddressCard v-if="view" :addresses="addresses" :stopped="false" :can-edit="false" />
+    <GameAddressCard
+      v-if="view"
+      :addresses="addresses"
+      :stopped="false"
+      :can-edit="isConnected"
+      :reason="isConnected ? undefined : t('game.address.editNeedsLink')"
+      @edit="addressOpen = true"
+    />
+    <PublicAddressDialog
+      :open="addressOpen"
+      :server-id="serverId"
+      :current="view?.publicAddress ?? null"
+      :perform="performAddress"
+      @close="addressOpen = false"
+    />
     <GamePortsCard v-if="view" :ports="view.ports" />
     <p v-if="view && consoleUnpublished" class="done__text" data-done-console>
       {{ t("fiche.done.console") }}

@@ -1299,11 +1299,16 @@ export const fr = {
         "Hearth ne connaît pas votre adresse d'internet : votre box ne l'a pas donnée. Renseignez-la avec « Modifier l'adresse d'internet » : un nom de domaine, ou l'adresse IP de votre box.",
       publicNote: "C'est l'adresse que vous avez renseignée pour vos amis.",
       edit: "Modifier l'adresse d'internet",
+      editNeedsLink: "Le lien avec le serveur est coupé : l'adresse se modifie dès qu'il revient.",
+      editNeedsRight:
+        "Seul un compte qui a le droit de gérer les services de ce serveur peut modifier l'adresse d'internet.",
+      editNeedsEngine:
+        "Le moteur de conteneurs n'est pas prêt : l'adresse se modifie dès qu'il l'est.",
       editTitle: "Adresse pour vos joueurs",
       editSubmit: "Enregistrer l'adresse",
       editLabel: "Adresse à donner aux joueurs (facultatif)",
       editHelp:
-        "Le nom de domaine ou l'adresse IP par lesquels vos joueurs vous joignent depuis Internet. Hearth ne peut pas la deviner ni vérifier qu'elle est joignable. Laissez vide pour l'effacer.",
+        "Le nom de domaine ou l'adresse IP par lesquels vos joueurs vous joignent depuis internet. Hearth ne peut pas la deviner ni vérifier qu'elle est joignable. Laissez vide pour l'effacer.",
       editPlaceholder: "jeu.exemple.org",
       issue: {
         tooLong: "L'adresse fait 253 caractères au plus.",
@@ -1340,7 +1345,7 @@ export const fr = {
       listCopied: "Liste copiée.",
       listFailed: "Impossible de copier. Sélectionnez la liste et copiez-la à la main.",
       open: "Pour que des joueurs hors de votre réseau vous rejoignent, ouvrez ces ports sur votre box (redirection de ports vers l'adresse de ce serveur) et, si votre serveur a un pare-feu, sur ce pare-feu. Hearth ne les ouvre pas lui-même.",
-      unverified: "Hearth ne peut pas vérifier que ces ports sont joignables depuis Internet.",
+      unverified: "Hearth ne peut pas vérifier que ces ports sont joignables depuis internet.",
       changed: "Les ports ont changé : mettez à jour votre box et votre pare-feu.",
       none: "Ce service ne publie aucun port.",
       role: {
@@ -2038,6 +2043,8 @@ export const fr = {
     badgeReady: "Prêt à installer",
     badgeSoon: "Bientôt",
     noMatch: "Aucun jeu ne correspond à « {text} ». Essayez un autre nom.",
+    noMatchHere: "« {text} » existe, mais le filtre choisi le cache.",
+    showAll: "Afficher tous les jeux",
     emptyList: "Aucun jeu dans cette liste pour l'instant.",
     footer:
       "Fiches livrées avec Hearth {version}. Chaque fiche est écrite par la personne qui publie Hearth et installe une image publique sur votre serveur.",
@@ -2531,9 +2538,11 @@ export const fr = {
       titleStarting: "Le serveur de jeu « {name} » démarre.",
       startingText:
         "Le premier démarrage peut prendre jusqu'à {d} minutes. Vous pouvez déjà copier l'adresse : elle marchera dès que le jeu sera prêt.",
-      next: "Il ne reste qu'à envoyer l'adresse à vos joueurs. Tout ce qui suit se retrouve dans la fiche du serveur de jeu, onglet Jeu.",
+      next: "Il ne reste qu'à envoyer l'adresse à vos joueurs. Vous retrouvez tout ceci dans le détail du serveur de jeu.",
       nextWorld:
-        "Le monde « {world} » est créé. Il ne reste qu'à envoyer l'adresse à vos joueurs. Tout ce qui suit se retrouve dans la fiche du serveur de jeu, onglet Jeu.",
+        "Le monde « {world} » est créé. Il ne reste qu'à envoyer l'adresse à vos joueurs. Vous retrouvez tout ceci dans le détail du serveur de jeu.",
+      nextWorldStarting:
+        "Le monde « {world} » sera créé au premier démarrage. Vous pouvez déjà envoyer l'adresse à vos joueurs. Vous retrouvez tout ceci dans le détail du serveur de jeu.",
       console: "La console à distance du jeu n'est pas publiée : rien d'autre à ouvrir.",
       readFailed: "Hearth n'a pas pu lire les adresses de ce serveur de jeu.",
       stepsTitle: "Les étapes de l'installation : {k} faites",

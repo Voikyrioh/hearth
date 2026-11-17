@@ -387,7 +387,7 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
 
 <template>
   <div class="inst" data-install-page>
-    <Teleport defer to="#header-actions">
+    <Teleport v-if="!finished" defer to="#header-actions">
       <HButton variant="secondary" data-install-close @click="guard.requestClose">
         {{ t("fiche.close") }}
       </HButton>

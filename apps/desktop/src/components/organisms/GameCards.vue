@@ -102,6 +102,14 @@ const addresses = computed(() =>
       )
     : null,
 );
+/** Pourquoi « Modifier l'adresse d'internet » est inactif ; jamais un bouton grisé sans un mot (revue UX v2, N1). */
+const editReason = computed(() => {
+  if (canEditAddress.value) return undefined;
+  if (!props.connected) return t("game.address.editNeedsLink");
+  if (!canAct(props.gate)) return t("game.address.editNeedsRight");
+  if (!props.engineReady) return t("game.address.editNeedsEngine");
+  return undefined;
+});
 const stopped = computed(
   () => props.service.state === "stopped" || props.service.state === "error",
 );
@@ -113,6 +121,7 @@ const stopped = computed(
       :addresses="addresses"
       :stopped="stopped"
       :can-edit="canEditAddress"
+      :reason="editReason"
       @edit="addressOpen = true"
     />
     <PublicAddressDialog

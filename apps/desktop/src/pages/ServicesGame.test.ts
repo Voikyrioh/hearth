@@ -338,7 +338,7 @@ describe("la carte « Ports à ouvrir » (BR-JEU-017 à BR-JEU-019)", () => {
       "Hearth ne les ouvre pas lui-même.",
     );
     expect(wrapper.get("[data-game-ports-unverified]").text()).toBe(
-      "Hearth ne peut pas vérifier que ces ports sont joignables depuis Internet.",
+      "Hearth ne peut pas vérifier que ces ports sont joignables depuis internet.",
     );
     expect(wrapper.find("[data-game-ports-changed]").exists()).toBe(false);
     wrapper.unmount();
