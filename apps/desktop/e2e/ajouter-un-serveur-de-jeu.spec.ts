@@ -53,6 +53,13 @@ test("de la page des services à l'écran de fin : trois chemins, Catalogue, tro
   await expect(review).toContainText("Voici ce que Hearth va faire sur");
   await expect(review.locator("[data-review-what] li")).toHaveCount(4);
   await expect(review).not.toContainText("hunter2-jeu");
+  // Les points d'attention (réglages gravés, processeur non vérifié) se cochent avant le lancement.
+  await expect(review.locator("[data-review-reason]")).toHaveText(
+    "Cochez les points d'attention et saisissez votre mot de passe pour lancer.",
+  );
+  for (const box of await review.locator("[data-sum-attention] input[type=checkbox]").all()) {
+    await box.check();
+  }
   await expect(review.locator("[data-review-reason]")).toHaveText(
     "Saisissez votre mot de passe pour lancer.",
   );

@@ -97,8 +97,10 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   await expect(dialog).toContainText("7777 vers 7777 (TCP)");
   await expect(dialog).toContainText("••••••••");
   await expect(dialog).not.toContainText("hunter2-jeu");
-  await expect(dialog).toContainText("2 réglage(s) différent(s) des valeurs proposées.");
+  await expect(dialog).toContainText("2 réglages différents des valeurs proposées.");
   await shoot(dialog, page, "installer-recapitulatif");
+  for (const box of await dialog.locator("[data-sum-attention] input[type=checkbox]").all())
+    await box.check();
   await dialog.locator("[data-reauth-field] input").fill(PASSWORD);
   await dialog.getByRole("button", { name: "Installer le serveur de jeu" }).click();
 
@@ -162,6 +164,8 @@ test("la fiche d'essai : preuves, variante, jeton, contrat à accepter dans sa f
   await page.locator("[data-install-next]").click();
 
   const dialog = page.locator("[data-review]");
+  for (const box of await dialog.locator("[data-sum-attention] input[type=checkbox]").all())
+    await box.check();
   await dialog.locator("[data-reauth-field] input").fill(PASSWORD);
   await dialog.getByRole("button", { name: "Installer le serveur de jeu" }).click();
   // Le contrat a sa fenêtre : rien n'est envoyé tant que « J'accepte » n'est pas cliqué.

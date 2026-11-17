@@ -25,4 +25,5 @@ L'étape « Réglages » montre à l'écran : la variante s'il y en a, le nom du
 - BR-FICHE-014, BR-FICHE-016, BR-FICHE-060
 
 ## Historique
+- 2026-11-17 : le nom du serveur de jeu, les questions essentielles et les ports sont dans UNE carte « L'essentiel » ; « Réglages avancés » replié porte aussi « Voir tous les réglages » (revue UX).
 - 2026-11-16 — création (HRT-244).

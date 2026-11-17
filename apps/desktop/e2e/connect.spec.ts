@@ -36,7 +36,7 @@ test("ajout d'un serveur en trois temps, de l'accueil au tableau de bord", async
   const next = page.getByRole("button", { name: "Suivant" });
   await expect(page.getByLabel("Comment voulez-vous l'appeler ?")).toBeFocused();
   await expect(next).not.toHaveAttribute("aria-disabled", "true");
-  await expect(page.getByLabel("Port", { exact: true })).toHaveAttribute("placeholder", "7341");
+  await expect(page.getByLabel("Port", { exact: true })).toHaveAttribute("placeholder", "ex. 7341");
   await fillAddress(page, "Atelier", "pas une adresse");
   await expect(page.getByText("Cette adresse n'est pas valide")).toBeVisible();
   await page.getByLabel("Adresse du serveur sur votre réseau").fill("10.9.9.9");

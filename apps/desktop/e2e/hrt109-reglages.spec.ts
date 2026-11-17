@@ -126,7 +126,7 @@ test("la recherche trouve sans tenir compte des accents ; « / » met le curseur
   await expect(page.locator("[data-settings-search] input")).toBeFocused();
   await page.keyboard.type("FLUIDITE");
   await expect(page.locator("[data-setting]")).toHaveCount(1);
-  await expect(page.locator("[data-settings-found]")).toHaveText("1 réglage(s) trouvé(s).");
+  await expect(page.locator("[data-settings-found]")).toHaveText("1 réglage trouvé.");
   await expect(row(page, "npc_stream")).toContainText("Fluidité des ennemis");
   await page.locator("[data-settings-search] input").fill("zzz");
   await expect(page.locator("[data-settings-none]")).toHaveText("Aucun réglage ne correspond.");
@@ -138,7 +138,7 @@ test("modifier, enregistrer avec le mot de passe, voir « À appliquer », puis 
   await open(page);
   await row(page, "motd").locator("input").fill("Bienvenue chez nous");
   await expect(row(page, "motd")).toContainText("Modifié");
-  await expect(page.locator("[data-settings-count]")).toHaveText("1 changement(s) à enregistrer.");
+  await expect(page.locator("[data-settings-count]")).toHaveText("1 changement à enregistrer.");
   await page.locator("[data-settings-save]").click();
   const dialog = page.locator("dialog[open]");
   await expect(dialog).toContainText("Les changements s'appliqueront au prochain démarrage.");
@@ -267,7 +267,7 @@ test("« Voir tous les réglages » dans l'installation : replié, déplié dans
   await body.locator('[data-theme="world"] summary').click();
   await body.locator('[data-setting="seed"] input').fill("graine-du-monde");
   await expect(page.locator("[data-install-settings-changed]")).toHaveText(
-    "1 réglage(s) différent(s) des valeurs proposées.",
+    "1 réglage différent des valeurs proposées.",
   );
   await expect(body.locator("[data-install-settings-import]")).toBeDisabled();
   await shoot(page.locator("[data-install-answers]"), page, "installation-reglages");
