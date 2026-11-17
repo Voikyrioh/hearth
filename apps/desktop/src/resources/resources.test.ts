@@ -115,7 +115,7 @@ describe("ranges", () => {
 
 describe("starting values (BR-RES-037, BR-RES-039)", () => {
   it("proposes 2 Go on a large free machine and every processor", () => {
-    expect(startingResources(machine(), null)).toEqual({ memoryBytes: 2 * GIB, cpuMillis: 16000 });
+    expect(startingResources(machine(), null)).toEqual({ memoryBytes: 2 * GIB, cpuMillis: 2000 });
   });
   it("proposes half of the free memory when that is smaller", () => {
     const roomy = machine({

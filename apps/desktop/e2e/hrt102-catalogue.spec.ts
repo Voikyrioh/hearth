@@ -63,12 +63,13 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   await open(page, "#/servers/forge/catalogue");
   const list = page.locator("[data-catalogue-list]");
   await expect(list).toContainText("Terraria");
-  await expect(list).toContainText("Livrée avec Hearth");
+  await expect(page.locator("[data-catalogue-footer]")).toContainText("Fiches livrées avec Hearth");
   await expect(page.locator(".nav__item.router-link-active")).toHaveText("Catalogue");
   await shoot(page, page, "catalogue-liste");
 
   await page.getByRole("button", { name: "Voir la fiche de Terraria" }).click();
   await expect(page.locator("[data-page-title]")).toHaveText("Terraria");
+  await page.locator("[data-fiche-table-toggle]").click();
   await expect(page.locator("[data-fiche-resources] [data-res-none]")).toContainText(
     "Hearth ne connaît pas les besoins de ce jeu",
   );
@@ -79,6 +80,7 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   await expect(page.locator("[data-page-title]")).toHaveText("Installer Terraria");
   await expect(page.locator('[data-field="name"] input')).toHaveValue("terraria");
   await page.getByLabel("Mot de passe du serveur").fill("hunter2-jeu");
+  await page.locator("[data-install-advanced-summary]").click();
   await page.getByLabel("Nombre de joueurs").fill("12");
   await shoot(page, page, "installer-reponses");
   await page.locator("[data-install-next]").click();
@@ -89,14 +91,16 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   await shoot(page, page, "installer-ressources");
   await page.locator("[data-install-next]").click();
 
-  const dialog = page.locator("dialog[open]");
-  await expect(dialog).toContainText("Vérifiez avant de lancer");
+  const dialog = page.locator("[data-review]");
+  await expect(dialog).toContainText("Voici ce que Hearth va faire sur");
   await expect(dialog).toContainText("ryshe/terraria:vanilla-1.4.5.8");
   await expect(dialog).toContainText("7777 vers 7777 (TCP)");
   await expect(dialog).toContainText("••••••••");
   await expect(dialog).not.toContainText("hunter2-jeu");
-  await expect(dialog).toContainText("2 réglage(s) différent(s) des valeurs proposées.");
+  await expect(dialog).toContainText("2 réglages différents des valeurs proposées : ");
   await shoot(dialog, page, "installer-recapitulatif");
+  for (const box of await dialog.locator("[data-sum-attention] input[type=checkbox]").all())
+    await box.check();
   await dialog.locator("[data-reauth-field] input").fill(PASSWORD);
   await dialog.getByRole("button", { name: "Installer le serveur de jeu" }).click();
 
@@ -113,7 +117,10 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
     const first = s.deploys.running("forge")[0];
     if (first) s.deploys.succeed("forge", first.operationId);
   });
-  await expect(page.getByText("Le service terraria est en marche.")).toBeVisible();
+  // L'écran de fin remplace la notification (HRT-247) ; « Ouvrir le serveur de jeu » mène au service.
+  await expect(page.locator("[data-done-title]")).toContainText("Le serveur de jeu « terraria » ");
+  await shoot(page.locator("[data-install-done]"), page, "installer-fin");
+  await page.locator("[data-done-open]").click();
   await expect(page).toHaveURL(new RegExp(`services\\?service=${op?.key}`));
   // La saisie est partie avec la demande, jamais dans l'adresse.
   expect(page.url()).not.toContain("hunter2");
@@ -121,7 +128,7 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   expect(received).toMatchObject({
     name: "terraria",
     fiche: "terraria",
-    version: 5,
+    version: 6,
     ports: [{ id: "game", hostPort: 7777 }],
   });
 });
@@ -130,6 +137,7 @@ test("la fiche d'essai : preuves, variante, jeton, contrat à accepter dans sa f
   page,
 }) => {
   await open(page, "#/servers/forge/catalogue/essai", (s) => s.catalog.addRich());
+  await page.locator("[data-fiche-table-toggle]").click();
   await expect(page.locator('[data-res-row="memory"] [data-proof]')).toContainText(
     "Mesuré au repos",
   );
@@ -155,7 +163,9 @@ test("la fiche d'essai : preuves, variante, jeton, contrat à accepter dans sa f
   );
   await page.locator("[data-install-next]").click();
 
-  const dialog = page.locator("dialog[open]").first();
+  const dialog = page.locator("[data-review]");
+  for (const box of await dialog.locator("[data-sum-attention] input[type=checkbox]").all())
+    await box.check();
   await dialog.locator("[data-reauth-field] input").fill(PASSWORD);
   await dialog.getByRole("button", { name: "Installer le serveur de jeu" }).click();
   // Le contrat a sa fenêtre : rien n'est envoyé tant que « J'accepte » n'est pas cliqué.
@@ -197,8 +207,8 @@ test("« Installer avec les valeurs proposées » ouvre aussitôt la fenêtre, e
 }) => {
   await open(page, "#/servers/forge/catalogue/terraria");
   await page.locator("[data-fiche-install-proposed]").click();
-  const dialog = page.locator("dialog[open]");
-  await expect(dialog).toContainText("Vérifiez avant de lancer");
+  const dialog = page.locator("[data-review]");
+  await expect(dialog).toContainText("Voici ce que Hearth va faire sur");
   // Sans rien avoir saisi, « Retour » ramène à la fiche, d'où l'on vient (revue UX du 24/10, constat 20).
   await dialog.getByRole("button", { name: "Retour" }).click();
   await expect(page.locator("[data-fiche-page]")).toBeVisible();

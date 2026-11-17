@@ -15,7 +15,7 @@ Règle de présentation, portée par le client (HRT-102) à partir du détail de
 
 ## Application (code)
 - `crates/hearth-agent/src/application/catalog.rs::CatalogService::detail`
-- `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
+- `apps/desktop/src/components/organisms/FicheReview.vue`
 
 ## Vérification
 - `crates/hearth-agent/src/application/catalog.rs::the_detail_shows_what_the_fiche_imposes_with_the_proof_of_each_figure_and_no_secret`
@@ -29,5 +29,7 @@ Règle de présentation, portée par le client (HRT-102) à partir du détail de
 - BR-FICHE-004, BR-FICHE-026
 
 ## Historique
+- 2026-11-17 : trois points d'attention de plus, à cocher avant le lancement : les réglages gravés dans le monde à sa création, le processeur que Hearth ne peut pas vérifier, l'absence de mot de passe (revue UX, HRT-246).
+- 2026-11-16 — le récapitulatif est une étape de la page : « Ce qui va se passer » en quatre étapes, l'adresse prévue pour les joueurs, la raison qui retient le lancement (HRT-246).
 - 2026-10-24 — création (HRT-101).
 - 2026-10-24 — côté client (HRT-102).

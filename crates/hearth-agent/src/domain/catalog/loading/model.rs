@@ -114,11 +114,41 @@ impl Fiche {
     }
 }
 
+/// Les clés de `fiche.toml` qui disent d'où vient l'IMAGE du jeu (HRT-238, BR-FICHE-062) : elles n'entrent pas dans
+/// l'empreinte (changer d'image ne déclenche jamais `FICHE_CHANGED`).
+const IMAGE_SOURCE_KEYS: [&[u8]; 2] = [b"steam_app_id", b"illustration"];
+
+/// Une ligne qui pose l'une des clés de l'image (`cle = valeur`, avec ou sans espaces autour du signe égal).
+fn is_image_source_line(line: &[u8]) -> bool {
+    let line = line.trim_ascii_start();
+    IMAGE_SOURCE_KEYS.iter().any(|key| {
+        line.strip_prefix(*key)
+            .is_some_and(|rest| rest.trim_ascii_start().starts_with(b"="))
+    })
+}
+
+/// `fiche.toml` sans les lignes qui disent d'où vient l'image : ce que l'empreinte couvre.
+fn digest_view(fiche_toml: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(fiche_toml.len());
+    // Seules les clés de premier niveau (avant le premier `[tableau]`) disent d'où vient l'image : une clé de même nom
+    // dans un tableau garde sa ligne, l'empreinte la couvre.
+    let mut top_level = true;
+    for line in fiche_toml.split_inclusive(|byte| *byte == b'\n') {
+        top_level &= !line.trim_ascii_start().starts_with(b"[");
+        if !(top_level && is_image_source_line(line)) {
+            out.extend_from_slice(line);
+        }
+    }
+    out
+}
+
 /// Empreinte d'une fiche : SHA-256 de `u32(longueur) || fiche.toml || u32(longueur) || settings.toml`,
-/// longueurs sur quatre octets en gros-boutiste (conception technique 5.1).
+/// longueurs sur quatre octets en gros-boutiste (conception technique 5.1). `fiche.toml` est lu SANS les lignes
+/// `steam_app_id` et `illustration` (HRT-238) : l'image d'un jeu ne change pas la fiche que le client a vue.
 pub fn fiche_digest(fiche_toml: &[u8], settings_toml: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
-    for part in [fiche_toml, settings_toml] {
+    let fiche_view = digest_view(fiche_toml);
+    for part in [fiche_view.as_slice(), settings_toml] {
         hasher.update((part.len() as u32).to_be_bytes());
         hasher.update(part);
     }

@@ -21,8 +21,6 @@ export type SettingLock =
   | "imposed"
   /** N'existe plus dans la version du jeu (BR-FICHE-049). */
   | "gone"
-  /** Reçu par variable ou argument : il se change en recréant le service, pas encore livré (HRT-87). */
-  | "recreate"
   | null;
 
 export interface SettingModel {
@@ -45,7 +43,6 @@ function lockOf(setting: FicheSetting, value: SettingValue): SettingLock {
   if (value.imposed || setting.imposedWhy !== null) return "imposed";
   if (value.gone) return "gone";
   if (value.frozen) return "frozen";
-  if (value.effect === "recreate") return "recreate";
   return null;
 }
 

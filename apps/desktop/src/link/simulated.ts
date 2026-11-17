@@ -19,6 +19,7 @@ import type {
   SaveOutcome,
   SaveSettingsRequest,
 } from "./gameSettings";
+import { agentIllustrationUrl, isSteamAppId } from "./illustrations";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
 import type { PackCheck } from "./packs";
@@ -176,6 +177,11 @@ export interface SimulatedOptions {
    * `bridge.machine` à la main.
    */
   liveMetrics?: boolean;
+  /**
+   * Démonstration (navigateur de développement) : le catalogue complet de l'agent de publication (douze fiches) et des
+   * déploiements qui avancent seuls jusqu'à l'écran de fin. Sans cela (tests), Terraria seul et rien n'avance seul.
+   */
+  demo?: boolean;
 }
 
 /** 8 groupes de 4 caractères hexadécimaux majuscules (les 16 premiers octets). */
@@ -334,6 +340,11 @@ export class SimulatedLinkBridge implements LinkBridge {
       connected: (id) => this.events.get(id)?.state === "connected",
       role: (id) => this.servers.find((server) => server.id === id)?.role ?? "readonly",
     });
+    if (options.demo) {
+      this.neutralImages = true;
+      this.catalog.loadDemo();
+      this.deploys.autoRunMs = 900;
+    }
     if (options.liveMetrics) {
       this.audit.seed("forge", 250);
       for (const server of this.servers) {
@@ -1362,6 +1373,33 @@ export class SimulatedLinkBridge implements LinkBridge {
 
   async openEngineDocs(): Promise<void> {
     this.services.docsOpened += 1;
+  }
+
+  /** Compte les ouvertures de la page d'installation de l'agent (test de l'assistant). */
+  agentInstallDocsOpened = 0;
+
+  async openAgentInstallDocs(): Promise<void> {
+    this.agentInstallDocsOpened += 1;
+  }
+
+  /**
+   * Images du mode simulé (HRT-239) : des fixtures NEUTRES générées (`scripts/build-fixture-illustrations.py`), aucune
+   * image d'éditeur, aucune requête vers Steam. Seuls Terraria et Valheim (Steam) et Minecraft (agent) en ont une ; tout
+   * autre jeu n'a volontairement aucun fichier : la page montre son repli neutre.
+   */
+  /** Démonstration : aucune image dans le navigateur (le protocole d'image n'existe que dans la coquille) : UN seul visuel neutre. */
+  private neutralImages = false;
+
+  steamHeaderUrl(appId: number): string {
+    if (this.neutralImages) return "";
+    return isSteamAppId(appId) ? `/fixtures/illustrations/steam-${appId}.jpg` : "";
+  }
+
+  agentIllustrationUrl(serverId: string, ficheId: string, digest: string): string {
+    if (this.neutralImages) return "";
+    return agentIllustrationUrl("", serverId, ficheId, digest) === ""
+      ? ""
+      : `/fixtures/illustrations/agent-${ficheId}.jpg`;
   }
 
   async retryNow(serverId: string): Promise<void> {

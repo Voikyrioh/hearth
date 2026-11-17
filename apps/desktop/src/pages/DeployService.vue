@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
 import ConfirmDialog from "@/components/molecules/ConfirmDialog.vue";
 import DeployForm from "@/components/organisms/DeployForm.vue";
 import DeployProgressDialog from "@/components/organisms/DeployProgressDialog.vue";
-import DeploySummaryDialog from "@/components/organisms/DeploySummaryDialog.vue";
+import DeployReview from "@/components/organisms/DeployReview.vue";
 import EnginePanel from "@/components/organisms/EnginePanel.vue";
 import ServiceLifecycleDialog from "@/components/organisms/ServiceLifecycleDialog.vue";
 import { useCurrentServer } from "@/composables/useCurrentServer";
@@ -24,7 +25,7 @@ import { useServiceOpsStore } from "@/stores/serviceOps";
 import { useServicesStore } from "@/stores/services";
 
 // La page « Déployer un service » (HRT-69, BR-DEPLOY-001 à 009, 014 à 016, 020, 027 à 031, 033) : le formulaire en
-// page (pas une fenêtre : cinq sections, jusqu'à 100 variables), puis le récapitulatif et la progression en fenêtres.
+// page (pas une fenêtre : cinq sections, jusqu'à 100 variables), puis la vérification (troisième étape, dans la page) et la progression en fenêtre.
 // La route est gardée (voir `router`) : un compte sans le droit de gérer les services et un moteur inutilisable sont
 // renvoyés vers la liste ; un moteur qui n'est pas « prêt » laisse le formulaire s'ouvrir et l'explique (BR-DEPLOY-027).
 // La saisie vit en mémoire seulement (`stores/deployForm.ts`) : jamais dans l'adresse ni sur le disque, effacée au
@@ -143,24 +144,27 @@ const progressOpen = computed(() => flow.launch.value !== null);
       @recheck="server && services.recheck(server.id)"
     />
 
-    <DeployForm
-      ref="formRef"
-      :form="form"
-      :refusal="flow.refusal.value"
-      :reason="reason"
-      :busy="flow.opening.value"
-      @submit="flow.openSummary()"
-    />
+    <div v-show="!flow.reviewing.value">
+      <DeployForm
+        ref="formRef"
+        :form="form"
+        :refusal="flow.refusal.value"
+        :reason="reason"
+        :busy="flow.opening.value"
+        @submit="flow.openReview()"
+      />
+    </div>
 
-    <DeploySummaryDialog
-      v-if="server"
-      :open="flow.summaryOpen.value"
+    <DeployReview
+      v-if="server && flow.reviewing.value"
       :server-id="server.id"
+      :server-name="safeText(server.name)"
       :draft="form.draft.value"
-      :check="flow.summaryCheck.value"
+      :check="flow.reviewCheck.value"
       :force-low-disk="flow.forceLowDisk.value"
       :perform="flow.perform"
-      @close="flow.closeSummary()"
+      :inert="flow.launch.value !== null"
+      @leave="flow.leaveReview()"
     />
 
     <DeployProgressDialog

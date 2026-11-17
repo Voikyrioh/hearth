@@ -40,6 +40,7 @@ async function openDeploy(page: Page) {
   await boot(page);
   await expect(page.locator("[data-row]").first()).toBeVisible();
   await page.locator("[data-deploy-open]").click();
+  await page.getByRole("button", { name: "Continuer sans fiche" }).click();
   await expect(page.locator("[data-deploy-form]")).toBeVisible();
   await expect(page.getByLabel("Nom du service")).toBeFocused();
   // Les bornes de la machine sont lues : le formulaire est prêt.
@@ -52,13 +53,11 @@ async function fillDeploy(page: Page) {
   await page.getByLabel("Version").fill("1.27");
 }
 
-const dialog = (page: Page) => page.locator("dialog[open]");
-
 test("constat 1 : la confirmation dit le mot de passe du compte simulé", async ({ page }) => {
   await openDeploy(page);
   await fillDeploy(page);
   await page.locator("[data-deploy-submit]").click();
-  await expect(dialog(page).locator("[data-dev-password]")).toContainText(PASSWORD);
+  await expect(page.locator("[data-review] [data-dev-password]")).toContainText(PASSWORD);
 });
 
 test("constat 3 : le tableau de bord, les curseurs et la fiche disent les mêmes chiffres", async ({
@@ -75,6 +74,7 @@ test("constat 3 : le tableau de bord, les curseurs et la fiche disent les mêmes
   await page.evaluate(() => {
     window.location.hash = "#/servers/forge/catalogue/terraria";
   });
+  await page.locator("[data-fiche-table-toggle]").click();
   await expect(page.locator("[data-fiche-resources]")).toContainText("16 cœurs");
   await expect(page.locator("[data-fiche-resources]")).toContainText("64 Go");
 });
@@ -90,8 +90,9 @@ test.describe("fiche et installation", () => {
       page.locator("[data-fiche-question]").filter({ hasText: "Taille du monde" }),
     ).not.toContainText(/La valeur proposée est \d/);
     await expect(page.locator("[data-fiche-questions]")).toContainText(
-      "La valeur proposée est Grand.",
+      "La valeur proposée est Moyen.",
     );
+    await page.locator("[data-fiche-table-toggle]").click();
     await expect(page.locator("[data-res-none]")).toHaveText(
       "Hearth ne connaît pas les besoins de ce jeu en processeur, en mémoire ni en espace disque.",
     );
@@ -114,18 +115,22 @@ test.describe("fiche et installation", () => {
     await page.locator("[data-install-next]").click();
     await expect(page.locator("[data-page-title]")).toHaveText("Installer Terraria");
     await page.locator("[data-install-next]").click();
-    const summary = dialog(page);
-    await expect(summary).toContainText("Vérifiez avant de lancer");
+    const summary = page.locator("[data-review]");
+    await expect(summary).toContainText("Voici ce que Hearth va faire sur");
     await expect(page.locator("[data-page-title]")).toHaveText("Installer Terraria");
-    // La fenêtre s'ouvre en haut, lisible de haut en bas : on lit le défilement une fois le curseur posé.
+    // La vérification est dans la page (HRT-246) : le curseur est dans le mot de passe, la raison est sous le bouton.
     await expect(summary.locator("[data-reauth-field] input")).toBeFocused();
-    const scrolled = await summary.locator(".dialog__scroll").evaluate((node) => node.scrollTop);
-    expect(scrolled).toBe(0);
-    await expect(summary.locator("[data-dialog-reason]")).toHaveText(
-      "Saisissez votre mot de passe pour continuer.",
+    await expect(summary.locator("[data-review-reason]")).toHaveText(
+      "Cochez les points d'attention et saisissez votre mot de passe pour lancer.",
+    );
+    for (const box of await summary.locator("[data-sum-attention] input[type=checkbox]").all()) {
+      await box.check();
+    }
+    await expect(summary.locator("[data-review-reason]")).toHaveText(
+      "Saisissez votre mot de passe pour lancer.",
     );
     await summary.locator("[data-reauth-field] input").fill(PASSWORD);
-    await expect(summary.locator("[data-dialog-reason]")).toHaveCount(0);
+    await expect(summary.locator("[data-review-reason]")).toHaveCount(0);
   });
 
   test("constat 20 : Échap sur « Installer avec les valeurs proposées » revient à la fiche", async ({
@@ -133,8 +138,8 @@ test.describe("fiche et installation", () => {
   }) => {
     await boot(page, "#/servers/forge/catalogue/terraria");
     await page.locator("[data-fiche-install-proposed]").click();
-    await expect(dialog(page)).toContainText("Vérifiez avant de lancer");
-    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-review]")).toContainText("Voici ce que Hearth va faire sur");
+    await page.locator("[data-review-back]").click();
     await expect(page).toHaveURL(/catalogue\/terraria$/);
     await expect(page.locator("[data-fiche-page]")).toBeVisible();
   });
@@ -162,7 +167,7 @@ test.describe("formulaire de déploiement", () => {
   }) => {
     await openDeploy(page);
     const image = page.getByLabel("Image", { exact: true });
-    await expect(image).toHaveAttribute("placeholder", "nginx");
+    await expect(image).toHaveAttribute("placeholder", "ex. nginx");
     await expect(page.locator('[data-field="image"]')).toContainText(
       "Le nom complet s'écrit registre/organisation/nom",
     );

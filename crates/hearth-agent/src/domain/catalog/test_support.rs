@@ -14,6 +14,7 @@ family = "demo"
 name = "Demo"
 summary = "Une fiche de démonstration."
 status = "preview"
+preview_reason = "Fiche de démonstration, pas encore proposée."
 platform = "linux"
 
 [image]

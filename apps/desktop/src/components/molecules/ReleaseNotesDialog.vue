@@ -110,6 +110,7 @@ function onNativeClose() {
 
 .notes__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   margin-top: var(--space-5);
 }

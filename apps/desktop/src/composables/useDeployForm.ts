@@ -115,7 +115,13 @@ export function useDeployForm(serverId: () => string, enabled: () => boolean) {
   }
   function addPort(): number {
     const id = store.rowId();
-    draft.value.ports.push({ id, host: "", container: "", protocol: "tcp" });
+    // La ligne ajoutée propose un port (le suivant du dernier, ou 8080) : jamais une ligne vide qui bloque le formulaire
+    // sans dire pourquoi (revue UX du 17/11). L'utilisateur le change ou retire la ligne.
+    const numbers = draft.value.ports
+      .map((row) => Number.parseInt(row.host, 10))
+      .filter((value) => Number.isInteger(value) && value >= 1024 && value < 65535);
+    const proposed = numbers.length > 0 ? String(Math.max(...numbers) + 1) : "8080";
+    draft.value.ports.push({ id, host: proposed, container: proposed, protocol: "tcp" });
     return id;
   }
   function removePort(id: number): void {

@@ -1,5 +1,12 @@
 import { GIB } from "@/resources";
-import type { FicheDetail, FicheQuestion, FicheSetting, FicheTheme } from "./catalog";
+import type {
+  Evidence,
+  FicheCard,
+  FicheDetail,
+  FicheQuestion,
+  FicheSetting,
+  FicheTheme,
+} from "./catalog";
 import {
   TERRARIA_DIGEST,
   TERRARIA_SETTINGS,
@@ -95,7 +102,7 @@ export function terraria(): FicheDetail {
       disk: { installBytes: null, evidence: { kind: "unmeasured" } },
     },
     firstStart: { readyTimeoutSeconds: 1800, worldGeneration: true, downloads: [], stages: [] },
-    stop: { graceSeconds: 10, worldSaved: "by_sequence", sequenceTested: false },
+    stop: { graceSeconds: 10, worldSaved: "by_sequence", sequenceTested: true },
     imposed: [
       {
         label: "Nom du fichier du monde",
@@ -472,4 +479,358 @@ function richQuestions(): FicheQuestion[] {
       variants: ["modded"],
     }),
   ];
+}
+
+/** Les huit fiches en cours de preuve d'un agent de publication, telles que sa liste les montre (HRT-236) : raison écrite pour le joueur, jamais installables. */
+export function waitingCards(): FicheCard[] {
+  const waiting = (
+    id: string,
+    name: string,
+    summary: string,
+    previewReason: string,
+  ): FicheCard => ({
+    id,
+    name,
+    summary,
+    version: 1,
+    status: "preview",
+    installable: false,
+    previewReason,
+  });
+  return [
+    waiting(
+      "zomboid",
+      "Project Zomboid",
+      "Le serveur officiel de Project Zomboid (Build 42), sans mod.",
+      "Le mot de passe d'administration apparaîtrait dans les journaux du jeu. Hearth attend une correction de l'image.",
+    ),
+    waiting(
+      "vrising",
+      "V Rising",
+      "Le serveur officiel de V Rising, sans mod, lancé avec Wine (une couche qui fait tourner un jeu Windows sur Linux).",
+      "Tout fonctionne sauf un point : l'enregistrement du monde avant l'arrêt n'est pas encore vérifié.",
+    ),
+    waiting(
+      "factorio",
+      "Factorio",
+      "Le serveur officiel de Factorio, avec ou sans l'extension Space Age, sans mod.",
+      "Le nom de la partie, son mot de passe et le nombre de joueurs ne se règlent pas encore depuis Hearth.",
+    ),
+    waiting(
+      "corekeeper",
+      "Core Keeper",
+      "Le serveur officiel de Core Keeper, en connexion directe, sans mod.",
+      "Le mot de passe du serveur apparaîtrait dans les journaux du jeu, et le jeu ne s'arrête pas encore proprement.",
+    ),
+    waiting(
+      "7dtd",
+      "7 Days to Die",
+      "Le serveur officiel de 7 Days to Die, sans mod.",
+      "Le jeu ne démarre pas encore avec les protections que Hearth impose à tout serveur.",
+    ),
+    waiting(
+      "palworld",
+      "Palworld",
+      "Le serveur officiel de Palworld, sans mod.",
+      "Le jeu ne s'arrête pas encore proprement : Hearth ne peut pas garantir votre monde à l'arrêt.",
+    ),
+    waiting(
+      "rust",
+      "Rust",
+      "Le serveur officiel de Rust, sans mod.",
+      "Pas encore essayé sur une vraie machine par Hearth, et sa console à distance n'est pas prise en charge : son mot de passe passerait par la ligne de commande.",
+    ),
+    waiting(
+      "satisfactory",
+      "Satisfactory",
+      "Le serveur officiel de Satisfactory, sans mod.",
+      "Le premier joueur qui se connecte pourrait s'approprier le serveur, et le jeu ne s'arrête pas encore proprement.",
+    ),
+  ];
+}
+
+// ── Le catalogue de démonstration (navigateur de développement) ─────────────────────────────────────────────────
+// Les douze fiches de l'agent de publication : quatre prêtes (Terraria, Minecraft Java, Valheim, Enshrouded) et huit en
+// cours de preuve avec leur raison (`waitingCards`). Les détails des trois nouvelles prêtes sont ABRÉGÉS (quelques
+// questions, les ports et ressources de la vraie fiche) : le jugement d'une installation, lui, est celui du simulateur.
+// Jamais utilisé par les tests, qui construisent leurs fiches (`terraria()`, `rich()`).
+
+interface GameSpec {
+  id: string;
+  name: string;
+  summary: string;
+  version: number;
+  digest: string;
+  image: { repository: string; tag: string };
+  ports: {
+    id: string;
+    container: number;
+    protocol: "tcp" | "udp";
+    role: "game" | "query" | "remote_console";
+    publish: "always" | "never";
+  }[];
+  questions: FicheQuestion[];
+  memory: { min: number; recommended: number; evidence: Evidence };
+  disk: number;
+  readyTimeoutSeconds: number;
+  stop: FicheDetail["stop"];
+  illustration?: boolean;
+  steamAppId?: number;
+  variants?: FicheDetail["variants"];
+}
+
+function publishedGame(spec: GameSpec): FicheDetail {
+  const settings = spec.questions.map((made, index) =>
+    setting(
+      "game",
+      made.secret || made.frozenAfterCreation || index < 2 ? "essential" : "common",
+      // Ces fiches passent leurs réglages par des variables d'environnement : le nom du réglage est celui de la variable.
+      made.id.toUpperCase(),
+      made,
+    ),
+  );
+  return {
+    card: {
+      id: spec.id,
+      name: spec.name,
+      summary: spec.summary,
+      version: spec.version,
+      status: "published",
+      installable: true,
+      memory: { recommendedBytes: spec.memory.recommended, evidence: spec.memory.evidence },
+      ...(spec.steamAppId ? { steamAppId: spec.steamAppId } : {}),
+      ...(spec.illustration
+        ? {
+            illustration: {
+              digest: `sha256:${spec.digest}`,
+              bytes: 120_000,
+              width: 920,
+              height: 430,
+              mediaType: "image/jpeg",
+            },
+          }
+        : {}),
+    },
+    digest: spec.digest,
+    image: { ...spec.image, digest: null },
+    ownerUid: 1000,
+    ownerGid: 1000,
+    variants: spec.variants ?? [],
+    ports: spec.ports.map((port) => ({
+      id: port.id,
+      container: port.container,
+      protocol: port.protocol,
+      role: port.role,
+      publish: port.publish,
+      defaultHost: port.publish === "always" ? port.container : null,
+      mapping: "nat" as const,
+      onlyVariants: [],
+    })),
+    folders: [{ id: "data", role: "world", target: "/data", backup: true, onlyVariants: [] }],
+    agreements: [],
+    questions: spec.questions,
+    resources: {
+      cpu: { minMillis: null, recommendedMillis: null, evidence: { kind: "unmeasured" } },
+      memory: {
+        minBytes: spec.memory.min,
+        recommendedBytes: spec.memory.recommended,
+        evidence: spec.memory.evidence,
+      },
+      disk: { installBytes: spec.disk, evidence: { kind: "measured_idle" } },
+    },
+    firstStart: {
+      readyTimeoutSeconds: spec.readyTimeoutSeconds,
+      worldGeneration: true,
+      downloads: [],
+      stages: [],
+    },
+    stop: spec.stop,
+    imposed: [],
+    themes: [{ id: "game", label: "Partie", order: 1 }],
+    settings,
+    worldImport: null,
+    mods: null,
+    settingsUnreadable: 0,
+    unreadable: 0,
+  };
+}
+
+/** Minecraft Java, Valheim et Enshrouded : les trois autres fiches prêtes du catalogue de démonstration. */
+export function demoPublished(): FicheDetail[] {
+  const worldName = (proposed: string) =>
+    question("world_name", "Nom du monde", "Le nom du monde que le jeu crée.", {
+      kind: "text",
+      charset: "file_stem",
+      minLen: 1,
+      maxLen: 30,
+      proposed,
+      frozenAfterCreation: true,
+    });
+  const password = (minLen: number) =>
+    question(
+      "password",
+      "Mot de passe du serveur",
+      "Les joueurs le saisissent pour se connecter. Laissé vide, tout le monde peut rejoindre.",
+      { kind: "secret", secretKind: "game_password", minLen, maxLen: 30 },
+    );
+  const serverName = (proposed: string) =>
+    question("server_name", "Nom du serveur", "Le nom affiché dans la liste des serveurs.", {
+      kind: "text",
+      charset: "line",
+      minLen: 1,
+      maxLen: 40,
+      proposed,
+    });
+  return [
+    publishedGame({
+      id: "minecraft",
+      name: "Minecraft Java",
+      summary:
+        "Le serveur de Minecraft Java : officiel, Paper, Purpur, Fabric, Quilt, Forge ou NeoForge, avec ou sans pack de mods.",
+      version: 4,
+      digest: "a1c4e7f0b3d6a9c2e5f8b1d4a7c0e3f6a9c2e5f8b1d4a7c0e3f6a9c2e5f8b1d4",
+      image: { repository: "itzg/minecraft-server", tag: "java21" },
+      ports: [
+        { id: "game", container: 25565, protocol: "tcp", role: "game", publish: "always" },
+        {
+          id: "rcon",
+          container: 25575,
+          protocol: "tcp",
+          role: "remote_console",
+          publish: "never",
+        },
+      ],
+      questions: [
+        question(
+          "motd",
+          "Message d'accueil",
+          "Le message que les joueurs voient dans la liste des serveurs.",
+          {
+            kind: "text",
+            charset: "line",
+            minLen: 0,
+            maxLen: 60,
+            proposed: "Un serveur Minecraft géré par Hearth",
+          },
+        ),
+        worldName("world"),
+        question("difficulty", "Difficulté", "La difficulté du monde.", {
+          kind: "choice",
+          proposed: "normal",
+          choices: [
+            { value: "peaceful", label: "Pacifique" },
+            { value: "easy", label: "Facile" },
+            { value: "normal", label: "Normal" },
+            { value: "hard", label: "Difficile" },
+          ],
+        }),
+        question(
+          "max_players",
+          "Nombre de joueurs",
+          "Combien de joueurs peuvent être connectés en même temps.",
+          { kind: "int", min: 1, max: 200, proposed: "20" },
+        ),
+      ],
+      memory: { min: 2 * GIB, recommended: 4 * GIB, evidence: { kind: "measured" } },
+      disk: 1_497_623_985,
+      readyTimeoutSeconds: 3600,
+      stop: { graceSeconds: 60, worldSaved: "by_sequence", sequenceTested: true },
+      illustration: true,
+      // Le moteur du serveur se choisit à l'installation, comme dans la vraie fiche (une variante par moteur).
+      variants: [
+        {
+          id: "vanilla",
+          label: "Officiel",
+          help: "Le serveur de Mojang, sans mod.",
+          default: true,
+        },
+        {
+          id: "paper",
+          label: "Paper",
+          help: "Un serveur rapide, avec des extensions.",
+          default: false,
+        },
+        {
+          id: "purpur",
+          label: "Purpur",
+          help: "Paper, avec encore plus de réglages.",
+          default: false,
+        },
+        {
+          id: "fabric",
+          label: "Fabric",
+          help: "Un serveur léger pour les mods Fabric.",
+          default: false,
+        },
+        { id: "quilt", label: "Quilt", help: "Un serveur pour les mods Quilt.", default: false },
+        { id: "forge", label: "Forge", help: "Un serveur pour les mods Forge.", default: false },
+        {
+          id: "neoforge",
+          label: "NeoForge",
+          help: "Un serveur pour les mods NeoForge.",
+          default: false,
+        },
+      ],
+    }),
+    publishedGame({
+      id: "valheim",
+      name: "Valheim",
+      summary: "Le serveur officiel de Valheim, sans mod.",
+      version: 1,
+      digest: "b2d5f8a1c4e7b0d3f6a9c2e5b8d1f4a7c0e3b6d9f2a5c8e1b4d7f0a3c6e9b2d5",
+      image: { repository: "ghcr.io/lloesche/valheim-server", tag: "latest" },
+      ports: [
+        { id: "game", container: 2456, protocol: "udp", role: "game", publish: "always" },
+        { id: "query", container: 2457, protocol: "udp", role: "query", publish: "always" },
+      ],
+      questions: [serverName("Mon serveur Valheim"), password(5), worldName("Dedicated")],
+      memory: { min: 4 * GIB, recommended: 6 * GIB, evidence: { kind: "measured" } },
+      disk: 4_743_565_597,
+      readyTimeoutSeconds: 1800,
+      stop: { graceSeconds: 30, worldSaved: "by_image_on_signal", sequenceTested: true },
+      steamAppId: 892970,
+    }),
+    publishedGame({
+      id: "enshrouded",
+      name: "Enshrouded",
+      summary:
+        "Le serveur officiel d'Enshrouded, sans mod, lancé avec Wine (une couche qui fait tourner un jeu Windows sur Linux).",
+      version: 2,
+      digest: "c3e6a9b2d5f8c1e4a7b0d3f6c9e2a5b8d1f4c7a0e3b6d9f2c5a8e1b4d7f0c3a6",
+      image: { repository: "mornedhels/enshrouded-server", tag: "latest" },
+      ports: [{ id: "game", container: 15637, protocol: "udp", role: "game", publish: "always" }],
+      questions: [
+        serverName("Mon serveur Enshrouded"),
+        password(0),
+        question(
+          "slots",
+          "Nombre de joueurs",
+          "Combien de joueurs peuvent être connectés en même temps.",
+          { kind: "int", min: 1, max: 16, proposed: "16" },
+        ),
+      ],
+      memory: {
+        min: 16 * GIB,
+        recommended: 16 * GIB,
+        evidence: { kind: "publisher", url: "https://github.com/mornedhels/enshrouded-server" },
+      },
+      disk: 8_946_101_770,
+      readyTimeoutSeconds: 3600,
+      stop: { graceSeconds: 30, worldSaved: "by_image_on_signal", sequenceTested: true },
+      steamAppId: 1203620,
+    }),
+  ];
+}
+
+/** Terraria tel que sa fiche livrée le dit (version 5) : mémoire mesurée sur la limite essayée, disque mesuré, image Steam. */
+export function demoTerraria(detail: FicheDetail): void {
+  detail.card.memory = { recommendedBytes: 2 * GIB, evidence: { kind: "measured" } };
+  detail.card.status = "published";
+  detail.card.steamAppId = 105600;
+  detail.resources.memory = {
+    minBytes: 2 * GIB,
+    recommendedBytes: 2 * GIB,
+    evidence: { kind: "measured" },
+  };
+  detail.resources.disk = { installBytes: 53_014_364, evidence: { kind: "measured_idle" } };
 }

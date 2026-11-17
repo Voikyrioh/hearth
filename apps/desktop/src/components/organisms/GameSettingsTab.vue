@@ -341,7 +341,7 @@ function openToken(id: string) {
           {{ t("gameSettings.saveOthers", { n: state.otherChanges.value.length }) }}
         </p>
         <HCheckbox
-          v-if="running"
+          v-if="running && state.effect.value !== 'recreate'"
           v-model="restartNow"
           :label="t('gameSettings.saveRestartNow')"
           :disabled="!canRestart"
@@ -384,7 +384,7 @@ function openToken(id: string) {
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
-  max-width: var(--detail-max);
+  width: 100%;
 }
 
 .tab__loading {
@@ -445,5 +445,11 @@ function openToken(id: string) {
   gap: var(--space-1);
   margin: 0;
   padding-left: var(--space-5);
+}
+
+/* HRT-265 : dans cet onglet, un bouton inactif est un aplat atténué, sans pointillés (comme les maquettes du catalogue). */
+.tab :deep(.btn[aria-disabled="true"]:not(.btn--busy)) {
+  border-style: solid;
+  border-color: transparent;
 }
 </style>

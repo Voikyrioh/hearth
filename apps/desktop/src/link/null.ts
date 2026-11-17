@@ -256,6 +256,16 @@ export class NullLinkBridge implements LinkBridge {
   async openEngineDocs(): Promise<never> {
     return this.unavailable();
   }
+  async openAgentInstallDocs(): Promise<never> {
+    return this.unavailable();
+  }
+  /** Aucune coquille : aucune image (la page montre le visuel neutre). */
+  steamHeaderUrl(): string {
+    return "";
+  }
+  agentIllustrationUrl(): string {
+    return "";
+  }
   async readAudit(): Promise<never> {
     return this.unavailable();
   }

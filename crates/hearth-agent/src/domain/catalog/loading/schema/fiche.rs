@@ -19,6 +19,15 @@ pub struct FicheFile {
     pub name: String,
     pub summary: String,
     pub status: Status,
+    /// Ce qui retient une fiche `preview`, dit au joueur (HRT-236, BR-FICHE-061) : interdit sur une fiche `published`.
+    pub preview_reason: Option<String>,
+    /// L'identifiant du JEU dans le magasin Steam (HRT-238, BR-FICHE-062) : jamais celui de son serveur dédié. Un entier
+    /// de 1 à 4 294 967 295 ; lu en `i64` pour que le chargeur refuse 0 et les valeurs hors borne avec un motif typé.
+    pub steam_app_id: Option<i64>,
+    /// Nom du fichier d'illustration du même dossier, pour un jeu absent de Steam (HRT-238, BR-FICHE-062) : JPEG de
+    /// 920 sur 430, 300 Kio au plus, avec sa provenance. Jamais avec `steam_app_id`. Le nom du champ n'est pas `image` :
+    /// la table `[image]` désigne déjà l'image de conteneur.
+    pub illustration: Option<String>,
     pub platform: Platform,
     pub image: Image,
     pub owner: Owner,

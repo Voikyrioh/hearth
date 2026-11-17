@@ -75,6 +75,7 @@ import {
   toGameSettingsRead,
   toSaveOutcome,
 } from "./gameSettings";
+import { agentIllustrationUrl, illustrationBase, steamHeaderUrl } from "./illustrations";
 import { type LogMessage, type LogReading, toLogMessage } from "./logs";
 import { type MachineEvent, toHistory, toMetrics, toView } from "./machine";
 import { type PackCheck, toPackCheck } from "./packs";
@@ -141,6 +142,12 @@ import {
   toServicesEvent,
 } from "./services";
 import { type DepositOutcome, type Transfer, toDepositOutcome, toTransfer } from "./transfers";
+
+/** Le protocole d'URI de la coquille s'écrit autrement sous Windows (WebView2) : `http://<protocole>.localhost/`. */
+function isWindows(): boolean {
+  return typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent);
+}
+
 import {
   type AccountInputCheck,
   type AccountList,
@@ -970,6 +977,18 @@ export class TauriLinkBridge implements LinkBridge {
 
   async openEngineDocs(): Promise<void> {
     unwrap(await commands.openEngineDocs());
+  }
+
+  async openAgentInstallDocs(): Promise<void> {
+    unwrap(await commands.openAgentInstallDocs());
+  }
+
+  steamHeaderUrl(appId: number): string {
+    return steamHeaderUrl(illustrationBase(isWindows()), appId);
+  }
+
+  agentIllustrationUrl(serverId: string, ficheId: string, digest: string): string {
+    return agentIllustrationUrl(illustrationBase(isWindows()), serverId, ficheId, digest);
   }
 
   async getSecurity(serverId: string): Promise<SecurityRead> {

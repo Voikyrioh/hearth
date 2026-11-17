@@ -18,7 +18,7 @@ Une fiche qui exige un contrat le déclare ; aucune fiche, variante, valeur prop
 - `crates/hearth-agent/src/domain/services/from_fiche.rs::body_and_secrets_from`
 - `crates/hearth-agent/src/domain/services/spec.rs::SpecAgreement`
 - `apps/desktop/src/components/organisms/AgreementDialog.vue`
-- `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
+- `apps/desktop/src/components/organisms/FicheReview.vue`
 
 ## Vérification
 - `crates/hearth-agent/src/domain/catalog/tests_fiches.rs::i8_a_contract_is_accepted_only_by_a_gesture`

@@ -41,7 +41,7 @@ describe("server book", () => {
   it("lists every server with its own state and the actions that fit it", async () => {
     const { wrapper, bridge } = await book();
     expect(wrapper.get("h1").text()).toBe("Mes serveurs");
-    expect(button(wrapper, "Ajouter un serveur")).toBeDefined();
+    expect(button(wrapper, "Relier un serveur")).toBeDefined();
     const forge = row(wrapper, "forge");
     expect(forge.text()).toContain("forge");
     expect(forge.text()).toContain("192.168.1.120");
@@ -137,7 +137,7 @@ describe("server book", () => {
     expect(form.text()).toContain("l'identité du serveur doit être vérifiée de nouveau");
     await form.trigger("submit");
     await flushPromises();
-    expect(wrapper.get("section").text()).toContain("Vérifie l'identité du serveur");
+    expect(wrapper.get("section").text()).toContain("Vérifiez que c'est bien lui");
     expect(wrapper.findAll("[data-fingerprint] span")).toHaveLength(8);
     // Refuser : retour au formulaire, rien n'est modifié.
     await button(wrapper.get("section"), "Refuser").trigger("click");

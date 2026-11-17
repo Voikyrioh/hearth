@@ -80,14 +80,14 @@ describe("ouverture de la section (BR-ENGINE-001, 019)", () => {
       "Hearth affiche ici les services qu'il a créés ou que vous lui avez confiés.",
     );
     expect(wrapper.get("[data-services-empty] [data-deploy-open]").text()).toBe(
-      "Déployer un service",
+      "Ajouter un serveur de jeu",
     );
     expect(wrapper.findAll("ul[aria-label] li").map((item) => item.text())).toEqual([
       "0 en marche",
       "0 arrêtés",
       "0 en erreur",
     ]);
-    // Un seul bouton « Déployer un service » : celui de l'état vide (un seul bouton principal par vue).
+    // Un seul bouton « Ajouter un serveur de jeu » : celui de l'état vide (un seul bouton principal par vue).
     expect(wrapper.findAll("[data-deploy-open]")).toHaveLength(1);
     wrapper.unmount();
   });

@@ -120,6 +120,9 @@ function onClick(event: MouseEvent) {
   border-radius: var(--radius-control);
   font-weight: var(--fw-semibold);
   white-space: nowrap;
+  /* HRT-249 : un bouton ne passe jamais à la ligne et ne rétrécit jamais sous son texte ; c'est la barre qui passe à la ligne. */
+  flex-shrink: 0;
+  min-width: max-content;
   cursor: pointer;
   transition:
     background var(--motion-fast) var(--ease),
@@ -202,12 +205,13 @@ function onClick(event: MouseEvent) {
   color: var(--tx);
 }
 
-/* HRT-141 : inactif = fond de surface neutre, texte au jeton discret (4,7 pour 1 sur ce fond), contour en tirets
-   discret, ni ombre ni couleur d'accent, curseur « interdit ». Rien ne repose sur l'opacité : le bouton reste lisible
-   et se distingue d'un coup d'œil de l'actif (orange plein, ou contour et texte pleins), pour les quatre variantes. */
+/* HRT-141 : inactif = fond de surface neutre, texte au jeton discret (4,7 pour 1 sur ce fond), ni ombre ni couleur
+   d'accent, curseur « interdit ». Un aplat atténué, JAMAIS de pointillés : ils disent « déposez ici » (revue UX du
+   17/11). Rien ne repose sur l'opacité : le bouton reste lisible et se distingue d'un coup d'œil de l'actif (orange plein,
+   ou contour et texte pleins), pour les quatre variantes. */
 .btn[aria-disabled="true"]:not(.btn--busy) {
-  border-style: dashed;
-  border-color: var(--tx-faint);
+  border-style: solid;
+  border-color: transparent;
   background: var(--disabled-bg);
   color: var(--disabled-tx);
   opacity: 1;

@@ -1,0 +1,6 @@
+# Provenance de l'illustration `header.jpg` (HRT-240, BR-FICHE-062, ADR-0061). Lu par `build.rs` : le fichier et ses clés sont exigés.
+tool = "Antigravity (Gemini), image générée pour Hearth"
+made = 2026-11-16
+requested_by = "Voiky, via le coordinateur du dépôt hearth"
+prompt_ref = "contexts/hearth/art/prompts/minecraft-header.md"
+original = true    # déclaration : aucun logo, personnage officiel, visuel d'éditeur, lettrage du nom du jeu

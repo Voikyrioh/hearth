@@ -1,0 +1,164 @@
+# Réglages de Rust (HRT-252) : arguments de la ligne de commande de `RustDedicated` (canal `args`). Les noms viennent du README de
+# l'image `pfeiffermax/rust-game-server` et de la liste des commandes d'administration du jeu ; AUCUN défaut n'a été vérifié sur
+# l'image (`game_default` absent, `source = "partial"`). Un changement recrée le service (BR-FICHE-042).
+
+[[theme]]
+id = "game"
+label = "Ma partie"
+order = 1
+
+[[theme]]
+id = "players"
+label = "Joueurs"
+order = 2
+
+[[theme]]
+id = "world"
+label = "Monde"
+order = 3
+
+[[setting]]
+id = "server_name"
+key = "+server.hostname"
+channel = "args"
+arg = { flag = "+server.hostname", form = "flag_value" }
+theme = "game"
+level = "essential"
+label = "Nom du serveur"
+help = "Le nom que vos joueurs voient dans la liste des serveurs. Écrivez un seul mot, sans espace."
+type = "text"
+charset = "arg_safe"
+max_len = 60
+proposed = "Mon-serveur-Rust"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "max_players"
+key = "+server.maxplayers"
+channel = "args"
+arg = { flag = "+server.maxplayers", form = "flag_value" }
+theme = "players"
+level = "essential"
+label = "Nombre de joueurs au plus"
+help = "Combien de joueurs peuvent être connectés en même temps."
+type = "int"
+min = 1
+max = 500
+proposed = "10"
+change = "anytime"
+source = "partial"
+
+[[setting]]
+id = "world_size"
+key = "+server.worldsize"
+channel = "args"
+arg = { flag = "+server.worldsize", form = "flag_value" }
+theme = "world"
+level = "essential"
+label = "Taille de la carte"
+help = "La taille de la carte en mètres. Une grande carte demande plus de mémoire et de temps à la création."
+type = "int"
+min = 1000
+max = 6000
+proposed = "3000"
+change = "world_creation"
+source = "partial"
+
+[[setting]]
+id = "seed"
+key = "+server.seed"
+channel = "args"
+arg = { flag = "+server.seed", form = "flag_value" }
+theme = "world"
+level = "common"
+label = "Graine de la carte"
+help = "Un nombre qui décide de la forme de la carte : la même graine et la même taille donnent la même carte."
+type = "int"
+min = 1
+max = 2147483647
+proposed = "12345"
+change = "world_creation"
+source = "partial"
+
+[[setting]]
+id = "save_interval"
+key = "+server.saveinterval"
+channel = "args"
+arg = { flag = "+server.saveinterval", form = "flag_value" }
+theme = "game"
+level = "advanced"
+label = "Enregistrement automatique"
+help = "Le nombre de secondes entre deux enregistrements automatiques du monde. Hearth ne peut pas demander d'enregistrement avant un arrêt : cet intervalle est la seule protection."
+type = "int"
+min = 60
+max = 3600
+proposed = "300"
+change = "anytime"
+source = "partial"
+
+# ---- Réglages posés par la fiche ----
+
+[[setting]]
+id = "server_ip"
+key = "+server.ip"
+channel = "args"
+arg = { flag = "+server.ip", form = "flag_value" }
+theme = "game"
+level = "advanced"
+label = "Adresse d'écoute dans le service"
+help = "L'adresse sur laquelle le jeu écoute dans le service. Hearth la fixe : vous ne pouvez pas la modifier."
+type = "text"
+charset = "arg_safe"
+max_len = 15
+change = "anytime"
+imposed = { value = "0.0.0.0", why = "Le jeu doit écouter sur toutes les adresses du service pour que Hearth puisse relier son port." }
+source = "partial"
+
+[[setting]]
+id = "server_port"
+key = "+server.port"
+channel = "args"
+arg = { flag = "+server.port", form = "flag_value" }
+theme = "game"
+level = "advanced"
+label = "Port d'écoute dans le service"
+help = "Le port de jeu à l'intérieur du service. Le port que vos joueurs utilisent se règle dans « Modifier ». Hearth le garde relié à ce dernier : vous ne pouvez pas le modifier ici."
+type = "int"
+min = 1024
+max = 65535
+change = "anytime"
+imposed = { port = "game", why = "Il doit rester celui que Hearth relie au port du serveur." }
+source = "partial"
+
+[[setting]]
+id = "server_queryport"
+key = "+server.queryport"
+channel = "args"
+arg = { flag = "+server.queryport", form = "flag_value" }
+theme = "game"
+level = "advanced"
+label = "Port de requête dans le service"
+help = "Le port de la liste des serveurs à l'intérieur du service. Hearth le garde relié au port de requête : vous ne pouvez pas le modifier ici."
+type = "int"
+min = 1024
+max = 65535
+change = "anytime"
+imposed = { port = "query", why = "Il doit rester celui que Hearth relie au port de requête du serveur." }
+source = "partial"
+
+[[setting]]
+id = "server_identity"
+key = "+server.identity"
+channel = "args"
+arg = { flag = "+server.identity", form = "flag_value" }
+theme = "world"
+level = "advanced"
+label = "Dossier des données du jeu"
+help = "Le nom du dossier où le jeu range sa carte et sa configuration. C'est le dossier que Hearth garde et sauvegarde : vous ne pouvez pas le modifier."
+type = "text"
+charset = "arg_safe"
+max_len = 30
+change = "anytime"
+imposed = { value = "hearth", why = "C'est le dossier que Hearth monte, garde et sauvegarde." }
+source = "partial"

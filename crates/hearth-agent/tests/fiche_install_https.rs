@@ -288,7 +288,7 @@ async fn a_fiche_install_creates_a_service_with_the_fiche_digest_the_pinned_imag
     .unwrap();
     assert_eq!(
         row,
-        ("terraria".to_owned(), 5, b.fiche.digest_hex()),
+        ("terraria".to_owned(), 6, b.fiche.digest_hex()),
         "la description du service"
     );
     // Le journal : une installation depuis une fiche, avec la fiche, et aucune valeur (BR-FICHE-032).
@@ -298,7 +298,7 @@ async fn a_fiche_install_creates_a_service_with_the_fiche_digest_the_pinned_imag
     assert_eq!(journal[0].3.as_deref(), Some("ada"));
     let target = journal[0].1.clone().unwrap();
     assert!(
-        target.contains("fiche terraria (version 5)") && target.contains("mon-terraria"),
+        target.contains("fiche terraria (version 6)") && target.contains("mon-terraria"),
         "{target}"
     );
     b.agent.shutdown().await;
@@ -493,7 +493,11 @@ async fn an_unmeasured_minimum_never_blocks_the_install() {
             "digest = \"sha256:3ece8ceb88c11e47bc490d4e17849e89f5343722142fca506fbde9a7ab04a677\"",
             &format!("digest = \"{IMAGE_DIGEST}\""),
         )
-        .replace("status = \"published\"", "status = \"preview\"")
+        .replace(
+            "status = \"published\"",
+            "status = \"preview\"
+preview_reason = \"Fiche d'essai, pas encore proposée.\"",
+        )
         .replace(
             "memory = { min_bytes = 2147483648, recommended_bytes = 2147483648, evidence = \"measured\" }",
             "memory = { evidence = \"unmeasured\" }",

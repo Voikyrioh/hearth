@@ -1244,6 +1244,8 @@ pub async fn start_engined(
         services.trail.clone(),
     ));
     service_ops.set_effects(service_updates.clone());
+    // Les réglages passés par une variable ou un argument s'appliquent par la recréation (HRT-266).
+    game_settings.set_updates(service_updates.clone());
     let deletion_for_shutdown = service_deletion.clone();
     let backups_for_shutdown = backups.clone();
     let router = http::router(AppState {

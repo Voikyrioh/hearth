@@ -15,7 +15,7 @@ Règle de vocabulaire, portée par le client (HRT-102) : la seule phrase sur la 
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/services/plan.rs::plan_from_spec`
-- `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
+- `apps/desktop/src/components/organisms/FicheReview.vue`
 - `apps/desktop/src/pages/FicheDetail.vue`
 - `apps/desktop/src/fiche/copy.test.ts`
 

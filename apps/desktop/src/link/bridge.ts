@@ -325,6 +325,15 @@ export interface LinkBridge {
   ): Promise<LogReading>;
   /** Ouvre la documentation officielle de Docker dans le navigateur du PC (l'adresse est une constante de la coquille). */
   openEngineDocs(): Promise<void>;
+  /** Ouvre la page d'installation de l'agent du site Hearth dans le navigateur du PC (l'adresse est une constante de la coquille). */
+  openAgentInstallDocs(): Promise<void>;
+
+  // Images des jeux (HRT-239, ADR-0061) : des adresses du protocole `hearth-illustration` de la coquille, construites sans
+  // aucune E/S ; la coquille lit son cache ou va chercher l'image, et applique le réglage « Images des jeux depuis Steam ».
+  /** L'image d'en-tête du magasin Steam d'un jeu ; `""` si l'identifiant n'est pas un entier valide. */
+  steamHeaderUrl(appId: number): string;
+  /** L'illustration embarquée d'une fiche, servie par l'agent ; `""` si une des valeurs n'a pas la forme attendue. */
+  agentIllustrationUrl(serverId: string, ficheId: string, digest: string): string;
 
   // Opérations de service (HRT-84, ADR-0045) : le suivi, uniforme pour toute opération longue. Aucune méthode
   // de ce pont ne lance ni n'annule une opération ; la seule qui agit est la décision, un acte confirmé.

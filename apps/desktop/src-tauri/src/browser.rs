@@ -100,6 +100,13 @@ mod tests {
     }
 
     #[test]
+    fn the_agent_install_page_address_passes_the_guard() {
+        assert!(is_safe_https_url(
+            crate::services::commands::AGENT_INSTALL_DOCS_URL
+        ));
+    }
+
+    #[test]
     fn a_refused_address_is_never_launched() {
         assert!(!open_in_browser("file:///c:/windows/system32/calc.exe"));
     }

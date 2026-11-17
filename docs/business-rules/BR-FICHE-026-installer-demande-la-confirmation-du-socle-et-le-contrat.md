@@ -16,7 +16,7 @@ L'acte `ServiceDeploy` est confirmé comme pour toute image (preuve de clé du p
 ## Application (code)
 - `crates/hearth-agent/src/entrypoint/http/reauth.rs::Parsed::read`
 - `crates/hearth-agent/src/domain/catalog/translate.rs::translate`
-- `apps/desktop/src/components/organisms/FicheSummaryDialog.vue`
+- `apps/desktop/src/components/organisms/FicheReview.vue`
 - `apps/desktop/src/components/organisms/AgreementDialog.vue`
 - `apps/desktop/src/fiche/attention.ts`
 
@@ -31,5 +31,7 @@ L'acte `ServiceDeploy` est confirmé comme pour toute image (preuve de clé du p
 - BR-FICHE-058, BR-DEPLOY-015
 
 ## Historique
+- 2026-11-16 — le mot de passe est saisi dans la page de vérification (`AdminActPanel`) ; le contrat garde sa fenêtre (HRT-246).
+- 2026-11-16 — la confirmation par mot de passe peut se saisir dans la page : `AdminActPanel` et `useAdminAct` partagent l'état de la fenêtre (HRT-245).
 - 2026-10-24 — création (HRT-101).
 - 2026-10-24 — côté client (HRT-102).

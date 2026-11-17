@@ -91,6 +91,9 @@ Mise en œuvre : `loading/memory.rs` (`memory_tiers`, `recommended_gap`), `invar
 
 ## Historique
 
+- 2026-11-16 (HRT-238) : la fiche porte `steam_app_id` et `illustration` (BR-FICHE-062, ADR-0061) ; aucun des deux n'entre dans l'empreinte ni dans `ids.lock`.
+- 2026-11-16 (HRT-236) : la fiche porte `preview_reason` (obligatoire sur une fiche `preview`, interdite sur une fiche `published`, BR-FICHE-061). Un agent de publication LISTE ses fiches `preview` sans les proposer : `embedded::partition` remplace `keep_offered`, seule porte du catalogue vers l'application.
+
 ### Version 1 (2026-10-13, matin), remplacée
 
 Titre : « Fiches de serveur de jeu : format TOML déclaratif et fermé, embarqué dans l'agent et couvert par sa signature, traduit en description de service ; l'ordre d'enregistrement du monde passe par l'entrée standard ou le signal, rien d'autre ».
@@ -108,7 +111,7 @@ Décision de la version 1, point par point, et son devenir :
 | 7 | Terraria : `save` puis `exit` ; 7 Days to Die : signal seul, 120 s | Gardé comme contenu des deux fiches ; la séquence de Terraria est `untested` |
 | 8 | Reprise d'un monde par copie vérifiée | Gardé, étendu aux sauvegardes existantes (conception, section 13) |
 
-« Comment l'appliquer » de la version 1 disait : « Une fiche n'est publiée que pour un jeu essayé, avec ses ressources mesurées ». Remplacé par la règle de publication de l'ADR-0053 et la question 2 de la conception. Aujourd'hui (HRT-113) toute fiche est embarquée dans le binaire, `preview` comprise : la publication de l'agent n'est pas bloquée par une fiche en cours de preuve, et `catalog-check --release` n'est branché sur aucune publication. Ce qui est vrai : une fiche `preview` n'est jamais proposée, `embedded::keep_offered` (seule porte du catalogue vers l'application) ne garde que les fiches `published`, plus les `preview` d'une construction d'essai (HRT-101). Le type de la traduction n'impose pas encore ce passage (suivi : `ValidatedSpec`).
+« Comment l'appliquer » de la version 1 disait : « Une fiche n'est publiée que pour un jeu essayé, avec ses ressources mesurées ». Remplacé par la règle de publication de l'ADR-0053 et la question 2 de la conception. Aujourd'hui (HRT-113) toute fiche est embarquée dans le binaire, `preview` comprise : la publication de l'agent n'est pas bloquée par une fiche en cours de preuve, et `catalog-check --release` n'est branché sur aucune publication. Ce qui est vrai : une fiche `preview` n'est jamais proposée (HRT-236 : elle est listée avec sa raison), `embedded::partition` (seule porte du catalogue vers l'application) ne propose que les fiches `published`, plus les `preview` d'une construction d'essai (HRT-101). Le type de la traduction n'impose pas encore ce passage (suivi : `ValidatedSpec`).
 
 Limites de la version 1 : « Aucune commande exécutée dans le conteneur, aucun RCON » : gardé (ADR-0052). « Les ordres et lignes de journal de Terraria ne sont pas vérifiés : la fiche n'est pas publiée avant un essai sur une copie » : remplacé (statut `untested`, décision A6 de Voiky).
 

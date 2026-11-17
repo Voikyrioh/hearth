@@ -12,6 +12,7 @@ pub mod dashboard;
 pub mod devices;
 pub mod domain;
 pub mod error;
+pub mod illustrations;
 pub mod link;
 mod link_commands;
 pub mod link_dto;
@@ -57,6 +58,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             commands::log_frontend_error,
             commands::get_notify_on_link_change,
             commands::set_notify_on_link_change,
+            commands::get_remote_game_images,
+            commands::set_remote_game_images,
             commands::get_notify_on_security_alert,
             commands::set_notify_on_security_alert,
             commands::set_displayed_server,
@@ -112,6 +115,7 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             services::commands::ack_service_logs,
             services::commands::keep_service_logs,
             services::commands::open_engine_docs,
+            services::commands::open_agent_install_docs,
             service_ops::commands::list_service_operations,
             service_ops::commands::ack_service_operations,
             service_ops::commands::decide_service_operation,
@@ -227,6 +231,23 @@ fn install_link<R: Runtime>(app: &tauri::App<R>) -> Result<(), String> {
     let runtime = Arc::new(runtime);
     let events = runtime.manager().subscribe();
     app.manage(runtime.clone());
+    // Les images des jeux (HRT-239, HRT-240, ADR-0061) : le protocole `hearth-illustration` répond depuis son cache ou
+    // va chercher l'image. Le réglage « Images des jeux depuis Steam » est relu à CHAQUE requête Steam ; une lecture
+    // impossible du réglage ne contacte pas Steam (jamais « activé » par défaut en cas de doute).
+    let local = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("dossier de données local : {error}"))?;
+    let handle = app.handle().clone();
+    let setting: illustrations::EnabledFlag = Arc::new(move || {
+        settings::remote_game_images(&handle, Path::new(settings::STORE_FILE)).unwrap_or(false)
+    });
+    app.manage(Arc::new(illustrations::Illustrations::new(
+        illustrations::cache::Cache::new(local.join("catalog-illustrations")),
+        illustrations::steam::SteamClient::production(),
+        setting,
+        Arc::new(link::LinkAgentImages::new(runtime.clone())),
+    )));
     // Les envois de fichiers de cette session (HRT-96) : tenus par la coquille, relus par le panneau « Transferts ».
     app.manage(Arc::new(transfers::service::TransferBook::default()));
     let log_sessions = Arc::new(services::logs::LogSessions::default());
@@ -315,6 +336,26 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(update::feed::plugin())
+        .register_asynchronous_uri_scheme_protocol(
+            illustrations::SCHEME,
+            |ctx, request, responder| {
+                let handle = ctx.app_handle().clone();
+                let (method, path) = (
+                    request.method().to_string(),
+                    request.uri().path().to_owned(),
+                );
+                tauri::async_runtime::spawn(async move {
+                    let reply = match handle.try_state::<Arc<illustrations::Illustrations>>() {
+                        Some(service) => service.handle(&method, &path).await,
+                        None => illustrations::Reply {
+                            status: 404,
+                            body: Vec::new(),
+                        },
+                    };
+                    responder.respond(illustrations::http_response(reply));
+                });
+            },
+        )
         .invoke_handler(builder.invoke_handler())
         .on_window_event(window::on_window_event)
         .setup(|app| {

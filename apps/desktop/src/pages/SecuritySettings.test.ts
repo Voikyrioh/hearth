@@ -34,8 +34,9 @@ describe("Réglage « Alertes de sécurité »", () => {
       "Une notification Windows quand une attaque probable vise ton identifiant, et quand le mode attaque s'arrête tout seul.",
     );
     const switches = wrapper.findAll('[role="switch"]');
-    // Démarrage, notifications du lien, alertes de sécurité : trois réglages distincts.
-    expect(switches).toHaveLength(3);
+    // Démarrage, notifications du lien, alertes de sécurité, images des jeux depuis Steam : quatre réglages distincts.
+    expect(switches).toHaveLength(4);
+    expect(wrapper.find("[data-setting-remote-images]").exists()).toBe(true);
     const security = switches[2];
     if (!security) throw new Error("réglage absent");
     const labelId = security.attributes("aria-labelledby") ?? "";
@@ -71,6 +72,36 @@ describe("Réglage « Alertes de sécurité »", () => {
     ]);
     expect(calls.some((call) => call.cmd === "set_notify_on_link_change")).toBe(false);
     expect(security().attributes("aria-checked")).toBe("true");
+  });
+});
+
+describe("Réglage « Images des jeux depuis Steam » (HRT-239, BR-CLIENT-015)", () => {
+  it("est activé par défaut, dit ce que Steam voit, et s'écrit par ses propres commandes", async () => {
+    const ctx = await mountContext();
+    const calls: Array<{ cmd: string; args: unknown }> = [];
+    mockIPC((cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_settings") return { launchAtStartup: false };
+      if (cmd === "get_remote_game_images") return true;
+      if (cmd === "set_remote_game_images") return (args as { enabled: boolean }).enabled;
+      return cmd === "get_app_version" ? "0.1.0" : true;
+    });
+    const wrapper = mount(Settings, { global: ctx.global });
+    await flushPromises();
+    expect(wrapper.text()).toContain("Images des jeux depuis Steam");
+    expect(wrapper.text()).toContain(
+      "Ce serveur voit l'adresse internet de ce PC et l'identifiant du jeu demandé, rien d'autre : ni compte, ni cookie, ni nom de serveur.",
+    );
+    const images = wrapper.get("[data-setting-remote-images]");
+    expect(images.attributes("aria-checked")).toBe("true");
+    await images.trigger("click");
+    await flushPromises();
+    expect(calls.filter((call) => call.cmd === "set_remote_game_images")).toEqual([
+      { cmd: "set_remote_game_images", args: { enabled: false } },
+    ]);
+    expect(wrapper.get("[data-setting-remote-images]").attributes("aria-checked")).toBe("false");
+    // Les autres réglages ne bougent pas.
+    expect(calls.some((call) => call.cmd === "set_notify_on_link_change")).toBe(false);
   });
 });
 

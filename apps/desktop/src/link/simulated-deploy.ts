@@ -473,6 +473,8 @@ export class SimulatedDeploys {
       accept: { reservedPorts: boolean; lowDisk: boolean };
       /** Reprendre un monde : prend la place des opérations lourdes du serveur (HRT-106, BR-MONDE-013). */
       world?: boolean;
+      /** La taille que la récupération annonce en démonstration (la taille de la fiche) ; sinon 1 Go. */
+      downloadBytes?: number;
     },
     by: string,
     remember: () => void,
@@ -552,7 +554,38 @@ export class SimulatedDeploys {
     });
     this.held.set(serverId, mine);
     remember();
+    this.runAuto(serverId, operation.id, plan.downloadBytes ?? 1_000_000_000);
     return { kind: "accepted", operationId: operation.id, serviceKey: key };
+  }
+
+  /**
+   * Démonstration (navigateur de développement) : le déploiement avance SEUL, une étape à la fois, jusqu'à « en marche »,
+   * pour qu'un parcours se voie de bout en bout. `null` (défaut, et toujours dans les tests) : rien n'avance seul.
+   */
+  autoRunMs: number | null = null;
+
+  private runAuto(serverId: string, opId: string, total: number): void {
+    const every = this.autoRunMs;
+    if (every === null) return;
+    const steps: Array<() => void> = [
+      () => this.progress(serverId, opId, 0),
+      () => this.progress(serverId, opId, 30, Math.round(total * 0.3), total),
+      () => this.progress(serverId, opId, 70, Math.round(total * 0.7), total),
+      () => this.progress(serverId, opId, 100, total, total),
+      () => this.toStep(serverId, opId, "create"),
+      () => this.toStep(serverId, opId, "start"),
+      () => this.toStep(serverId, opId, "watch"),
+      () => this.succeed(serverId, opId),
+    ];
+    steps.forEach((run, index) => {
+      setTimeout(
+        () => {
+          // Annulé ou déjà clos entre-temps : rien ne reprend.
+          if (this.held.get(serverId)?.has(opId)) run();
+        },
+        every * (index + 1),
+      );
+    });
   }
 
   // ── La suite de l'opération, pilotée par l'appelant ──────────────────────────────────────────

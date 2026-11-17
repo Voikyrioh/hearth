@@ -30,4 +30,5 @@ Un enregistrement qui change quelque chose s'inscrit sous l'action `service.game
 - BR-FICHE-032, BR-FICHE-047, BR-FICHE-052
 
 ## Historique
+- 2026-11-17 : le journal ne compte que les réglages réellement enregistrés ; un enregistrement dont la recréation est refusée est inscrit en échec avec les seuls réglages du fichier (HRT-266).
 - 2026-10-24 — création (HRT-108).

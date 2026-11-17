@@ -191,6 +191,20 @@ pub enum Motif {
     PublieeSansMemoireRecommandee {
         raison: &'static str,
     },
+    /// Une fiche `preview` sans `preview_reason` (BR-FICHE-061).
+    PreviewSansRaison,
+    /// Une fiche `published` qui porte une `preview_reason` (BR-FICHE-061).
+    RaisonDAttenteSurPubliee,
+    /// `preview_reason` hors de la forme écrite pour le joueur (20 à 200 caractères, point final...).
+    RaisonDAttenteHorsForme {
+        raison: &'static str,
+    },
+    /// `steam_app_id` à 0 ou au-delà de `u32` (BR-FICHE-062).
+    SteamAppIdHorsBorne,
+    /// Une fiche qui porte `steam_app_id` ET `illustration` (BR-FICHE-062).
+    IllustrationEtSteam,
+    /// Le nom de l'illustration n'est pas `[a-z0-9-]+.jpg` (BR-FICHE-062).
+    IllustrationNomInvalide,
 }
 
 impl Motif {
@@ -246,7 +260,13 @@ impl Motif {
             | CranNonDeclarable { .. }
             | CranBorneInvalide { .. }
             | CranPreuveInterdite { .. }
-            | PublieeSansMemoireRecommandee { .. } => "coherence",
+            | PublieeSansMemoireRecommandee { .. }
+            | PreviewSansRaison
+            | RaisonDAttenteSurPubliee
+            | RaisonDAttenteHorsForme { .. }
+            | SteamAppIdHorsBorne
+            | IllustrationEtSteam
+            | IllustrationNomInvalide => "coherence",
         }
     }
 
@@ -309,6 +329,12 @@ impl Motif {
             CranBorneInvalide { id, raison } => format!("cran de mémoire `{id}` : {raison}"),
             CranPreuveInterdite { id } => format!("cran de mémoire `{id}` : seule la preuve `measured` ou `{{ publisher = \"https://...\" }}` est permise (BR-RES-033)"),
             PublieeSansMemoireRecommandee { raison } => format!("une fiche `published` exige une mémoire recommandée mesurée ou publiée par l'éditeur : {raison} (BR-RES-038)"),
+            PreviewSansRaison => "une fiche `preview` exige `preview_reason` : ce qui la retient, dit au joueur (BR-FICHE-061)".into(),
+            RaisonDAttenteSurPubliee => "une fiche `published` n'a pas de `preview_reason` (BR-FICHE-061)".into(),
+            RaisonDAttenteHorsForme { raison } => format!("`preview_reason` hors forme : {raison} (BR-FICHE-061)"),
+            SteamAppIdHorsBorne => "`steam_app_id` est un entier de 1 à 4294967295, l'identifiant du JEU dans le magasin Steam (BR-FICHE-062)".into(),
+            IllustrationEtSteam => "une fiche porte `steam_app_id` ou `illustration`, jamais les deux (BR-FICHE-062)".into(),
+            IllustrationNomInvalide => "`illustration` est un nom de fichier `[a-z0-9-]+.jpg` du dossier de la fiche (BR-FICHE-062)".into(),
         }
     }
 }

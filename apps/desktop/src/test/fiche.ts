@@ -5,7 +5,7 @@ import { useFicheInstallStore } from "@/stores/ficheInstall";
 import { typeInto } from "@/test/confirm";
 import { boot, settle, useDeployTestClock } from "@/test/deploy";
 
-export { confirmTop, dialogText, settle, toasts, topButton } from "@/test/deploy";
+export { confirmTop, dialogText, settle, tickAttention, toasts, topButton } from "@/test/deploy";
 
 /** Horloge simulée et remise à zéro des magasins entre deux tests du Catalogue (HRT-102). */
 export function useFicheTestClock() {

@@ -465,6 +465,167 @@ fn apply_to_fiche(
     }))
 }
 
+/// La réponse d'un réglage de fiche qui change (HRT-266) : `value` à `None`, le réglage revient à « non écrit »
+/// (la réponse est oubliée).
+#[derive(Clone, PartialEq, Eq)]
+pub struct AnswerChange {
+    /// L'identifiant du réglage dans la fiche.
+    pub id: String,
+    pub value: Option<String>,
+    /// Le réglage est un secret : sa réponse est scellée avec les autres secrets de la description.
+    pub secret: bool,
+}
+
+impl std::fmt::Debug for AnswerChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AnswerChange(***)")
+    }
+}
+
+/// Ce que le changement de réglages d'un serveur de jeu fait à sa description (HRT-266, BR-JEU-035) : les réponses,
+/// puis les variables et la commande que la fiche en tire (calculées par `translate`, jamais par le client).
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct GameChange {
+    pub answers: Vec<AnswerChange>,
+    /// Variable à poser (`Some`) ou à retirer (`None`), par nom.
+    pub env: Vec<(String, Option<String>)>,
+    /// La nouvelle commande de lancement, élément par élément (`Some(vide)` : celle de l'image).
+    pub command: Option<Vec<String>>,
+}
+
+impl std::fmt::Debug for GameChange {
+    /// Des nombres seulement : une valeur de variable ou un élément de commande peut être un secret.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GameChange")
+            .field("answers", &self.answers.len())
+            .field("env", &self.env.len())
+            .field("command", &self.command.is_some())
+            .finish()
+    }
+}
+
+/// Applique des réglages d'un service de fiche à sa description (HRT-266) : les réponses, les variables et la
+/// commande changent, tout le reste (ports, montages, image, adresse, autres réponses) est conservé. Le résultat est
+/// une [`Candidate`] qui oblige à recréer le conteneur par le plan de HRT-87 (mêmes volumes, arrêt qui enregistre le
+/// monde, retour seul en cas d'échec). `Applied::Nothing` quand rien ne change (BR-EDIT-013). Une réponse figée à
+/// l'installation n'est jamais changée ici (`frozen`, BR-EDIT-035).
+pub fn apply_game_env(
+    body: &SpecBody,
+    secrets: &SpecSecrets,
+    change: &GameChange,
+) -> Result<Applied, UpdateRefusal> {
+    let Some(stored) = &body.fiche else {
+        return Err(UpdateRefusal::SettingNotAllowed { reason: "fiche" });
+    };
+    if change.answers.iter().any(|given| {
+        stored
+            .answers
+            .iter()
+            .any(|answer| answer.id == given.id && answer.frozen)
+    }) {
+        return Err(UpdateRefusal::SettingNotAllowed { reason: "frozen" });
+    }
+    let mut next = body.clone();
+    let mut next_secrets = clone_secrets(secrets);
+    let mut summary = Summary::default();
+    let lines: Vec<EnvChange> = change
+        .env
+        .iter()
+        .map(|(name, value)| EnvChange {
+            name: name.clone(),
+            op: if value.is_some() {
+                EnvOp::Set
+            } else {
+                EnvOp::Remove
+            },
+            value: value.clone(),
+        })
+        .collect();
+    let (env, set, removed) = merge_env(&next_secrets.env, &lines)?;
+    next_secrets.env = env;
+    summary.env_set = set;
+    summary.env_removed = removed;
+    if let Some(command) = &change.command {
+        let wanted: Option<Vec<Secret>> =
+            (!command.is_empty()).then(|| command.iter().cloned().map(Secret::new).collect());
+        let same = match (&wanted, &next_secrets.command) {
+            (None, None) => true,
+            (Some(a), Some(b)) => {
+                a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.expose() == y.expose())
+            }
+            _ => false,
+        };
+        if !same {
+            next_secrets.command = wanted;
+            summary.command = true;
+        }
+    }
+    // Les réponses suivent : en clair dans le corps, ou scellées avec les secrets.
+    for given in &change.answers {
+        if let Some(fiche) = &mut next.fiche {
+            fiche.answers.retain(|answer| answer.id != given.id);
+        }
+        next_secrets
+            .answers
+            .retain(|answer| answer.id.as_str() != given.id);
+        let Some(value) = &given.value else { continue };
+        let answer = if given.secret {
+            let id = crate::domain::sealed::AnswerId::parse(&given.id)
+                .ok_or_else(|| invalid("answers", "bad_format"))?;
+            next_secrets.answers.push(super::spec::AnswerEntry {
+                id,
+                value: Secret::new(value.clone()),
+            });
+            super::spec::SpecAnswer {
+                id: given.id.clone(),
+                value: None,
+                secret: true,
+                frozen: false,
+            }
+        } else {
+            super::spec::SpecAnswer {
+                id: given.id.clone(),
+                value: Some(value.clone()),
+                secret: false,
+                frozen: false,
+            }
+        };
+        if let Some(fiche) = &mut next.fiche {
+            fiche.answers.push(answer);
+        }
+    }
+    if !summary.needs_recreation() {
+        // Les réponses seules (une valeur que la fiche ne passe pas au conteneur) ne recréent rien : la description
+        // change quand même, le service ne bouge pas.
+        if next == *body && next_secrets_equal(&next_secrets, secrets) {
+            return Ok(Applied::Nothing);
+        }
+    }
+    Ok(Applied::Changed(Candidate {
+        ports: deploy_ports(&next),
+        body: next,
+        secrets: next_secrets,
+        summary,
+        accept: DeployAccept::default(),
+    }))
+}
+
+fn next_secrets_equal(a: &SpecSecrets, b: &SpecSecrets) -> bool {
+    let env = |s: &SpecSecrets| -> Vec<(String, String)> {
+        s.env
+            .iter()
+            .map(|e| (e.name.expose().to_owned(), e.value.expose().to_owned()))
+            .collect()
+    };
+    let answers = |s: &SpecSecrets| -> Vec<(String, String)> {
+        s.answers
+            .iter()
+            .map(|e| (e.id.as_str().to_owned(), e.value.expose().to_owned()))
+            .collect()
+    };
+    env(a) == env(b) && answers(a) == answers(b)
+}
+
 /// Ce que le moteur dit du conteneur d'un service, ramené aux réglages que la description pose (BR-EDIT-024,
 /// BR-EDIT-036). `consigned` : l'identifiant de ce conteneur est un de ceux que l'agent a consignés pour ce
 /// service : c'est la preuve que Hearth l'a créé (l'étiquette n'en est jamais une, ADR-0037) ; faux, quelqu'un a
@@ -869,6 +1030,123 @@ mod tests {
             agreements: Vec::new(),
         });
         body
+    }
+
+    fn motd(value: Option<&str>) -> GameChange {
+        GameChange {
+            answers: vec![AnswerChange {
+                id: "motd".into(),
+                value: value.map(str::to_owned),
+                secret: false,
+            }],
+            env: vec![("MOTD".into(), value.map(str::to_owned))],
+            command: None,
+        }
+    }
+
+    #[test]
+    fn a_game_change_replaces_variable_and_answer_and_keeps_the_rest() {
+        let body = fiche_body();
+        let secrets = SpecSecrets {
+            env: vec![EnvEntry {
+                name: Secret::new("MOTD".into()),
+                value: Secret::new("Salut".into()),
+            }],
+            ..SpecSecrets::default()
+        };
+        let candidate = changed(apply_game_env(&body, &secrets, &motd(Some("Bonjour"))));
+        assert!(candidate.summary.needs_recreation() && candidate.summary.env_set == 1);
+        assert_eq!(candidate.secrets.env[0].value.expose(), "Bonjour");
+        let fiche = candidate.body.fiche.as_ref().unwrap();
+        let answer = fiche.answers.iter().find(|a| a.id == "motd").unwrap();
+        assert_eq!(answer.value.as_deref(), Some("Bonjour"));
+        assert!(
+            fiche
+                .answers
+                .iter()
+                .any(|a| a.id == "world_name" && a.frozen)
+        );
+        assert_eq!(candidate.body.ports, body.ports);
+        assert_eq!(candidate.body.name, body.name);
+        let removed = changed(apply_game_env(&body, &secrets, &motd(None)));
+        assert!(removed.secrets.env.is_empty() && removed.summary.env_removed == 1);
+        assert!(
+            removed
+                .body
+                .fiche
+                .unwrap()
+                .answers
+                .iter()
+                .all(|a| a.id != "motd")
+        );
+        assert!(matches!(
+            apply_game_env(&body, &secrets, &motd(Some("Salut"))),
+            Ok(Applied::Nothing)
+        ));
+    }
+
+    #[test]
+    fn a_game_change_sets_the_command_only_when_it_differs() {
+        let body = fiche_body();
+        let change = GameChange {
+            command: Some(vec!["run".into(), "-x".into()]),
+            ..GameChange::default()
+        };
+        let candidate = changed(apply_game_env(&body, &SpecSecrets::default(), &change));
+        assert!(candidate.summary.command && candidate.summary.needs_recreation());
+        assert_eq!(candidate.secrets.command.as_ref().unwrap().len(), 2);
+        let same = apply_game_env(&body, &candidate.secrets, &change);
+        assert!(matches!(same, Ok(Applied::Nothing)));
+    }
+
+    #[test]
+    fn a_secret_answer_is_sealed_with_the_secrets_never_in_the_body() {
+        let change = GameChange {
+            answers: vec![AnswerChange {
+                id: "password".into(),
+                value: Some("hunter2".into()),
+                secret: true,
+            }],
+            env: vec![("PASSWORD".into(), Some("hunter2".into()))],
+            command: None,
+        };
+        let candidate = changed(apply_game_env(
+            &fiche_body(),
+            &SpecSecrets::default(),
+            &change,
+        ));
+        let answer = candidate
+            .body
+            .fiche
+            .as_ref()
+            .unwrap()
+            .answers
+            .iter()
+            .find(|a| a.id == "password")
+            .unwrap();
+        assert!(answer.secret && answer.value.is_none());
+        assert_eq!(candidate.secrets.answers[0].value.expose(), "hunter2");
+        assert!(!format!("{:?}", candidate.body).contains("hunter2"));
+    }
+
+    #[test]
+    fn a_frozen_answer_or_a_service_without_fiche_refuses_a_game_change() {
+        let frozen = GameChange {
+            answers: vec![AnswerChange {
+                id: "world_name".into(),
+                value: Some("x".into()),
+                secret: false,
+            }],
+            ..GameChange::default()
+        };
+        assert!(matches!(
+            apply_game_env(&fiche_body(), &SpecSecrets::default(), &frozen),
+            Err(UpdateRefusal::SettingNotAllowed { reason: "frozen" })
+        ));
+        assert!(matches!(
+            apply_game_env(&body(), &SpecSecrets::default(), &frozen),
+            Err(UpdateRefusal::SettingNotAllowed { reason: "fiche" })
+        ));
     }
 
     #[test]

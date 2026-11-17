@@ -93,6 +93,9 @@ export function createLinkBridge(): LinkBridge {
       ...(none ? { servers: [] } : {}),
       agents: [SAMPLE_AGENT],
       liveMetrics: true,
+      // Le catalogue complet et les installations qui avancent seules, pour une personne devant l'écran. Une session pilotée
+      // (Playwright : `navigator.webdriver`) garde le pont d'essai habituel, sauf demande explicite par `?demo=1`.
+      demo: new URLSearchParams(window.location.search).has("demo") || navigator.webdriver !== true,
     });
     (window as unknown as { __hearthSim?: SimulatedLinkBridge }).__hearthSim = simulated;
     return simulated;

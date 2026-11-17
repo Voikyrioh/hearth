@@ -10,7 +10,7 @@ import { useServersStore } from "./servers";
  * démarrage ou un redémarrage est lancé depuis le client (`useServiceLifecycle`) ; un serveur retiré du carnet est oublié.
  */
 export interface PendingApply {
-  /** Toujours un redémarrage : l'agent refuse tout réglage qui demanderait la recréation du service (`recreate_not_available`). */
+  /** Toujours un redémarrage : un réglage qui demande la recréation s'applique tout de suite (HRT-266). */
   effect: "restart";
 }
 
@@ -24,7 +24,8 @@ export const useGameSettingsPendingStore = defineStore("gameSettingsPending", ()
 
   /** Des réglages viennent d'être enregistrés : s'il y a quelque chose à appliquer, on s'en souvient. */
   function note(serverId: string, serviceKey: string, effect: SettingEffect): void {
-    if (effect === "none") return;
+    // La recréation s'applique tout de suite, avec l'enregistrement : rien n'attend un démarrage (HRT-266).
+    if (effect === "none" || effect === "recreate") return;
     items.set(keyOf(serverId, serviceKey), { effect: "restart" });
   }
 

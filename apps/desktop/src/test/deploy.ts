@@ -92,7 +92,7 @@ export const reason = (wrapper: VueWrapper) => wrapper.find("[data-deploy-reason
 export const toasts = () => useToastsStore().items.map((toast) => toast.message);
 /** Le texte de TOUTES les fenêtres ouvertes (une confirmation peut s'ouvrir par-dessus la progression). */
 export const dialogText = () =>
-  [...document.querySelectorAll("dialog[open]")]
+  [...document.querySelectorAll("dialog[open], [data-review]")]
     .map((dialog) => dialog.textContent ?? "")
     .join(" ");
 
@@ -104,22 +104,36 @@ export async function openSummary(wrapper: VueWrapper) {
 /** Le bouton de la fenêtre la plus récente (une confirmation s'ouvre par-dessus la progression), par son texte. */
 export function topButton(label: string): HTMLButtonElement | undefined {
   const dialogs = [...document.querySelectorAll("dialog[open]")];
-  const top = dialogs[dialogs.length - 1];
+  const top = dialogs[dialogs.length - 1] ?? document.querySelector("[data-review]");
   return [...(top?.querySelectorAll("button") ?? [])].find(
     (button) => button.textContent?.trim() === label,
   );
+}
+
+/**
+ * Accepte tous les points d'attention de la vérification en page (HRT-246) : un test qui lance l'installation les accepte
+ * tous ; ceux qui prouvent qu'un point bloque le lancement cliquent eux-mêmes.
+ */
+export async function tickAttention() {
+  for (const box of document.querySelectorAll<HTMLInputElement>(
+    "[data-review] [data-sum-attention] input[type=checkbox]",
+  )) {
+    if (!box.checked) box.click();
+  }
+  await flushPromises();
 }
 
 /** Comme `confirmDialog`, mais dans la fenêtre la plus récente : saisit le mot de passe puis clique. */
 export async function confirmTop(label: string, password: string | null = OWN) {
   await flushPromises();
   const dialogs = [...document.querySelectorAll("dialog[open]")];
-  const top = dialogs[dialogs.length - 1];
+  const top = dialogs[dialogs.length - 1] ?? document.querySelector("[data-review]");
   const field = top?.querySelector<HTMLInputElement>("[data-reauth-field] input");
   if (field && password !== null) {
     typeInto(field, password);
     await flushPromises();
   }
+  await tickAttention();
   topButton(label)?.click();
   await flushPromises();
 }

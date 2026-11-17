@@ -13,7 +13,9 @@ family = "palworld"
 name = "Palworld"
 summary = "Le serveur officiel de Palworld, sans mod."
 status = "preview"
+preview_reason = "Le jeu ne s'arrête pas encore proprement : Hearth ne peut pas garantir votre monde à l'arrêt."
 platform = "linux"
+steam_app_id = 1623730                        # identifiant du JEU dans le magasin Steam, relu sur sa page le 16/11/2026 (BR-FICHE-062)
 
 [image]
 repository = "thijsvanloef/palworld-server-docker"

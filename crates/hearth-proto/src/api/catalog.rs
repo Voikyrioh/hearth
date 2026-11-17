@@ -2,7 +2,8 @@
 //! `GET /catalog/{id}`. Annoncé par la capacité [`crate::api::service_ops::CAPABILITY_CATALOG`].
 //!
 //! Aucun secret n'y figure : une fiche ne contient aucune valeur secrète, et les réponses d'un utilisateur ne
-//! passent jamais par ces types. Une fiche `preview` n'est listée que par une construction d'essai de l'agent.
+//! passent jamais par ces types. Un agent de publication LISTE ses fiches `preview` (avec leur raison) sans les proposer :
+//! détail et installation les refusent comme une fiche inconnue ; une construction d'essai les propose aussi.
 
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +14,7 @@ use crate::lenient::Items;
 #[serde(rename_all = "snake_case")]
 pub enum FicheStatus {
     Published,
-    /// En cours de preuve : visible dans une construction d'essai seulement.
+    /// En cours de preuve : listée avec sa raison, proposée (détail, installation) par une construction d'essai seulement.
     Preview,
     #[serde(other)]
     Unknown,
@@ -43,9 +44,42 @@ pub struct FicheCard {
     pub summary: String,
     pub version: u32,
     pub status: FicheStatus,
-    /// `false` : la fiche est listée mais ne s'installe pas sur ce serveur (plateforme non disponible).
+    /// `false` : la fiche est listée mais ne s'installe pas sur ce serveur (plateforme non disponible, ou fiche en
+    /// cours de preuve dans un agent de publication).
     #[serde(default = "yes")]
     pub installable: bool,
+    /// Ce qui retient une fiche en cours de preuve, dit au joueur (BR-FICHE-061) ; absent pour une fiche publiée.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_reason: Option<String>,
+    /// La mémoire recommandée de la fiche et la preuve de ce chiffre (BR-FICHE-064) ; absent quand la fiche n'a pas
+    /// de mémoire recommandée.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryHint>,
+    /// L'identifiant du JEU dans le magasin Steam (BR-FICHE-062) ; absent d'un jeu hors Steam ou d'un agent ancien.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steam_app_id: Option<u32>,
+    /// L'illustration originale livrée avec l'agent, pour un jeu absent de Steam (BR-FICHE-062) ; servie par
+    /// `GET /catalog/{id}/illustration`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub illustration: Option<IllustrationView>,
+}
+
+/// L'illustration embarquée d'une fiche : ce qu'il faut pour la demander, la vérifier et la réserver dans la page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IllustrationView {
+    /// `sha256:<64 hexadécimaux>` : l'empreinte des octets, aussi l'`ETag` de la route.
+    pub digest: String,
+    pub bytes: u32,
+    pub width: u16,
+    pub height: u16,
+    pub media_type: String,
+}
+
+/// La mémoire conseillée d'une carte du catalogue : le chiffre et sa preuve, jamais l'un sans l'autre.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryHint {
+    pub recommended_bytes: u64,
+    pub evidence: EvidenceView,
 }
 
 fn yes() -> bool {

@@ -45,8 +45,8 @@ use crate::domain::agent_identity;
 use crate::domain::pending_ops::OperationId;
 use crate::domain::secret::Secret;
 use crate::ports::transport::{
-    ApiError, ApiRequest, ApiResponse, AuditExport, Frame, LogsConn, LogsFrame, Method, Pin,
-    Probed, StreamConn, Target, Transport, TransportError, UploadConn, UploadFrame,
+    ApiError, ApiRequest, ApiResponse, AuditExport, BinaryBody, Frame, LogsConn, LogsFrame, Method,
+    Pin, Probed, StreamConn, Target, Transport, TransportError, UploadConn, UploadFrame,
 };
 
 /// Taille maximale d'une réponse HTTP lue (un `GET /metrics/history` en tient largement).
@@ -199,7 +199,7 @@ impl HttpTransport {
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|e| map_error(e, &state))? {
             if bytes.len().saturating_add(chunk.len()) > max_body {
-                return Err(TransportError::Protocol("réponse trop volumineuse".into()));
+                return Err(TransportError::TooLarge);
             }
             bytes.extend_from_slice(&chunk);
         }
@@ -367,6 +367,34 @@ impl Transport for HttpTransport {
         }
         serde_json::from_slice(&bytes)
             .map_err(|e| TransportError::Protocol(format!("historique illisible : {e}")))
+    }
+
+    async fn get_binary(
+        &self,
+        target: &Target,
+        token: &Secret,
+        path: &str,
+        max_bytes: usize,
+    ) -> Result<BinaryBody, TransportError> {
+        let call = Call {
+            method: Method::Get,
+            path,
+            token: Some(token),
+            idempotency_key: None,
+            body: None,
+        };
+        let (status, headers, bytes) = self.send_limited(target, call, max_bytes).await?;
+        if !(200..300).contains(&status) {
+            return Err(TransportError::Api(api_error(status, &headers, &bytes)));
+        }
+        let content_type = headers
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        Ok(BinaryBody {
+            content_type,
+            bytes,
+        })
     }
 
     async fn export_audit(
@@ -775,7 +803,7 @@ async fn read_body(
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| map_error(e, state))? {
         if bytes.len().saturating_add(chunk.len()) > MAX_BODY_BYTES {
-            return Err(TransportError::Protocol("réponse trop volumineuse".into()));
+            return Err(TransportError::TooLarge);
         }
         bytes.extend_from_slice(&chunk);
     }

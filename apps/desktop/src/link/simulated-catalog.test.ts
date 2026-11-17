@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   type DeployRefusal,
   type FicheDetail,
@@ -66,7 +66,7 @@ describe("lire le catalogue", () => {
     const detail = await detailOf(sim, "terraria");
     expect(detail.card).toMatchObject({
       name: "Terraria",
-      version: 5,
+      version: 6,
       status: "preview",
       installable: true,
     });
@@ -109,6 +109,33 @@ describe("lire le catalogue", () => {
     const catalog = await sim.readCatalog("forge");
     expect(catalog.refused).toEqual([{ dir: "autre", invariant: "I2" }]);
     expect(catalog.unreadable).toBe(2);
+  });
+});
+
+describe("un agent de publication liste les fiches en cours de preuve (HRT-236)", () => {
+  it("les montre avec leur raison, non installables, sans détail ni installation", async () => {
+    const sim = bridge();
+    sim.catalog.addWaiting();
+    const catalog = await sim.readCatalog("forge");
+    const waiting = catalog.fiches.filter((card) => !card.installable);
+    expect(waiting.map((card) => card.id).sort()).toEqual(
+      [
+        "7dtd",
+        "corekeeper",
+        "factorio",
+        "palworld",
+        "rust",
+        "satisfactory",
+        "vrising",
+        "zomboid",
+      ].sort(),
+    );
+    for (const card of waiting) {
+      expect(card.installable).toBe(false);
+      expect(card.previewReason).toMatch(/^.{20,200}\.$/);
+      expect(card.previewReason).not.toMatch(/—|–/);
+      expect(await sim.readFiche("forge", card.id)).toEqual({ kind: "unknown" });
+    }
   });
 });
 
@@ -453,5 +480,50 @@ describe("refuser comme l'agent, dans l'ordre", () => {
       { hostPort: 25570, containerPort: 25565 },
       { hostPort: 7778, containerPort: 7778 },
     ]);
+  });
+});
+
+describe("le catalogue de démonstration (navigateur de développement)", () => {
+  it("liste les douze fiches : quatre prêtes qui s'installent, huit en cours de preuve avec leur raison", async () => {
+    const sim = new SimulatedLinkBridge({ retryDelayMs: -1, demo: true });
+    sim.services.seed("forge", []);
+    const catalog = await sim.readCatalog("forge");
+    expect(catalog.fiches).toHaveLength(12);
+    const ready = catalog.fiches.filter((card) => card.status === "published");
+    expect(ready.map((card) => card.id).sort()).toEqual([
+      "enshrouded",
+      "minecraft",
+      "terraria",
+      "valheim",
+    ]);
+    expect(ready.every((card) => card.installable)).toBe(true);
+    const waiting = catalog.fiches.filter((card) => card.status === "preview");
+    expect(waiting).toHaveLength(8);
+    expect(waiting.every((card) => !card.installable && (card.previewReason ?? "") !== "")).toBe(
+      true,
+    );
+    // Minecraft a son illustration originale, les autres jeux Steam leur identifiant.
+    expect(ready.find((card) => card.id === "minecraft")?.illustration?.width).toBe(920);
+    expect(ready.find((card) => card.id === "valheim")?.steamAppId).toBe(892970);
+  });
+
+  it("fait avancer une installation seule jusqu'à « en marche », sans que rien ne la pilote", async () => {
+    vi.useFakeTimers();
+    try {
+      const sim = new SimulatedLinkBridge({ retryDelayMs: -1, demo: true });
+      sim.services.seed("forge", []);
+      const detail = await detailOf(sim, "terraria");
+      const outcome = await sim.installFiche(
+        "forge",
+        terrariaRequest(detail, { answers: [{ id: "world_name", value: "Monde" }] }),
+        PASSWORD,
+      );
+      expect(outcome.kind).toBe("accepted");
+      expect(sim.deploys.running("forge")).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(900 * 9);
+      expect(sim.deploys.running("forge")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

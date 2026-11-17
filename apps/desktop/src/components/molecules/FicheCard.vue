@@ -1,118 +1,146 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { safeText } from "@/audit/text";
+import FicheVisual from "@/components/atoms/FicheVisual.vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HTag from "@/components/atoms/HTag.vue";
+import { memorySentence } from "@/fiche/memory";
 import { t } from "@/i18n";
 import type { FicheCard } from "@/link";
 
-// Une fiche dans la liste du Catalogue (HRT-102, BR-FICHE-003) : le nom du jeu, une phrase, « Livrée avec Hearth
-// {version} » et « Voir la fiche ». Rien d'autre : pas d'illustration (aucun visuel sans droit d'usage établi), pas
-// de bouton « Installer » (un seul chemin, depuis la fiche), pas de mention de compte (BR-FICHE-004). Un jeu sans
-// serveur pour ce système est atténué et le dit. Les textes viennent de la fiche : ils sont montrés tels quels, sans
-// jamais être interprétés. Toute la carte ouvre la fiche (revue UX 2026-10-24, constat 21) ; « Voir la fiche » reste le
-// point d'entrée du clavier.
+// Une carte de la grille du Catalogue (HRT-241, BR-FICHE-003, 033, 063, 064) : l'image du jeu (ou son visuel neutre), son
+// nom, un badge d'état, sa phrase, puis la mémoire conseillée en une phrase (fiche prête) ou la raison de son attente
+// (fiche bientôt). Une carte prête s'ouvre entière (« Voir la fiche » reste le point d'entrée du clavier). Une carte
+// bientôt n'a ni bouton, ni clic, ni survol cliquable : seule une construction d'essai la rend installable, et elle
+// se comporte alors comme une carte prête. Les textes viennent de la fiche : montrés tels quels, jamais interprétés.
 const props = defineProps<{
   card: FicheCard;
-  /** La version de l'agent qui livre la fiche ; `null` tant qu'elle n'est pas connue. */
-  agentVersion: string | null;
+  serverId: string;
+  serverName: string;
+  /** La mémoire de la machine ; `null` tant qu'elle n'est pas lue. */
+  capacityBytes: number | null;
 }>();
 
 const emit = defineEmits<{ open: [] }>();
 
 const name = computed(() => safeText(props.card.name));
-const delivered = computed(() =>
-  props.agentVersion === null
-    ? t("catalogue.deliveredWithBare")
-    : t("catalogue.deliveredWith", { version: safeText(props.agentVersion) }),
+const soon = computed(() => props.card.status === "preview" && !props.card.installable);
+const openable = computed(() => props.card.installable);
+const memory = computed(() =>
+  memorySentence(props.card.memory, props.capacityBytes, safeText(props.serverName), "card"),
 );
+const reason = computed(() =>
+  props.card.previewReason ? safeText(props.card.previewReason) : null,
+);
+
+function open() {
+  if (openable.value) emit("open");
+}
 </script>
 
 <template>
   <article
-    :class="['fcard', { 'fcard--dim': !card.installable }]"
+    :class="['fcard', { 'fcard--soon': soon, 'fcard--open': openable }]"
     data-fiche-card
     :data-fiche="card.id"
-    @click="emit('open')"
+    :data-soon="soon ? 'true' : undefined"
+    @click="open"
   >
-    <div class="fcard__text">
-      <h2 class="fcard__name">{{ name }}</h2>
-      <p class="fcard__summary">{{ safeText(card.summary) }}</p>
-      <div class="fcard__meta">
-        <HTag tone="neutral" data-fiche-delivered>{{ delivered }}</HTag>
+    <FicheVisual :server-id="serverId" :card="card" variant="card" class="fcard__visual" />
+    <div class="fcard__body">
+      <div class="fcard__head">
+        <h3 class="fcard__name">{{ name }}</h3>
+        <HTag :tone="soon ? 'warn' : 'ok'" data-fiche-badge>
+          {{ soon ? t("catalogue.badgeSoon") : t("catalogue.badgeReady") }}
+        </HTag>
       </div>
+      <p class="fcard__summary">{{ safeText(card.summary) }}</p>
+      <p v-if="soon && reason" class="fcard__line" data-fiche-reason>{{ reason }}</p>
+      <p v-else-if="!soon" class="fcard__line" data-fiche-memory>{{ memory }}</p>
+      <p v-if="!soon && !card.installable" class="fcard__line" data-fiche-not-installable>
+        {{ t("catalogue.noServer") }}
+      </p>
+      <HButton
+        v-if="openable"
+        class="fcard__open"
+        variant="secondary"
+        data-fiche-open
+        :aria-label="t('catalogue.seeLabel', { name })"
+        @click.stop="emit('open')"
+      >
+        {{ t("catalogue.see") }}
+      </HButton>
     </div>
-    <p v-if="!card.installable" class="fcard__note" data-fiche-not-installable>
-      {{ t("catalogue.noServer") }}
-    </p>
-    <HButton
-      class="fcard__open"
-      variant="secondary"
-      data-fiche-open
-      :aria-label="t('catalogue.seeLabel', { name })"
-      @click.stop="emit('open')"
-    >
-      {{ t("catalogue.see") }}
-    </HButton>
   </article>
 </template>
 
 <style scoped>
 .fcard {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-3) var(--space-4);
-  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
   border-radius: var(--radius-card);
   background: var(--card);
   box-shadow: var(--card-edge);
+}
+
+.fcard--open {
   cursor: pointer;
 }
 
-.fcard:hover {
+.fcard--open:hover {
   background: var(--card-2);
 }
 
-.fcard--dim .fcard__text {
+/* Une carte « Bientôt » est atténuée et n'a aucun survol. */
+.fcard--soon .fcard__visual {
+  filter: saturate(0.4);
   opacity: var(--opacity-disabled);
 }
 
-.fcard__text {
+.fcard__body {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-4);
   min-width: 0;
 }
 
+.fcard__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+/* Le badge s'affiche entier : il passe sous le titre quand la place manque, jamais rogné par le bord de la carte. */
+.fcard__head > :last-child {
+  flex: 0 0 auto;
+}
+
 .fcard__name {
+  min-width: 0;
   margin: 0;
   font-family: var(--font-title);
-  font-size: var(--fs-h3);
+  font-size: var(--fs-lead);
   font-weight: var(--fw-semibold);
   overflow-wrap: anywhere;
 }
 
-.fcard__summary {
+.fcard__summary,
+.fcard__line {
   margin: 0;
   color: var(--tx-secondary);
   overflow-wrap: anywhere;
 }
 
-.fcard__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.fcard__note {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--tx-secondary);
+.fcard__line {
+  font-size: var(--fs-small);
 }
 
 .fcard__open {
-  grid-column: 2;
-  grid-row: 1;
+  align-self: flex-start;
 }
 </style>

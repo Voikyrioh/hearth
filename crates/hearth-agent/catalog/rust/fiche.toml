@@ -1,0 +1,112 @@
+# Rust (Facepunch), serveur officiel sans mod. Fiche en `preview` (HRT-252, ADR-0050 version 2, ADR-0053) : AUCUN banc n'a été lancé,
+# rien n'est mesuré, tout ce qui n'est pas lu dans la documentation de l'image est `untested` ou `unmeasured`.
+#
+# Image choisie : `pfeiffermax/rust-game-server` (dépôt https://github.com/max-pfeiffer/rust-game-server-docker), comparée le 16/11/2026
+# à `didstopia/rust-server` (plus de téléchargements, mais SEULES les étiquettes `latest` et `full` sont maintenues : une fiche refuse
+# `latest`, aucune version ne s'épingle ; son script embarque aussi nginx et un RCON web). L'image retenue est reconstruite chaque nuit
+# quand Facepunch publie une version, une étiquette `build-<numéro>` précise chaque construction, le jeu est DANS l'image (pas de
+# téléchargement au démarrage), l'utilisateur est 10001:10001 (non root). Sa documentation et son Dockerfile ont été lus ; l'image n'a
+# pas été démarrée.
+#
+# Ce que l'image fait (README, `runds.sh`, Dockerfile) : TOUTE la configuration passe par des arguments de la ligne de commande du jeu
+# (`+server.port 28015`, `+server.hostname ...`), rien par des variables d'environnement. Les données (carte, configuration, plans)
+# vivent dans `/srv/rust/server/<identité>`, l'identité étant `+server.identity` : la fiche la fixe à `hearth` et monte ce dossier.
+#
+# Limites trouvées dans la documentation de l'image, qui expliquent ce que la fiche ne fait PAS :
+# - la console à distance (RCON) se règle par `+rcon.password <mot de passe>` : ce mot de passe passerait par la ligne de commande,
+#   lisible par tout lecteur du moteur, ce que le format de fiche refuse (invariant I3, secret en argument). La fiche n'active donc
+#   pas le RCON : sans mot de passe, le jeu ne l'ouvre pas, et Hearth ne peut pas enregistrer le monde par la console avant l'arrêt ;
+# - un argument de fiche tient dans un alphabet fermé (pas d'espace) : le nom du serveur est un seul mot, sans espace ;
+# - le script de lancement n'utilise pas `exec` : l'arrêt par le signal n'est pas garanti (non essayé).
+# La compagnon Rust+ (`app.port`, 28082) n'est pas publiée.
+format = 2
+id = "rust"
+version = 1
+family = "rust"
+name = "Rust"
+summary = "Le serveur officiel de Rust, sans mod."
+status = "preview"
+preview_reason = "Pas encore essayé sur une vraie machine par Hearth, et sa console à distance n'est pas prise en charge : son mot de passe passerait par la ligne de commande."
+platform = "linux"
+steam_app_id = 252490                        # identifiant du JEU dans le magasin Steam, relu sur sa page le 16/11/2026 (BR-FICHE-062)
+
+[image]
+repository = "pfeiffermax/rust-game-server"
+tag = "build-26498655"
+digest = "sha256:c83a49c8d5a1038b1f6ad0093ca34656dd2e864c728eeccd43a1c49c0a83c0bf"   # relevée sur Docker Hub le 16/11/2026 (amd64, 1,8 Go compressés)
+game_updates = "never"                    # le jeu est installé dans l'image : sa version est celle de l'étiquette
+
+[owner]
+uid = 10001                               # lu dans le Dockerfile de l'image (`useradd -u 10001`, `USER 10001`)
+gid = 10001
+
+# Le dossier de données du serveur : carte, configuration, plans des joueurs (README : « Docker Volume » monté sur l'identité).
+[[folder]]
+id = "data"
+role = "world"
+target = "/srv/rust/server/hearth"
+read_only = false
+backup = true
+
+[[port]]
+id = "game"
+container = 28015
+protocol = "udp"
+role = "game"
+publish = "always"
+default_host = 28015
+mapping = "nat"
+
+# Le port de requête (liste des serveurs) : 28017 en UDP dans la ligne EXPOSE de l'image.
+[[port]]
+id = "query"
+container = 28017
+protocol = "udp"
+role = "query"
+publish = "always"
+default_host = 28017
+mapping = "nat"
+
+[[channel]]
+id = "args"
+kind = "args"
+
+[first_start]
+ready_timeout_s = 900                     # génération de la carte : durée non mesurée, estimation prudente
+world_generation = true
+
+[ready]
+log_contains = "Server startup complete"  # NON VÉRIFIÉ : ligne de journal habituelle de RustDedicated, jamais vue sur cette image
+status = "untested"
+
+# `runds.sh` lance `RustDedicated` sans `exec` : le signal d'arrêt n'est peut-être pas transmis. Aucune console n'est active :
+# aucune suite d'enregistrement ne peut être déclarée. L'enregistrement automatique du jeu (toutes les dix minutes par défaut) reste la seule protection.
+[stop]
+grace_s = 60
+signal = "SIGTERM"
+world_saved = "not_saved"
+
+[resources]
+cpu = { evidence = "unmeasured" }
+memory = { recommended_bytes = 17179869184, evidence = { publisher = "https://github.com/max-pfeiffer/rust-game-server-docker" } }   # exemple de production du dépôt de l'image : limite de 16 Go
+disk = { evidence = "unmeasured" }
+
+[[not_exposed]]
+key = "+rcon.password"
+channel = "args"
+why = "Le mot de passe de la console à distance passerait par la ligne de commande, lisible par tout lecteur du moteur : la console n'est pas activée."
+
+[[not_exposed]]
+key = "+rcon.port"
+channel = "args"
+why = "La console à distance n'est pas activée : son port n'est ni choisi ni publié."
+
+[[not_exposed]]
+key = "+app.port"
+channel = "args"
+why = "La compagnon Rust+ n'est pas prise en charge : son port n'est pas publié."
+
+[[not_exposed]]
+key = "-logfile"
+channel = "args"
+why = "Les journaux restent sur la sortie du service, où Hearth les lit."

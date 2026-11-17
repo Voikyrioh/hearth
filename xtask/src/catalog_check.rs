@@ -7,7 +7,7 @@
 //!   change pas de clé sans `rename` d'un `[[migration]]`, n'est pas réutilisé après son retrait ;
 //! - `--release` (option, branchée sur aucune publication : la CI lance `catalog-check` sans elle) : refuse toute
 //!   fiche `preview`. Toute fiche est embarquée, `preview` comprise ; une fiche `preview` n'est PROPOSÉE que par une
-//!   construction d'essai (`domain::catalog::embedded::keep_offered`, HRT-101). Il refuse aussi toute fiche dont la mémoire recommandée manque ou
+//!   construction d'essai (`domain::catalog::embedded::partition`, HRT-101). Il refuse aussi toute fiche dont la mémoire recommandée manque ou
 //!   n'a qu'une mesure au repos (HRT-122, BR-RES-038).
 //!
 //! Hors périmètre de ce ticket (HRT-114) : `golden.toml`, `probe.toml`, `evidence.toml`, le relevé sur l'image
@@ -330,7 +330,11 @@ mod tests {
     fn check_preview(settings: &str, lock: &str, release: bool) -> Vec<String> {
         let text = std::str::from_utf8(FICHE)
             .expect("utf-8")
-            .replace("status = \"published\"", "status = \"preview\"")
+            .replace(
+                "status = \"published\"",
+                "status = \"preview\"
+preview_reason = \"Fiche d'essai, pas encore proposée.\"",
+            )
             .replace(
                 "memory = { min_bytes = 2147483648, recommended_bytes = 2147483648, evidence = \"measured\" }",
                 "memory = { min_bytes = 591187148, evidence = \"measured_idle\" }",

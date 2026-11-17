@@ -1,4 +1,4 @@
-import type { DeployCheck, FicheDetail } from "@/link";
+import type { DeployCheck, FicheDetail, FicheQuestion } from "@/link";
 import type { EngineCapacity, Resources } from "@/resources";
 import { availableMemory, diskVerdict, type Lack, minimumVerdicts, publisherAbove } from "./fit";
 import { proven } from "./proof";
@@ -23,7 +23,13 @@ export type AttentionPoint =
   /** Le minimum annoncé par l'éditeur dépasse la machine (BR-FICHE-021). */
   | { key: "publisher_minimum"; lack: Lack; needed: number; has: number }
   /** Reprendre un monde : Hearth ne sait pas avec quelle version du jeu il a été enregistré (BR-MONDE-016). */
-  | { key: "world_version" };
+  | { key: "world_version" }
+  /** Ces réglages sont gravés dans le monde à sa création et ne changeront plus (BR-FICHE-030, HRT-246). */
+  | { key: "frozen_settings"; labels: string[] }
+  /** La fiche ne sait pas combien de processeur le jeu demande : Hearth ne peut pas le vérifier (BR-FICHE-020). */
+  | { key: "cpu_unverified" }
+  /** Aucun mot de passe : toute personne qui peut joindre le port peut rejoindre la partie (BR-FICHE-025). */
+  | { key: "no_password" };
 
 export type AttentionKey = AttentionPoint["key"];
 
@@ -36,10 +42,35 @@ export function attentionPoints(input: {
   forceLowDisk: { freeBytes: number | null } | null;
   /** Un monde existant est repris : son geste « Je comprends » est un point d'attention (BR-MONDE-016). */
   resumesWorld?: boolean;
+  /** Les questions de l'installation et les réponses : de quoi dire ce qui sera gravé et ce qui est laissé vide. */
+  questions?: readonly FicheQuestion[];
+  answers?: Readonly<Record<string, string>>;
 }): AttentionPoint[] {
   const { detail, capacity, check, resources, forceLowDisk } = input;
   const points: AttentionPoint[] = [];
   if (input.resumesWorld === true) points.push({ key: "world_version" });
+
+  // Ce qui ne changera plus après la création du monde, dit avant de lancer. Un monde repris ne crée rien.
+  if (input.resumesWorld !== true) {
+    const frozen = (input.questions ?? []).filter((question) => question.frozenAfterCreation);
+    if (frozen.length > 0) {
+      points.push({ key: "frozen_settings", labels: frozen.map((question) => question.label) });
+    }
+  }
+  if (proven(detail.resources.cpu.recommendedMillis, detail.resources.cpu.evidence) === null) {
+    points.push({ key: "cpu_unverified" });
+  }
+  const passwordQuestion = (input.questions ?? []).find(
+    (question) => question.secret && question.secretKind === "game_password",
+  );
+  if (
+    passwordQuestion &&
+    (input.answers?.[passwordQuestion.id] ?? "").trim() === "" &&
+    passwordQuestion.minLen !== null &&
+    passwordQuestion.minLen === 0
+  ) {
+    points.push({ key: "no_password" });
+  }
 
   const minimums = publisherAbove(minimumVerdicts(detail, capacity));
   for (const verdict of minimums) {

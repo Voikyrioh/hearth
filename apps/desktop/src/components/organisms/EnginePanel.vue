@@ -399,6 +399,7 @@ const announce = computed(() => t("engine.announce", { state: stateText.value })
 
 .engine__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
 }

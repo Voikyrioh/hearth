@@ -72,8 +72,8 @@ use crate::domain::services::drift::{Drift, compare};
 use crate::domain::services::plan::{PlanContext, image_reference, plan_from_spec};
 use crate::domain::services::spec::{SecretsAccess, SpecBody, SpecMountKind, SpecSecrets};
 use crate::domain::services::update::{
-    Applied, Candidate, Summary, UpdateRefusal, apply, clone_secrets, deploy_mounts, deploy_ports,
-    image_variables, observed_container,
+    Applied, Candidate, GameChange, Summary, UpdateRefusal, apply, apply_game_env, clone_secrets,
+    deploy_mounts, deploy_ports, image_variables, observed_container,
 };
 use crate::domain::services::{
     EngineState, KeyKind, RunState, ServiceKey, ServiceStateKind, TransitionKind,
@@ -348,6 +348,12 @@ struct Subject {
     consigned: Vec<String>,
 }
 
+/// Ce qu'une modification demande : le formulaire d'un service, ou les réglages d'un serveur de jeu.
+enum Wanted {
+    Spec(SpecChange),
+    Game(GameChange),
+}
+
 impl ServiceUpdates {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -550,6 +556,70 @@ impl ServiceUpdates {
         actor: Actor,
         op_key: &str,
     ) -> Result<UpdateAccepted, UpdateFailed> {
+        let (base_rev, seen_drift) = (change.base_rev, change.seen_drift);
+        self.update_wanted(
+            key,
+            base_rev,
+            seen_drift,
+            Wanted::Spec(change),
+            actor,
+            op_key,
+        )
+        .await
+    }
+
+    /// Ce que `update` jugerait AVANT toute écriture, sans rien accepter : le service est modifiable (moteur prêt,
+    /// aucune action en cours, état permis, pas changé hors de Hearth). Sert à refuser tout un enregistrement de
+    /// réglages avant d'écrire le moindre fichier (HRT-266). Le serveur refait chaque contrôle à l'acceptation.
+    pub async fn precheck(&self, key: &ServiceKey) -> Result<(), UpdateFailed> {
+        self.ops.wait_closed(key).await;
+        let engine_state = self.registry.engine_state();
+        let subject = self.subject(key).await?;
+        let named = |error| UpdateFailed::named(error, &subject.name);
+        if engine_state != EngineState::Ready {
+            return Err(named(UpdateError::EngineUnavailable(engine_state)));
+        }
+        if let Some(busy) = self.busy_error(key) {
+            return Err(named(busy));
+        }
+        if let Some(target) = &subject.target
+            && !updatable(target.state)
+        {
+            return Err(named(UpdateError::NotUpdatable(target.state)));
+        }
+        if matches!(self.drift_of(key, &subject), Drift::ModifiedOutside(_)) {
+            return Err(named(UpdateError::Conflict {
+                current_rev: subject.rev,
+                outside: true,
+            }));
+        }
+        Ok(())
+    }
+
+    /// Change les réglages d'un serveur de jeu qui passent par une variable ou la commande (HRT-266, BR-JEU-035) :
+    /// la description est révisée et le conteneur recréé par le plan de HRT-87. `base_rev` est la révision que
+    /// l'appelant a lue AVANT d'écrire quoi que ce soit : une description changée entre-temps est un `SPEC_CONFLICT`.
+    pub async fn update_game(
+        self: &Arc<Self>,
+        key: &ServiceKey,
+        base_rev: u32,
+        change: GameChange,
+        actor: Actor,
+        op_key: &str,
+    ) -> Result<UpdateAccepted, UpdateFailed> {
+        self.update_wanted(key, base_rev, None, Wanted::Game(change), actor, op_key)
+            .await
+    }
+
+    async fn update_wanted(
+        self: &Arc<Self>,
+        key: &ServiceKey,
+        base_rev: u32,
+        seen_drift: Option<DriftView>,
+        wanted: Wanted,
+        actor: Actor,
+        op_key: &str,
+    ) -> Result<UpdateAccepted, UpdateFailed> {
         // Une clôture en cours sur ce service se termine avant que l'on juge « occupé ».
         self.ops.wait_closed(key).await;
         let engine_state = self.registry.engine_state();
@@ -579,7 +649,7 @@ impl ServiceUpdates {
             return Err(named(UpdateError::NotUpdatable(target.state)));
         }
         // La révision lue par le formulaire est la courante (BR-EDIT-024), avant tout arrêt.
-        if change.base_rev != subject.rev {
+        if base_rev != subject.rev {
             return Err(named(UpdateError::Conflict {
                 current_rev: subject.rev,
                 outside: false,
@@ -588,7 +658,7 @@ impl ServiceUpdates {
         let drift = self.drift_of(key, &subject);
         // Le service a été changé hors de Hearth depuis l'ouverture du formulaire : refusé, sans nommer d'auteur.
         if matches!(drift, Drift::ModifiedOutside(_))
-            && change.seen_drift != Some(DriftView::ModifiedOutside)
+            && seen_drift != Some(DriftView::ModifiedOutside)
         {
             return Err(named(UpdateError::Conflict {
                 current_rev: subject.rev,
@@ -596,8 +666,11 @@ impl ServiceUpdates {
             }));
         }
 
-        let applied = apply(&subject.body, &subject.secrets, &change)
-            .map_err(|refusal| named(UpdateError::Refused(refusal)))?;
+        let applied = match &wanted {
+            Wanted::Spec(change) => apply(&subject.body, &subject.secrets, change),
+            Wanted::Game(change) => apply_game_env(&subject.body, &subject.secrets, change),
+        }
+        .map_err(|refusal| named(UpdateError::Refused(refusal)))?;
         let recreate_anyway = !matches!(drift, Drift::None);
         let (candidate, save_revision) = match applied {
             Applied::Changed(candidate) => (candidate, true),

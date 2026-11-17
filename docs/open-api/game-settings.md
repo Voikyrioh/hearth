@@ -57,7 +57,7 @@ Corps (`SaveSettingsRequest`) :
 | `409 SETTINGS_FILE_CHANGED` | le fichier a bougé depuis la lecture (`file_stamp`) ou juste avant l'écriture, un autre enregistrement a gagné la course, ou des réglages en écart attendent un choix (`details.ids`) ; rien n'est remis par-dessus le fichier d'un autre |
 | `422 SETTINGS_FILE_UNREADABLE` | le format ne sait pas découper le fichier (`details.reason`, `details.line`) ; jamais réécrit |
 | `422 SETTING_REFUSED` | un changement est refusé (`details.id` seulement si c'est un réglage de la fiche, `details.reason` : `bounds`, `choice`, `charset`, `length`, `frozen`, `imposed`, `retired`, `unknown_id`, `variant`, `version`, `check`, `secret`, `carried_by_world`, `details.char` au plus un caractère) ; jamais la valeur |
-| `409 RECREATE_NOT_AVAILABLE` | un réglage reçu par variable ou argument demande de recréer le service (`details.ids`) ; rien n'est écrit |
+| `409 RECREATE_NOT_AVAILABLE` | un réglage reçu par variable ou argument demande de recréer le service, que Hearth ne peut pas recréer maintenant (moteur pas prêt, état, port) ; les valeurs de ces réglages reviennent à ce qu'elles étaient |
 | `409 OPERATION_IN_PROGRESS` | une opération exclusive tient le service |
 | `422 VALIDATION_ERROR` | corps incohérent (`details.field`) |
 

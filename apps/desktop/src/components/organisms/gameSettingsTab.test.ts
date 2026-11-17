@@ -142,7 +142,7 @@ describe("les thèmes en mots simples (BR-FICHE-041)", () => {
     await showAll(wrapper);
     expect(wrapper.findAll("[data-setting-theme]")).toHaveLength(7);
     expect(wrapper.findAll("[data-setting]")).toHaveLength(32);
-    expect(wrapper.get('[data-theme="journey"]').text()).toContain("15 réglage(s), 0 modifié(s)");
+    expect(wrapper.get('[data-theme="journey"]').text()).toContain("15 réglages · modifiés : 0");
     wrapper.unmount();
   });
 
@@ -193,13 +193,12 @@ describe("les réglages verrouillés ou secrets", () => {
     wrapper.unmount();
   });
 
-  it("dit un réglage reçu par argument en attente de la recréation, désactivé", async () => {
+  it("dit qu'un réglage reçu par argument recrée le service à l'enregistrement, et le laisse se régler", async () => {
     const { wrapper } = await open();
     await showAll(wrapper);
     const box = row(wrapper, "announcement_box_off");
-    expect(box.get("[data-setting-lock]").text()).toBe(
-      "Ce réglage se change en recréant le service. Cela arrive bientôt.",
-    );
+    expect(box.find("[data-setting-lock]").exists()).toBe(false);
+    expect(box.get("[data-setting-effect]").text()).toContain("Hearth recrée le service");
     wrapper.unmount();
   });
 
@@ -224,7 +223,7 @@ describe("chercher et filtrer (BR-FICHE-043, 045)", () => {
     expect(
       wrapper.findAll("[data-setting]").map((item) => item.attributes("data-setting")),
     ).toEqual(["npc_stream"]);
-    expect(wrapper.get("[data-settings-found]").text()).toBe("1 réglage(s) trouvé(s).");
+    expect(wrapper.get("[data-settings-found]").text()).toBe("1 réglage trouvé.");
     typeInto(search.element, "zzz");
     await settle();
     expect(wrapper.get("[data-settings-none]").text()).toBe("Aucun réglage ne correspond.");
@@ -237,7 +236,7 @@ describe("enregistrer (BR-FICHE-042, 048, 053)", () => {
     const { wrapper, bridge } = await open();
     await type(wrapper, "motd", "Bienvenue chez nous");
     expect(row(wrapper, "motd").get("[data-setting-tag='modified']").text()).toBe("Modifié");
-    expect(wrapper.get("[data-settings-count]").text()).toBe("1 changement(s) à enregistrer.");
+    expect(wrapper.get("[data-settings-count]").text()).toBe("1 changement à enregistrer.");
     await wrapper.get("[data-settings-save]").trigger("click");
     await flushPromises();
     expect(dialogText()).toContain("Les changements s'appliqueront au prochain démarrage.");
@@ -388,7 +387,7 @@ describe("l'import d'un texte collé (BR-FICHE-052)", () => {
     expect(table?.textContent).toContain("Valeur que ce jeu ne connaît pas");
     expect(table?.textContent).toContain("Imposé par la fiche : ignoré");
     expect(document.querySelector("dialog [data-import-unknown]")?.textContent).toContain(
-      "1 ligne(s) inconnue(s)",
+      "1 ligne inconnue",
     );
     expect(dialogText()).toContain("Ce texte retire ou change un réglage dont Hearth a besoin");
     await confirmTop("Appliquer ces réglages");

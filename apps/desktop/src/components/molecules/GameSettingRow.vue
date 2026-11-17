@@ -73,11 +73,8 @@ const notWritten = computed(
     props.edit === undefined &&
     !unverified.value,
 );
-// Un réglage qui attend la recréation dit déjà « Cela arrive bientôt » : sa mention d'effet serait une promesse de plus.
 const effect = computed(() =>
-  props.mode === "service" && props.model.lock !== "recreate"
-    ? effectText(props.model.effect, props.model.lock === "frozen")
-    : null,
+  props.mode === "service" ? effectText(props.model.effect, props.model.lock === "frozen") : null,
 );
 const hasProposal = computed(() => !secret.value && question.value.proposed !== null);
 const canReset = computed(() => !readOnly.value && resettable(props.model, props.edit));
@@ -96,8 +93,6 @@ const lockText = computed(() => {
     // Figé : la mention d'effet (BR-FICHE-042) le dit une fois, pas deux.
     case "frozen":
       return null;
-    case "recreate":
-      return t("gameSettings.recreateSoon");
     case "gone": {
       const until = props.model.setting.until;
       return until === null
@@ -132,7 +127,6 @@ function update(next: string) {
     <legend class="sr-only">{{ label }}</legend>
 
     <div class="row__tags">
-      <code class="row__key" data-setting-key>{{ t("gameSettings.technicalName", { key: safeText(model.setting.key) }) }}</code>
       <HTag v-if="modified && !imposed" tone="accent" data-setting-tag="modified">{{ t("gameSettings.tagModified") }}</HTag>
       <HTag v-if="model.lock === 'frozen'" data-setting-tag="frozen">
         <HIcon name="lock" size="sm" />
@@ -217,6 +211,10 @@ function update(next: string) {
         {{ resetLabel }}
       </HButton>
     </div>
+    <!-- Le nom technique vient APRÈS le libellé, en discret (revue UX v2, N6). -->
+    <code class="row__key" data-setting-key>{{
+      t("gameSettings.technicalName", { key: safeText(model.setting.key) })
+    }}</code>
   </fieldset>
 </template>
 
@@ -293,6 +291,7 @@ function update(next: string) {
 
 .row__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-start;
 }
 </style>

@@ -315,7 +315,11 @@ fn i1_one_way_closed_plan_refuses_image_and_port_traps() {
         Motif::EmpreinteInvalide
     );
     assert_eq!(
-        *motif(&bad_fiche("status = \"preview\"", "status = \"published\"")),
+        *motif(&bad_fiche(
+            "status = \"preview\"
+preview_reason = \"Fiche de démonstration, pas encore proposée.\"",
+            "status = \"published\""
+        )),
         Motif::PublieeSansEmpreinte
     );
     for port in [80u16, 22, 443, 1023] {
@@ -1548,8 +1552,8 @@ fn the_terraria_catalog_speaks_to_the_user_in_vous_and_every_text_stays_within_i
             .all(|n| n.channel == "args" || n.key == "banlist")
     );
     assert_eq!(
-        terraria.file.version, 5,
-        "version 5 : publiée après le banc local, mémoire mesurée (HRT-226) ; version 4 : suites essayées sur la vraie image, empreinte et mesures au repos (HRT-114) ; version 3 : l'aide ne redit plus les bornes ni le jeu de caractères (ADR-0050)"
+        terraria.file.version, 6,
+        "version 6 : valeurs proposées Moyen et Classique pour un premier monde (retour de revue UX) ; version 5 : publiée après le banc local, mémoire mesurée (HRT-226) ; version 4 : suites essayées sur la vraie image, empreinte et mesures au repos (HRT-114) ; version 3 : l'aide ne redit plus les bornes ni le jeu de caractères (ADR-0050)"
     );
     // Un entier dit ses bornes quand l'inventaire les donne ; un réglage à valeurs fermées dit chacune.
     let max_players = terraria.setting("max_players").expect("max_players");
@@ -1845,4 +1849,282 @@ fn ids_lock_a_changed_key_needs_a_declared_rename_and_a_new_setting_needs_a_line
     );
     // ids.lock est fermé comme le reste.
     assert!(ids_lock::parse(b"ids = [{ id = \"a\", key = \"a\", channel = \"c\", state = \"active\", since = 1, extra = 1 }]").is_err());
+}
+
+// ---- HRT-236 : la raison d'attente d'une fiche preview (BR-FICHE-061) -------------------------------------
+
+const BASE_REASON: &str = "preview_reason = \"Fiche de démonstration, pas encore proposée.\"";
+
+fn reason_motif(reason_line: &str) -> Motif {
+    motif(&bad_fiche(BASE_REASON, reason_line)).clone()
+}
+
+#[test]
+fn a_preview_fiche_without_a_reason_is_refused() {
+    assert_eq!(reason_motif(""), Motif::PreviewSansRaison);
+}
+
+#[test]
+fn a_published_fiche_with_a_reason_is_refused() {
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let text = replace(
+        &replace(BASE_FICHE, "status = \"preview\"", "status = \"published\""),
+        "tag = \"1.2.3\"",
+        &format!("tag = \"1.2.3\"\ndigest = \"{digest}\""),
+    );
+    assert!(text.contains(BASE_REASON));
+    assert_eq!(
+        *motif(&bad(&text, BASE_SETTINGS)),
+        Motif::RaisonDAttenteSurPubliee
+    );
+}
+
+#[test]
+fn a_reason_out_of_form_is_refused_with_its_own_cause() {
+    let cases: [(String, &str); 7] = [
+        (
+            format!("preview_reason = \"{}.\"", "a".repeat(18)),
+            "moins de 20 caractères",
+        ),
+        (
+            format!("preview_reason = \"{}.\"", "a".repeat(200)),
+            "plus de 200 caractères",
+        ),
+        (
+            "preview_reason = \"Une phrase assez longue mais sans point final\"".into(),
+            "elle se termine par un point",
+        ),
+        (
+            "preview_reason = \"Une phrase assez longue\\navec un retour à la ligne.\"".into(),
+            "aucun retour à la ligne",
+        ),
+        (
+            "preview_reason = \"Une phrase assez longue avec <b>une balise</b>.\"".into(),
+            "aucune balise",
+        ),
+        (
+            "preview_reason = \"Une phrase assez longue \u{2014} avec un tiret cadratin.\"".into(),
+            "aucun tiret cadratin ni demi-cadratin",
+        ),
+        (
+            "preview_reason = \"Une phrase assez longue \u{2013} avec un demi-cadratin.\"".into(),
+            "aucun tiret cadratin ni demi-cadratin",
+        ),
+    ];
+    for (line, expected) in cases {
+        assert_eq!(
+            reason_motif(&line),
+            Motif::RaisonDAttenteHorsForme { raison: expected },
+            "{line}"
+        );
+    }
+    // Les bornes sont incluses : 20 et 200 caractères passent.
+    for length in [20usize, 200] {
+        let line = format!("preview_reason = \"{}.\"", "a".repeat(length - 1));
+        assert!(
+            load_texts(&replace(BASE_FICHE, BASE_REASON, &line), BASE_SETTINGS).is_ok(),
+            "{length} caractères"
+        );
+    }
+}
+
+#[test]
+fn every_embedded_preview_fiche_has_a_conforming_reason_and_no_published_one_has_any() {
+    let (fiches, refused) = super::embedded::load_all();
+    assert!(refused.is_empty());
+    let mut previews = 0;
+    for fiche in &fiches {
+        match fiche.file.status {
+            Status::Preview => {
+                previews += 1;
+                let reason = fiche.file.preview_reason.as_deref().expect("une raison");
+                assert!(
+                    (20..=200).contains(&reason.chars().count()) && reason.ends_with('.'),
+                    "{}: {reason}",
+                    fiche.id()
+                );
+            }
+            Status::Published => assert!(fiche.file.preview_reason.is_none(), "{}", fiche.id()),
+        }
+    }
+    assert!(previews >= 8, "les huit fiches en cours de preuve");
+}
+
+// ---- HRT-238 : l'image d'un jeu, Steam ou illustration embarquée (BR-FICHE-062) ----------------------------
+
+#[test]
+fn a_steam_app_id_is_an_integer_from_one_to_u32_max() {
+    let ok = |line: &str| {
+        load_texts(
+            &replace(
+                BASE_FICHE,
+                "platform = \"linux\"",
+                &format!("platform = \"linux\"\n{line}"),
+            ),
+            BASE_SETTINGS,
+        )
+    };
+    assert_eq!(
+        ok("steam_app_id = 105600").unwrap().file.steam_app_id,
+        Some(105_600)
+    );
+    assert!(ok("steam_app_id = 4294967295").is_ok());
+    for bad in [
+        "steam_app_id = 0",
+        "steam_app_id = 4294967296",
+        "steam_app_id = -5",
+    ] {
+        let refusal = ok(bad).expect_err(bad);
+        assert_eq!(refusal.motif, Motif::SteamAppIdHorsBorne, "{bad}");
+    }
+    // Une chaîne est refusée par le schéma lui-même, jamais lue comme un entier.
+    assert!(ok("steam_app_id = \"105600\"").is_err());
+}
+
+#[test]
+fn a_fiche_never_carries_both_a_steam_id_and_an_illustration() {
+    let both = replace(
+        BASE_FICHE,
+        "platform = \"linux\"",
+        "platform = \"linux\"\nsteam_app_id = 1\nillustration = \"header.jpg\"",
+    );
+    assert_eq!(
+        *motif(&bad(&both, BASE_SETTINGS)),
+        Motif::IllustrationEtSteam
+    );
+}
+
+#[test]
+fn an_illustration_name_is_a_simple_lowercase_jpg_name() {
+    let with = |name: &str| {
+        bad(
+            &replace(
+                BASE_FICHE,
+                "platform = \"linux\"",
+                &format!("platform = \"linux\"\nillustration = \"{name}\""),
+            ),
+            BASE_SETTINGS,
+        )
+    };
+    for name in [
+        "Header.jpg",
+        "../header.jpg",
+        "a/b.jpg",
+        "header.png",
+        ".jpg",
+        "header.JPG",
+        "a b.jpg",
+    ] {
+        assert_eq!(
+            *motif(&with(name)),
+            Motif::IllustrationNomInvalide,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn the_image_source_does_not_enter_the_fiche_digest() {
+    let plain = load_texts(BASE_FICHE, BASE_SETTINGS).unwrap();
+    let with_steam = load_texts(
+        &replace(
+            BASE_FICHE,
+            "platform = \"linux\"",
+            "platform = \"linux\"
+steam_app_id = 105600",
+        ),
+        BASE_SETTINGS,
+    )
+    .unwrap();
+    let with_illustration = load_texts(
+        &replace(
+            BASE_FICHE,
+            "platform = \"linux\"",
+            "platform = \"linux\"
+illustration = \"header.jpg\"",
+        ),
+        BASE_SETTINGS,
+    )
+    .unwrap();
+    // Changer l'image (ou son origine) ne change jamais l'empreinte : jamais `FICHE_CHANGED` pour une image.
+    assert_eq!(plain.digest, with_steam.digest);
+    assert_eq!(plain.digest, with_illustration.digest);
+    // Le reste de la fiche, lui, compte toujours.
+    let other_summary = load_texts(
+        &replace(
+            BASE_FICHE,
+            "Une fiche de démonstration.",
+            "Une autre phrase.",
+        ),
+        BASE_SETTINGS,
+    )
+    .unwrap();
+    assert_ne!(plain.digest, other_summary.digest);
+}
+
+#[test]
+fn every_embedded_fiche_has_a_steam_id_or_an_illustration_or_nothing_never_both() {
+    let (fiches, refused) = super::embedded::load_all();
+    assert!(refused.is_empty());
+    for fiche in &fiches {
+        assert!(
+            !(fiche.file.steam_app_id.is_some() && fiche.file.illustration.is_some()),
+            "{}",
+            fiche.id()
+        );
+    }
+    let steam: Vec<&str> = fiches
+        .iter()
+        .filter(|f| f.file.steam_app_id.is_some())
+        .map(|f| f.id())
+        .collect();
+    assert_eq!(
+        steam.len(),
+        11,
+        "les onze jeux présents sur Steam : {steam:?}"
+    );
+    let minecraft = fiches.iter().find(|f| f.id() == "minecraft").unwrap();
+    assert_eq!(minecraft.file.illustration.as_deref(), Some("header.jpg"));
+}
+
+#[test]
+fn the_embedded_illustration_of_minecraft_is_a_920_by_430_jpeg_under_300_kib() {
+    let embedded = super::embedded::EMBEDDED
+        .iter()
+        .find(|e| e.dir == "minecraft")
+        .unwrap();
+    let illustration = embedded
+        .illustration
+        .as_ref()
+        .expect("illustration embarquée");
+    assert_eq!(
+        super::jpeg::jpeg_dimensions(illustration.bytes),
+        Some((920, 430))
+    );
+    assert!(illustration.bytes.len() <= super::jpeg::MAX_ILLUSTRATION_BYTES);
+    assert_eq!(super::jpeg::check_illustration(illustration.bytes), Ok(()));
+    // L'empreinte calculée à la compilation est bien celle des octets.
+    use sha2::{Digest, Sha256};
+    assert_eq!(
+        illustration.digest.as_slice(),
+        Sha256::digest(illustration.bytes).as_slice()
+    );
+    // Les autres fiches n'embarquent aucune image.
+    assert!(
+        super::embedded::EMBEDDED
+            .iter()
+            .filter(|e| e.dir != "minecraft")
+            .all(|e| e.illustration.is_none())
+    );
+}
+
+#[test]
+fn the_digest_ignores_the_image_keys_at_top_level_only() {
+    use super::loading::model::fiche_digest;
+    let base = b"version = 1\nsteam_app_id = 105600\n[[port]]\nid = \"game\"\n";
+    let without = b"version = 1\n[[port]]\nid = \"game\"\n";
+    assert_eq!(fiche_digest(base, b""), fiche_digest(without, b""));
+    // La même clé dans un tableau n'est pas une clé d'image : l'empreinte la couvre.
+    let inside = b"version = 1\n[[port]]\nid = \"game\"\nillustration = \"x\"\n";
+    assert_ne!(fiche_digest(inside, b""), fiche_digest(without, b""));
 }

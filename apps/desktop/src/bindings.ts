@@ -19,6 +19,10 @@ export const commands = {
 	/**  Réglage « Notifier quand un serveur devient hors ligne ou revient » (BR-RESIL-015) : activé par défaut. */
 	getNotifyOnLinkChange: () => typedError<boolean, AppError>(__TAURI_INVOKE("get_notify_on_link_change")),
 	setNotifyOnLinkChange: (enabled: boolean) => typedError<boolean, AppError>(__TAURI_INVOKE("set_notify_on_link_change", { enabled })),
+	/**  Réglage « Images des jeux depuis Steam » (HRT-239, BR-CLIENT-015) : activé par défaut. */
+	getRemoteGameImages: () => typedError<boolean, AppError>(__TAURI_INVOKE("get_remote_game_images")),
+	/**  Active ou coupe les images Steam. Coupées, la coquille OUBLIE aussitôt les images Steam qu'elle gardait. */
+	setRemoteGameImages: (enabled: boolean) => typedError<boolean, AppError>(__TAURI_INVOKE("set_remote_game_images", { enabled })),
 	/**  Réglage « Alertes de sécurité » (BR-TRUST-033) : activé par défaut, séparé du réglage du lien. */
 	getNotifyOnSecurityAlert: () => typedError<boolean, AppError>(__TAURI_INVOKE("get_notify_on_security_alert")),
 	setNotifyOnSecurityAlert: (enabled: boolean) => typedError<boolean, AppError>(__TAURI_INVOKE("set_notify_on_security_alert", { enabled })),
@@ -219,6 +223,11 @@ export const commands = {
 	 *  la constante [`ENGINE_DOCS_URL`].
 	 */
 	openEngineDocs: () => typedError<null, LinkFailure>(__TAURI_INVOKE("open_engine_docs")),
+	/**
+	 *  Ouvre la page d'installation de l'agent du site Hearth dans le navigateur du PC (l'assistant « Relier un serveur »,
+	 *  HRT-248). L'adresse est la constante [`AGENT_INSTALL_DOCS_URL`], jamais un paramètre.
+	 */
+	openAgentInstallDocs: () => typedError<null, LinkFailure>(__TAURI_INVOKE("open_agent_install_docs")),
 	/**
 	 *  Les opérations en cours de chaque serveur et les issues pas encore annoncées, sans lecture réseau : une
 	 *  par événement, que l'interface rejoue à son abonnement (ADR-0013 point 3).
@@ -1361,6 +1370,14 @@ export type FicheCardDto = {
 	version: number,
 	status: FicheStatusDto,
 	installable: boolean,
+	/**  Ce qui retient une fiche en cours de preuve, dit au joueur (BR-FICHE-061) ; `null` pour une fiche publiée. */
+	previewReason: string | null,
+	/**  La mémoire recommandée et sa preuve (BR-FICHE-064) ; `null` quand la fiche ne recommande aucun chiffre. */
+	memory: FicheMemoryHintDto | null,
+	/**  L'identifiant du JEU dans le magasin Steam (BR-FICHE-062) ; `null` pour un jeu hors Steam. */
+	steamAppId: number | null,
+	/**  L'illustration embarquée de l'agent, pour un jeu absent de Steam (BR-FICHE-062) ; `null` sinon. */
+	illustration: FicheIllustrationDto | null,
 };
 
 /**  Le jeu de caractères d'un texte. */
@@ -1445,6 +1462,15 @@ export type FicheFolderDto = {
 	onlyVariants: string[],
 };
 
+/**  Ce qu'il faut pour demander l'illustration d'une fiche et réserver sa place dans la page. */
+export type FicheIllustrationDto = {
+	digest: string,
+	bytes: number,
+	width: number,
+	height: number,
+	mediaType: string,
+};
+
 export type FicheImageDto = {
 	repository: string,
 	tag: string,
@@ -1500,6 +1526,12 @@ export type FicheListDto = {
 	itemCharset: FicheItemCharsetDto,
 	separator: string,
 	maxItems: number,
+};
+
+/**  La mémoire conseillée d'une carte : le chiffre et sa preuve. */
+export type FicheMemoryHintDto = {
+	recommendedBytes: number | null,
+	evidence: FicheEvidenceDto,
 };
 
 export type FicheMemoryNeedDto = {

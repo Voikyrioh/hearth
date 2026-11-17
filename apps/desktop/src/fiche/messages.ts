@@ -290,6 +290,11 @@ export function registryText(registry: string | null): string {
     : t("fiche.imageRegistry", { registry: safeText(registry) });
 }
 
+/** Un libellé au milieu d'une phrase : sa première lettre en minuscule (jamais un sigle de deux majuscules). */
+export function lowerFirst(text: string): string {
+  return /^[A-ZÀ-Ý]{2}/.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1);
+}
+
 /** La phrase d'un point d'attention propre à l'installation depuis une fiche (les autres sont ceux du déploiement). */
 export function attentionText(point: AttentionPoint): string | null {
   switch (point.key) {
@@ -305,6 +310,14 @@ export function attentionText(point: AttentionPoint): string | null {
       });
     case "world_version":
       return t("fiche.world.versionWarning");
+    case "frozen_settings":
+      return t("fiche.attention.frozenSettings", {
+        labels: point.labels.map((label) => lowerFirst(safeText(label))).join(", "),
+      });
+    case "cpu_unverified":
+      return t("fiche.attention.cpuUnverified");
+    case "no_password":
+      return t("fiche.attention.noPassword");
     case "publisher_minimum":
       return t(point.lack === "memory" ? "fiche.publisherAboveMemory" : "fiche.publisherAboveCpu", {
         needed: amount(point.lack, point.needed),

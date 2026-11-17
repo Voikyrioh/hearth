@@ -561,6 +561,19 @@ impl hearth_link::ports::Transport for SharedSpy {
         self.0.hour_history(target, token).await
     }
 
+    async fn get_binary(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+        path: &str,
+        max_bytes: usize,
+    ) -> Result<
+        hearth_link::ports::transport::BinaryBody,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.0.get_binary(target, token, path, max_bytes).await
+    }
+
     async fn export_audit(
         &self,
         target: &hearth_link::ports::transport::Target,
@@ -790,6 +803,19 @@ impl hearth_link::ports::Transport for Spy {
             .hour_returned
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         read
+    }
+
+    async fn get_binary(
+        &self,
+        target: &hearth_link::ports::transport::Target,
+        token: &Secret,
+        path: &str,
+        max_bytes: usize,
+    ) -> Result<
+        hearth_link::ports::transport::BinaryBody,
+        hearth_link::ports::transport::TransportError,
+    > {
+        self.inner.get_binary(target, token, path, max_bytes).await
     }
 
     async fn export_audit(

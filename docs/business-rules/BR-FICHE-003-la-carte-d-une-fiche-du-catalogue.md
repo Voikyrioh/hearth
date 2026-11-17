@@ -11,12 +11,12 @@ maj: 2026-10-24
 # BR-FICHE-003 — La carte d'une fiche
 
 ## Règle
-Pour chaque fiche, la liste rend son identifiant, son nom, sa phrase de description, la version de la fiche, son état (`published`, `preview`) et si elle est installable sur ce serveur (une plateforme non disponible est listée mais ne s'installe pas). Les fiches que le chargeur a écartées sont rendues à part avec leur dossier et l'invariant violé, jamais un contenu, et consignées une fois au démarrage dans le journal d'activité (`catalog.fiche.refused`, auteur : le système). Aucune illustration n'est rendue.
+Pour chaque fiche, la liste rend son identifiant, son nom, sa phrase de description, la version de la fiche, son état (`published`, `preview`) et si elle est installable sur ce serveur (une plateforme non disponible est listée mais ne s'installe pas). Les fiches que le chargeur a écartées sont rendues à part avec leur dossier et l'invariant violé, jamais un contenu, et consignées une fois au démarrage dans le journal d'activité (`catalog.fiche.refused`, auteur : le système). Elle porte aussi la mémoire recommandée de la fiche avec sa preuve (`memory`, HRT-237, BR-FICHE-064) et, pour une fiche en cours de preuve, sa raison (`preview_reason`, BR-FICHE-061). Elle porte aussi d'où vient l'image du jeu : `steam_app_id` ou `illustration` (BR-FICHE-062, HRT-238). Côté client (HRT-241), chaque carte montre l'image (ou un visuel neutre), le nom, un badge d'état (« Prêt à installer » ou « Bientôt »), la phrase, puis la mémoire conseillée en une phrase (fiche prête, BR-FICHE-064) ou la raison de l'attente (fiche bientôt). Le pied de page dit « Fiches livrées avec Hearth {version} ».
 
 ## Application (code)
 - `crates/hearth-agent/src/application/catalog.rs::{CatalogService::list, CatalogService::record_refused}`
 - `crates/hearth-proto/src/api/catalog.rs::{FicheCard, RefusedFiche, CatalogView}`
-- `apps/desktop/src/components/molecules/FicheCard.vue`
+- `apps/desktop/src/components/molecules/FicheCard.vue`, `components/atoms/FicheVisual.vue`
 - `apps/desktop/src/pages/Catalogue.vue`
 
 ## Vérification
@@ -33,3 +33,5 @@ Pour chaque fiche, la liste rend son identifiant, son nom, sa phrase de descript
 ## Historique
 - 2026-10-24 — création (HRT-101, étapes S7 et S8).
 - 2026-10-24 — côté client (HRT-102).
+- 2026-11-16 — mémoire conseillée et raison dans la carte (HRT-236, HRT-237).
+- 2026-11-16 — image du jeu, badge, mémoire en phrase, raison (HRT-238, HRT-241).

@@ -68,7 +68,7 @@ describe("ServerRail", () => {
 
   it("opens the add-server wizard and the server book from the rail", async () => {
     const { wrapper } = await mountRail();
-    expect(wrapper.get('a[aria-label="Ajouter un serveur"]').attributes("href")).toBe(
+    expect(wrapper.get('a[aria-label="Relier un serveur"]').attributes("href")).toBe(
       "/servers/new",
     );
     expect(wrapper.get('a[aria-label="Mes serveurs"]').attributes("href")).toBe("/servers");
@@ -88,7 +88,7 @@ describe("ServerRail", () => {
     await router.push("/");
     const wrapper = mount(ServerRail, { global: { plugins: [ctx.pinia, router] } });
     expect(wrapper.find('a[aria-label="Mes serveurs"]').exists()).toBe(false);
-    expect(wrapper.find('a[aria-label="Ajouter un serveur"]').exists()).toBe(true);
+    expect(wrapper.find('a[aria-label="Relier un serveur"]').exists()).toBe(true);
   });
 
   it("moves the focus with the arrow keys, wrapping around", async () => {

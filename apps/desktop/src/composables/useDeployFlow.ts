@@ -102,8 +102,8 @@ export interface Launch {
 /**
  * Le parcours d'un déploiement, de « Déployer » à l'issue (HRT-69, BR-DEPLOY-015, 016, 019, 028, 029, 030, 032) :
  *
- * 1. `openSummary` refait la consultation (le serveur a le dernier mot) : un point qui a changé ramène au champ sans
- *    ouvrir le récapitulatif ; sinon le récapitulatif s'ouvre avec les points d'attention frais ;
+ * 1. `openReview` refait la consultation (le serveur a le dernier mot) : un point qui a changé ramène au champ sans
+ *    afficher la vérification ; sinon la vérification s'affiche dans la page (HRT-246) avec les points d'attention frais ;
  * 2. `perform` envoie le déploiement (acte confirmé, mot de passe toujours demandé). L'agent répond « accepté » :
  *    l'issue ne se lit JAMAIS dans cette réponse, elle arrive par le suivi des opérations (`useServiceOpsStore`) ;
  *    un refus de champ (nom pris, port pris au dernier moment…) ferme la fenêtre et ramène au champ, la saisie reste ;
@@ -122,6 +122,13 @@ export function useDeployFlow(
     focusField: (field: DeployField) => void;
     /** Met le curseur sur cette question d'une fiche. */
     focusQuestion?: (id: string) => void;
+    /**
+     * L'installation a réussi (HRT-247) : `"stay"` garde la page, qui montre alors son écran de fin (installation par
+     * fiche) ; `"leave"` (défaut) dit la réussite par une notification et ramène à la liste (formulaire libre).
+     */
+    onSucceeded?: (launch: Launch, operation: ServiceOperation) => "stay" | "leave";
+    /** L'installation d'un serveur de jeu : les phrases disent « installation » du début à la fin (HRT-246). */
+    installing?: boolean;
   } & (
     | /** Le formulaire d'une image (`DeployService`). */ { form: DeployFormState }
     | /** Une autre origine (une fiche du Catalogue). */ { source: DeployFlowSource }
@@ -133,8 +140,8 @@ export function useDeployFlow(
   const toasts = useToastsStore();
   const action = useServerAction(() => serverId());
 
-  const summaryOpen = ref(false);
-  const summaryCheck = ref<DeployCheck | null>(null);
+  const reviewing = ref(false);
+  const reviewCheck = ref<DeployCheck | null>(null);
   /** `null` : rien n'est exigé ; sinon le manque de place que le serveur vient de dire (`freeBytes` : `null` sans chiffre). */
   const forceLowDisk = ref<{ freeBytes: number | null } | null>(null);
   const opening = ref(false);
@@ -155,8 +162,8 @@ export function useDeployFlow(
 
   // ── 1. Le récapitulatif ──────────────────────────────────────────────────────────────────────
 
-  async function openSummary(): Promise<void> {
-    if (opening.value || summaryOpen.value) return;
+  async function openReview(): Promise<void> {
+    if (opening.value || reviewing.value) return;
     if (form.validate()) return;
     opening.value = true;
     refusal.value = null;
@@ -169,15 +176,15 @@ export function useDeployFlow(
         if (blocking.field) focusLater(blocking.field);
         return;
       }
-      summaryCheck.value = fresh;
-      summaryOpen.value = true;
+      reviewCheck.value = fresh;
+      reviewing.value = true;
     } finally {
       opening.value = false;
     }
   }
 
-  function closeSummary(): void {
-    summaryOpen.value = false;
+  function leaveReview(): void {
+    reviewing.value = false;
   }
 
   // ── 2. L'envoi ───────────────────────────────────────────────────────────────────────────────
@@ -228,7 +235,7 @@ export function useDeployFlow(
       // Un refus propre à la source (une réponse refusée, une machine trop petite) : la page le dit, la saisie reste.
       refusal.value = own;
       void form.refreshCheck();
-      summaryOpen.value = false;
+      reviewing.value = false;
       if (own.question && options.focusQuestion) {
         const question = own.question;
         void nextTick()
@@ -242,12 +249,21 @@ export function useDeployFlow(
     refusal.value = { text: refusalText(refused), field };
     // Les constats du formulaire se rafraîchissent : le port refusé propose son port libre, le nom se dit pris.
     void form.refreshCheck();
-    summaryOpen.value = false;
+    reviewing.value = false;
     if (field) focusLater(field);
     return { kind: "done" };
   }
 
   // ── 3. La progression ────────────────────────────────────────────────────────────────────────
+
+  // Derrière la fenêtre de progression, la page reste sur la vérification que l'on vient de lancer (figée) : elle ne
+  // revient à l'étape d'avant que lorsque la progression se ferme (annulation, échec à modifier, retour à la liste).
+  watch(
+    () => launch.value,
+    (now) => {
+      if (now === null) reviewing.value = false;
+    },
+  );
 
   const follow = useOperationFollow(serverId, () => launch.value?.operationId ?? null);
   /** L'opération telle qu'elle court (étape, progression, annulable). */
@@ -268,6 +284,13 @@ export function useDeployFlow(
     const op = done.operation;
     const key = current.serviceKey;
     if (op.status === "succeeded" && op.cause !== "stopped_right_after_start") {
+      if (options.onSucceeded?.(current, op) === "stay") {
+        // L'écran de fin de la page remplace la notification et le retour à la liste ; la saisie est effacée.
+        settle();
+        form.wipe();
+        launch.value = null;
+        return;
+      }
       if (!done.announced) {
         toasts.push({ kind: "success", message: t("deploy.success", { name: current.name }) });
       }
@@ -285,7 +308,11 @@ export function useDeployFlow(
     }
     if (op.status === "cancelled") {
       // Rien n'a été créé : la notification le dit, le formulaire reste rempli (BR-DEPLOY-016).
-      if (!done.announced) toasts.push({ kind: "info", message: t("deploy.cancelled") });
+      if (!done.announced)
+        toasts.push({
+          kind: "info",
+          message: t(options.installing ? "fiche.installCancelled" : "deploy.cancelled"),
+        });
       settle();
       launch.value = null;
       return;
@@ -369,8 +396,8 @@ export function useDeployFlow(
   }
 
   return {
-    summaryOpen,
-    summaryCheck,
+    reviewing,
+    reviewCheck,
     forceLowDisk,
     opening,
     refusal,
@@ -379,8 +406,8 @@ export function useDeployFlow(
     operation,
     service,
     busy: action.busy,
-    openSummary,
-    closeSummary,
+    openReview,
+    leaveReview,
     perform,
     performCancel,
     background,

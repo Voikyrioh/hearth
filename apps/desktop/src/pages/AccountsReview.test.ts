@@ -58,7 +58,7 @@ describe("« moi » vient de l'agent", () => {
       .find((b) => b.text() === "Supprimer mon compte")
       ?.trigger("click");
     await flushPromises();
-    typeInto(document.querySelector('input[placeholder="ton-identifiant"]'), "marie");
+    typeInto(document.querySelector('input[placeholder="votre-identifiant"]'), "marie");
     await flushPromises();
     await confirmDialog("Supprimer mon compte");
     // Le compte est bien trouvé (pas « Ce compte n'existe pas ») : l'agent répond « dernier administrateur ».

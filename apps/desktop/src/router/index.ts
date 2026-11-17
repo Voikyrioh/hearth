@@ -11,6 +11,7 @@ import { reportUiError } from "@/errors/report";
 import type { MessageKey } from "@/i18n";
 import ServerLayout from "@/layouts/ServerLayout.vue";
 import Accounts from "@/pages/Accounts.vue";
+import AddGameServer from "@/pages/AddGameServer.vue";
 import AddServer from "@/pages/AddServer.vue";
 import Audit from "@/pages/Audit.vue";
 import Catalogue from "@/pages/Catalogue.vue";
@@ -40,7 +41,7 @@ declare module "vue-router" {
 
 /**
  * Routes : `/welcome` (aucun serveur), `/servers/new` (assistant d'ajout), `/servers` (carnet),
- * `/servers/:id/{dashboard,services,services/deployer,catalogue,catalogue/serveur-existant,catalogue/:fiche,catalogue/:fiche/installer,accounts,audit,security}` dans le gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
+ * `/servers/:id/{dashboard,services,services/ajouter,services/deployer,catalogue,catalogue/serveur-existant,catalogue/:fiche,catalogue/:fiche/installer,accounts,audit,security}` dans le gabarit du serveur, `/settings`. `/` ne rend rien : la garde l'envoie vers le premier
  * serveur ou l'accueil. Historique par hachage (l'application est servie depuis des fichiers).
  */
 export function createAppRouter(history: RouterHistory = createWebHashHistory()): Router {
@@ -69,6 +70,14 @@ export function createAppRouter(history: RouterHistory = createWebHashHistory())
             name: "services",
             component: Services,
             meta: { title: "pages.services" },
+          },
+          {
+            // Ajouter un serveur de jeu (HRT-243) : l'écran des trois chemins, gardé comme le formulaire d'image.
+            path: "services/ajouter",
+            name: "services-add",
+            component: AddGameServer,
+            meta: { title: "pages.addGameServer" },
+            beforeEnter: deployRouteGuard,
           },
           {
             // Déployer une image (HRT-69) : la route est gardée (droit de gérer les services, moteur utilisable).

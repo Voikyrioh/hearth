@@ -220,6 +220,7 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::NotAGameService // service qui n'est pas un serveur de jeu créé depuis une fiche
         | ErrorCode::OperationNotFound // opération inconnue, ou sur un service que le compte ne voit pas
         | ErrorCode::PackUnknown // pack déposé inconnu (HRT-124)
+        | ErrorCode::IllustrationAbsent // fiche listée sans illustration (HRT-238, lecture ouverte, jamais consignée)
         | ErrorCode::BackupNotFound => Some(Outcome::Failed(Reason::NotFound)), // sauvegarde inconnue
         // Installer depuis une fiche (HRT-101, BR-FICHE-032) : une cause typée par refus.
         ErrorCode::HostTooSmall => Some(Outcome::Failed(Reason::HostTooSmall)), // machine trop petite

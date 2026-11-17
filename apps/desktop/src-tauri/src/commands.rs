@@ -8,6 +8,7 @@ use std::time::Instant;
 use tauri::{AppHandle, State};
 
 use crate::alerts::Alerts;
+use crate::illustrations::Illustrations;
 use crate::link::LinkRuntime;
 
 use crate::domain::{
@@ -102,6 +103,28 @@ pub fn set_notify_on_security_alert(
     let now =
         settings::set_notify_on_security_alert(&app, Path::new(settings::STORE_FILE), enabled)?;
     alerts.set_security_enabled(now);
+    Ok(now)
+}
+
+/// Réglage « Images des jeux depuis Steam » (HRT-239, BR-CLIENT-015) : activé par défaut.
+#[tauri::command]
+#[specta::specta]
+pub fn get_remote_game_images(app: AppHandle) -> Result<bool, AppError> {
+    settings::remote_game_images(&app, Path::new(settings::STORE_FILE))
+}
+
+/// Active ou coupe les images Steam. Coupées, la coquille OUBLIE aussitôt les images Steam qu'elle gardait.
+#[tauri::command]
+#[specta::specta]
+pub fn set_remote_game_images(
+    app: AppHandle,
+    illustrations: State<'_, Arc<Illustrations>>,
+    enabled: bool,
+) -> Result<bool, AppError> {
+    let now = settings::set_remote_game_images(&app, Path::new(settings::STORE_FILE), enabled)?;
+    if !now {
+        illustrations.purge_steam();
+    }
     Ok(now)
 }
 

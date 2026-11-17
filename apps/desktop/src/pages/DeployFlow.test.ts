@@ -68,12 +68,12 @@ const stepStates = () =>
   );
 
 describe("le récapitulatif (BR-DEPLOY-015, 031)", () => {
-  it("montre tout ce qui part dans une seule fenêtre, sans jamais écrire une valeur en clair", async () => {
+  it("montre tout ce qui part dans une seule page, sans jamais écrire une valeur en clair", async () => {
     const { wrapper } = await boot();
     await fillAll(wrapper);
     await openSummary(wrapper);
     const text = dialogText();
-    expect(text).toContain("Vérifiez avant de lancer");
+    expect(text).toContain("Voici ce que Hearth va faire sur");
     expect(document.querySelector("[data-sum-name]")?.textContent).toBe("web");
     expect(document.querySelector("[data-sum-image]")?.textContent).toContain("nginx:1.27");
     expect(document.querySelector("[data-sum-ports]")?.textContent).toContain("8080 vers 80 (TCP)");
@@ -89,7 +89,7 @@ describe("le récapitulatif (BR-DEPLOY-015, 031)", () => {
       "Le service redémarre tout seul après un redémarrage du serveur, sauf si vous l'avez arrêté.",
     );
     expect(document.querySelector("[data-sum-resources]")?.textContent).toBe(
-      "Le service reçoit 2 Go de mémoire et 4 cœurs de processeur.",
+      "Le service reçoit 2 Go de mémoire et 2 cœurs de processeur.",
     );
     // Ni la valeur de la variable, ni la commande n'apparaissent dans la page.
     expect(document.body.textContent).not.toContain(SECRET);
@@ -222,7 +222,7 @@ describe("le lancement et la progression (BR-DEPLOY-016)", () => {
       env: [{ name: "DB_PASSWORD", value: SECRET }],
       ports: [{ hostPort: 8080, containerPort: 80, protocol: "tcp" }],
       command: `run --token ${COMMAND_SECRET}`,
-      resources: { memoryBytes: 2 * GIB, cpuMillis: 4000 },
+      resources: { memoryBytes: 2 * GIB, cpuMillis: 2000 },
     });
     expect(progress()?.textContent).toContain("Déploiement de web");
     expect(stepStates()).toEqual([
@@ -413,8 +413,8 @@ describe("l'état de confiance change entre la lecture et l'envoi", () => {
     dialogButton("Déployer le service")?.click();
     await settle();
     expect(toasts()).toEqual([]);
-    expect(document.querySelector("dialog[open] [data-reauth-notice]")).not.toBeNull();
-    expect(document.querySelector("dialog[open]")).not.toBeNull();
+    expect(document.querySelector("[data-review] [data-reauth-notice]")).not.toBeNull();
+    expect(document.querySelector("[data-review]")).not.toBeNull();
     expect(field(wrapper, "name").element.value).toBe("web");
     wrapper.unmount();
   });
@@ -673,7 +673,7 @@ describe("les refus du serveur au lancement : le serveur a le dernier mot (BR-DE
     wrapper.unmount();
   });
 
-  it("deux déploiements déjà en cours : le refus est dit dans la fenêtre, qui reste ouverte", async () => {
+  it("deux déploiements déjà en cours : le refus est dit dans la page de vérification, qui reste affichée", async () => {
     const { wrapper, bridge } = await boot();
     await fillMinimum(wrapper);
     await openSummary(wrapper);
@@ -712,7 +712,7 @@ describe("les refus du serveur au lancement : le serveur a le dernier mot (BR-DE
     expect(dialogText()).toContain(
       "Deux déploiements sont déjà en cours sur ce serveur. Attendez la fin de l'un d'eux.",
     );
-    expect(document.querySelector("dialog[open]")).not.toBeNull();
+    expect(document.querySelector("[data-review]")).not.toBeNull();
     wrapper.unmount();
   });
 
@@ -742,7 +742,7 @@ describe("les refus du serveur au lancement : le serveur a le dernier mot (BR-DE
     expect(document.querySelector("[data-attention='disk']")?.textContent).toContain(
       "Il reste 3 Go libres",
     );
-    expect(document.querySelector("dialog[open]")).not.toBeNull();
+    expect(document.querySelector("[data-review]")).not.toBeNull();
     typeInto(reauthField(), OWN);
     document.querySelector<HTMLInputElement>("[data-attention='disk'] input")?.click();
     await flushPromises();

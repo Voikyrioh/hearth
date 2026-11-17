@@ -1907,6 +1907,9 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             // Le détail d'une fiche (HRT-101) : une lecture ; ce banc ne propose aucune fiche d'essai, donc
             // `404 FICHE_UNKNOWN` ; rien n'est écrit au journal.
             "/catalog/{id}" => "/catalog/terraria".to_owned(),
+            // L'illustration embarquée d'une fiche listée (HRT-238) : une lecture ; Terraria n'en a pas (`404 ILLUSTRATION_ABSENT`),
+            // Minecraft oui (`200`) ; rien n'est écrit au journal.
+            "/catalog/{id}/illustration" => "/catalog/minecraft/illustration".to_owned(),
             // La vue d'un serveur de jeu (HRT-104) : une lecture ; ce banc n'a pas de service de ce nom, donc `404`.
             "/services/{key}/game" => "/services/h_inconnu/game".to_owned(),
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),

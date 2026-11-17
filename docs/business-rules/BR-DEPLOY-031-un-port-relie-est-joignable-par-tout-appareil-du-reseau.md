@@ -15,7 +15,7 @@ Dès qu'une correspondance de ports existe, la section Ports du formulaire écri
 
 ## Application (code)
 - `apps/desktop/src/components/organisms/PortMappingRows.vue (data-ports-exposed)`
-- `apps/desktop/src/components/organisms/DeploySummaryDialog.vue (data-sum-exposed)`
+- `apps/desktop/src/components/organisms/DeployReview.vue (data-sum-exposed)`
 
 ## Vérification
 - `apps/desktop/src/pages/DeployService.test.ts (les ports : dit que tout appareil…)`

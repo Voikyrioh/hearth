@@ -37,6 +37,7 @@ const link = useLinkStore();
 
 .head__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-3);
 }
 </style>

@@ -17,9 +17,11 @@ id = "vrising"
 version = 1
 family = "vrising"
 name = "V Rising"
-summary = "Le serveur officiel de V Rising, sans mod, par Wine."
+summary = "Le serveur officiel de V Rising, sans mod, lancé avec Wine (une couche qui fait tourner un jeu Windows sur Linux)."
 status = "preview"
+preview_reason = "Tout fonctionne sauf un point : l'enregistrement du monde avant l'arrêt n'est pas encore vérifié."
 platform = "linux"
+steam_app_id = 1604030                        # identifiant du JEU dans le magasin Steam, relu sur sa page le 16/11/2026 (BR-FICHE-062)
 
 [image]
 repository = "trueosiris/vrising"

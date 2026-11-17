@@ -8,12 +8,13 @@
 
 format = 2
 id = "enshrouded"
-version = 1
+version = 2
 family = "enshrouded"
 name = "Enshrouded"
-summary = "Le serveur officiel d'Enshrouded, sans mod, par Wine."
+summary = "Le serveur officiel d'Enshrouded, sans mod, lancé avec Wine (une couche qui fait tourner un jeu Windows sur Linux)."
 status = "published"
 platform = "linux"
+steam_app_id = 1203620                        # identifiant du JEU dans le magasin Steam, relu sur sa page le 16/11/2026 (BR-FICHE-062)
 
 [image]
 repository = "mornedhels/enshrouded-server"

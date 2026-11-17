@@ -107,7 +107,7 @@ test("l'état de chaque serveur est indépendant", async ({ page }) => {
 test("action lancée à la coupure : résultat inconnu, jamais rejouée, issue au retour", async ({
   page,
 }) => {
-  await page.goto("/#/servers/forge/dashboard");
+  await page.goto("/?devtools=1#/servers/forge/dashboard");
   const launch = page.locator("[data-sim-action]");
   await page.evaluate(() => {
     (window as unknown as { __hearthSim: Sim }).__hearthSim.actionMode = "cut";

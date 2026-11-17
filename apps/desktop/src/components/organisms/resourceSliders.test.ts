@@ -48,7 +48,7 @@ describe("ResourceSliders (HRT-146)", () => {
   it("starts on the value given by the caller and says it in clear units", () => {
     const wrapper = open();
     expect(memorySlider(wrapper).attributes("aria-valuetext")).toBe("2 Go");
-    expect(cpuSlider(wrapper).attributes("aria-valuetext")).toBe("16 cœurs");
+    expect(cpuSlider(wrapper).attributes("aria-valuetext")).toBe("2 cœurs");
     expect(fields(wrapper)[0]?.element.value).toBe("2");
   });
 

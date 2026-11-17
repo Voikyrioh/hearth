@@ -19,6 +19,8 @@ type Runtime_<'a> = State<'a, Arc<LinkRuntime>>;
 /// La documentation officielle d'installation de Docker : une constante de la coquille, jamais fournie par
 /// l'interface (conception technique, section 8, écart 8).
 pub const ENGINE_DOCS_URL: &str = "https://docs.docker.com/engine/install/";
+/// La page d'installation de l'agent du site Hearth (HRT-248, HRT-251) : constante de la coquille, jamais un texte reçu.
+pub const AGENT_INSTALL_DOCS_URL: &str = "https://hearth.voikyrioh.fr/installer/";
 
 /// Le dernier état des services de chaque serveur du carnet, sans lecture réseau : l'interface le rejoue à
 /// son abonnement (ADR-0013 point 3). Un serveur dont la coquille n'a encore rien reçu en cette exécution
@@ -140,6 +142,18 @@ pub fn keep_service_logs(
 #[specta::specta]
 pub fn open_engine_docs() -> Result<(), LinkFailure> {
     if crate::browser::open_in_browser(ENGINE_DOCS_URL) {
+        Ok(())
+    } else {
+        Err(LinkFailure::Internal)
+    }
+}
+
+/// Ouvre la page d'installation de l'agent du site Hearth dans le navigateur du PC (l'assistant « Relier un serveur »,
+/// HRT-248). L'adresse est la constante [`AGENT_INSTALL_DOCS_URL`], jamais un paramètre.
+#[tauri::command]
+#[specta::specta]
+pub fn open_agent_install_docs() -> Result<(), LinkFailure> {
+    if crate::browser::open_in_browser(AGENT_INSTALL_DOCS_URL) {
         Ok(())
     } else {
         Err(LinkFailure::Internal)

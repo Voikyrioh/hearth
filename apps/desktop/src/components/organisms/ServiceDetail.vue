@@ -207,7 +207,7 @@ const commandNote = computed(() => {
 
 <template>
   <section
-    :class="['detail', { 'detail--logs': tab === 'logs', 'detail--wide': tab === 'backups' }]"
+    :class="['detail', { 'detail--logs': tab === 'logs', 'detail--wide': tab === 'backups' || tab === 'settings' }]"
     :aria-label="service ? t('serviceDetail.region', { name: clip(service.name, 80).text }) : t('serviceDetail.unnamed')"
     :aria-busy="opened.kind === 'waiting' ? 'true' : undefined"
     :data-gone="gone ? '' : undefined"
@@ -413,13 +413,6 @@ const commandNote = computed(() => {
           <div v-if="service.graceS !== null" class="defs__row">
             <dt>{{ t("serviceDetail.graceLabel") }}</dt>
             <dd>{{ graceText(service.graceS) }}</dd>
-          </div>
-          <div v-if="service.origin === 'hearth'" class="defs__row defs__row--wide">
-            <dt class="sr-only">{{ t("serviceDetail.resources") }}</dt>
-            <dd class="defs__soft">
-              <HIcon name="info" size="sm" />
-              {{ t("serviceDetail.resources") }}
-            </dd>
           </div>
         </dl>
       </DashCard>

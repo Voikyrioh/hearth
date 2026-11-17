@@ -62,6 +62,7 @@ async function open(page: Page) {
   });
   await expect(page.locator("[data-row]").first()).toBeVisible();
   await page.locator("[data-deploy-open]").click();
+  await page.getByRole("button", { name: "Continuer sans fiche" }).click();
   await expect(page.locator("[data-deploy-form]")).toBeVisible();
   await expect(page.getByLabel("Nom du service")).toBeFocused();
 }
@@ -74,8 +75,8 @@ async function fill(page: Page) {
 
 async function launch(page: Page) {
   await page.locator("[data-deploy-submit]").click();
-  const dialog = page.locator("dialog[open]");
-  await expect(dialog).toContainText("Vérifiez avant de lancer");
+  const dialog = page.locator("[data-review]");
+  await expect(dialog).toContainText("Voici ce que Hearth va faire sur");
   await dialog.locator("[data-reauth-field] input").fill(PASSWORD);
   await dialog.getByRole("button", { name: "Déployer le service" }).click();
   await expect(page.locator("[data-deploy-progress]")).toBeVisible();
@@ -103,8 +104,8 @@ test("de la section au service en marche : formulaire, récapitulatif, progressi
   await shoot(page, page, "deploy-formulaire-rempli");
 
   await page.locator("[data-deploy-submit]").click();
-  const dialog = page.locator("dialog[open]");
-  await expect(dialog).toContainText("Vérifiez avant de lancer");
+  const dialog = page.locator("[data-review]");
+  await expect(dialog).toContainText("Voici ce que Hearth va faire sur");
   await expect(dialog).toContainText("9090 vers 80 (TCP)");
   await expect(dialog).toContainText("1 variable");
   await expect(dialog).not.toContainText("hunter2");

@@ -328,7 +328,8 @@ test("HRT-141 : un bouton inactif se reconnaît d'un coup d'œil et reste lisibl
     expect(inactive.opacity, `${label} : aucune opacité`).toBe("1");
     expect(inactive.shadow, `${label} : pas d'ombre`).toBe("none");
     expect(inactive.cursor, `${label} : curseur`).toBe("not-allowed");
-    expect(inactive.border, `${label} : contour en tirets`).toBe("dashed");
+    // Un aplat atténué, JAMAIS de pointillés : ils disent « déposez ici » (revue UX du 17/11, BR-UI-002).
+    expect(inactive.border, `${label} : contour plein, jamais en tirets`).toBe("solid");
     expect(hexOf(inactive.background), `${label} : fond de surface neutre`).toBe(tokens["card-2"]);
     expect(
       ratio(hexOf(inactive.color), hexOf(inactive.background)),

@@ -10,3 +10,4 @@ La fiche d'un jeu (HRT-102) : `FicheSheet`, les constats de la machine, la phras
 - Revue UX du 2026-10-24 : le titre de l'en-tête est le nom du jeu (la page ne le répète pas, constat 17) ; les besoins inconnus se disent une fois (constat 19).
 
 HRT-221 : deux boutons nommés et expliqués d'une phrase chacun : « Installer… » (ouvre le formulaire de réglages) et « Installation rapide » (valeurs recommandées, sans formulaire, récapitulatif à vérifier). La page prend toute la largeur utile.
+- HRT-242 : la page s'ouvre par un bandeau (`FicheVisual` en `banner`, badges « Prêt à installer » ou « Bientôt » et « Livrée avec Hearth {version} ») puis `KeyFacts`. Lien « Retour au catalogue » inchangé.

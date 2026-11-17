@@ -7,12 +7,14 @@ import HSkeleton from "@/components/atoms/HSkeleton.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import ConfirmDialog from "@/components/molecules/ConfirmDialog.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
+import InstallAside from "@/components/molecules/InstallAside.vue";
 import StepTrail from "@/components/molecules/StepTrail.vue";
 import DeployProgressDialog from "@/components/organisms/DeployProgressDialog.vue";
 import EnginePanel from "@/components/organisms/EnginePanel.vue";
-import FicheSummaryDialog from "@/components/organisms/FicheSummaryDialog.vue";
+import FicheReview from "@/components/organisms/FicheReview.vue";
 import ImposedDialog from "@/components/organisms/ImposedDialog.vue";
 import InstallAnswers from "@/components/organisms/InstallAnswers.vue";
+import InstallDone from "@/components/organisms/InstallDone.vue";
 import InstallResources from "@/components/organisms/InstallResources.vue";
 import ServiceLifecycleDialog from "@/components/organisms/ServiceLifecycleDialog.vue";
 import { useAgentVersion } from "@/composables/useAgentVersion";
@@ -26,10 +28,14 @@ import { usePageTitle } from "@/composables/usePageTitle";
 import { useServiceLifecycle } from "@/composables/useServiceLifecycle";
 import { useServiceRights } from "@/composables/useServiceRights";
 import { deployDoor } from "@/deploy/availability";
+import { shownHostPort } from "@/fiche/draft";
+import { memorySentence } from "@/fiche/memory";
 import { minimumText } from "@/fiche/messages";
 import { packIssueText } from "@/fiche/pack";
+import { createdWorld } from "@/fiche/review";
 import { notEnoughRoom } from "@/fiche/world";
 import { t } from "@/i18n";
+import type { ServiceOperation } from "@/link";
 import { resourcesIssue } from "@/resources";
 import { useFicheInstallStore } from "@/stores/ficheInstall";
 import { useServiceOpsStore } from "@/stores/serviceOps";
@@ -92,18 +98,48 @@ const guard = useLeaveGuard({
   home: back,
   wipe: () => install.wipe(),
 });
+// L'installation réussie : la page montre l'écran de fin au lieu de ramener à la liste (HRT-247, BR-FICHE-066). Ce qu'il
+// dit (nom du serveur de jeu, monde créé, fiche) est retenu quand la vérification s'affiche : la saisie est effacée au
+// lancement.
+const finished = ref<{
+  key: string;
+  name: string;
+  world: string | null;
+  detail: NonNullable<typeof install.detail.value>;
+  operation: ServiceOperation;
+  withWorld: boolean;
+} | null>(null);
+const toRemember = ref<{ world: string | null } | null>(null);
 const flow = useDeployFlow({
   serverId,
   source: install.flowSource,
+  installing: true,
   navigate: (to) => void guard.leave(to),
   focusField: () => undefined,
   focusQuestion: (id) => answers.value?.focusQuestion(id),
+  onSucceeded: (launch, operation) => {
+    const current = install.detail.value;
+    if (!current || launch.serviceKey === null) return "leave";
+    finished.value = {
+      key: launch.serviceKey,
+      name: launch.name,
+      world: toRemember.value?.world ?? null,
+      detail: current,
+      operation,
+      withWorld: resumedWorld.value,
+    };
+    return "stay";
+  },
 });
 
 watch(
-  () => flow.summaryOpen.value,
+  () => flow.reviewing.value,
   (open) => {
-    if (open) resumedWorld.value = draft.value?.world.resume === true;
+    if (!open) return;
+    resumedWorld.value = draft.value?.world.resume === true;
+    toRemember.value = {
+      world: detail.value && draft.value ? createdWorld(detail.value, draft.value) : null,
+    };
   },
 );
 
@@ -126,6 +162,29 @@ interface Reason {
   text: string;
   fixable: boolean;
 }
+
+type IssueTarget =
+  | { kind: "name" }
+  | { kind: "question"; id: string }
+  | { kind: "port"; id: string };
+
+/** Le premier champ en défaut, dans l'ordre de la page : le nom, les questions, les ports. */
+const firstIssue = computed<{ label: string; target: IssueTarget } | null>(() => {
+  if (install.nameProblem.value !== null) {
+    return { label: t("fiche.cardName"), target: { kind: "name" } };
+  }
+  for (const question of install.questions.value) {
+    if (install.answerProblems.value.has(question.id)) {
+      return { label: question.label, target: { kind: "question", id: question.id } };
+    }
+  }
+  for (const port of install.published.value) {
+    if (install.portProblems.value.has(port.id)) {
+      return { label: t("fiche.portFieldLabel"), target: { kind: "port", id: port.id } };
+    }
+  }
+  return null;
+});
 
 /** Le motif du blocage par priorité : le lien, le moteur ou le droit, la fiche, la machine, la saisie. */
 const reason = computed<Reason | null>(() => {
@@ -151,9 +210,13 @@ const reason = computed<Reason | null>(() => {
     if (pack === "sending" || pack === "unsent" || pack === "unread") {
       return { text: packIssueText(pack), fixable: false };
     }
-    return install.answersInvalid.value || serverBlocks.value
-      ? { text: t("fiche.fixAnswers"), fixable: true }
-      : null;
+    if (!install.answersInvalid.value && !serverBlocks.value) return null;
+    // Le premier champ en défaut est nommé (HRT-244) ; sans champ à nommer (monde, pack, nom pris), la phrase générale.
+    const first = firstIssue.value;
+    return {
+      text: first ? t("fiche.fixField", { label: safeText(first.label) }) : t("fiche.fixAnswers"),
+      fixable: true,
+    };
   }
   if (install.capacity.value === null) return { text: t("deploy.capacityPending"), fixable: false };
   if (resourcesBad.value) return { text: t("fiche.fixAnswers"), fixable: false };
@@ -177,6 +240,15 @@ async function goToRefusedQuestion() {
 async function goToFirstIssue() {
   install.touchAll();
   await nextTick();
+  const first = firstIssue.value;
+  if (first?.target.kind === "question") {
+    // Un réglage avancé refusé déplie son bloc avant de recevoir le curseur (BR-FICHE-065).
+    if (await answers.value?.focusQuestion(first.target.id)) return;
+  }
+  if (first?.target.kind === "name") {
+    answers.value?.focusName();
+    return;
+  }
   const target = document.querySelector<HTMLElement>(
     '[data-install-answers] [aria-invalid="true"]',
   );
@@ -189,7 +261,7 @@ async function next() {
     if (install.next()) await nextTick();
     return;
   }
-  await flow.openSummary();
+  await flow.openReview();
 }
 
 // ── « Installer avec les valeurs proposées » ───────────────────────────────────────────────────
@@ -201,7 +273,7 @@ watch(
     if (!current || !resources || !on) return;
     proposedDone = true;
     await nextTick();
-    await flow.openSummary();
+    await flow.openReview();
   },
   { immediate: true },
 );
@@ -228,13 +300,19 @@ watch(
  * constat 20). Une saisie déjà commencée, ou un refus qui a ramené à la page, reste sur la page.
  */
 const proposedEntry = route.query.proposees === "1";
-function closeSummary() {
+function leaveReview() {
   if (proposedEntry && !edited()) {
     install.wipe();
     void guard.leave(back());
     return;
   }
-  flow.closeSummary();
+  flow.leaveReview();
+}
+
+/** « Modifier les réglages » depuis la vérification : retour à la première étape, la saisie intacte. */
+function editSettings() {
+  flow.leaveReview();
+  while (install.step.value > 1) install.back();
 }
 
 onBeforeUnmount(() => {
@@ -268,14 +346,48 @@ const steps = computed(() => [
   t("fiche.stepVerify"),
 ]);
 const progressOpen = computed(() => flow.launch.value !== null);
+
+/** « Ouvrir le serveur de jeu » : le détail du service créé. « Fermer » : la liste des services. */
+function openDone() {
+  const key = finished.value?.key;
+  void guard.leave({
+    name: "services",
+    params: { id: serverId() },
+    query: key ? { service: key } : {},
+  });
+}
+function closeDone() {
+  void guard.leave({ name: "services", params: { id: serverId() } });
+}
 const name = computed(() => safeText(detail.value?.card.name ?? ""));
+
+// L'encart de résumé (HRT-244) : des phrases composées par les règles pures de la fiche, jamais calculées dans le composant.
+const serverName = computed(() => safeText(server.value?.name ?? ""));
+const asideMemory = computed(() =>
+  memorySentence(
+    detail.value?.card.memory ?? null,
+    install.capacity.value?.memoryBytes ?? null,
+    serverName.value,
+    "card",
+  ),
+);
+const asideAddress = computed(() => {
+  const current = draft.value;
+  const host = server.value?.host;
+  if (!current || !host) return null;
+  const port =
+    install.published.value.find((entry) => entry.role === "game") ?? install.published.value[0];
+  if (!port) return null;
+  const shown = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  return `${safeText(shown)}:${shownHostPort(current, port)}`;
+});
 // Un seul titre, à chaque étape : « Installer Terraria » (revue UX 2026-10-24, constat 17).
 usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value }) : null));
 </script>
 
 <template>
   <div class="inst" data-install-page>
-    <Teleport defer to="#header-actions">
+    <Teleport v-if="!finished" defer to="#header-actions">
       <HButton variant="secondary" data-install-close @click="guard.requestClose">
         {{ t("fiche.close") }}
       </HButton>
@@ -291,7 +403,25 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
       @recheck="server && services.recheck(server.id)"
     />
 
-    <Callout v-if="install.phase.value === 'failed' && !detail" tone="error" role="alert" data-install-failed>
+    <InstallDone
+      v-if="finished && server"
+      :server-id="server.id"
+      :service-key="finished.key"
+      :name="finished.name"
+      :world="finished.world"
+      :detail="finished.detail"
+      :operation="finished.operation"
+      :with-world="finished.withWorld"
+      @open="openDone"
+      @close="closeDone"
+    />
+
+    <Callout
+      v-else-if="install.phase.value === 'failed' && !detail"
+      tone="error"
+      role="alert"
+      data-install-failed
+    >
       {{ t("fiche.readFailed") }}
       <template #actions>
         <HButton variant="secondary" @click="install.reload()">{{ t("common.retry") }}</HButton>
@@ -311,7 +441,11 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
     </div>
 
     <template v-else>
-      <StepTrail :steps="steps" :current="install.step.value - 1" :label="t('fiche.stepsLabel')" />
+      <StepTrail
+        :steps="steps"
+        :current="flow.reviewing.value ? 2 : install.step.value - 1"
+        :label="t('fiche.stepsLabel')"
+      />
 
       <Callout v-if="refusalVisible" tone="error" role="alert" data-install-refusal>
         {{ flow.refusal.value?.text }}
@@ -330,15 +464,49 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
         {{ minimumText(install.tooSmallVerdict.value) }}
       </Callout>
 
-      <InstallAnswers
-        v-show="install.step.value === 1"
-        ref="answers"
-        :install="install"
-        @link="(kind, key) => links.open(kind, key)"
-      />
-      <InstallResources v-if="install.step.value === 2" :install="install" />
+      <div v-show="!flow.reviewing.value" class="inst__stage">
+      <div class="inst__cols">
+        <div class="inst__main">
+          <InstallAnswers
+            v-show="install.step.value === 1"
+            ref="answers"
+            :install="install"
+            @link="(kind, key) => links.open(kind, key)"
+          />
+          <InstallResources v-if="install.step.value === 2" :install="install" />
+        </div>
+        <InstallAside
+          v-if="install.step.value <= 2"
+          class="inst__aside"
+          :heading="t('fiche.aside.heading', { game: name, server: serverName })"
+          :summary="safeText(detail.card.summary)"
+          :memory="asideMemory"
+          :address="asideAddress"
+        />
+      </div>
 
       <div class="inst__bar" data-install-bar>
+        <div class="inst__left">
+          <!-- UN seul « Retour » par étape : celui de l'étape d'avant ; « Retour à la fiche » seulement à la première. -->
+          <HButton
+            v-if="install.step.value === 1"
+            variant="ghost"
+            size="lg"
+            data-install-to-fiche
+            @click="guard.requestClose"
+          >
+            {{ t("fiche.backToFiche") }}
+          </HButton>
+          <HButton
+            v-else
+            variant="ghost"
+            size="lg"
+            data-install-back
+            @click="install.back()"
+          >
+            {{ t("fiche.previous") }}
+          </HButton>
+        </div>
         <div class="inst__reason">
           <p v-if="reason" :id="reasonId" class="inst__reason-text" data-install-reason>
             {{ reason.text }}
@@ -350,13 +518,10 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
             data-install-first-issue
             @click="goToFirstIssue"
           >
-            {{ t("deploy.goToField") }}
+            {{ t("fiche.goToQuestion") }}
           </HButton>
         </div>
         <div class="inst__buttons">
-          <HButton v-if="install.step.value === 2" variant="secondary" size="lg" data-install-back @click="install.back()">
-            {{ t("fiche.previous") }}
-          </HButton>
           <HButton
             size="lg"
             data-install-next
@@ -369,11 +534,13 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
           </HButton>
         </div>
       </div>
+      </div>
 
-      <FicheSummaryDialog
-        v-if="server"
-        :open="flow.summaryOpen.value"
+      <FicheReview
+        v-if="server && flow.reviewing.value"
         :server-id="server.id"
+        :server-name="serverName"
+        :host="server.host"
         :detail="detail"
         :draft="draft"
         :questions="install.questions.value"
@@ -384,11 +551,13 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
             : null
         "
         :capacity="install.capacity.value"
-        :check="flow.summaryCheck.value"
+        :check="flow.reviewCheck.value"
         :force-low-disk="flow.forceLowDisk.value"
         :agent-version="agentVersion"
         :perform="flow.perform"
-        @close="closeSummary"
+        :inert="flow.launch.value !== null"
+        @leave="leaveReview"
+        @edit="editSettings"
         @agree="install.agreed.value = $event"
         @imposed="imposedOpen = true"
       />
@@ -455,11 +624,39 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
   gap: var(--card-gap);
 }
 
+.inst__stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.inst__cols {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.inst__main {
+  flex: 3 1 var(--form-min);
+  min-width: 0;
+}
+
+.inst__aside {
+  /* Il reste visible pendant la saisie (adresse prévue, mémoire) : il suit le défilement. */
+  position: sticky;
+  top: var(--space-4);
+  align-self: flex-start;
+  flex: 1 1 var(--card-min);
+}
+
 .inst__bar {
   position: sticky;
   bottom: 0;
   z-index: var(--z-raised);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
@@ -467,6 +664,11 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
   border-radius: var(--radius-card);
   background: var(--card);
   box-shadow: var(--card-edge);
+}
+
+.inst__left {
+  display: flex;
+  align-items: center;
 }
 
 .inst__reason {
@@ -484,6 +686,7 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
 
 .inst__buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-3);
 }
 </style>

@@ -1,8 +1,8 @@
 import { nameIssue } from "@/deploy/rules";
-import type { Catalog, FicheDetail, FicheInstallRequest, FicheRead } from "./catalog";
+import type { Catalog, FicheCard, FicheDetail, FicheInstallRequest, FicheRead } from "./catalog";
 import type { DeployOutcome, DeployRefusal, DeployStep } from "./deploy";
 import type { SimulatedDeploys } from "./simulated-deploy";
-import { rich, terraria } from "./simulated-fiches";
+import { demoPublished, demoTerraria, rich, terraria, waitingCards } from "./simulated-fiches";
 import { judgeValue } from "./simulated-judge";
 import type { SimulatedPacks } from "./simulated-packs";
 import type { SimulatedWorlds } from "./simulated-worlds";
@@ -54,6 +54,8 @@ export class SimulatedCatalog {
   /** L'agent de la reprise d'un monde (HRT-106) : posé par le pont ; `null` : un agent d'avant HRT-105. */
   worlds: SimulatedWorlds | null = null;
   private readonly fiches = new Map<string, FicheDetail>();
+  /** Les fiches LISTÉES mais non proposées (`preview` d'un agent de publication, HRT-236) : sans détail ni installation. */
+  private waiting: FicheCard[] = [];
 
   constructor(
     private readonly deploys: SimulatedDeploys,
@@ -74,6 +76,27 @@ export class SimulatedCatalog {
     const detail = rich();
     this.put(detail);
     return detail;
+  }
+
+  /**
+   * Le catalogue de démonstration du navigateur de développement : les douze fiches d'un agent de publication, quatre
+   * prêtes (Terraria, Minecraft Java, Valheim, Enshrouded) et huit en cours de preuve avec leur raison. Jamais appelé par
+   * les tests, qui construisent leurs fiches.
+   */
+  loadDemo(): void {
+    const base = this.fiches.get("terraria");
+    if (base) demoTerraria(base);
+    for (const detail of demoPublished()) this.put(detail);
+    this.addWaiting();
+  }
+
+  /**
+   * Un agent de publication : il liste les huit fiches en cours de preuve avec leur raison (HRT-236, BR-FICHE-061) sans
+   * les proposer. Leur détail se lit comme une fiche inconnue et aucune ne s'installe.
+   */
+  addWaiting(): FicheCard[] {
+    this.waiting = waitingCards();
+    return this.waiting.map((card) => ({ ...card }));
   }
 
   remove(id: string): void {
@@ -98,7 +121,10 @@ export class SimulatedCatalog {
   list(): Catalog {
     if (this.failRead) throw new Error("catalogue illisible");
     return {
-      fiches: [...this.fiches.values()].map((detail) => ({ ...detail.card })),
+      fiches: [
+        ...[...this.fiches.values()].map((detail) => ({ ...detail.card })),
+        ...this.waiting.map((card) => ({ ...card })),
+      ],
       refused: this.refused.map((entry) => ({ ...entry })),
       unreadable: this.unreadable,
     };
@@ -298,6 +324,8 @@ export class SimulatedCatalog {
         })),
         accept: request.accept,
         world: world !== null,
+        // La récupération simulée annonce la taille que la fiche annonce (revue UX v2, N7).
+        downloadBytes: detail.resources.disk.installBytes ?? undefined,
       },
       by,
       () => this.received.push({ serverId, request: structuredClone(request) }),

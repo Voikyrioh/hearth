@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
 import HCheckbox from "@/components/atoms/HCheckbox.vue";
 import HTag from "@/components/atoms/HTag.vue";
 import Callout from "@/components/molecules/Callout.vue";
-import StepTrail from "@/components/molecules/StepTrail.vue";
-import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
+import AdminActPanel from "@/components/organisms/AdminActPanel.vue";
 import AgreementDialog from "@/components/organisms/AgreementDialog.vue";
+import { useAdminAct } from "@/composables/useAdminAct";
 import { useFicheLinks } from "@/composables/useFicheLinks";
 import type { ActReport } from "@/composables/useReauth";
 import { portVerdict, refusalText } from "@/deploy/messages";
@@ -20,6 +20,7 @@ import {
   downloadText,
   ficheRefusalText,
   folderRoleText,
+  lowerFirst,
   portRoleText,
   proofLabel,
   registryText,
@@ -29,6 +30,7 @@ import {
 import { genreLabel, packSentences, readPack } from "@/fiche/pack";
 import { forVariant, publishedPorts, readableHostPorts } from "@/fiche/ports";
 import { proofOf } from "@/fiche/proof";
+import { launchReason, plannedAddress, whatWillHappen, whatWillHappenNote } from "@/fiche/review";
 import {
   folderText,
   inspectionFiles,
@@ -47,18 +49,21 @@ import type {
 import { type EngineCapacity, formatCpu, formatMemory } from "@/resources";
 import { formatSize } from "@/serviceOps/messages";
 
-// « Vérifiez avant de lancer » (HRT-102, BR-FICHE-025, 026, 036) : UNE fenêtre large pour tout ce qui va partir ET la
-// confirmation du socle (`AdminActDialog`, acte `service_deploy`, JAMAIS couvert par l'élévation de 5 minutes). Elle
-// montre, dans l'ordre : la fiche, la variante, le nom du service, l'image exacte (version, empreinte, registre), ce que le
-// programme télécharge, les ports et qui peut les joindre, les dossiers, les réponses (les secrets masqués), les
-// ressources choisies avec la preuve de la recommandation, le redémarrage, l'arrêt du jeu, ce que la fiche impose, la
-// phrase de confiance (jamais « isolé » ni « sûr »), puis les POINTS D'ATTENTION qui s'appliquent : chacun une case, et
-// « Installer le serveur de jeu » reste inactif tant qu'un point n'est pas validé. Le contrat de licence n'est pas une
-// case : le bouton ouvre d'abord sa fenêtre à deux boutons, rien ne part sans « J'accepte ». Tout est lu dans la fiche
-// et la saisie ; le serveur refait chaque contrôle au lancement et a le dernier mot (BR-DEPLOY-032).
+// « Vérifiez avant de lancer » (HRT-102, BR-FICHE-025, 026, 036), troisième étape de la PAGE (HRT-246, plus une fenêtre) : tout
+// ce qui va partir ET la confirmation du socle (`AdminActPanel`, acte `service_deploy`, JAMAIS couvert par l'élévation de
+// 5 minutes). Elle montre, dans l'ordre : le serveur de jeu (la fiche, la variante, le nom, les ports et qui peut les joindre,
+// les dossiers, les réponses (les secrets masqués), les ressources avec la preuve de la recommandation, le redémarrage,
+// l'arrêt du jeu, ce que la fiche impose), « Ce qui va se passer » en quatre étapes, l'adresse prévue pour les joueurs, la
+// phrase de confiance (jamais « isolé » ni « sûr »), les POINTS D'ATTENTION qui s'appliquent (chacun une case), puis le mot
+// de passe Hearth. Le bouton de lancement reste inactif tant qu'un point n'est pas validé ou que le mot de passe manque, et
+// la barre dit lequel. Le contrat de licence n'est pas une case : le bouton ouvre d'abord sa fenêtre à deux boutons, rien ne
+// part sans « J'accepte ». Tout est lu dans la fiche et la saisie ; le serveur refait chaque contrôle au lancement et a le
+// dernier mot (BR-DEPLOY-032).
 const props = defineProps<{
-  open: boolean;
   serverId: string;
+  /** Le nom du serveur Hearth et son adresse, pour les phrases (« sur {serveur} ») et l'adresse prévue. */
+  serverName: string;
+  host: string;
   detail: FicheDetail;
   draft: FicheDraft;
   questions: readonly FicheQuestion[];
@@ -79,19 +84,18 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  close: [];
+  /** « Retour » : revient à l'étape « Mémoire et processeur », la saisie intacte. */
+  leave: [];
+  /** L'envoi est parti (accepté, ou résultat inconnu) : la progression prend le relais. */
+  launched: [];
   /** Les contrats que l'utilisateur vient d'accepter, juste avant l'envoi. */
   agree: [ids: string[]];
   imposed: [];
+  /** « Modifier les réglages » : revient à l'étape « Réglages ». */
+  edit: [];
 }>();
 
 const ticked = ref<Record<string, boolean>>({});
-watch(
-  () => props.open,
-  () => {
-    ticked.value = {};
-  },
-);
 
 const points = computed<AttentionPoint[]>(() =>
   attentionPoints({
@@ -101,6 +105,8 @@ const points = computed<AttentionPoint[]>(() =>
     resources: props.draft.resources,
     forceLowDisk: props.forceLowDisk,
     resumesWorld: props.draft.world.resume,
+    questions: props.questions,
+    answers: props.draft.answers,
   }),
 );
 
@@ -122,6 +128,15 @@ const resumed = computed(() => {
     left: inspection === null ? [] : notCopiedLines(inspection),
   };
 });
+/** Les réglages qui diffèrent de la valeur proposée, nommés : « 1 réglage différent » ne dit pas lequel. */
+const changedNames = computed(() =>
+  [
+    ...changed.value.map((question) => question.label),
+    ...changedMore.value.map((setting) => setting.question.label),
+  ]
+    .map((label) => safeText(label))
+    .join(", "),
+);
 const attentionDone = computed(() => allValidated(points.value, ticked.value));
 
 const published = computed(() =>
@@ -176,7 +191,7 @@ const memoryProof = computed(() => {
   const { recommendedBytes, evidence } = props.detail.resources.memory;
   const proof = proofOf(evidence);
   return recommendedBytes !== null && proof !== "unmeasured"
-    ? t("fiche.sumMemoryProof", { proof: proofLabel(proof) })
+    ? t("fiche.sumMemoryProof", { proof: lowerFirst(proofLabel(proof)) })
     : null;
 });
 
@@ -233,34 +248,62 @@ function send(adminPassword: string | null): Promise<ActReport> {
   return props.perform(adminPassword, acceptOf(points.value, ticked.value));
 }
 
-const steps = computed(() => [
-  t("fiche.stepAnswers"),
-  t("fiche.stepResources"),
-  t("fiche.stepVerify"),
-]);
-
 function refusal(refused: { kind: string }): string | undefined {
   return ficheRefusalText(refused, props.detail) ?? refusalText(refused);
 }
+
+const act = useAdminAct({
+  serverId: () => props.serverId,
+  kind: () => "service_deploy",
+  role: () => null,
+  active: () => true,
+  canSubmit: () => attentionDone.value,
+  blockedReason: () => launchReason(true, false) ?? undefined,
+  beforeSubmit,
+  perform: send,
+  refusalText: refusal,
+  onFinished: () => emit("launched"),
+});
+
+const attentionPending = computed(() => points.value.length > 0 && !attentionDone.value);
+const passwordMissing = computed(() => act.askPassword.value && act.password.value === "");
+/** Pourquoi le bouton est inactif (BR-FICHE-025) ; `null` : il est actif. */
+const reason = computed(() => launchReason(attentionPending.value, passwordMissing.value));
+
+const what = computed(() => whatWillHappen(props.detail, props.draft, safeText(props.serverName)));
+const note = computed(() => whatWillHappenNote(props.detail));
+const address = computed(() => plannedAddress(props.detail, props.draft, props.host));
+const internetText = computed(() => {
+  const ports = address.value.internet.map((port) =>
+    t("fiche.review.internetPort", { port: port.port, protocol: port.protocol }),
+  );
+  return ports.length === 0
+    ? null
+    : t("fiche.review.internet", { ports: ports.join(", "), server: safeText(props.serverName) });
+});
+/** Les réglages que l'on ne pourra plus changer après la création du monde, dits dans l'introduction. */
+const frozenLabels = computed(() =>
+  props.questions
+    .filter((question) => question.frozenAfterCreation)
+    // En milieu de phrase, pas de majuscule : « sauf nom du monde, taille du monde ».
+    .map((question) => lowerFirst(safeText(question.label))),
+);
+const intro = computed(() =>
+  frozenLabels.value.length > 0
+    ? t("fiche.review.introFrozen", {
+        server: safeText(props.serverName),
+        frozen: frozenLabels.value.join(", "),
+      })
+    : t("fiche.review.intro", { server: safeText(props.serverName) }),
+);
 </script>
 
 <template>
-  <AdminActDialog
-    :open="open"
-    :server-id="serverId"
-    kind="service_deploy"
-    :title="t('fiche.summaryTitle')"
-    :submit-label="t('fiche.summarySubmit')"
-    :cancel-label="t('fiche.summaryBack')"
-    :can-submit="attentionDone"
-    :before-submit="beforeSubmit"
-    :perform="send"
-    :refusal-text="refusal"
-    wide
-    @close="emit('close')"
-  >
-    <StepTrail :steps="steps" :current="2" :label="t('fiche.stepsLabel')" />
+  <form class="review" data-review data-fiche-review novalidate @submit.prevent="act.canSend.value && act.submit()">
+    <p class="review__intro" data-review-intro>{{ intro }}</p>
 
+    <section class="review__block" :aria-label="t('fiche.review.blockServer')">
+      <h2 class="review__title">{{ t("fiche.review.blockServer") }}</h2>
     <dl class="sum" data-fiche-summary>
       <div class="sum__row">
         <dt>{{ t("fiche.sumFiche") }}</dt>
@@ -336,7 +379,7 @@ function refusal(refused: { kind: string }): string | undefined {
             </li>
           </ul>
           <span v-if="answers.length > 0" class="sum__note" data-sum-changed>
-            {{ t("fiche.sumChanged", { n: changed.length + changedMore.length }) }}
+            {{ t("fiche.sumChanged", { n: changed.length + changedMore.length, names: changedNames }) }}
           </span>
         </dd>
       </div>
@@ -391,6 +434,26 @@ function refusal(refused: { kind: string }): string | undefined {
         </div>
       </dl>
     </details>
+      <HButton variant="secondary" size="sm" data-review-edit @click="emit('edit')">
+        {{ t("fiche.review.editSettings") }}
+      </HButton>
+    </section>
+
+    <section class="review__block" :aria-label="t('fiche.review.blockWhat')" data-review-what>
+      <h2 class="review__title">{{ t("fiche.review.blockWhat") }}</h2>
+      <ol class="review__steps">
+        <li v-for="line in what" :key="line">{{ line }}</li>
+      </ol>
+      <p class="review__note" data-review-note>{{ note }}</p>
+    </section>
+
+    <section class="review__block" :aria-label="t('fiche.review.blockAddress')" data-review-address>
+      <h2 class="review__title">{{ t("fiche.review.blockAddress") }}</h2>
+      <p v-if="address.lan" class="review__line" data-review-lan>
+        {{ t("fiche.review.lan", { address: address.lan, server: safeText(serverName) }) }}
+      </p>
+      <p v-if="internetText" class="review__line" data-review-internet>{{ internetText }}</p>
+    </section>
 
     <Callout tone="info" data-sum-trust>{{ t("fiche.trust") }}</Callout>
 
@@ -427,6 +490,33 @@ function refusal(refused: { kind: string }): string | undefined {
       {{ t("fiche.needAttention") }}
     </p>
 
+    <section class="review__block" :aria-label="t('fiche.review.blockPassword')">
+      <h2 class="review__title">{{ t("fiche.review.blockPassword") }}</h2>
+      <fieldset class="review__fieldset">
+        <AdminActPanel :act="act" :server-id="serverId" />
+      </fieldset>
+      <p class="review__note" data-review-password-help>{{ t("fiche.review.passwordHelp") }}</p>
+      <Callout v-if="act.error.value" tone="error" role="alert" data-review-error>
+        {{ act.error.value }}
+      </Callout>
+    </section>
+
+    <div class="review__bar" data-review-bar>
+      <HButton variant="ghost" size="lg" data-review-back @click="emit('leave')">
+        {{ t("fiche.review.back") }}
+      </HButton>
+      <p v-if="reason" class="review__reason" data-review-reason>{{ reason }}</p>
+      <HButton
+        type="submit"
+        size="lg"
+        data-review-launch
+        :disabled="!act.canSend.value"
+        :busy="act.sending.value"
+      >
+        {{ t("fiche.summarySubmit") }}
+      </HButton>
+    </div>
+
     <AgreementDialog
       v-if="asking"
       :open="asking !== null"
@@ -436,10 +526,79 @@ function refusal(refused: { kind: string }): string | undefined {
       @accept="answer(true)"
       @refuse="answer(false)"
     />
-  </AdminActDialog>
+  </form>
 </template>
 
 <style scoped>
+.review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.review__intro {
+  margin: 0;
+  color: var(--tx-secondary);
+}
+
+.review__block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--card-edge);
+}
+
+.review__title {
+  margin: 0;
+  font-size: var(--fs-lead);
+  font-weight: var(--fw-semibold);
+}
+
+.review__steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.review__note,
+.review__line {
+  margin: 0;
+  color: var(--tx-secondary);
+}
+
+.review__fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.review__bar {
+  /* À la suite du mot de passe, jamais collée en bas de la fenêtre : elle ne cache plus l'erreur sous le champ. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  background: var(--card);
+  box-shadow: var(--card-edge);
+}
+
+.review__reason {
+  margin: 0;
+  min-width: 0;
+  color: var(--tx-secondary);
+}
+
 .sum__tech-title {
   color: var(--tx);
   cursor: pointer;

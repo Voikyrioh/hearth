@@ -37,12 +37,36 @@ describe("AddServerWizard", () => {
     await flushPromises();
   }
 
+  it("explique chaque étape : introduction, aides, encart « Ce qui va suivre », lien d'installation (HRT-248)", async () => {
+    const { wrapper, bridge } = await wizard();
+    expect(wrapper.get("[data-wizard-intro]").text()).toContain(
+      "un ordinateur de chez vous sur lequel l'agent Hearth est installé",
+    );
+    expect(wrapper.text()).toContain("Ce nom ne sert qu'à vous, dans la barre de gauche.");
+    expect(wrapper.text()).toContain("Gardez 7341 sauf si vous l'avez changé.");
+    const aside = wrapper.get("[data-wizard-aside]").text();
+    expect(aside).toContain("Ce qui va suivre");
+    expect(aside).toContain("2. Vérifier que c'est bien lui.");
+    expect(aside).toContain("3. Se connecter.");
+    expect(wrapper.get("[data-wizard-install]").text()).toContain(
+      "Vous n'avez pas encore installé l'agent Hearth sur un ordinateur ?",
+    );
+    expect(bridge.agentInstallDocsOpened).toBe(0);
+    await wrapper.get("[data-open-install-docs]").trigger("click");
+    expect(bridge.agentInstallDocsOpened).toBe(1);
+    wrapper.unmount();
+  });
+
   it("starts at step 1 with the exact spec labels and « Suivant » never greyed without a reason", async () => {
     const { wrapper } = await wizard();
-    expect(wrapper.get("h1").text()).toBe("Ajouter un serveur");
+    expect(wrapper.get("h1").text()).toBe("Relier un serveur à ce PC");
     const labels = wrapper.findAll("label").map((label) => label.text());
-    expect(labels).toEqual(["Nom du serveur", "Adresse IP ou nom", "Port (optionnel)"]);
-    expect(wrapper.find("input[placeholder='7341']").exists()).toBe(true);
+    expect(labels).toEqual([
+      "Comment voulez-vous l'appeler ?",
+      "Adresse du serveur sur votre réseau",
+      "Port",
+    ]);
+    expect(wrapper.find("input[placeholder='ex. 7341']").exists()).toBe(true);
     expect(wrapper.find("input[placeholder='ex. salon']").exists()).toBe(true);
     expect(wrapper.find("input[placeholder='ex. 192.168.1.10 ou serveur.local']").exists()).toBe(
       true,
@@ -52,7 +76,7 @@ describe("AddServerWizard", () => {
     expect(next?.attributes("aria-disabled")).not.toBe("true");
     expect(wrapper.findAll("[role=radio]")).toHaveLength(8);
     // Le fil des étapes : l'étape courante est annoncée.
-    expect(wrapper.get("[aria-current=step]").text()).toContain("Adresse");
+    expect(wrapper.get("[aria-current=step]").text()).toContain("Où est le serveur");
   });
 
   // FIX:01M4D0RJ5EMX3TG1TJB0EJ5EYP (C1, C2) : curseur dans le premier champ ; « Suivant » (clic ou Entrée)
@@ -64,12 +88,12 @@ describe("AddServerWizard", () => {
     await flushPromises();
     const inputs = wrapper.findAll("input");
     expect(document.activeElement).toBe(inputs[0]?.element);
-    // L'adresse est remplie, le nom manque : Entrée dit « Le nom du serveur est requis », curseur dans le nom.
+    // L'adresse est remplie, le nom manque : Entrée dit « Indiquez un nom pour ce serveur. », curseur dans le nom.
     await inputs[1]?.setValue("192.168.1.99");
     (document.activeElement as HTMLElement).blur();
     await wrapper.get("form").trigger("submit");
     await flushPromises();
-    expect(wrapper.text()).toContain("Le nom du serveur est requis");
+    expect(wrapper.text()).toContain("Indiquez un nom pour ce serveur.");
     expect(document.activeElement).toBe(inputs[0]?.element);
     // Le même texte au clic sur « Suivant ».
     const next = wrapper.findAll("button").find((b) => b.text() === "Suivant");
@@ -80,11 +104,11 @@ describe("AddServerWizard", () => {
   it("goes through the three steps, comparing the fingerprint and connecting", async () => {
     const { wrapper, servers } = await wizard();
     await reachFingerprint(wrapper);
-    expect(wrapper.get("h1").text()).toBe("Vérifie l'identité du serveur");
+    expect(wrapper.get("h1").text()).toBe("Vérifiez que c'est bien lui");
     const groups = wrapper.findAll("[data-fingerprint] span").map((g) => g.text());
     expect(groups).toEqual(["A1B2", "C3D4", "E5F6", "0718", "293A", "4B5C", "6D7E", "8F90"]);
     expect(wrapper.text()).toContain(
-      "Compare avec l'empreinte affichée à la fin de l'installation de l'agent.",
+      "Comparez cette empreinte avec celle affichée à la fin de l'installation de l'agent.",
     );
     // Rien n'est enregistré avant « Confirmer » ; les deux boutons sont là.
     expect(servers.servers).toHaveLength(0);
@@ -101,7 +125,7 @@ describe("AddServerWizard", () => {
     await flushPromises();
     // « Confirmer » n'enregistre rien : le serveur n'existe qu'à la connexion réussie.
     expect(servers.servers).toHaveLength(0);
-    expect(wrapper.get("h1").text()).toBe("Connecte-toi");
+    expect(wrapper.get("h1").text()).toBe("Connectez-vous");
     const remember = wrapper.get("input[type=checkbox]");
     expect((remember.element as HTMLInputElement).checked).toBe(true);
     expect(wrapper.text()).toContain("Se souvenir de moi sur ce PC");
@@ -133,7 +157,7 @@ describe("AddServerWizard", () => {
     await reachFingerprint(wrapper);
     await wrapper.get("[data-fingerprint-back]").trigger("click");
     expect(wrapper.find("[data-fingerprint]").exists()).toBe(false);
-    expect(wrapper.get("h1").text()).toBe("Ajouter un serveur");
+    expect(wrapper.get("h1").text()).toBe("Relier un serveur à ce PC");
     expect(wrapper.emitted("cancel")).toBeUndefined();
     expect(servers.servers).toHaveLength(0);
   });
@@ -148,7 +172,7 @@ describe("AddServerWizard", () => {
     expect(wrapper.get("[role=alert]").text()).toBe(
       "Cette adresse n'est pas joignable. Vérifie l'adresse et essaie de nouveau.",
     );
-    expect(wrapper.get("h1").text()).toBe("Ajouter un serveur");
+    expect(wrapper.get("h1").text()).toBe("Relier un serveur à ce PC");
   });
 
   it("leaves nothing behind when the wizard is closed at step 3", async () => {
@@ -222,8 +246,8 @@ describe("LoginForm", () => {
   it("asks for the identifier and the password and sends them with the remember choice", async () => {
     const wrapper = mount(LoginForm);
     await wrapper.get("form").trigger("submit");
-    expect(wrapper.text()).toContain("L'identifiant est requis");
-    expect(wrapper.text()).toContain("Le mot de passe est requis");
+    expect(wrapper.text()).toContain("Indiquez votre identifiant.");
+    expect(wrapper.text()).toContain("Saisissez votre mot de passe.");
     expect(wrapper.emitted("submit")).toBeUndefined();
     const [user, password] = wrapper.findAll("input:not([type=checkbox])");
     await user?.setValue(" marie ");
@@ -350,7 +374,7 @@ describe("ReconnectPanel", () => {
     expect(wrapper.text()).toContain(
       "Demande à l'administrateur du serveur de rétablir ton compte",
     );
-    expect(wrapper.text()).not.toContain("Connecte-toi à");
+    expect(wrapper.text()).not.toContain("Connectez-vous à");
     expect(wrapper.find("form").exists()).toBe(false);
     await wrapper.get("button").trigger("click");
     expect(wrapper.text()).toContain("Se connecter");

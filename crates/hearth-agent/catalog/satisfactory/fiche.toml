@@ -13,7 +13,9 @@ family = "satisfactory"
 name = "Satisfactory"
 summary = "Le serveur officiel de Satisfactory, sans mod."
 status = "preview"
+preview_reason = "Le premier joueur qui se connecte pourrait s'approprier le serveur, et le jeu ne s'arrête pas encore proprement."
 platform = "linux"
+steam_app_id = 526870                        # identifiant du JEU dans le magasin Steam, relu sur sa page le 16/11/2026 (BR-FICHE-062)
 
 [image]
 repository = "wolveix/satisfactory-server"

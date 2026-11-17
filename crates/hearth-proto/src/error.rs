@@ -93,6 +93,8 @@ pub enum ErrorCode {
     TransferLimit,
     /// Fiche de serveur de jeu inconnue.
     FicheUnknown,
+    /// La fiche listée n'a pas d'illustration embarquée (HRT-238).
+    IllustrationAbsent,
     /// La machine est trop petite pour ce service.
     HostTooSmall,
     /// Le monde à reprendre n'existe plus à son emplacement.
@@ -168,6 +170,7 @@ impl ErrorCode {
             Self::ForbiddenRole | Self::WriteDenied => 403,
             Self::NotFound
             | Self::FicheUnknown
+            | Self::IllustrationAbsent
             | Self::ServiceNotFound
             | Self::NotAGameService
             | Self::OperationNotFound
@@ -397,7 +400,7 @@ mod tests {
         assert_eq!(ErrorCode::Unknown.or_from_status(200), ErrorCode::Unknown);
     }
 
-    const ALL: [(ErrorCode, &str, u16); 71] = [
+    const ALL: [(ErrorCode, &str, u16); 72] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -450,6 +453,7 @@ mod tests {
         (ErrorCode::TransferExpired, "TRANSFER_EXPIRED", 410),
         (ErrorCode::TransferLimit, "TRANSFER_LIMIT", 429),
         (ErrorCode::FicheUnknown, "FICHE_UNKNOWN", 404),
+        (ErrorCode::IllustrationAbsent, "ILLUSTRATION_ABSENT", 404),
         (ErrorCode::HostTooSmall, "HOST_TOO_SMALL", 409),
         (ErrorCode::WorldGone, "WORLD_GONE", 409),
         (ErrorCode::TooLateToCancel, "TOO_LATE_TO_CANCEL", 409),

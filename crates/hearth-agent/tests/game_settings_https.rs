@@ -795,10 +795,20 @@ async fn a_reset_never_touches_a_secret_nor_a_frozen_setting() {
 }
 
 #[tokio::test]
-async fn a_setting_received_by_argument_asks_for_a_recreation_this_agent_cannot_do() {
+async fn a_setting_received_by_argument_recreates_the_service_with_a_new_revision() {
     let b = bench().await;
     let key = b.install().await;
-    let before = b.file(&key);
+    let spec_rev = |body: &Value| body["rev"].as_u64().unwrap_or(0);
+    let read_spec = || async {
+        b.agent
+            .request("GET", &Bench::path(&key, "spec"))
+            .token(&b.ada.token)
+            .send()
+            .await
+    };
+    let first = read_spec().await;
+    assert_eq!(first.status, 200, "{}", first.text);
+    assert_eq!(spec_rev(&first.body), 1);
     let stamp = b.view(&key).await.file_stamp.unwrap();
     let reply = b
         .save(
@@ -814,15 +824,95 @@ async fn a_setting_received_by_argument_asks_for_a_recreation_this_agent_cannot_
             ),
         )
         .await;
-    assert_eq!(
-        (reply.status, code(&reply).as_str()),
-        (409, "RECREATE_NOT_AVAILABLE")
+    assert_eq!(reply.status, 200, "{}", reply.text);
+    assert_eq!(reply.body["effect"], "recreate");
+    // La description a une nouvelle révision : la recréation a eu lieu par le plan de HRT-87.
+    let started = Instant::now();
+    loop {
+        let now = read_spec().await;
+        if spec_rev(&now.body) == 2 {
+            assert!(now.body["command_set"].as_bool().unwrap_or(false));
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(15), "{}", now.text);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_mixed_save_is_refused_whole_before_any_write_when_the_service_cannot_be_recreated() {
+    let b = bench().await;
+    let key = b.install().await;
+    // Une première recréation qui dure : l'arrêt de l'ancien conteneur est lent, le service est tenu.
+    for id in b.engine.container_ids() {
+        b.engine.set_stop_delay(&id, Duration::from_secs(3));
+    }
+    let stamp = b.view(&key).await.file_stamp.unwrap();
+    let first = b
+        .save(
+            &key,
+            Bench::body(
+                0,
+                &stamp,
+                "recreate",
+                vec![Bench::change("announcement_box_off", "1")],
+            ),
+        )
+        .await;
+    assert_eq!(first.status, 200, "{}", first.text);
+    let before = b.file(&key);
+    let journal_before = b.journal().await.len();
+    let view = b.view(&key).await;
+    // Une demande mixte (réglage du fichier + réglage du conteneur + mot de passe) : refusée en entier, rien d'écrit.
+    let second = b
+        .save(
+            &key,
+            Bench::body(
+                view.rev,
+                &view.file_stamp.unwrap(),
+                "recreate",
+                vec![
+                    Bench::change("motd", "Autre"),
+                    Bench::change("announcement_box_range", "5"),
+                    Bench::change("password", SENTINEL_2),
+                ],
+            ),
+        )
+        .await;
+    assert_eq!(second.status, 409, "{}", second.text);
+    assert!(
+        ["OPERATION_IN_PROGRESS", "RECREATE_NOT_AVAILABLE"].contains(&code(&second).as_str()),
+        "{}",
+        second.text
     );
+    assert!(!second.text.contains(SENTINEL_2));
+    assert_eq!(b.file(&key), before, "aucun fichier n'est écrit");
     assert_eq!(
-        reply.body["error"]["details"]["ids"],
-        json!(["announcement_box_off"])
+        b.journal().await.len(),
+        journal_before,
+        "rien n'est inscrit au journal pour une demande refusée en entier"
     );
-    assert_eq!(b.file(&key), before, "rien n'est écrit à moitié");
+    let after = b.view(&key).await;
+    assert_eq!(after.rev, view.rev, "l'état des réglages n'a pas bougé");
+    assert!(!format!("{:?}", b.journal().await).contains(SENTINEL_2));
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn an_import_cannot_set_a_setting_that_recreates_the_service() {
+    let b = bench().await;
+    let key = b.install().await;
+    let stamp = b.view(&key).await.file_stamp.unwrap();
+    let mut body = Bench::body(
+        0,
+        &stamp,
+        "recreate",
+        vec![json!({ "id": "announcement_box_off", "action": "from_import" })],
+    );
+    body["import_text"] = json!("-disableannouncementbox=1");
+    let reply = b.save(&key, body).await;
+    assert_eq!(reply.status, 422, "{}", reply.text);
     b.agent.shutdown().await;
 }
 

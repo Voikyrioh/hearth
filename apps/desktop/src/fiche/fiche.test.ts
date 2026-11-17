@@ -353,7 +353,7 @@ describe("la machine et la place (BR-FICHE-020 à 023)", () => {
     expect(diskVerdict(terraria(), 1)).toEqual({ kind: "unknown" });
   });
 
-  it("place les curseurs sur le recommandé prouvé, sinon sur la proposition prudente et tous les processeurs", () => {
+  it("place les curseurs sur le recommandé prouvé, sinon sur la proposition prudente et deux cœurs au plus", () => {
     const placed = placement(rich(), machine(8, 16));
     expect(placed.resources).toEqual({ memoryBytes: 4 * GIB, cpuMillis: 2000 });
     expect(placed.memory).toMatchObject({
@@ -365,10 +365,10 @@ describe("la machine et la place (BR-FICHE-020 à 023)", () => {
     const clamped = placement(rich(), machine(4, 3));
     expect(clamped.memory.clamped).toBe(true);
     expect(clamped.resources.memoryBytes).toBeLessThanOrEqual(3 * GIB);
-    // Aucune preuve : proposition prudente, tous les processeurs.
+    // Aucune preuve : proposition prudente, deux cœurs au plus.
     const bare = placement(terraria(), machine(4, 16));
     expect(bare.memory.recommended).toBeNull();
-    expect(bare.resources.cpuMillis).toBe(4000);
+    expect(bare.resources.cpuMillis).toBe(2000);
     expect(bare.cpu.recommended).toBeNull();
   });
 
@@ -532,7 +532,9 @@ describe("les points d'attention (BR-FICHE-026)", () => {
       resources: null,
       forceLowDisk: { freeBytes: null },
     });
-    expect(points).toEqual([{ key: "low_disk", freeBytes: null, neededBytes: null }]);
+    // Terraria n'a aucun chiffre de processeur prouvé : ce point s'ajoute (HRT-246), la case du disque est exigée.
+    expect(points).toContainEqual({ key: "low_disk", freeBytes: null, neededBytes: null });
+    expect(points.map((point) => point.key)).toEqual(["cpu_unverified", "low_disk"]);
   });
 
   it("demande « Je comprends » pour un minimum de l'éditeur que la machine n'atteint pas", () => {

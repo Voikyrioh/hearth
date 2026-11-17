@@ -512,7 +512,10 @@ impl From<LinkError> for LinkFailure {
             },
             LinkError::Unreachable(_) | LinkError::Timeout => Self::Unreachable,
             // Réponse qui n'est pas celle d'un agent Hearth (produit inconnu, corps illisible).
-            LinkError::Protocol(_) => Self::NotAgent,
+            LinkError::Protocol(_)
+            | LinkError::TooLarge
+            | LinkError::UnexpectedContent
+            | LinkError::DigestMismatch => Self::NotAgent,
             LinkError::Store(_) => Self::Storage,
             LinkError::Vault(_) => Self::Vault,
             LinkError::NotConnected => Self::NotConnected,

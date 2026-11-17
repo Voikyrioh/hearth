@@ -7,3 +7,4 @@ Le bouton « Déployer un service » de la section Services et de son état vide
 - Props : `door` (`DeployDoor`), `rightsReasonId` (l'`id` du texte de `ServiceRightReason`)
 - Événements : `click`
 - Notes : posé par `pages/Services.vue` (barre au-dessus de la liste, ou action de `EmptyState`). Tests : `pages/DeployService.test.ts` (le bouton de la section Services), `deploy/deploy.test.ts` (la porte).
+- HRT-243 : le bouton dit « Ajouter un serveur de jeu » et ouvre l'écran des trois chemins (`services-add`) ; l'attribut `data-deploy-open` est inchangé.

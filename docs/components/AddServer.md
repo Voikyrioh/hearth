@@ -7,3 +7,4 @@ Ajout d'un serveur : carte centrée sans navigation de serveur. Route `/servers/
 - Props : aucune
 - Événements et slots : aucun
 - Notes : Tests : `e2e/connect.spec.ts`.
+- HRT-248 : le bouton qui ouvre l'assistant dit « Relier un serveur » (barre de gauche, carnet des serveurs, accueil), pour ne plus se confondre avec « Ajouter un serveur de jeu » de la page Services ; titre « Relier un serveur à ce PC ».

@@ -194,8 +194,11 @@ export class SimulatedGameSettings {
     held.lastBy = by;
   }
 
-  private catalogChannel(setting: FicheSetting): "config" | "args" {
-    // Le canal n'est pas dans la fiche servie : l'agent le sait. Terraria le dit, les autres fiches passent par le fichier.
+  private catalogChannel(setting: FicheSetting): "config" | "args" | "env" {
+    // Le canal n'est pas dans la fiche servie : l'agent le sait. Une variable d'environnement porte un nom en
+    // majuscules (« MOTD ») : les fiches de démonstration qui passent par des variables (Minecraft, Valheim, Enshrouded)
+    // le disent ainsi ; Terraria le dit par sa fixture ; les autres fiches passent par le fichier.
+    if (/^[A-Z][A-Z0-9_]*$/.test(setting.key)) return "env";
     return TERRARIA_CHANNEL[setting.question.id] ?? "config";
   }
 
@@ -215,7 +218,9 @@ export class SimulatedGameSettings {
   }
 
   private effectOf(setting: FicheSetting): SettingEffect {
-    return this.catalogChannel(setting) === "args" ? "recreate" : "restart";
+    // Un réglage passé par variable ou argument recrée le service à l'enregistrement ; celui d'un fichier prend effet au
+    // prochain démarrage (BR-FICHE-042).
+    return this.catalogChannel(setting) === "config" ? "restart" : "recreate";
   }
 
   read(serverId: string, key: string): GameSettingsRead {
@@ -381,7 +386,6 @@ export class SimulatedGameSettings {
 
     // 1. Chaque changement vers son réglage, dans l'ordre de la demande.
     const asked: { setting: FicheSetting; wanted: Wanted }[] = [];
-    const recreate: string[] = [];
     for (const change of request.changes) {
       const setting = detail.settings.find((item) => item.question.id === change.id);
       if (!setting) {
@@ -400,10 +404,6 @@ export class SimulatedGameSettings {
           reason: "secret",
           character: null,
         });
-      }
-      if (this.effectOf(setting) === "recreate") {
-        recreate.push(question.id);
-        continue;
       }
       let wanted: Wanted;
       if (change.action === "set") {
@@ -426,7 +426,6 @@ export class SimulatedGameSettings {
       }
       asked.push({ setting, wanted });
     }
-    if (recreate.length > 0) return refused({ kind: "recreate_not_available", ids: recreate });
     for (const other of request.others) {
       if (!other.remove && other.value === null) return refused({ kind: "invalid" });
     }
@@ -525,7 +524,12 @@ export class SimulatedGameSettings {
     const toWrite = all.filter(([name, value]) => (observed.get(name) ?? null) !== value);
 
     // 6. L'effet signé : le plus lourd des changements, ou un redémarrage quand seul le fichier est retouché.
-    const effect: SettingEffect = changed.length > 0 || toWrite.length > 0 ? "restart" : "none";
+    const recreates = changed.some((setting) => this.effectOf(setting) === "recreate");
+    const effect: SettingEffect = recreates
+      ? "recreate"
+      : changed.length > 0 || toWrite.length > 0
+        ? "restart"
+        : "none";
     if (request.effect !== effect) {
       return refused({ kind: "conflict", by: null, effectMismatch: true });
     }

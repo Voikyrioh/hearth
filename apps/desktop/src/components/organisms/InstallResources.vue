@@ -13,7 +13,7 @@ import { formatSize } from "@/serviceOps/messages";
 
 // Les « Ressources » de l'installation d'un serveur de jeu (HRT-102, BR-FICHE-020 à 023, BR-RES-037) : les deux curseurs de
 // mémoire et de processeur, déjà placés sur ce que la fiche RECOMMANDE (jamais sur un chiffre sans preuve : sans preuve,
-// la mémoire part de la valeur proposée pour une application inconnue et le processeur de tous les processeurs du
+// la mémoire part de la valeur proposée pour une application inconnue et le processeur de deux cœurs au plus du
 // serveur, et la page le dit). Il n'existe aucune position « sans limite ». Les avertissements chiffrés sont en direct :
 // ce qui reste de mémoire, une limite sous le minimum ou au-dessus de ce qui reste ; les cases « Je comprends »
 // correspondantes sont dans la fenêtre « Vérifiez avant de lancer », pas ici. L'espace disque : un besoin MESURÉ qui
@@ -90,7 +90,21 @@ const free = computed(() => props.install.check.value?.disk?.freeBytes ?? null);
         :recommended="recommended"
         :memory-note="memoryNote"
         :cpu-note="cpuNote"
-      />
+      >
+        <template #memory-notices>
+          <p v-if="minimum" class="resources__line" data-resources-minimum>{{ minimum }}</p>
+          <p v-if="clamped" class="resources__line" data-resources-clamped>{{ clamped }}</p>
+          <Callout
+            v-for="notice in install.notices.value"
+            :key="notice.kind"
+            tone="warn"
+            inline
+            :data-resources-notice="notice.kind"
+          >
+            {{ memoryNoticeText(notice) }}
+          </Callout>
+        </template>
+      </ResourceSliders>
       <HButton
         v-if="install.capacity.value === null && install.capacityFailed.value"
         variant="secondary"
@@ -100,17 +114,6 @@ const free = computed(() => props.install.check.value?.disk?.freeBytes ?? null);
       >
         {{ t("common.retry") }}
       </HButton>
-      <p v-if="minimum" class="resources__line" data-resources-minimum>{{ minimum }}</p>
-      <p v-if="clamped" class="resources__line" data-resources-clamped>{{ clamped }}</p>
-      <Callout
-        v-for="notice in install.notices.value"
-        :key="notice.kind"
-        tone="warn"
-        inline
-        :data-resources-notice="notice.kind"
-      >
-        {{ memoryNoticeText(notice) }}
-      </Callout>
       <p v-if="free !== null" class="resources__line" data-resources-free>
         {{ t("fiche.diskFree", { size: formatSize(free) }) }}
       </p>

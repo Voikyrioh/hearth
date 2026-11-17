@@ -10,3 +10,5 @@ Les « Réponses » de l'installation (HRT-102, BR-FICHE-014 à 019) : la varian
 
 HRT-109 : `InstallSettings` (« Voir tous les réglages ») est sous la carte des questions.
 - Revue UX du 2026-10-24 (constat 16) : expose `focusName()` ; la page y met le curseur à l'arrivée, comme le formulaire de déploiement.
+- HRT-244 : « L'essentiel » (la question du monde, les secrets, les questions sans valeur proposée) à l'écran, le reste dans « Réglages avancés », replié (`<details>` piloté, ouvert seul sur un refus ou « Aller au champ », `focusQuestion` async) ; répartition `fiche/questions.ts::splitQuestions` (BR-FICHE-065).
+- Revue UX du 17/11 (HRT-244) : UNE carte « L'essentiel » (le nom du serveur de jeu, les questions qui comptent, les ports), puis « Le monde », puis « Réglages avancés » replié avec « Voir tous les réglages » dedans : un seul moyen d'ouvrir les autres réglages.

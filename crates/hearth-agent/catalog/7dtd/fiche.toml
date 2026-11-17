@@ -20,7 +20,9 @@ family = "7dtd"
 name = "7 Days to Die"
 summary = "Le serveur officiel de 7 Days to Die, sans mod."
 status = "preview"
+preview_reason = "Le jeu ne démarre pas encore avec les protections que Hearth impose à tout serveur."
 platform = "linux"
+steam_app_id = 251570                        # identifiant du JEU dans le magasin Steam, relu sur sa page le 16/11/2026 (BR-FICHE-062)
 
 [image]
 repository = "vinanrra/7dtd-server"

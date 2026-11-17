@@ -2150,6 +2150,8 @@ dependencies = [
  "minisign",
  "reqwest",
  "rfd",
+ "rustls",
+ "rustls-native-certs",
  "semver",
  "serde",
  "serde_json",

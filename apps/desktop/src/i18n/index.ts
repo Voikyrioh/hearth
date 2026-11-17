@@ -11,8 +11,20 @@ export function t(key: MessageKey, params?: Record<string, string | number>): st
   }
   const text = node as string;
   if (!params) return text;
-  return text.replace(/\{(\w+)\}/g, (match, name: string) =>
+  const filled = text.replace(/\{(\w+)\}/g, (match, name: string) =>
     name in params ? String(params[name]) : match,
+  );
+  return typeof params.n === "number" ? agreed(filled, params.n) : filled;
+}
+
+/**
+ * Les accords d'un compte écrits « mot(s) » : « 1 réglage différent », « 3 réglages différents » (revue UX du 17/11 : jamais
+ * de parenthèses dans une phrase). Seuls `(s)`, `(x)` et `(e)` sont lus, et seulement quand le texte porte un nombre `n`.
+ */
+export function agreed(text: string, n: number): string {
+  const one = n === 1 || n === 0;
+  return text.replace(/\((s|x|e)\)/g, (_match, mark: string) =>
+    one ? "" : mark === "e" ? "" : mark,
   );
 }
 

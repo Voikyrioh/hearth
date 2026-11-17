@@ -10,16 +10,20 @@ export function typeInto(el: Element | null, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-/** Le bouton d'une fenêtre ouverte, par son texte. */
+/** Le bouton d'une fenêtre ouverte (ou, à défaut, de la vérification en page, HRT-246), par son texte. */
 export function dialogButton(label: string): HTMLButtonElement | undefined {
-  return [...document.querySelectorAll<HTMLButtonElement>("dialog button")].find(
-    (button) => button.textContent?.trim() === label,
-  );
+  const find = (selector: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>(selector)].find(
+      (button) => button.textContent?.trim() === label,
+    );
+  return find("dialog button") ?? find("[data-review] button");
 }
 
 /** Le champ « Votre mot de passe » de la confirmation d'un acte, s'il est affiché. */
 export function reauthField(): HTMLInputElement | null {
-  return document.querySelector<HTMLInputElement>("dialog [data-reauth-field] input");
+  return document.querySelector<HTMLInputElement>(
+    "dialog [data-reauth-field] input, [data-review] [data-reauth-field] input",
+  );
 }
 
 /**

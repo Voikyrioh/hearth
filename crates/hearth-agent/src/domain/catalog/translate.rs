@@ -548,3 +548,94 @@ pub fn translate(fiche: &Fiche, request: &Request<'_>) -> Result<ServiceSpecDraf
 pub trait DeploymentValidator {
     fn validate(&self, spec: &ServiceSpecDraft) -> Result<(), String>;
 }
+/// Ce que change, dans les variables et la commande d'un service de fiche, un changement de réponses (HRT-266,
+/// BR-JEU-035). La fiche est traduite DEUX fois, avant et après, avec le même contexte ; seule la différence est
+/// rendue. Les secrets tirés à l'installation (mots de passe générés) ne sont pas connus ici : ils sont remplacés par
+/// la même valeur de remplissage des deux côtés, donc ils ne figurent jamais dans la différence et le service garde
+/// les siens. Un contexte inconnu après l'installation (monde repris, pack déposé) est compté de la même façon des
+/// deux côtés.
+#[derive(Default, PartialEq, Eq)]
+pub struct GameDiff {
+    /// Variable à poser (`Some`) ou à retirer (`None`).
+    pub env: Vec<(String, Option<String>)>,
+    /// La nouvelle commande, seulement quand elle diffère.
+    pub command: Option<Vec<String>>,
+}
+
+impl std::fmt::Debug for GameDiff {
+    /// Des nombres seulement : une valeur de variable ou un élément de commande peut être un secret.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GameDiff")
+            .field("env", &self.env.len())
+            .field("command", &self.command.is_some())
+            .finish()
+    }
+}
+
+/// Le contexte de l'installation que la description garde.
+pub struct GameContext<'a> {
+    pub variant: Option<&'a str>,
+    /// Identifiants des ports de la fiche que le service publie, avec le port choisi.
+    pub host_ports: &'a BTreeMap<String, u16>,
+}
+
+pub fn game_diff(
+    fiche: &Fiche,
+    context: &GameContext<'_>,
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+) -> Result<GameDiff, TranslateError> {
+    let agreements: BTreeSet<String> = fiche.file.agreement.iter().map(|a| a.id.clone()).collect();
+    let optional: BTreeSet<String> = context.host_ports.keys().cloned().collect();
+    let generated: BTreeMap<String, Secret> = fiche
+        .file
+        .secret
+        .iter()
+        .map(|secret| {
+            (
+                secret.id.clone(),
+                Secret::new("a".repeat(secret.length as usize)),
+            )
+        })
+        .collect();
+    let draft = |answers: &BTreeMap<String, String>| {
+        translate(
+            fiche,
+            &Request {
+                variant: context.variant,
+                answers,
+                agreements: &agreements,
+                host_ports: context.host_ports,
+                optional_ports: &optional,
+                generated: &generated,
+                world_imported: false,
+                pack: None,
+            },
+        )
+    };
+    let (old, new) = (draft(before)?, draft(after)?);
+    let value_of = |env: &[EnvDraft], name: &str| {
+        env.iter()
+            .find(|e| e.name == name)
+            .map(|e| e.value.expose().to_owned())
+    };
+    let mut names: Vec<&str> = old
+        .env
+        .iter()
+        .chain(new.env.iter())
+        .map(|e| e.name.as_str())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    let mut diff = GameDiff::default();
+    for name in names {
+        let (was, now) = (value_of(&old.env, name), value_of(&new.env, name));
+        if was != now {
+            diff.env.push((name.to_owned(), now));
+        }
+    }
+    if old.command != new.command {
+        diff.command = Some(new.command);
+    }
+    Ok(diff)
+}

@@ -18,6 +18,7 @@ pub const STORE_FILE: &str = "settings.json";
 const KEY_CLOSE_HINT_SEEN: &str = "closeHintSeen";
 const KEY_NOTIFY_ON_LINK_CHANGE: &str = "notifyOnLinkChange";
 const KEY_NOTIFY_ON_SECURITY_ALERT: &str = "notifyOnSecurityAlert";
+const KEY_REMOTE_GAME_IMAGES: &str = "remoteGameImages";
 
 /// Entrée de démarrage de Windows (port, pour pouvoir la simuler en test).
 pub trait Autostart {
@@ -118,4 +119,23 @@ pub fn mark_close_hint_seen<R: Runtime>(app: &AppHandle<R>, file: &Path) -> Resu
     let store = app.store(file).map_err(store_error)?;
     store.set(KEY_CLOSE_HINT_SEEN, json!(true));
     store.save().map_err(store_error)
+}
+
+/// Réglage « Images des jeux depuis Steam » (HRT-239, BR-CLIENT-015) : activé par défaut. Lu par le protocole
+/// `hearth-illustration` à CHAQUE requête Steam : désactivé, ce PC ne contacte plus jamais Steam.
+pub fn remote_game_images<R: Runtime>(app: &AppHandle<R>, file: &Path) -> Result<bool, AppError> {
+    let store = app.store(file).map_err(store_error)?;
+    Ok(flag_or(store.get(KEY_REMOTE_GAME_IMAGES).as_ref(), true))
+}
+
+/// Active ou désactive les images Steam, puis relit l'état réel.
+pub fn set_remote_game_images<R: Runtime>(
+    app: &AppHandle<R>,
+    file: &Path,
+    enabled: bool,
+) -> Result<bool, AppError> {
+    let store = app.store(file).map_err(store_error)?;
+    store.set(KEY_REMOTE_GAME_IMAGES, json!(enabled));
+    store.save().map_err(store_error)?;
+    Ok(flag_or(store.get(KEY_REMOTE_GAME_IMAGES).as_ref(), true))
 }

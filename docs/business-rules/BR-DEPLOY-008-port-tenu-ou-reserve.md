@@ -18,7 +18,7 @@ Le formulaire vérifie le port à la saisie (`POST /deployments/check`) et l'age
 - `crates/hearth-agent/src/application/deployments.rs::Deployments::check_ports_for`
 - `crates/hearth-agent/src/infrastructure/host/listening_ports.rs`
 - `crates/hearth-agent/src/application/services.rs::ServicesRegistry::port_claim`
-- `apps/desktop/src/deploy/messages.ts::portVerdict` et `components/organisms/DeploySummaryDialog.vue` (client : le constat de l'agent dit en phrases, la case du récapitulatif)
+- `apps/desktop/src/deploy/messages.ts::portVerdict` et `components/organisms/DeployReview.vue` (client : le constat de l'agent dit en phrases, la case du récapitulatif)
 
 ## Vérification
 - `crates/hearth-agent/tests/service_deploy_https.rs::a_port_held_by_a_container_a_program_or_the_agent_is_refused_with_a_suggestion`

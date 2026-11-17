@@ -23,7 +23,7 @@ describe("Welcome (BR-CLIENT-013)", () => {
     const { wrapper } = await mountWelcome();
     expect(wrapper.get("h1").text()).toBe("Bienvenue dans Hearth");
     expect(wrapper.text()).toContain("Ajoute ton premier serveur pour commencer.");
-    expect(wrapper.get("button").text()).toBe("Ajouter un serveur");
+    expect(wrapper.get("button").text()).toBe("Relier un serveur");
   });
 
   it("draws the decorative first-launch illustration", async () => {

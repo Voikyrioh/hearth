@@ -97,7 +97,9 @@ const plan = computed<readonly string[]>(() => {
 /** La copie du monde court : le bouton d'annulation devient « Annuler la reprise » (BR-MONDE-013). */
 const copyingWorld = computed(() => props.operation?.step === "world");
 const cancelLabel = computed(() =>
-  copyingWorld.value ? t("fiche.world.cancelResume") : t("deploy.cancel"),
+  copyingWorld.value
+    ? t("fiche.world.cancelResume")
+    : t(props.installing ? "fiche.cancelInstall" : "deploy.cancel"),
 );
 
 const steps = computed<ProgressStep[]>(() => {
@@ -173,7 +175,10 @@ function onCancelKey() {
     @cancel="onCancelKey"
   >
     <div v-if="view === 'running'" class="progress__body">
-      <ProgressSteps :steps="steps" :label="t('deploy.progressSteps')" />
+      <ProgressSteps
+        :steps="steps"
+        :label="t(installing ? 'fiche.progressSteps' : 'deploy.progressSteps')"
+      />
       <p v-if="cancelling" class="progress__note" role="status" data-deploy-cancelling>
         {{ t("deploy.cancelling") }}
       </p>
@@ -243,9 +248,9 @@ function onCancelKey() {
     :open="open && cancelOpen"
     :server-id="serverId"
     kind="operation_cancel"
-    :title="t('deploy.cancelTitle', { name })"
+    :title="t(installing ? 'fiche.cancelInstallTitle' : 'deploy.cancelTitle', { name })"
     :submit-label="cancelLabel"
-    :cancel-label="t('deploy.keep')"
+    :cancel-label="t(installing ? 'fiche.keepInstall' : 'deploy.keep')"
     destructive
     :perform="performCancel"
     :refusal-text="cancelRefusalText"

@@ -108,6 +108,16 @@ pub struct AuditExport {
     pub truncated: bool,
 }
 
+/// Un corps binaire lu chez l'agent (HRT-240) : jamais interprété par la liaison, seulement borné et typé.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryBody {
+    pub content_type: Option<String>,
+    pub bytes: Vec<u8>,
+}
+
+/// Le texte de l'erreur de protocole d'une réponse qui dépasse la borne demandée.
+pub const RESPONSE_TOO_LARGE: &str = "réponse trop volumineuse";
+
 /// Réponse d'erreur de l'agent (`{ "error": { code, message, details } }`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApiError {
@@ -142,6 +152,9 @@ pub enum TransportError {
     FingerprintMismatch { presented: Fingerprint },
     #[error("réponse inattendue : {0}")]
     Protocol(String),
+    /// La réponse dépasse la borne que l'appelant a fixée.
+    #[error("réponse trop volumineuse")]
+    TooLarge,
     #[error("le serveur a répondu {}", .0.status)]
     Api(ApiError),
 }
@@ -315,6 +328,21 @@ pub trait Transport: Send + Sync {
     ) -> Result<HistoryResponse, TransportError> {
         Err(TransportError::Protocol(
             "historique non pris en charge".into(),
+        ))
+    }
+
+    /// Un `GET` dont le corps est binaire (HRT-240 : l'illustration d'une fiche), lu en flux et BORNÉ à `max_bytes` :
+    /// au-delà, `Protocol(RESPONSE_TOO_LARGE)`. Un refus de l'agent est une `TransportError::Api`. Par défaut non pris en
+    /// charge (transports simulés).
+    async fn get_binary(
+        &self,
+        _target: &Target,
+        _token: &Secret,
+        _path: &str,
+        _max_bytes: usize,
+    ) -> Result<BinaryBody, TransportError> {
+        Err(TransportError::Protocol(
+            "lecture binaire non prise en charge".into(),
         ))
     }
 

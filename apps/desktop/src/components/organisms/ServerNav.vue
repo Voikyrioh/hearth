@@ -36,7 +36,8 @@ const route = useRoute();
  * section Catalogue (HRT-102) : leur entrée reste marquée.
  */
 function inSection(entry: Entry): boolean {
-  if (entry.route === "services") return route.name === "services-deploy";
+  if (entry.route === "services")
+    return route.name === "services-deploy" || route.name === "services-add";
   return entry.route === "catalogue" && (route.name === "fiche" || route.name === "fiche-install");
 }
 </script>
