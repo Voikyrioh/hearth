@@ -66,7 +66,7 @@ describe("AddServerWizard", () => {
       "Adresse du serveur sur votre réseau",
       "Port",
     ]);
-    expect(wrapper.find("input[placeholder='7341']").exists()).toBe(true);
+    expect(wrapper.find("input[placeholder='ex. 7341']").exists()).toBe(true);
     expect(wrapper.find("input[placeholder='ex. salon']").exists()).toBe(true);
     expect(wrapper.find("input[placeholder='ex. 192.168.1.10 ou serveur.local']").exists()).toBe(
       true,
@@ -88,12 +88,12 @@ describe("AddServerWizard", () => {
     await flushPromises();
     const inputs = wrapper.findAll("input");
     expect(document.activeElement).toBe(inputs[0]?.element);
-    // L'adresse est remplie, le nom manque : Entrée dit « Le nom du serveur est requis », curseur dans le nom.
+    // L'adresse est remplie, le nom manque : Entrée dit « Indiquez un nom pour ce serveur. », curseur dans le nom.
     await inputs[1]?.setValue("192.168.1.99");
     (document.activeElement as HTMLElement).blur();
     await wrapper.get("form").trigger("submit");
     await flushPromises();
-    expect(wrapper.text()).toContain("Le nom du serveur est requis");
+    expect(wrapper.text()).toContain("Indiquez un nom pour ce serveur.");
     expect(document.activeElement).toBe(inputs[0]?.element);
     // Le même texte au clic sur « Suivant ».
     const next = wrapper.findAll("button").find((b) => b.text() === "Suivant");
@@ -246,8 +246,8 @@ describe("LoginForm", () => {
   it("asks for the identifier and the password and sends them with the remember choice", async () => {
     const wrapper = mount(LoginForm);
     await wrapper.get("form").trigger("submit");
-    expect(wrapper.text()).toContain("L'identifiant est requis");
-    expect(wrapper.text()).toContain("Le mot de passe est requis");
+    expect(wrapper.text()).toContain("Indiquez votre identifiant.");
+    expect(wrapper.text()).toContain("Saisissez votre mot de passe.");
     expect(wrapper.emitted("submit")).toBeUndefined();
     const [user, password] = wrapper.findAll("input:not([type=checkbox])");
     await user?.setValue(" marie ");

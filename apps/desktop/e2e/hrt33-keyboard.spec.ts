@@ -29,7 +29,7 @@ test("assistant d'ajout : curseur dans le nom, Entrée dit ce qui manque, curseu
     "true",
   );
   await page.keyboard.press("Enter");
-  await expect(page.getByText("Le nom du serveur est requis")).toBeVisible();
+  await expect(page.getByText("Indiquez un nom pour ce serveur.")).toBeVisible();
   await expect(name).toBeFocused();
   await page.keyboard.type("Atelier");
   await page.keyboard.press("Enter");

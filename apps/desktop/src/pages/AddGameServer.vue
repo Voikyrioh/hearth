@@ -92,12 +92,13 @@ function close() {
 
 <template>
   <div class="add" data-add-game-server>
-    <div class="add__top">
-      <p class="add__intro">{{ t("addGame.intro", { server: serverName }) }}</p>
+    <!-- « Fermer » est toujours dans l'en-tête, à la même place que sur les autres écrans de l'assistant. -->
+    <Teleport defer to="#header-actions">
       <HButton variant="secondary" data-add-close @click="close">
         {{ t("deploy.close") }}
       </HButton>
-    </div>
+    </Teleport>
+    <p class="add__intro">{{ t("addGame.intro", { server: serverName }) }}</p>
 
     <EnginePanel
       v-if="showEngine && engine"

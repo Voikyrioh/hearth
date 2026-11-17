@@ -1,6 +1,6 @@
 {
   "fiche": {
-    "digest": "d1c7b7091cce380148a023c1d836dadfab6e5718aa09b72121daad1ab4c70b53",
+    "digest": "c175a6722a92b17adfb29dc8bf3061454bd3635e6309fe4339ac056865f30bcb",
     "id": "terraria",
     "version": 6
   },
@@ -157,7 +157,7 @@
           }
         ],
         "frozen_after_creation": true,
-        "help": "La taille du monde que le jeu crée s'il n'existe pas encore : petit, moyen ou grand. Elle est gravée dans le monde et ne change plus ensuite. Sans cette ligne, le jeu ne crée aucun monde.",
+        "help": "La taille du monde que le jeu crée s'il n'existe pas encore : petit, moyen ou grand. Elle est gravée dans le monde et ne change plus ensuite. Sans taille, le jeu ne crée aucun monde.",
         "id": "world_size",
         "kind": "choice",
         "label": "Taille du monde",

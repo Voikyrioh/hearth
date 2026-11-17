@@ -23,7 +23,9 @@ export function t(key: MessageKey, params?: Record<string, string | number>): st
  */
 export function agreed(text: string, n: number): string {
   const one = n === 1 || n === 0;
-  return text.replace(/\((s|x|e)\)/g, (_match, mark: string) => (one ? "" : mark === "e" ? "" : mark));
+  return text.replace(/\((s|x|e)\)/g, (_match, mark: string) =>
+    one ? "" : mark === "e" ? "" : mark,
+  );
 }
 
 // Exhaustif : une nouvelle `kind` côté Rust ne compile pas ici sans son texte.

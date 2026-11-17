@@ -476,7 +476,7 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
           <InstallResources v-if="install.step.value === 2" :install="install" />
         </div>
         <InstallAside
-          v-if="install.step.value === 1"
+          v-if="install.step.value <= 2"
           class="inst__aside"
           :heading="t('fiche.aside.heading', { game: name, server: serverName })"
           :summary="safeText(detail.card.summary)"
@@ -487,8 +487,24 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
 
       <div class="inst__bar" data-install-bar>
         <div class="inst__left">
-          <HButton variant="ghost" size="lg" data-install-to-fiche @click="guard.requestClose">
+          <!-- UN seul « Retour » par étape : celui de l'étape d'avant ; « Retour à la fiche » seulement à la première. -->
+          <HButton
+            v-if="install.step.value === 1"
+            variant="ghost"
+            size="lg"
+            data-install-to-fiche
+            @click="guard.requestClose"
+          >
             {{ t("fiche.backToFiche") }}
+          </HButton>
+          <HButton
+            v-else
+            variant="ghost"
+            size="lg"
+            data-install-back
+            @click="install.back()"
+          >
+            {{ t("fiche.previous") }}
           </HButton>
         </div>
         <div class="inst__reason">
@@ -506,9 +522,6 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
           </HButton>
         </div>
         <div class="inst__buttons">
-          <HButton v-if="install.step.value === 2" variant="secondary" size="lg" data-install-back @click="install.back()">
-            {{ t("fiche.previous") }}
-          </HButton>
           <HButton
             size="lg"
             data-install-next
@@ -631,6 +644,10 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
 }
 
 .inst__aside {
+  /* Il reste visible pendant la saisie (adresse prévue, mémoire) : il suit le défilement. */
+  position: sticky;
+  top: var(--space-4);
+  align-self: flex-start;
   flex: 1 1 var(--card-min);
 }
 

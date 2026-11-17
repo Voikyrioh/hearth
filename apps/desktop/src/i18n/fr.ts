@@ -455,7 +455,7 @@ export const fr = {
     hostPlaceholder: "ex. 192.168.1.10 ou serveur.local",
     port: "Port",
     portHelp: "Gardez 7341 sauf si vous l'avez changé.",
-    portPlaceholder: "7341",
+    portPlaceholder: "ex. 7341",
     color: "Couleur du serveur dans la barre de gauche",
     colorOption: "Couleur {n}",
     next: "Suivant",
@@ -473,6 +473,7 @@ export const fr = {
     confirmFingerprint: "Confirmer",
     refuseFingerprint: "Refuser",
     loginTitle: "Connectez-vous",
+    loginHelp: "Saisissez l'identifiant et le mot de passe créés sur le serveur.",
     username: "Identifiant",
     password: "Mot de passe",
     remember: "Se souvenir de moi sur ce PC",
@@ -507,14 +508,14 @@ export const fr = {
       "Ce compte a accès en lecture seule. Les actions d'administration sont désactivées.",
   },
   validation: {
-    nameRequired: "Le nom du serveur est requis",
+    nameRequired: "Indiquez un nom pour ce serveur.",
     nameTaken: "Un serveur porte déjà ce nom",
-    hostRequired: "L'adresse du serveur est requise",
+    hostRequired: "Indiquez l'adresse du serveur.",
     hostInvalid: "Cette adresse n'est pas valide",
     // FIX:01M4E48MY42041VB11FJFSG0XW ; ⁠ (liant de mots) : la plage ne se coupe pas en fin de ligne.
     portInvalid: "Port invalide. Plage admise : 1–⁠65535",
-    usernameRequired: "L'identifiant est requis",
-    passwordRequired: "Le mot de passe est requis",
+    usernameRequired: "Indiquez votre identifiant.",
+    passwordRequired: "Saisissez votre mot de passe.",
   },
   failure: {
     unreachable: "Cette adresse n'est pas joignable. Vérifie l'adresse et essaie de nouveau.",
@@ -3106,7 +3107,7 @@ export const fr = {
     // Section Général
     general: "Général",
     nameLabel: "Nom du service",
-    namePlaceholder: "mon-service",
+    namePlaceholder: "ex. mon-service",
     nameHelp:
       "Lettres, chiffres, tirets et points. Ce nom ne pourra pas être réutilisé par un autre service.",
     nameRequired: "Le nom est requis",
@@ -3120,7 +3121,7 @@ export const fr = {
     nameBeingDeleted:
       "Ce service est en cours de suppression. Attendez la fin de l'effacement de ses données.",
     imageLabel: "Image",
-    imagePlaceholder: "nginx",
+    imagePlaceholder: "ex. nginx",
     imageHelp:
       "Le nom complet s'écrit registre/organisation/nom ; le registre et l'organisation sont facultatifs.",
     imageRequired: "L'image est requise",
@@ -3129,7 +3130,7 @@ export const fr = {
     imageDigest: "Les identifiants d'empreinte (@sha256) ne sont pas pris en charge pour l'instant",
     imageMoved: "La version a été déplacée dans le champ Version.",
     tagLabel: "Version",
-    tagPlaceholder: "latest",
+    tagPlaceholder: "ex. latest",
     tagFormat:
       "La version n'est pas valide (lettres, chiffres, points, tirets et soulignés, 128 caractères au plus)",
     tagConflict:

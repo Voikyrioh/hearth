@@ -187,6 +187,7 @@ function refuse() {
     <!-- Temps 3 : connexion -->
     <div v-else class="wizard__form">
       <h1 id="wizard-title" class="wizard__title">{{ t("connect.loginTitle") }}</h1>
+      <p class="wizard__help" data-wizard-login-help>{{ t("connect.loginHelp") }}</p>
       <LoginForm
         ref="login"
         :busy="wizard.busy.value === 'login'"

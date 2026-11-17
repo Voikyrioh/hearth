@@ -167,7 +167,7 @@ channel = "config"
 theme = "world"
 level = "essential"
 label = "Taille du monde"
-help = "La taille du monde que le jeu crée s'il n'existe pas encore : petit, moyen ou grand. Elle est gravée dans le monde et ne change plus ensuite. Sans cette ligne, le jeu ne crée aucun monde."
+help = "La taille du monde que le jeu crée s'il n'existe pas encore : petit, moyen ou grand. Elle est gravée dans le monde et ne change plus ensuite. Sans taille, le jeu ne crée aucun monde."
 type = "choice"
 choices = [
   { value = "1", label = "Petit" },

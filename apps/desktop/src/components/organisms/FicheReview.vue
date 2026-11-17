@@ -20,6 +20,7 @@ import {
   downloadText,
   ficheRefusalText,
   folderRoleText,
+  lowerFirst,
   portRoleText,
   proofLabel,
   registryText,
@@ -275,7 +276,8 @@ const internetText = computed(() => {
 const frozenLabels = computed(() =>
   props.questions
     .filter((question) => question.frozenAfterCreation)
-    .map((question) => safeText(question.label)),
+    // En milieu de phrase, pas de majuscule : « sauf nom du monde, taille du monde ».
+    .map((question) => lowerFirst(safeText(question.label))),
 );
 const intro = computed(() =>
   frozenLabels.value.length > 0

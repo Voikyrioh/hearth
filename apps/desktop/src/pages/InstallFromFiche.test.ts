@@ -404,9 +404,7 @@ describe("« Vérifiez avant de lancer » (BR-FICHE-025, 026, 036)", () => {
     expect(document.querySelector("[data-sum-stop]")?.textContent).toContain(
       "Le délai d'arrêt est de 10 secondes.",
     );
-    expect(document.querySelector("[data-sum-imposed]")?.textContent).toContain(
-      "3 réglages posés",
-    );
+    expect(document.querySelector("[data-sum-imposed]")?.textContent).toContain("3 réglages posés");
     expect(document.querySelector("[data-sum-trust]")?.textContent).toContain(
       "Elle fait tourner une image publique sur votre serveur, avec les droits d'un service ordinaire.",
     );
