@@ -137,7 +137,6 @@ const describedBy = computed(() => {
   /* Un exemple, jamais une valeur : plus pâle et en italique pour qu'un champ vide ne paraisse pas rempli. */
   color: var(--tx3);
   font-style: italic;
-  opacity: 0.8;
 }
 
 .field__error {

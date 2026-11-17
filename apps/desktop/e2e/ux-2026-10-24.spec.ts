@@ -53,8 +53,6 @@ async function fillDeploy(page: Page) {
   await page.getByLabel("Version").fill("1.27");
 }
 
-const dialog = (page: Page) => page.locator("dialog[open]");
-
 test("constat 1 : la confirmation dit le mot de passe du compte simulé", async ({ page }) => {
   await openDeploy(page);
   await fillDeploy(page);
