@@ -28,7 +28,7 @@ export type AttentionPoint =
   | { key: "frozen_settings"; labels: string[] }
   /** La fiche ne sait pas combien de processeur le jeu demande : Hearth ne peut pas le vérifier (BR-FICHE-020). */
   | { key: "cpu_unverified" }
-  /** Aucun mot de passe : toute personne qui peut joindre le port peut rejoindre la partie (BR-FICHE-055). */
+  /** Aucun mot de passe : toute personne qui peut joindre le port peut rejoindre la partie (BR-FICHE-025). */
   | { key: "no_password" };
 
 export type AttentionKey = AttentionPoint["key"];
