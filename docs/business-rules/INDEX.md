@@ -117,6 +117,7 @@ Règles métier par domaine. Chaque fiche `BR-{DOMAINE}-{NNN}-{slug}.md` documen
 
 ### UPDATE (client, HRT-16)
 
+- [BR-UI-002](./BR-UI-002-un-bouton-inactif-se-reconnait-a-son-aplat-attenue-sans-pointilles.md) — Un bouton inactif se reconnaît d'un coup d'œil à son aplat atténué, texte lisible et `aria-disabled`, jamais à des pointillés — `apps/desktop/src/components/atoms/HButton.vue` — —
 - [BR-UPDATE-001](./BR-UPDATE-001-verification-au-lancement-puis-une-fois-par-jour.md) — Le client vérifie au lancement, puis une fois par jour au plus (une tentative qui échoue compte) — `update/domain.rs::check_is_due`, `update/service.rs::UpdateService::check` — invariant ✓
 - [BR-UPDATE-002](./BR-UPDATE-002-aucune-installation-sans-consentement.md) — Aucune mise à jour du client n'est installée sans le clic de l'utilisateur — `update/service.rs::UpdateService::begin_install` — invariant ✓
 - [BR-UPDATE-003](./BR-UPDATE-003-bandeau-nouvelle-version-avec-notes.md) — Une version plus récente est annoncée par un bandeau discret avec les notes (texte brut) — `update/domain.rs::{validate_candidate, banner_visible}` — invariant —
