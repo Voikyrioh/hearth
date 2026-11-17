@@ -21,11 +21,18 @@ const ICONS = { memory: "server", disk: "box", ports: "external", start: "clock"
 <style scoped>
 .facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--card-min), 1fr));
+  /* Quatre faits : deux par ligne, jamais trois puis un seul ; les quatre sur une ligne seulement quand la place le permet. */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3);
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+@media (min-width: 1500px) {
+  .facts {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .facts__item {

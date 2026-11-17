@@ -118,7 +118,8 @@ defineExpose({
       />
     </DashCard>
 
-    <DashCard :title="t('fiche.cardName')">
+    <!-- L'essentiel d'abord, dans UNE carte : le nom, les questions qui comptent, les ports (maquette Ajout2Reglages). -->
+    <DashCard :title="t('fiche.cardQuestionsAsk')">
       <HInput
         data-field="name"
         :model-value="draft.name"
@@ -129,14 +130,6 @@ defineExpose({
         @update:model-value="install.setName($event)"
         @blur="install.touch('name')"
       />
-    </DashCard>
-
-    <!-- Le monde : neuf, ou repris d'un monde existant (HRT-106) -->
-    <WorldCard :install="install" />
-    <!-- Le pack de mods (HRT-125) : seulement si la fiche offre le dépôt d'un pack -->
-    <InstallPack :install="install" />
-
-    <DashCard v-if="install.questions.value.length > 0" :title="t('fiche.cardQuestionsAsk')">
       <QuestionField
         v-for="question in split.essential"
         :key="question.id"
@@ -147,33 +140,6 @@ defineExpose({
         @blur="install.touch(`q:${question.id}`)"
         @link="emit('link', 'token', question.id)"
       />
-      <details
-        v-if="split.advanced.length > 0"
-        class="answers__advanced"
-        data-install-advanced
-        :open="advancedOpen"
-        @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open"
-      >
-        <summary class="answers__advanced-title" data-install-advanced-summary>
-          {{ advancedSummary }}
-        </summary>
-        <p class="answers__advanced-help">{{ t("fiche.advancedHelp") }}</p>
-        <QuestionField
-          v-for="question in split.advanced"
-          :key="question.id"
-          :question="question"
-          :model-value="currentAnswer(question, draft.answers)"
-          :error="questionError(question.id)"
-          @update:model-value="install.setAnswer(question.id, $event)"
-          @blur="install.touch(`q:${question.id}`)"
-          @link="emit('link', 'token', question.id)"
-        />
-      </details>
-      <!-- « Voir tous les réglages » (HRT-109, BR-FICHE-040) : les autres réglages du jeu, repliés par défaut -->
-      <InstallSettings :install="install" />
-    </DashCard>
-
-    <DashCard v-if="always.length > 0 || optional.length > 0" :title="always.length + optional.length > 1 ? t('fiche.cardPorts2') : t('fiche.cardPort')">
       <FichePortField
         v-for="port in always"
         :key="port.id"
@@ -203,6 +169,39 @@ defineExpose({
         @blur="install.touch(`p:${port.id}`)"
         @suggest="install.setHostPort(port.id, String($event))"
       />
+    </DashCard>
+
+    <!-- Le monde : neuf, ou repris d'un monde existant (HRT-106) -->
+    <WorldCard :install="install" />
+    <!-- Le pack de mods (HRT-125) : seulement si la fiche offre le dépôt d'un pack -->
+    <InstallPack :install="install" />
+
+    <!-- Les réglages avancés, repliés avec leurs valeurs proposées ; UN seul moyen d'ouvrir tous les autres réglages. -->
+    <DashCard v-if="split.advanced.length > 0 || install.extras.value.length > 0" :title="t('fiche.cardAdvanced')">
+      <details
+        v-if="split.advanced.length > 0"
+        class="answers__advanced"
+        data-install-advanced
+        :open="advancedOpen"
+        @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open"
+      >
+        <summary class="answers__advanced-title" data-install-advanced-summary>
+          {{ advancedSummary }}
+        </summary>
+        <p class="answers__advanced-help">{{ t("fiche.advancedHelp") }}</p>
+        <QuestionField
+          v-for="question in split.advanced"
+          :key="question.id"
+          :question="question"
+          :model-value="currentAnswer(question, draft.answers)"
+          :error="questionError(question.id)"
+          @update:model-value="install.setAnswer(question.id, $event)"
+          @blur="install.touch(`q:${question.id}`)"
+          @link="emit('link', 'token', question.id)"
+        />
+      </details>
+      <!-- « Voir tous les réglages » (HRT-109, BR-FICHE-040) : les autres réglages du jeu, repliés par défaut -->
+      <InstallSettings :install="install" />
     </DashCard>
 
     <p class="answers__version" data-install-version>

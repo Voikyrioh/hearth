@@ -395,7 +395,7 @@ describe("« Vérifiez avant de lancer » (BR-FICHE-025, 026, 036)", () => {
     expect(answers).toContain("Mot de passe du serveur");
     expect(answers).toContain("••••••••");
     expect(answers).toContain("16");
-    expect(answers).toContain("2 réglage(s) différent(s) des valeurs proposées.");
+    expect(answers).toContain("2 réglages différents des valeurs proposées.");
     expect(text).not.toContain(SECRET);
     expect(document.querySelector("[data-sum-resources]")?.textContent).toMatch(
       /de mémoire, .* de processeur/,
@@ -405,7 +405,7 @@ describe("« Vérifiez avant de lancer » (BR-FICHE-025, 026, 036)", () => {
       "Le délai d'arrêt est de 10 secondes.",
     );
     expect(document.querySelector("[data-sum-imposed]")?.textContent).toContain(
-      "3 réglage(s) posé(s)",
+      "3 réglages posés",
     );
     expect(document.querySelector("[data-sum-trust]")?.textContent).toContain(
       "Elle fait tourner une image publique sur votre serveur, avec les droits d'un service ordinaire.",

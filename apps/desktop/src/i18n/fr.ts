@@ -2048,7 +2048,7 @@ export const fr = {
     refused:
       "{n} fiche(s) écartée(s) : leur contenu n'est pas accepté. Mettez Hearth à jour ou réinstallez-le.",
     unreadable:
-      "{n} fiche(s) viennent d'une version de Hearth plus récente que ce client et ne peuvent pas être lues. Mettez le client à jour.",
+      "Fiches venues d'une version de Hearth plus récente que ce client, que celui-ci ne peut pas lire : {n}. Mettez le client à jour.",
     emptyTitle: "Aucune fiche n'est disponible sur ce serveur.",
     emptyText: "Ce serveur ne propose aucun serveur de jeu à installer pour le moment.",
     oldAgent: "Ce serveur doit être mis à jour pour proposer des fiches.",
@@ -2097,6 +2097,8 @@ export const fr = {
         "Les joueurs de votre réseau maison se connectent directement. Pour vos amis d'internet, vous ouvrirez le port sur votre box. Hearth vous donnera l'adresse à leur envoyer.",
       startStopTitle: "Premier démarrage et arrêt",
       settingsTitle: "Les réglages du jeu",
+      settingsMore:
+        "Voir les {n} autres réglages, modifiables après l'installation, dans l'onglet Réglages.",
       settingsCount:
         "{n} questions à l'installation, {m} réglages modifiables ensuite dans l'onglet Réglages du serveur de jeu.",
     },
@@ -2401,6 +2403,7 @@ export const fr = {
     fixField: "Corrigez le champ « {label} » pour continuer.",
     portFieldLabel: "Port du jeu",
     cardQuestionsAsk: "L'essentiel",
+    cardAdvanced: "Réglages avancés",
     advancedList: "Réglages avancés : {list}",
     advancedMore: "Réglages avancés : {list}, et {k} autres",
     advancedHelp: "Les valeurs proposées conviennent à la plupart des parties.",

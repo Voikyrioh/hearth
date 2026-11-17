@@ -88,6 +88,7 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
           :aria-expanded="tableOpen"
           @click="tableOpen = !tableOpen"
         >
+          <HIcon :name="tableOpen ? 'chevron-down' : 'chevron-right'" size="sm" />
           {{ tableOpen ? t("fiche.facts.tableHide") : t("fiche.facts.tableShow") }}
         </HButton>
         <FicheResourcesCard
@@ -123,10 +124,30 @@ const downloads = computed(() => firstStart.value?.downloads ?? []);
         <p class="sheet__line">
           {{ t("fiche.facts.settingsCount", { n: detail.questions.length, m: detail.settings.length }) }}
         </p>
+        <ul v-if="detail.questions.length > 0" class="sheet__list" data-need-questions>
+          <li v-for="question in detail.questions" :key="question.id" data-need-question>
+            <span class="sheet__strong">{{ safeText(question.label) }}</span>
+            <span class="sheet__muted">
+              {{
+                question.proposed !== null
+                  ? t("fiche.proposedValue", { value: valueLabel(question, question.proposed) })
+                  : t("fiche.noProposedValue")
+              }}
+            </span>
+          </li>
+        </ul>
+        <p v-if="detail.settings.length > detail.questions.length" class="sheet__muted" data-need-more>
+          {{ t("fiche.facts.settingsMore", { n: detail.settings.length - detail.questions.length }) }}
+        </p>
       </div>
     </section>
 
-    <section class="sheet__grid" :aria-label="t('fiche.sectionNeeds')" data-fiche-needs>
+    <section
+      v-if="tableOpen"
+      class="sheet__grid"
+      :aria-label="t('fiche.sectionNeeds')"
+      data-fiche-needs
+    >
       <DashCard :title="t('fiche.cardPorts')" data-fiche-ports>
         <div class="sheet__scroll">
           <table class="sheet__table" :aria-label="t('fiche.portsHead')">

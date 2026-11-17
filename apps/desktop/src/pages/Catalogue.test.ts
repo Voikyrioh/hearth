@@ -178,9 +178,9 @@ describe("le pied de la liste (BR-FICHE-006)", () => {
       bridge.catalog.unreadable = 1;
     });
     expect(wrapper.get("[data-catalogue-refused]").text()).toBe(
-      "2 fiche(s) écartée(s) : leur contenu n'est pas accepté. Mettez Hearth à jour ou réinstallez-le.",
+      "2 fiches écartées : leur contenu n'est pas accepté. Mettez Hearth à jour ou réinstallez-le.",
     );
-    expect(wrapper.get("[data-catalogue-unreadable]").text()).toContain("1 fiche(s)");
+    expect(wrapper.get("[data-catalogue-unreadable]").text()).toContain("ne peut pas lire : 1.");
     // Ni le dossier ni l'invariant écarté ne sont montrés.
     expect(wrapper.text()).not.toMatch(/I2|I3/);
     wrapper.unmount();

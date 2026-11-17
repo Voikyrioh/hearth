@@ -76,12 +76,12 @@ describe("un réglage changé part avec l'installation (BR-FICHE-040, BR-FICHE-0
     typeInto(rowInput("seed"), "graine-du-monde");
     await settle();
     expect(wrapper.get("[data-install-settings-changed]").text()).toBe(
-      "1 réglage(s) différent(s) des valeurs proposées.",
+      "1 réglage différent des valeurs proposées.",
     );
     await goNext(wrapper);
     await goNext(wrapper);
     expect(dialogText()).toContain("Graine du monde : graine-du-monde");
-    expect(dialogText()).toContain("1 réglage(s) différent(s) des valeurs proposées.");
+    expect(dialogText()).toContain("1 réglage différent des valeurs proposées.");
     await confirmTop("Installer le serveur de jeu");
     await settle();
     const received = bridge.catalog.received[0]?.request;
