@@ -127,7 +127,6 @@ function update(next: string) {
     <legend class="sr-only">{{ label }}</legend>
 
     <div class="row__tags">
-      <code class="row__key" data-setting-key>{{ t("gameSettings.technicalName", { key: safeText(model.setting.key) }) }}</code>
       <HTag v-if="modified && !imposed" tone="accent" data-setting-tag="modified">{{ t("gameSettings.tagModified") }}</HTag>
       <HTag v-if="model.lock === 'frozen'" data-setting-tag="frozen">
         <HIcon name="lock" size="sm" />
@@ -212,6 +211,10 @@ function update(next: string) {
         {{ resetLabel }}
       </HButton>
     </div>
+    <!-- Le nom technique vient APRÈS le libellé, en discret (revue UX v2, N6). -->
+    <code class="row__key" data-setting-key>{{
+      t("gameSettings.technicalName", { key: safeText(model.setting.key) })
+    }}</code>
   </fieldset>
 </template>
 

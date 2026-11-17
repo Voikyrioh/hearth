@@ -97,7 +97,7 @@ test("du Catalogue au service en marche : liste, fiche, trois étapes, progressi
   await expect(dialog).toContainText("7777 vers 7777 (TCP)");
   await expect(dialog).toContainText("••••••••");
   await expect(dialog).not.toContainText("hunter2-jeu");
-  await expect(dialog).toContainText("2 réglages différents des valeurs proposées.");
+  await expect(dialog).toContainText("2 réglages différents des valeurs proposées : ");
   await shoot(dialog, page, "installer-recapitulatif");
   for (const box of await dialog.locator("[data-sum-attention] input[type=checkbox]").all())
     await box.check();

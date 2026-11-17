@@ -194,8 +194,11 @@ export class SimulatedGameSettings {
     held.lastBy = by;
   }
 
-  private catalogChannel(setting: FicheSetting): "config" | "args" {
-    // Le canal n'est pas dans la fiche servie : l'agent le sait. Terraria le dit, les autres fiches passent par le fichier.
+  private catalogChannel(setting: FicheSetting): "config" | "args" | "env" {
+    // Le canal n'est pas dans la fiche servie : l'agent le sait. Une variable d'environnement porte un nom en
+    // majuscules (« MOTD ») : les fiches de démonstration qui passent par des variables (Minecraft, Valheim, Enshrouded)
+    // le disent ainsi ; Terraria le dit par sa fixture ; les autres fiches passent par le fichier.
+    if (/^[A-Z][A-Z0-9_]*$/.test(setting.key)) return "env";
     return TERRARIA_CHANNEL[setting.question.id] ?? "config";
   }
 
@@ -215,7 +218,9 @@ export class SimulatedGameSettings {
   }
 
   private effectOf(setting: FicheSetting): SettingEffect {
-    return this.catalogChannel(setting) === "args" ? "recreate" : "restart";
+    // Un réglage passé par variable ou argument recrée le service à l'enregistrement ; celui d'un fichier prend effet au
+    // prochain démarrage (BR-FICHE-042).
+    return this.catalogChannel(setting) === "config" ? "restart" : "recreate";
   }
 
   read(serverId: string, key: string): GameSettingsRead {

@@ -6,6 +6,7 @@ import type {
   SimulatedLinkBridge,
 } from "@/link";
 import { freshBridge } from "@/test/app";
+import { demoPublished } from "./simulated-fiches";
 import { IMPOSED_STAND_IN } from "./simulated-game-settings";
 
 // L'agent d'essai des réglages juge COMME LE VRAI (HRT-108, ADR-0051) : même ordre de refus, `file_stamp` obligatoire, un
@@ -373,5 +374,39 @@ worldpath=${IMPOSED_STAND_IN}`);
     expect(outcome.kind).toBe("saved");
     expect(view().settings.find((s) => s.id === "motd")?.value).toBe("Salut");
     expect(JSON.stringify(view())).not.toContain("venu-du-texte");
+  });
+});
+
+describe("l'effet d'un réglage selon son canal (BR-FICHE-042, revue UX v2)", () => {
+  it("un réglage passé par variable (Minecraft) recrée le service ; celui d'un fichier (Terraria) attend le prochain démarrage", () => {
+    const detail = bridge.catalog.get("terraria");
+    if (!detail) throw new Error("Terraria est la fiche de départ");
+    const minecraft = demoPublished().find((fiche) => fiche.card.id === "minecraft");
+    if (!minecraft) throw new Error("Minecraft est une fiche de démonstration");
+    bridge.catalog.put(minecraft);
+    bridge.gameSettings.register(SERVER, "h_SIMMINECRAFT", minecraft, []);
+    const read = bridge.gameSettings.read(SERVER, "h_SIMMINECRAFT");
+    if (read.kind !== "found") throw new Error("des réglages étaient attendus");
+    const effects = new Map(read.view.settings.map((setting) => [setting.id, setting.effect]));
+    expect(effects.get("motd")).toBe("recreate");
+    expect(effects.get("difficulty")).toBe("recreate");
+    const terraria = view();
+    expect(terraria.settings.find((setting) => setting.id === "motd")?.effect).toBe("restart");
+    const outcome = bridge.gameSettings.save(
+      SERVER,
+      "h_SIMMINECRAFT",
+      {
+        baseRev: read.view.rev,
+        fileStamp: read.view.fileStamp ?? "x",
+        origin: "form",
+        effect: "recreate",
+        changes: [{ id: "max_players", action: "set", value: "30" }],
+        others: [],
+        driftChoices: [],
+        importText: null,
+      },
+      "marie",
+    );
+    expect(outcome).toMatchObject({ kind: "saved", effect: "recreate" });
   });
 });

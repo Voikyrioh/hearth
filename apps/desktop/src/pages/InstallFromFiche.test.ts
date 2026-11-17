@@ -395,7 +395,7 @@ describe("« Vérifiez avant de lancer » (BR-FICHE-025, 026, 036)", () => {
     expect(answers).toContain("Mot de passe du serveur");
     expect(answers).toContain("••••••••");
     expect(answers).toContain("16");
-    expect(answers).toContain("2 réglages différents des valeurs proposées.");
+    expect(answers).toContain("2 réglages différents des valeurs proposées : ");
     expect(text).not.toContain(SECRET);
     expect(document.querySelector("[data-sum-resources]")?.textContent).toMatch(
       /de mémoire, .* de processeur/,
@@ -547,9 +547,7 @@ describe("lancer, suivre, terminer (BR-FICHE-013, 027, 034)", () => {
     );
     expect(done.find("[data-game-address]").exists()).toBe(true);
     expect(done.find("[data-game-ports]").exists()).toBe(true);
-    expect(done.get("[data-done-next]").text()).toContain(
-      "envoyer l'adresse à vos joueurs.",
-    );
+    expect(done.get("[data-done-next]").text()).toContain("envoyer l'adresse à vos joueurs.");
     expect(done.get("[data-done-steps] summary").text()).toMatch(
       /^Les étapes de l'installation : \d+ faites$/,
     );

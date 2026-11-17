@@ -42,13 +42,13 @@ const engineReady = computed(() => engine.value?.state === "ready");
 const showEngine = computed(() => engine.value !== null && engine.value.state !== "ready");
 const serverName = computed(() => safeText(server.value?.name ?? ""));
 
-/** Les jeux prêts à installer : trois noms au plus, par ordre alphabétique (BR-DEPLOY-039). */
+/** Les jeux prêts à installer : tous, jusqu'à six noms, par ordre alphabétique (BR-DEPLOY-039). */
 const readyNames = computed(() =>
   (catalog.value?.fiches ?? [])
     .filter((card) => card.status === "published" && card.installable)
     .map((card) => safeText(card.name))
     .sort((a, b) => a.localeCompare(b, "fr", { sensitivity: "base" }))
-    .slice(0, 3),
+    .slice(0, 6),
 );
 
 /** « Minecraft Java, Terraria et Valheim » ; sans catalogue lu, la phrase ne cite aucun nom. */

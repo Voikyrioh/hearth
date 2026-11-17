@@ -576,6 +576,7 @@ interface GameSpec {
   stop: FicheDetail["stop"];
   illustration?: boolean;
   steamAppId?: number;
+  variants?: FicheDetail["variants"];
 }
 
 function publishedGame(spec: GameSpec): FicheDetail {
@@ -583,7 +584,8 @@ function publishedGame(spec: GameSpec): FicheDetail {
     setting(
       "game",
       made.secret || made.frozenAfterCreation || index < 2 ? "essential" : "common",
-      made.id,
+      // Ces fiches passent leurs réglages par des variables d'environnement : le nom du réglage est celui de la variable.
+      made.id.toUpperCase(),
       made,
     ),
   );
@@ -613,7 +615,7 @@ function publishedGame(spec: GameSpec): FicheDetail {
     image: { ...spec.image, digest: null },
     ownerUid: 1000,
     ownerGid: 1000,
-    variants: [],
+    variants: spec.variants ?? [],
     ports: spec.ports.map((port) => ({
       id: port.id,
       container: port.container,
@@ -734,6 +736,41 @@ export function demoPublished(): FicheDetail[] {
       readyTimeoutSeconds: 3600,
       stop: { graceSeconds: 60, worldSaved: "by_sequence", sequenceTested: true },
       illustration: true,
+      // Le moteur du serveur se choisit à l'installation, comme dans la vraie fiche (une variante par moteur).
+      variants: [
+        {
+          id: "vanilla",
+          label: "Officiel",
+          help: "Le serveur de Mojang, sans mod.",
+          default: true,
+        },
+        {
+          id: "paper",
+          label: "Paper",
+          help: "Un serveur rapide, avec des extensions.",
+          default: false,
+        },
+        {
+          id: "purpur",
+          label: "Purpur",
+          help: "Paper, avec encore plus de réglages.",
+          default: false,
+        },
+        {
+          id: "fabric",
+          label: "Fabric",
+          help: "Un serveur léger pour les mods Fabric.",
+          default: false,
+        },
+        { id: "quilt", label: "Quilt", help: "Un serveur pour les mods Quilt.", default: false },
+        { id: "forge", label: "Forge", help: "Un serveur pour les mods Forge.", default: false },
+        {
+          id: "neoforge",
+          label: "NeoForge",
+          help: "Un serveur pour les mods NeoForge.",
+          default: false,
+        },
+      ],
     }),
     publishedGame({
       id: "valheim",

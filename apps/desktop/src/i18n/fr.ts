@@ -2085,6 +2085,9 @@ export const fr = {
       placeTitle: "Place sur votre serveur",
       lineMemory: "Mémoire : il faut {n}, {server} en a {m}. {proof}",
       lineMemoryBare: "Mémoire : il faut {n}. {proof}",
+      // Deux chiffres qui diffèrent : chacun dit ce qu'il est (revue UX v2, N7).
+      lineMemoryBoth: "Mémoire : {min} au minimum, {rec} conseillés, {server} en a {m}. {proof}",
+      lineMemoryBothBare: "Mémoire : {min} au minimum, {rec} conseillés. {proof}",
       lineMemoryUnverified:
         "Mémoire : non vérifiée. Hearth ne peut pas dire combien ce jeu en demande.",
       lineDisk: "Espace disque : {n}. {proof}",
@@ -2596,11 +2599,11 @@ export const fr = {
     sumImposed: "Ce que cette fiche impose",
     sumName: "Nom du service",
     sumProposedTag: "valeur proposée",
-    sumChanged: "{n} réglage(s) différent(s) des valeurs proposées.",
+    sumChanged: "{n} réglage(s) différent(s) des valeurs proposées : {names}.",
     sumNoAnswers: "Cette fiche ne pose aucune question.",
     sumEmptyAnswer: "Laissé vide",
     sumResourcesText: "{memory} de mémoire, {cpu} de processeur.",
-    sumMemoryProof: "Mémoire recommandée : {proof}.",
+    sumMemoryProof: "Chiffre de mémoire recommandé : {proof}.",
     needAttention: "Validez les points d'attention pour continuer.",
     attention: {
       title: "Points d'attention",
@@ -2763,7 +2766,7 @@ export const fr = {
     hiddenAdvanced:
       "{n} réglage(s) avancé(s) ne sont pas affichés. Choisissez « Tout afficher » pour les voir.",
     // Les cartes de thèmes
-    themeCount: "{n} réglage(s), {m} modifié(s)",
+    themeCount: "{n} réglage(s) · modifiés : {m}",
     themeReset: "Remettre ce thème aux valeurs proposées",
     // Une ligne de réglage
     tagModified: "Modifié",
@@ -3065,7 +3068,7 @@ export const fr = {
     and: "et",
     pathCatalogTitle: "Choisir un jeu dans le Catalogue",
     pathCatalogTag: "Conseillé",
-    pathCatalogNames: "{names} et d'autres bientôt.",
+    pathCatalogNames: "{names} sont prêts à installer. D'autres arrivent bientôt.",
     pathCatalogNoNames: "Le Catalogue propose des jeux prêts à installer.",
     pathCatalogText:
       "Hearth connaît déjà ce qu'il faut à chaque jeu : la place, le port, la façon dont le jeu enregistre son monde avant un arrêt. Vous choisissez un nom, quelques réglages, et vous vérifiez avant de lancer.",

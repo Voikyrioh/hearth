@@ -103,9 +103,6 @@ const free = computed(() => props.install.check.value?.disk?.freeBytes ?? null);
           >
             {{ memoryNoticeText(notice) }}
           </Callout>
-          <p v-if="free !== null" class="resources__line" data-resources-free>
-            {{ t("fiche.diskFree", { size: formatSize(free) }) }}
-          </p>
         </template>
       </ResourceSliders>
       <HButton
@@ -117,6 +114,9 @@ const free = computed(() => props.install.check.value?.disk?.freeBytes ?? null);
       >
         {{ t("common.retry") }}
       </HButton>
+      <p v-if="free !== null" class="resources__line" data-resources-free>
+        {{ t("fiche.diskFree", { size: formatSize(free) }) }}
+      </p>
       <Callout
         v-if="disk"
         :tone="diskTone"

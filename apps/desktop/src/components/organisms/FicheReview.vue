@@ -128,6 +128,15 @@ const resumed = computed(() => {
     left: inspection === null ? [] : notCopiedLines(inspection),
   };
 });
+/** Les réglages qui diffèrent de la valeur proposée, nommés : « 1 réglage différent » ne dit pas lequel. */
+const changedNames = computed(() =>
+  [
+    ...changed.value.map((question) => question.label),
+    ...changedMore.value.map((setting) => setting.question.label),
+  ]
+    .map((label) => safeText(label))
+    .join(", "),
+);
 const attentionDone = computed(() => allValidated(points.value, ticked.value));
 
 const published = computed(() =>
@@ -182,7 +191,7 @@ const memoryProof = computed(() => {
   const { recommendedBytes, evidence } = props.detail.resources.memory;
   const proof = proofOf(evidence);
   return recommendedBytes !== null && proof !== "unmeasured"
-    ? t("fiche.sumMemoryProof", { proof: proofLabel(proof) })
+    ? t("fiche.sumMemoryProof", { proof: lowerFirst(proofLabel(proof)) })
     : null;
 });
 
@@ -370,7 +379,7 @@ const intro = computed(() =>
             </li>
           </ul>
           <span v-if="answers.length > 0" class="sum__note" data-sum-changed>
-            {{ t("fiche.sumChanged", { n: changed.length + changedMore.length }) }}
+            {{ t("fiche.sumChanged", { n: changed.length + changedMore.length, names: changedNames }) }}
           </span>
         </dd>
       </div>

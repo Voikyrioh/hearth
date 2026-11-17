@@ -142,7 +142,7 @@ describe("les thèmes en mots simples (BR-FICHE-041)", () => {
     await showAll(wrapper);
     expect(wrapper.findAll("[data-setting-theme]")).toHaveLength(7);
     expect(wrapper.findAll("[data-setting]")).toHaveLength(32);
-    expect(wrapper.get('[data-theme="journey"]').text()).toContain("15 réglages, 0 modifiés");
+    expect(wrapper.get('[data-theme="journey"]').text()).toContain("15 réglages · modifiés : 0");
     wrapper.unmount();
   });
 

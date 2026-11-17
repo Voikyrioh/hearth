@@ -341,6 +341,7 @@ export class SimulatedLinkBridge implements LinkBridge {
       role: (id) => this.servers.find((server) => server.id === id)?.role ?? "readonly",
     });
     if (options.demo) {
+      this.neutralImages = true;
       this.catalog.loadDemo();
       this.deploys.autoRunMs = 900;
     }
@@ -1386,11 +1387,16 @@ export class SimulatedLinkBridge implements LinkBridge {
    * image d'éditeur, aucune requête vers Steam. Seuls Terraria et Valheim (Steam) et Minecraft (agent) en ont une ; tout
    * autre jeu n'a volontairement aucun fichier : la page montre son repli neutre.
    */
+  /** Démonstration : aucune image dans le navigateur (le protocole d'image n'existe que dans la coquille) : UN seul visuel neutre. */
+  private neutralImages = false;
+
   steamHeaderUrl(appId: number): string {
+    if (this.neutralImages) return "";
     return isSteamAppId(appId) ? `/fixtures/illustrations/steam-${appId}.jpg` : "";
   }
 
   agentIllustrationUrl(serverId: string, ficheId: string, digest: string): string {
+    if (this.neutralImages) return "";
     return agentIllustrationUrl("", serverId, ficheId, digest) === ""
       ? ""
       : `/fixtures/illustrations/agent-${ficheId}.jpg`;

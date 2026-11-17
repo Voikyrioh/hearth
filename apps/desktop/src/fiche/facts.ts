@@ -91,15 +91,28 @@ export function needLines(
 ): NeedLines {
   const resources = detail.resources;
   const need = resources.memory.minBytes ?? resources.memory.recommendedBytes;
+  const { minBytes, recommendedBytes } = resources.memory;
+  const both = minBytes !== null && recommendedBytes !== null && minBytes !== recommendedBytes;
   const memory =
     need === null || proofOf(resources.memory.evidence) === "unmeasured"
       ? t("fiche.facts.lineMemoryUnverified")
-      : t(capacity ? "fiche.facts.lineMemory" : "fiche.facts.lineMemoryBare", {
-          n: formatMemory(need),
-          server: serverName,
-          m: capacity ? formatMemory(capacity.memoryBytes) : "",
-          proof: proofSentence(resources.memory),
-        });
+      : t(
+          both
+            ? capacity
+              ? "fiche.facts.lineMemoryBoth"
+              : "fiche.facts.lineMemoryBothBare"
+            : capacity
+              ? "fiche.facts.lineMemory"
+              : "fiche.facts.lineMemoryBare",
+          {
+            n: formatMemory(need),
+            min: minBytes === null ? "" : formatMemory(minBytes),
+            rec: recommendedBytes === null ? "" : formatMemory(recommendedBytes),
+            server: serverName,
+            m: capacity ? formatMemory(capacity.memoryBytes) : "",
+            proof: proofSentence(resources.memory),
+          },
+        );
   const disk =
     resources.disk.installBytes === null || proofOf(resources.disk.evidence) === "unmeasured"
       ? t("fiche.facts.lineDiskUnverified")

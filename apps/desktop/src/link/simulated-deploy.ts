@@ -473,6 +473,8 @@ export class SimulatedDeploys {
       accept: { reservedPorts: boolean; lowDisk: boolean };
       /** Reprendre un monde : prend la place des opérations lourdes du serveur (HRT-106, BR-MONDE-013). */
       world?: boolean;
+      /** La taille que la récupération annonce en démonstration (la taille de la fiche) ; sinon 1 Go. */
+      downloadBytes?: number;
     },
     by: string,
     remember: () => void,
@@ -552,7 +554,7 @@ export class SimulatedDeploys {
     });
     this.held.set(serverId, mine);
     remember();
-    this.runAuto(serverId, operation.id);
+    this.runAuto(serverId, operation.id, plan.downloadBytes ?? 1_000_000_000);
     return { kind: "accepted", operationId: operation.id, serviceKey: key };
   }
 
@@ -562,14 +564,14 @@ export class SimulatedDeploys {
    */
   autoRunMs: number | null = null;
 
-  private runAuto(serverId: string, opId: string): void {
+  private runAuto(serverId: string, opId: string, total: number): void {
     const every = this.autoRunMs;
     if (every === null) return;
     const steps: Array<() => void> = [
       () => this.progress(serverId, opId, 0),
-      () => this.progress(serverId, opId, 30, 300_000_000, 1_000_000_000),
-      () => this.progress(serverId, opId, 70, 700_000_000, 1_000_000_000),
-      () => this.progress(serverId, opId, 100, 1_000_000_000, 1_000_000_000),
+      () => this.progress(serverId, opId, 30, Math.round(total * 0.3), total),
+      () => this.progress(serverId, opId, 70, Math.round(total * 0.7), total),
+      () => this.progress(serverId, opId, 100, total, total),
       () => this.toStep(serverId, opId, "create"),
       () => this.toStep(serverId, opId, "start"),
       () => this.toStep(serverId, opId, "watch"),

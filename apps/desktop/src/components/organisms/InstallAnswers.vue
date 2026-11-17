@@ -176,35 +176,34 @@ defineExpose({
     <!-- Le pack de mods (HRT-125) : seulement si la fiche offre le dépôt d'un pack -->
     <InstallPack :install="install" />
 
-    <!-- Les réglages avancés, repliés avec leurs valeurs proposées ; UN seul moyen d'ouvrir tous les autres réglages. -->
-    <DashCard v-if="split.advanced.length > 0 || install.extras.value.length > 0" :title="t('fiche.cardAdvanced')">
-      <details
-        v-if="split.advanced.length > 0"
-        class="answers__advanced"
-        data-install-advanced
-        :open="advancedOpen"
-        @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open"
-      >
-        <summary class="answers__advanced-title" data-install-advanced-summary>
-          {{ advancedSummary }}
-        </summary>
-        <p class="answers__advanced-help">{{ t("fiche.advancedHelp") }}</p>
-        <QuestionField
-          v-for="question in split.advanced"
-          :key="question.id"
-          :question="question"
-          :model-value="currentAnswer(question, draft.answers)"
-          :error="questionError(question.id)"
-          @update:model-value="install.setAnswer(question.id, $event)"
-          @blur="install.touch(`q:${question.id}`)"
-          @link="emit('link', 'token', question.id)"
-        />
-      </details>
-      <!-- « Voir tous les réglages » (HRT-109, BR-FICHE-040) : les autres réglages du jeu, repliés par défaut -->
+    <!-- Les réglages avancés, repliés avec leurs valeurs proposées, et DANS le même dépliant « Voir tous les réglages » :
+         un seul titre, un seul moyen d'ouvrir les autres réglages (revue UX v2, I7). -->
+    <details
+      v-if="split.advanced.length > 0 || install.extras.value.length > 0"
+      class="answers__advanced"
+      data-install-advanced
+      :open="advancedOpen"
+      @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open"
+    >
+      <summary class="answers__advanced-title" data-install-advanced-summary>
+        {{ split.advanced.length > 0 ? advancedSummary : t("fiche.cardAdvanced") }}
+      </summary>
+      <p class="answers__advanced-help">{{ t("fiche.advancedHelp") }}</p>
+      <QuestionField
+        v-for="question in split.advanced"
+        :key="question.id"
+        :question="question"
+        :model-value="currentAnswer(question, draft.answers)"
+        :error="questionError(question.id)"
+        @update:model-value="install.setAnswer(question.id, $event)"
+        @blur="install.touch(`q:${question.id}`)"
+        @link="emit('link', 'token', question.id)"
+      />
+      <!-- « Voir tous les réglages » (HRT-109, BR-FICHE-040) : les autres réglages du jeu -->
       <InstallSettings :install="install" />
-    </DashCard>
+    </details>
 
-    <p class="answers__version" data-install-version>
+    <p v-if="detail.variants.length <= 1" class="answers__version" data-install-version>
       {{ t("fiche.versionFixed", { version: safeText(detail.image.tag) }) }}
     </p>
   </div>

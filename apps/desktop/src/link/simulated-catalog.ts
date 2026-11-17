@@ -324,6 +324,8 @@ export class SimulatedCatalog {
         })),
         accept: request.accept,
         world: world !== null,
+        // La récupération simulée annonce la taille que la fiche annonce (revue UX v2, N7).
+        downloadBytes: detail.resources.disk.installBytes ?? undefined,
       },
       by,
       () => this.received.push({ serverId, request: structuredClone(request) }),
