@@ -113,6 +113,7 @@ const toRemember = ref<{ world: string | null } | null>(null);
 const flow = useDeployFlow({
   serverId,
   source: install.flowSource,
+  installing: true,
   navigate: (to) => void guard.leave(to),
   focusField: () => undefined,
   focusQuestion: (id) => answers.value?.focusQuestion(id),
@@ -541,8 +542,8 @@ usePageTitle(() => (detail.value ? t("fiche.installTitle", { name: name.value })
         :force-low-disk="flow.forceLowDisk.value"
         :agent-version="agentVersion"
         :perform="flow.perform"
+        :inert="flow.launch.value !== null"
         @leave="leaveReview"
-        @launched="flow.leaveReview()"
         @edit="editSettings"
         @agree="install.agreed.value = $event"
         @imposed="imposedOpen = true"

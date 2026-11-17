@@ -113,7 +113,7 @@ describe("la page (BR-FICHE-014, 015)", () => {
     expect(questionInput(wrapper, "max_players").element.value).toBe("8");
     expect(questionInput(wrapper, "password").element.value).toBe("");
     expect(wrapper.get("[data-install-version]").text()).toBe(
-      "Hearth installe toujours la même image du programme serveur : elle ne se choisit pas. La version du jeu, elle, se choisit plus haut.",
+      "Hearth installe toujours la même image du programme serveur : elle ne se choisit pas.",
     );
     // Aucun champ libre : ni image, ni variable, ni commande, ni dossier.
     expect(wrapper.find('[data-field="image"]').exists()).toBe(false);
@@ -590,11 +590,11 @@ describe("lancer, suivre, terminer (BR-FICHE-013, 027, 034)", () => {
     await settle();
     document.querySelector<HTMLElement>("[data-deploy-cancel]")?.click();
     await settle();
-    await confirmTop("Annuler le déploiement");
+    await confirmTop("Annuler l'installation");
     await vi.advanceTimersByTimeAsync(10);
     await settle();
     expect(bridge.deploys.cancels).toEqual([{ serverId: "forge", opId: op.operationId }]);
-    expect(toasts()).toContain("Le déploiement a été annulé et rien n'a été créé.");
+    expect(toasts()).toContain("L'installation a été annulée et rien n'a été créé.");
     // Rien n'a été créé, et la page garde la saisie.
     expect(bridge.services.find("forge", op.key)).toBeUndefined();
     expect(wrapper.find("[data-install-page]").exists()).toBe(true);

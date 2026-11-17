@@ -2417,7 +2417,7 @@ export const fr = {
     portPlaceholder: "Numéro du port",
     portLabel: "{role}",
     versionFixed:
-      "Hearth installe toujours la même image du programme serveur : elle ne se choisit pas. La version du jeu, elle, se choisit plus haut.",
+      "Hearth installe toujours la même image du programme serveur : elle ne se choisit pas.",
     noPassword:
       "Aucun mot de passe : toute personne qui peut joindre ce port peut rejoindre la partie.",
     tokenHelp:
@@ -2625,6 +2625,12 @@ export const fr = {
     },
     // Progression
     progressTitle: "Installation de {name}",
+    progressSteps: "Étapes de l'installation",
+    cancelInstall: "Annuler l'installation",
+    keepInstall: "Garder l'installation",
+    cancelInstallTitle: "Annuler l'installation de {name} ?",
+    installCancelled: "L'installation a été annulée et rien n'a été créé.",
+    tooLateInstall: "Il est trop tard pour annuler : le serveur de jeu est en cours de création.",
     // Premier démarrage (BR-FICHE-056)
     firstStart: {
       headline: "Premier démarrage : le jeu prépare ses fichiers. Ce n'est pas une panne.",

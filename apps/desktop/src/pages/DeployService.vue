@@ -163,8 +163,8 @@ const progressOpen = computed(() => flow.launch.value !== null);
       :check="flow.reviewCheck.value"
       :force-low-disk="flow.forceLowDisk.value"
       :perform="flow.perform"
+      :inert="flow.launch.value !== null"
       @leave="flow.leaveReview()"
-      @launched="flow.leaveReview()"
     />
 
     <DeployProgressDialog

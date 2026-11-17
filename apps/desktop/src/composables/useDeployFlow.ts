@@ -127,6 +127,8 @@ export function useDeployFlow(
      * fiche) ; `"leave"` (défaut) dit la réussite par une notification et ramène à la liste (formulaire libre).
      */
     onSucceeded?: (launch: Launch, operation: ServiceOperation) => "stay" | "leave";
+    /** L'installation d'un serveur de jeu : les phrases disent « installation » du début à la fin (HRT-246). */
+    installing?: boolean;
   } & (
     | /** Le formulaire d'une image (`DeployService`). */ { form: DeployFormState }
     | /** Une autre origine (une fiche du Catalogue). */ { source: DeployFlowSource }
@@ -254,6 +256,15 @@ export function useDeployFlow(
 
   // ── 3. La progression ────────────────────────────────────────────────────────────────────────
 
+  // Derrière la fenêtre de progression, la page reste sur la vérification que l'on vient de lancer (figée) : elle ne
+  // revient à l'étape d'avant que lorsque la progression se ferme (annulation, échec à modifier, retour à la liste).
+  watch(
+    () => launch.value,
+    (now) => {
+      if (now === null) reviewing.value = false;
+    },
+  );
+
   const follow = useOperationFollow(serverId, () => launch.value?.operationId ?? null);
   /** L'opération telle qu'elle court (étape, progression, annulable). */
   const operation = follow.operation;
@@ -297,7 +308,11 @@ export function useDeployFlow(
     }
     if (op.status === "cancelled") {
       // Rien n'a été créé : la notification le dit, le formulaire reste rempli (BR-DEPLOY-016).
-      if (!done.announced) toasts.push({ kind: "info", message: t("deploy.cancelled") });
+      if (!done.announced)
+        toasts.push({
+          kind: "info",
+          message: t(options.installing ? "fiche.installCancelled" : "deploy.cancelled"),
+        });
       settle();
       launch.value = null;
       return;
