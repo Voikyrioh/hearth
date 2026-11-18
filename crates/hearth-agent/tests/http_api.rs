@@ -1915,6 +1915,12 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             "/operations/{id}" => "/operations/INCONNUE".to_owned(),
             // La liste des sauvegardes d'un service (HRT-97) : une lecture, aucune entrée de journal.
             "/services/{key}/backups" => format!("/services/{}/backups", backup_key.as_str()),
+            // La liste des mods d'un serveur et celle d'une sauvegarde (HRT-256, HRT-293) : deux lectures, aucune entrée
+            // de journal ; la seconde sur une clé mal formée (404), son banc de sauvegardes est testé à part.
+            "/services/{key}/mods" => format!("/services/{}/mods", game_key.as_str()),
+            "/services/{key}/backups/{id}/mods" => {
+                "/services/pas-une-cle/backups/x/mods".to_owned()
+            }
             // Lire une opération de service (HRT-144) : une lecture, aucune entrée de journal.
             "/operations/services/{id}" => "/operations/services/INCONNUE".to_owned(),
             // Un POST qui ne modifie rien : il relance la détection du moteur (HRT-61, lecture seule).
