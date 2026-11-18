@@ -256,6 +256,7 @@ mod tests {
                 path,
                 is_file: true,
                 size: 1,
+                crc32: None,
             })
             .collect();
         detect(&entries, &mut Files(files.iter().copied().collect()))

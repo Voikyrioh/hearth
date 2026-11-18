@@ -314,6 +314,12 @@ impl std::io::Read for FakeFile {
     }
 }
 
+impl std::io::Seek for FakeFile {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        std::io::Seek::seek(&mut self.data, pos)
+    }
+}
+
 impl ReadFile for FakeFile {
     fn meta(&self) -> Result<EntryMeta, FsError> {
         let done = self.data.position() >= self.data.get_ref().len() as u64;

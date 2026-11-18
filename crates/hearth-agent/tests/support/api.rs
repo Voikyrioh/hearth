@@ -329,6 +329,14 @@ fn state_over_rig(
             super::engine::fast_transfers(),
         ),
         game_settings,
+        mods: Arc::new(hearth_agent::application::mods::ModsService::new(
+            specs.clone(),
+            Arc::new(hearth_agent::application::catalog::CatalogService::embedded(true)),
+            rig.safe_fs.clone(),
+            Arc::new(hearth_agent::infrastructure::sqlite::SqliteModOrigins::new(
+                env.db.pool().clone(),
+            )),
+        )),
         catalog: Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         world_import: hearth_agent::application::world_import::WorldImport::new(
             Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),

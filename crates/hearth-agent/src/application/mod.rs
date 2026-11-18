@@ -18,6 +18,7 @@ pub mod hello;
 pub mod install;
 pub mod maintenance;
 pub mod metrics;
+pub mod mods;
 pub mod operations;
 pub mod pack_intake;
 pub mod ports;

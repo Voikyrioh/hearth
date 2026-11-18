@@ -154,6 +154,7 @@ impl PackIntake {
                 path: entry.path.as_str(),
                 is_file: entry.kind == EntryKind::File,
                 size: entry.size,
+                crc32: entry.crc32,
             })
             .collect();
         let mut descriptions =
@@ -339,7 +340,6 @@ mod tests {
     fn the_pack_size_limit_is_four_gib() {
         assert_eq!(pack_limits().max_file_size, 4 * GIB);
     }
-}
 
     #[test]
     fn the_jar_limits_are_256_mib_one_gib_and_65536_entries() {
@@ -348,3 +348,4 @@ mod tests {
         assert_eq!(limits.max_unpacked, GIB);
         assert_eq!(limits.max_entries, 65_536);
     }
+}

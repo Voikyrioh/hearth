@@ -152,9 +152,9 @@ pub struct DirListing {
     pub skipped_names: u32,
 }
 
-/// Un fichier ordinaire ouvert en lecture : ses octets, et ce que `fstat` en dit sur le MÊME descripteur (avant
+/// Un fichier ordinaire ouvert en lecture (lisible et repositionnable : un jar se lit comme une archive, HRT-256) : ses octets, et ce que `fstat` en dit sur le MÊME descripteur (avant
 /// et après la lecture, pour voir qu'il a changé pendant la copie à chaud).
-pub trait ReadFile: std::io::Read + Send {
+pub trait ReadFile: std::io::Read + std::io::Seek + Send {
     fn meta(&self) -> Result<EntryMeta, FsError>;
 }
 

@@ -214,6 +214,7 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::LimitsRequired // limites obligatoires absentes
         | ErrorCode::SettingsFileUnreadable // fichier de réglages que le format ne sait pas découper
         | ErrorCode::PackRefused // pack déposé refusé (HRT-124)
+        | ErrorCode::ModsFolderBlocked // dossier des mods qui est un lien (HRT-256)
         | ErrorCode::SettingRefused => Some(Outcome::Failed(Reason::Validation)), // valeur de réglage refusée
         // Ressource inexistante.
         ErrorCode::ServiceNotFound // service inconnu

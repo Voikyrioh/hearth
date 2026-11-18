@@ -111,6 +111,8 @@ pub enum ErrorCode {
     /// jeu (HRT-109). Distinct de `SERVICE_NOT_FOUND` (clé mal formée) et de `NOT_FOUND` (route qu'un agent plus
     /// ancien ne sert pas) : le client sait ainsi s'il montre l'onglet « Réglages ».
     NotAGameService,
+    /// `data/mods` ou `data/mods-retires` est un lien ou n'est pas un dossier : la liste des mods n'est pas lue (HRT-256, BR-MOD-020).
+    ModsFolderBlocked,
     /// Une opération tient déjà ce service (`details.by`, `details.kind`).
     ServiceBusy,
     /// Le service est déjà dans l'état demandé (`details.state`).
@@ -223,6 +225,7 @@ impl ErrorCode {
             | Self::LimitsRequired
             | Self::AgreementRequired
             | Self::PackRefused
+            | Self::ModsFolderBlocked
             | Self::SettingsFileUnreadable
             | Self::SettingRefused => 422,
             Self::Busy | Self::EngineUnavailable => 503,
@@ -400,7 +403,7 @@ mod tests {
         assert_eq!(ErrorCode::Unknown.or_from_status(200), ErrorCode::Unknown);
     }
 
-    const ALL: [(ErrorCode, &str, u16); 72] = [
+    const ALL: [(ErrorCode, &str, u16); 73] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -460,6 +463,7 @@ mod tests {
         (ErrorCode::EngineUnavailable, "ENGINE_UNAVAILABLE", 503),
         (ErrorCode::ServiceNotFound, "SERVICE_NOT_FOUND", 404),
         (ErrorCode::NotAGameService, "NOT_A_GAME_SERVICE", 404),
+        (ErrorCode::ModsFolderBlocked, "MODS_FOLDER_BLOCKED", 422),
         (ErrorCode::ServiceBusy, "SERVICE_BUSY", 409),
         (
             ErrorCode::ServiceAlreadyInState,

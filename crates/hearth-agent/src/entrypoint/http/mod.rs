@@ -22,6 +22,7 @@ mod error;
 mod game_settings;
 mod hello;
 mod metrics;
+mod mods;
 mod operations;
 mod reauth;
 mod security;
@@ -115,6 +116,8 @@ pub struct AppState {
     pub world_import: Arc<WorldImport>,
     /// Les réglages d'un serveur de jeu : lire, analyser un texte collé, enregistrer (HRT-108, ADR-0051).
     pub game_settings: Arc<GameSettings>,
+    /// Les mods d'un serveur de jeu installé : la liste lue dans le volume (HRT-256, ADR-0062).
+    pub mods: Arc<crate::application::mods::ModsService>,
     pub stream: StreamContext,
     /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
     /// administrateurs par `GET /security`, sans rien de sensible.
@@ -697,6 +700,17 @@ pub static ENDPOINTS: &[Endpoint] = &[
         audit: None,
         route: || get(game_settings::game_view),
     },
+    // Les mods d'un serveur de jeu installé (HRT-256, ADR-0062, BR-MOD-031) : une consultation ouverte à tout compte
+    // authentifié, sans effet ni journal ; la route ne modifie ni le volume ni la base.
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/mods",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(mods::list),
+    },
     // Le mot de passe du serveur de jeu (HRT-103, BR-JEU-025, BR-JEU-026) : réservé au droit « gérer les services »
     // (niveau `Services`), lu dans la description chiffrée, jamais dans le moteur ni le fichier. Comme la
     // révélation des variables, une consultation et non un acte d'administration (aucun mot de passe demandé) :
@@ -1196,6 +1210,8 @@ mod tests {
         ("GET", "/services/{key}/env", Service),
         // Ce que le détail d'un serveur de jeu montre (HRT-104) : ouvert à tout compte authentifié, aucun secret.
         ("GET", "/services/{key}/game", OpenRead),
+        // Les mods d'un serveur installé (HRT-256) : une consultation de tout compte authentifié.
+        ("GET", "/services/{key}/mods", OpenRead),
         // Le mot de passe du serveur de jeu (HRT-103) : le droit est exigé par le niveau, la révélation est consignée.
         ("GET", "/services/{key}/game-secret", Service),
         // Les réglages d'un serveur de jeu (HRT-108) : le droit est exigé par le niveau ; l'analyse d'un texte collé

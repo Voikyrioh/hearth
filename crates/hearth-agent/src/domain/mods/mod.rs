@@ -2,6 +2,7 @@
 
 pub mod compat;
 pub mod game;
+pub mod game_info;
 pub mod jar;
 pub mod listing;
 pub mod pack;

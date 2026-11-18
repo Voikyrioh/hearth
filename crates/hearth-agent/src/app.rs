@@ -1067,6 +1067,15 @@ pub async fn start_engined(
         let _ = network.external_ip().await;
         game_settings.set_network(network);
     }
+    // Les mods d'un serveur installé (HRT-256) : le volume par `SafeFs`, l'origine des fichiers en base.
+    let mods = Arc::new(crate::application::mods::ModsService::new(
+        foundations.specs.clone(),
+        catalog.clone(),
+        safe_fs.clone(),
+        Arc::new(crate::infrastructure::sqlite::SqliteModOrigins::new(
+            database.pool().clone(),
+        )),
+    ));
     // L'arrêt des serveurs de jeu (HRT-103) : la suite d'étapes de la fiche, déroulée par le cas d'usage de pilotage.
     service_lifecycle.set_game_stop(GameStop::new(
         foundations.specs.clone(),
@@ -1202,6 +1211,9 @@ pub async fn start_engined(
             ))
         });
     deployments.set_pack_intake(Arc::new(PackIntake::new(pack_deposits)));
+    deployments.set_mod_origins(Arc::new(
+        crate::infrastructure::sqlite::SqliteModOrigins::new(database.pool().clone()),
+    ));
     // Modifier un service par recréation (HRT-87) : l'ancien est mis de côté, le nouveau créé depuis la description,
     // l'ancien remis si le nouveau échoue.
     let service_updates = ServiceUpdates::new(
@@ -1271,6 +1283,7 @@ pub async fn start_engined(
         catalog,
         world_import,
         game_settings,
+        mods,
         stream,
         erasure_pending: database.erasure_pending(),
     });

@@ -38,6 +38,9 @@ use hearth_proto::api::game_settings::{
     ChangeAction, DriftResolution, FileState, ImportState, SaveOrigin, SettingEffect, ValueState,
 };
 use hearth_proto::api::metrics::HistoryWindow;
+use hearth_proto::api::mods::{
+    Applicable, EnvironmentView, MinecraftFrom, ModOrigin, ModPlace, PackKind, VerdictCode,
+};
 use hearth_proto::api::operations::OperationStatus as HttpOperationStatus;
 use hearth_proto::api::packs::PackGenreWire;
 use hearth_proto::api::reauth::ReauthMode;
@@ -204,6 +207,13 @@ fn enums() -> Vec<Entry> {
         entry!("api/catalog.rs::EvidenceView", Tolerant, EvidenceView),
         entry!("api/catalog.rs::QuestionKind", Tolerant, QuestionKind),
         entry!("api/catalog.rs::WorldSavedView", Tolerant, WorldSavedView),
+        entry!("api/mods.rs::Applicable", Tolerant, Applicable),
+        entry!("api/mods.rs::EnvironmentView", Tolerant, EnvironmentView),
+        entry!("api/mods.rs::MinecraftFrom", Tolerant, MinecraftFrom),
+        entry!("api/mods.rs::ModOrigin", Tolerant, ModOrigin),
+        entry!("api/mods.rs::ModPlace", Tolerant, ModPlace),
+        entry!("api/mods.rs::PackKind", Tolerant, PackKind),
+        entry!("api/mods.rs::VerdictCode", Tolerant, VerdictCode),
         entry!("api/catalog.rs::PortMappingView", Tolerant, PortMappingView),
         entry!("api/catalog.rs::CharsetView", Tolerant, CharsetView),
         entry!("api/catalog.rs::SecretKindView", Tolerant, SecretKindView),

@@ -430,6 +430,7 @@ pub(super) fn inspect<R: Read + Seek>(
                 EntryKind::File
             },
             size,
+            crc32: Some(crc),
         });
         plans.push(ZipPlan {
             local_offset: offset,

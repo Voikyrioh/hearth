@@ -537,6 +537,12 @@ impl Read for UnixFile {
     }
 }
 
+impl io::Seek for UnixFile {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        io::Seek::seek(&mut self.file, pos)
+    }
+}
+
 impl ReadFile for UnixFile {
     fn meta(&self) -> Result<EntryMeta, FsError> {
         let stat = fstat(&self.file).map_err(fs_error)?;
