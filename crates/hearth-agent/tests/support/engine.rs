@@ -70,6 +70,7 @@ pub fn parts_supervised(
         backups: hearth_agent::app::BackupParts {
             timings: fast_backup(),
             files: Some(Arc::new(super::fake_backup_files::FakeBackupFiles::new())),
+            mods: None,
         },
         transfers: hearth_agent::app::TransferParts {
             timings: fast_transfers(),

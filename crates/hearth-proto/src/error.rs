@@ -113,6 +113,12 @@ pub enum ErrorCode {
     NotAGameService,
     /// `data/mods` ou `data/mods-retires` est un lien ou n'est pas un dossier : la liste des mods n'est pas lue (HRT-256, BR-MOD-020).
     ModsFolderBlocked,
+    /// Le lot de mods à contrôler est vide, de plus de 8 dépôts ou répète un dépôt (HRT-257).
+    ModsBatchInvalid,
+    /// Aucun dépôt complet de ce compte sous cet identifiant (HRT-257) : jamais reçu, déjà consommé, périmé ou d'un autre compte.
+    DepositUnknown,
+    /// Le moteur de ce serveur ne charge pas de mods `.jar` (HRT-257, BR-MOD-030).
+    ModsNotApplicable,
     /// Une opération tient déjà ce service (`details.by`, `details.kind`).
     ServiceBusy,
     /// Le service est déjà dans l'état demandé (`details.state`).
@@ -177,6 +183,7 @@ impl ErrorCode {
             | Self::NotAGameService
             | Self::OperationNotFound
             | Self::PackUnknown
+            | Self::DepositUnknown
             | Self::BackupNotFound => 404,
             Self::MethodNotAllowed => 405,
             Self::PayloadTooLarge => 413,
@@ -188,6 +195,7 @@ impl ErrorCode {
             | Self::PostNotRecognized
             | Self::SpecConflict
             | Self::ServiceAdopted
+            | Self::ModsNotApplicable
             | Self::NameBeingDeleted
             | Self::LimitRefusedLive
             | Self::LimitsChanged
@@ -226,6 +234,7 @@ impl ErrorCode {
             | Self::AgreementRequired
             | Self::PackRefused
             | Self::ModsFolderBlocked
+            | Self::ModsBatchInvalid
             | Self::SettingsFileUnreadable
             | Self::SettingRefused => 422,
             Self::Busy | Self::EngineUnavailable => 503,
@@ -403,7 +412,7 @@ mod tests {
         assert_eq!(ErrorCode::Unknown.or_from_status(200), ErrorCode::Unknown);
     }
 
-    const ALL: [(ErrorCode, &str, u16); 73] = [
+    const ALL: [(ErrorCode, &str, u16); 76] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -464,6 +473,9 @@ mod tests {
         (ErrorCode::ServiceNotFound, "SERVICE_NOT_FOUND", 404),
         (ErrorCode::NotAGameService, "NOT_A_GAME_SERVICE", 404),
         (ErrorCode::ModsFolderBlocked, "MODS_FOLDER_BLOCKED", 422),
+        (ErrorCode::ModsBatchInvalid, "MODS_BATCH_INVALID", 422),
+        (ErrorCode::DepositUnknown, "DEPOSIT_UNKNOWN", 404),
+        (ErrorCode::ModsNotApplicable, "MODS_NOT_APPLICABLE", 409),
         (ErrorCode::ServiceBusy, "SERVICE_BUSY", 409),
         (
             ErrorCode::ServiceAlreadyInState,

@@ -13,21 +13,29 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use hearth_proto::api::mods::{
-    Applicable, EnvironmentView, MinecraftFrom, ModIdentityView, ModItem, ModOrigin, ModPlace,
-    ModVerdictView, ModsGame, ModsView, PackKind, VerdictCode,
+    Applicable, CheckOutcome, EnvironmentView, MinecraftFrom, ModCheckFile, ModIdentityView,
+    ModItem, ModOrigin, ModPlace, ModReplaces, ModVerdictView, ModsCheckView, ModsGame, ModsView,
+    PackKind, RefusalValues, VerdictCode,
 };
 use thiserror::Error;
 use tokio::sync::Mutex;
 
 use super::catalog::CatalogService;
 use super::pack_intake::{jar_limits, pack_limits};
-use super::ports::{FsError, ModOrigins, ReadFile, ServiceRoot, StoreError};
+use super::ports::{
+    CurrentMods, DepositError, DepositFile, DepositId, FsError, ModOrigins, ModsRead, ModsReading,
+    ModsSnapshot, PackDeposits, ReadFile, ServiceRoot, StoreError,
+};
 use super::service_specs::{ServiceSpecs, SpecServiceError};
-use crate::domain::archive::{self, Inspection};
+use crate::domain::archive::{self, ArchiveRefusal, Inspection};
 use crate::domain::catalog::loading::model::{Fiche, hex};
 use crate::domain::catalog::translate::pack_file_name;
 use crate::domain::files::RelPath;
+use crate::domain::mods::backup_list::{
+    CurrentMod, IdentitySummary, Place, Snapshot, SnapshotFile,
+};
 use crate::domain::mods::compat::{self, Candidate, ServerProfile, Verdict};
+use crate::domain::mods::deposit::{self, Deposit, Installed, Refusal};
 use crate::domain::mods::game::is_game_version;
 use crate::domain::mods::game_info::{
     FileFacts, LOG_READ_BYTES, MANIFEST_READ_BYTES, ModrinthManifest, Origin, OriginRow,
@@ -56,6 +64,15 @@ pub enum ModsError {
     /// `data/mods` ou `data/mods-retires` est un lien ou n'est pas un dossier.
     #[error("le dossier des mods est bloqué")]
     FolderBlocked,
+    /// Le lot à contrôler est vide, de plus de 8 dépôts ou répète un dépôt.
+    #[error("lot de dépôts invalide")]
+    BatchInvalid,
+    /// Un dépôt n'existe pas pour ce compte.
+    #[error("dépôt inconnu")]
+    DepositUnknown,
+    /// Le moteur du serveur ne charge pas de mods.
+    #[error("ce serveur ne prend pas de mods")]
+    NotApplicable,
     #[error("stockage : {0}")]
     Storage(String),
 }
@@ -101,6 +118,8 @@ pub struct ModsService {
     /// Les services dont le pack serveur range a deja ete relu pour inscrire l'origine de ses mods (HRT-256 : un
     /// serveur installe avant la 0.2.2 n'a pas de lignes) : une seule relecture par service et par execution.
     pack_reread: StdMutex<HashSet<String>>,
+    /// La zone d'attente des dépôts, pour contrôler des jars (HRT-257) ; posée par la racine de composition.
+    deposits: std::sync::OnceLock<Arc<dyn PackDeposits>>,
     budget: Duration,
 }
 
@@ -114,11 +133,15 @@ struct Plan {
     data_dir: RelPath,
     /// Ou est range le pack serveur d'un serveur installe avec un pack (dossier des packs de la fiche, nom fixe).
     pack_rel: Option<RelPath>,
+    /// Les noms des deux dossiers de mods et le point de montage du dossier gere qui les porte (HRT-293).
+    dir: String,
+    retired_dir_name: String,
+    data_target: String,
 }
 
 enum Judged {
     Done(Applicable),
-    Read(Plan),
+    Read(Box<Plan>),
 }
 
 fn loader_of_variant(variant: &str) -> Option<JarLoader> {
@@ -153,6 +176,7 @@ impl ModsService {
             cache: Arc::new(StdMutex::new(HashMap::new())),
             reading: StdMutex::new(HashMap::new()),
             pack_reread: StdMutex::new(HashSet::new()),
+            deposits: std::sync::OnceLock::new(),
             budget: READ_BUDGET,
         }
     }
@@ -164,8 +188,8 @@ impl ModsService {
         self
     }
 
-    /// `GET /services/{key}/mods` (BR-MOD-020, 021, 028, 030, 032, 033).
-    pub async fn list(&self, key: &ServiceKey) -> Result<ModsView, ModsError> {
+    /// Ce que la description et la fiche disent du serveur : le plan de lecture, ou pourquoi il n'y en a pas.
+    async fn plan_of(&self, key: &ServiceKey) -> Result<Judged, ModsError> {
         let Some(body) = self.specs.body(key).await? else {
             return Err(ModsError::NotAGameService);
         };
@@ -176,18 +200,24 @@ impl ModsService {
             .catalog
             .fiche(&spec_fiche.id)
             .ok_or(ModsError::NotAGameService)?;
-        let plan = match judge_applicable(fiche, spec_fiche) {
-            Judged::Done(applicable) => {
-                return Ok(ModsView {
-                    applicable,
-                    game: ModsGame::default(),
-                    mods: Vec::new(),
-                    unread: 0,
-                    truncated: false,
-                });
-            }
-            Judged::Read(plan) => plan,
-        };
+        Ok(judge_applicable(fiche, spec_fiche))
+    }
+
+    /// Lit le volume (une lecture de liste à la fois par service) : les lignes d'origine et les fichiers.
+    async fn read_volume(
+        &self,
+        key: &ServiceKey,
+        plan: &Plan,
+    ) -> Result<(Vec<OriginRow>, Gathered), ModsError> {
+        self.read_volume_within(key, plan, self.budget).await
+    }
+
+    async fn read_volume_within(
+        &self,
+        key: &ServiceKey,
+        plan: &Plan,
+        budget: Duration,
+    ) -> Result<(Vec<OriginRow>, Gathered), ModsError> {
         let gate = {
             let mut map = self.reading.lock().unwrap_or_else(|e| e.into_inner());
             Arc::clone(map.entry(key.as_str().to_owned()).or_default())
@@ -206,7 +236,6 @@ impl ModsService {
             let fs = Arc::clone(&self.fs);
             let cache = Arc::clone(&self.cache);
             let key = key.clone();
-            let budget = self.budget;
             let input = Gather {
                 data_dir: plan.data_dir.clone(),
                 mods_dir: plan.mods_dir.clone(),
@@ -236,7 +265,252 @@ impl ModsService {
             PackRead::Done => self.mark_reread(key),
             PackRead::OutOfTime | PackRead::NotAsked => {}
         }
+        Ok((rows, gathered))
+    }
+
+    /// `GET /services/{key}/mods` (BR-MOD-020, 021, 028, 030, 032, 033).
+    pub async fn list(&self, key: &ServiceKey) -> Result<ModsView, ModsError> {
+        let plan = match self.plan_of(key).await? {
+            Judged::Done(applicable) => {
+                return Ok(ModsView {
+                    applicable,
+                    game: ModsGame::default(),
+                    mods: Vec::new(),
+                    unread: 0,
+                    truncated: false,
+                });
+            }
+            Judged::Read(plan) => plan,
+        };
+        let (rows, gathered) = self.read_volume(key, &plan).await?;
         Ok(assemble(&plan, &rows, gathered))
+    }
+
+    /// Branche la zone d'attente des dépôts (racine de composition, une seule fois) : sans elle, `check` refuse.
+    pub fn set_deposits(&self, deposits: Arc<dyn PackDeposits>) {
+        let _ = self.deposits.set(deposits);
+    }
+
+    /// `POST /services/{key}/mods/check` (HRT-257, BR-MOD-021, 022, 023) : juge des `.jar` déposés sans rien écrire dans
+    /// le service. Un dépôt refusé est retiré de la zone d'attente aussitôt ; un dépôt accepté y reste.
+    pub async fn check(
+        &self,
+        key: &ServiceKey,
+        account: &str,
+        deposits: &[String],
+    ) -> Result<ModsCheckView, ModsError> {
+        if deposits.is_empty() || deposits.len() > deposit::MAX_BATCH {
+            return Err(ModsError::BatchInvalid);
+        }
+        let ids: Vec<DepositId> = deposits
+            .iter()
+            .map(|text| DepositId::parse(text).ok_or(ModsError::DepositUnknown))
+            .collect::<Result<_, _>>()?;
+        for (i, id) in ids.iter().enumerate() {
+            if ids[..i].contains(id) {
+                return Err(ModsError::BatchInvalid);
+            }
+        }
+        let plan = match self.plan_of(key).await? {
+            Judged::Done(_) => return Err(ModsError::NotApplicable),
+            Judged::Read(plan) => plan,
+        };
+        let pool = Arc::clone(self.deposits.get().ok_or_else(|| {
+            ModsError::Storage("zone d'attente des dépôts non branchée".to_owned())
+        })?);
+        let (rows, gathered) = self.read_volume(key, &plan).await?;
+        let game = game_of(&plan, &rows, &gathered);
+        let modrinth = gathered.manifest.clone();
+        let installed: Vec<Installed> = gathered
+            .files
+            .iter()
+            .filter(|f| f.place == ModPlace::Active && !f.unread)
+            .filter_map(|f| {
+                let name = f.name.as_ref()?;
+                Some(Installed {
+                    file: name.clone(),
+                    enabled: f.enabled,
+                    identities: f
+                        .read
+                        .as_ref()
+                        .map(|c| c.identities.clone())
+                        .unwrap_or_default(),
+                    from_modrinth_pack: modrinth
+                        .as_ref()
+                        .is_some_and(|m| m.mod_files.contains(listing::active_name(name))),
+                })
+            })
+            .collect();
+        let profile = game.profile.clone();
+        let account = account.to_owned();
+        let pool2 = Arc::clone(&pool);
+        let ids2 = ids.clone();
+        let judged = tokio::task::spawn_blocking(move || {
+            judge_deposit_files(pool2.as_ref(), &account, &ids2, &profile, &installed)
+        })
+        .await
+        .map_err(|error| ModsError::Storage(error.to_string()))??;
+        // Un dépôt refusé quitte la zone d'attente aussitôt (BR-MOD-016) ; un accepté y reste.
+        let account = judged.account;
+        let mut files = Vec::with_capacity(ids.len());
+        for (id, judgement) in ids.iter().zip(judged.judgements) {
+            files.push(match judgement {
+                Ok(accepted) => ModCheckFile {
+                    deposit: id.as_str().to_owned(),
+                    outcome: if accepted.replaces.is_some() {
+                        CheckOutcome::Replace
+                    } else {
+                        CheckOutcome::Add
+                    },
+                    identity: Some(identity_view(&accepted.identity)),
+                    target_file: Some(accepted.target_file),
+                    replaces: accepted
+                        .replaces
+                        .map(|(file, version)| ModReplaces { file, version }),
+                    verdict: Some(verdict_view(&accepted.verdict, Vec::new())),
+                    refusal: None,
+                    refusal_values: None,
+                },
+                Err((refusal, identity)) => {
+                    pool.discard(id, &account);
+                    let values = match &refusal {
+                        Refusal::IncompatibleLoader { jar, server } => Some(RefusalValues {
+                            loader: Some(jar.variant_id().to_owned()),
+                            server_loader: server.map(|s| s.variant_id().to_owned()),
+                            server_minecraft: None,
+                        }),
+                        Refusal::IncompatibleMinecraft => Some(RefusalValues {
+                            loader: None,
+                            server_loader: None,
+                            server_minecraft: game.minecraft.clone(),
+                        }),
+                        _ => None,
+                    };
+                    ModCheckFile {
+                        deposit: id.as_str().to_owned(),
+                        outcome: CheckOutcome::Refused,
+                        identity: identity.as_ref().map(identity_view),
+                        target_file: None,
+                        replaces: None,
+                        verdict: None,
+                        refusal: Some(refusal.code().to_owned()),
+                        refusal_values: values,
+                    }
+                }
+            });
+        }
+        Ok(ModsCheckView { files })
+    }
+}
+
+/// Ce qu'on sait du jeu pour juger : moteur, version, et d'où elle vient.
+struct GameInfo {
+    loader: Option<JarLoader>,
+    minecraft: Option<String>,
+    minecraft_from: MinecraftFrom,
+    profile: ServerProfile,
+}
+
+fn game_of(plan: &Plan, _rows: &[OriginRow], gathered: &Gathered) -> GameInfo {
+    let manifest = gathered.manifest.as_ref();
+    let loader = loader_of_variant(&plan.variant).or_else(|| manifest.and_then(|m| m.loader));
+    let from_setting = plan
+        .version_answer
+        .as_deref()
+        .filter(|value| !value.eq_ignore_ascii_case("latest") && is_game_version(value))
+        .map(str::to_owned);
+    let (minecraft, minecraft_from) = if plan.variant == "modrinth" {
+        match manifest.and_then(|m| m.minecraft.clone()) {
+            Some(version) => (Some(version), MinecraftFrom::ModrinthManifest),
+            None => (None, MinecraftFrom::Unknown),
+        }
+    } else if let Some(version) = from_setting {
+        (Some(version), MinecraftFrom::Setting)
+    } else if let Some(version) = gathered.log_version.clone() {
+        (Some(version), MinecraftFrom::Log)
+    } else {
+        (None, MinecraftFrom::Unknown)
+    };
+    let profile = ServerProfile {
+        loader,
+        minecraft: minecraft.as_deref().and_then(GameVersion::parse),
+    };
+    GameInfo {
+        loader,
+        minecraft,
+        minecraft_from,
+        profile,
+    }
+}
+
+/// Ce que `judge_deposit_files` rend.
+struct DepositsJudged {
+    account: String,
+    judgements: Vec<deposit::Judgement>,
+}
+
+/// Ouvre TOUS les dépôts d'abord (un inconnu arrête tout, rien n'est jugé ni retiré), puis lit et juge chacun.
+fn judge_deposit_files(
+    pool: &dyn PackDeposits,
+    account: &str,
+    ids: &[DepositId],
+    profile: &ServerProfile,
+    installed: &[Installed],
+) -> Result<DepositsJudged, ModsError> {
+    let mut opened = Vec::with_capacity(ids.len());
+    for id in ids {
+        match pool.open(id, account) {
+            Ok(file) => opened.push(file),
+            Err(DepositError::NotFound) => return Err(ModsError::DepositUnknown),
+            Err(_) => return Err(ModsError::Storage("dépôt illisible".to_owned())),
+        }
+    }
+    let batch: Vec<Deposit> = opened.iter_mut().map(read_deposit).collect();
+    Ok(DepositsJudged {
+        account: account.to_owned(),
+        judgements: deposit::judge_deposits(profile, installed, &batch),
+    })
+}
+
+/// Lit un jar déposé : archive jugée entière, puis les fichiers d'identité. Aucune erreur n'est recopiée.
+fn read_deposit(file: &mut Box<dyn DepositFile>) -> Deposit {
+    let limits = jar_limits();
+    let refused = |too_large: bool| Deposit {
+        archive_refused: !too_large,
+        too_large,
+        identities: Vec::new(),
+    };
+    let inspection = match archive::inspect(file, &limits, &|| false) {
+        Ok(inspection) => inspection,
+        Err(ArchiveRefusal::FileTooLarge { .. }) => return refused(true),
+        Err(_) => return refused(false),
+    };
+    let Ok(found) = archive::read_many(file, &inspection, &IDENTITY_FILES, &limits, &|| false)
+    else {
+        return refused(false);
+    };
+    let mut files = JarFiles(
+        IDENTITY_FILES
+            .into_iter()
+            .zip(found)
+            .map(|(name, bytes)| (name, bytes.map_err(|_| ())))
+            .collect(),
+    );
+    Deposit {
+        archive_refused: false,
+        too_large: false,
+        identities: jar::identify(&mut files),
+    }
+}
+
+fn identity_view(identity: &JarIdentity) -> ModIdentityView {
+    ModIdentityView {
+        id: identity.id.as_str().to_owned(),
+        name: identity.name.clone(),
+        version: identity.version.as_ref().map(|v| v.as_str().to_owned()),
+        loader: identity.loader.variant_id().to_owned(),
+        minecraft_declared: identity.minecraft_declared && identity.minecraft.is_some(),
+        environment: environment_view(identity.environment),
     }
 }
 
@@ -264,9 +538,10 @@ fn judge_applicable(
             RelPath::parse(&flat).ok()?,
             RelPath::parse(&format!("{flat}/{}", jars.dir)).ok()?,
             RelPath::parse(&format!("{flat}/{}", jars.retired_dir)).ok()?,
+            target,
         ))
     })();
-    let Some((data_dir, mods_dir, retired_dir)) = dirs else {
+    let Some((data_dir, mods_dir, retired_dir, data_target)) = dirs else {
         return Judged::Done(Applicable::NoWay);
     };
     let pack_rel = (|| {
@@ -288,7 +563,7 @@ fn judge_applicable(
     let updates_every_start = version_answer
         .as_deref()
         .is_none_or(|value| value.eq_ignore_ascii_case("latest"));
-    Judged::Read(Plan {
+    Judged::Read(Box::new(Plan {
         variant,
         version_answer,
         updates_every_start,
@@ -296,7 +571,10 @@ fn judge_applicable(
         retired_dir,
         data_dir,
         pack_rel,
-    })
+        dir: jars.dir.clone(),
+        retired_dir_name: jars.retired_dir.clone(),
+        data_target,
+    }))
 }
 
 struct Gather {
@@ -624,35 +902,18 @@ fn verdict_view(verdict: &Verdict, needed_by: Vec<String>) -> ModVerdictView {
 /// Assemble la réponse : le jeu (moteur, version et sa source), puis chaque fichier avec son verdict et son origine.
 fn assemble(plan: &Plan, rows: &[OriginRow], gathered: Gathered) -> ModsView {
     let manifest = gathered.manifest.as_ref();
-    let loader = loader_of_variant(&plan.variant).or_else(|| manifest.and_then(|m| m.loader));
-    // La version : un Modrinth la dit dans son manifeste ; sinon le réglage (s'il n'est pas LATEST) ; sinon le journal.
-    let from_setting = plan
-        .version_answer
-        .as_deref()
-        .filter(|value| !value.eq_ignore_ascii_case("latest") && is_game_version(value))
-        .map(str::to_owned);
-    let (minecraft, minecraft_from) = if plan.variant == "modrinth" {
-        match manifest.and_then(|m| m.minecraft.clone()) {
-            Some(version) => (Some(version), MinecraftFrom::ModrinthManifest),
-            None => (None, MinecraftFrom::Unknown),
-        }
-    } else if let Some(version) = from_setting {
-        (Some(version), MinecraftFrom::Setting)
-    } else if let Some(version) = gathered.log_version.clone() {
-        (Some(version), MinecraftFrom::Log)
-    } else {
-        (None, MinecraftFrom::Unknown)
-    };
+    let GameInfo {
+        loader,
+        minecraft,
+        minecraft_from,
+        profile,
+    } = game_of(plan, rows, &gathered);
     let pack = if plan.variant == "modrinth" {
         PackKind::ModrinthPack
     } else if rows.iter().any(|row| !row.from_hearth) {
         PackKind::ServerPack
     } else {
         PackKind::None
-    };
-    let profile = ServerProfile {
-        loader,
-        minecraft: minecraft.as_deref().and_then(GameVersion::parse),
     };
     // Un fichier désactivé ou retiré garde son verdict mais ne compte ni pour les dépendances ni pour les doublons.
     let read: Vec<&Found> = gathered.files.iter().filter(|f| !f.unread).collect();
@@ -688,20 +949,7 @@ fn assemble(plan: &Plan, rows: &[OriginRow], gathered: Gathered) -> ModsView {
                 needed_by(at, &candidates, &chosen),
             )
         };
-        let active_name = found.name.as_deref().map(listing::active_name);
-        let origin = match (&found.name, active_name) {
-            (Some(_), Some(active)) => origin_view(resolve_origin(
-                &FileFacts {
-                    active_name: active,
-                    size: found.size,
-                    crc32: found.read.as_ref().and_then(|c| c.crc32),
-                    sha256: found.read.as_ref().map(|c| c.sha256.as_str()),
-                },
-                manifest,
-                rows,
-            )),
-            _ => ModOrigin::Manual,
-        };
+        let origin = origin_view(found_origin(found, manifest, rows));
         mods.push(ModItem {
             file: found.name.clone(),
             rank: found.rank,
@@ -763,4 +1011,138 @@ fn needed_by(
     }
     out.sort();
     out
+}
+
+/// L'origine d'un fichier (BR-MOD-033) : un nom illisible n'est jamais attribue.
+fn found_origin(found: &Found, manifest: Option<&ModrinthManifest>, rows: &[OriginRow]) -> Origin {
+    let Some(name) = found.name.as_deref() else {
+        return Origin::Manual;
+    };
+    resolve_origin(
+        &FileFacts {
+            active_name: listing::active_name(name),
+            size: found.size,
+            crc32: found.read.as_ref().and_then(|c| c.crc32),
+            sha256: found.read.as_ref().map(|c| c.sha256.as_str()),
+        },
+        manifest,
+        rows,
+    )
+}
+
+fn summary_of(identity: &JarIdentity) -> IdentitySummary {
+    IdentitySummary {
+        mod_id: identity.id.as_str().to_owned(),
+        name: identity.name.clone(),
+        version: identity.version.as_ref().map(|v| v.as_str().to_owned()),
+        loader: identity.loader,
+        environment: identity.environment,
+    }
+}
+
+/// Le temps que la lecture des mods d'une sauvegarde peut prendre (HRT-293).
+const SNAPSHOT_BUDGET: Duration = Duration::from_secs(60);
+
+#[async_trait::async_trait]
+impl ModsSnapshot for ModsService {
+    async fn applicable(&self, key: &ServiceKey) -> bool {
+        matches!(self.plan_of(key).await, Ok(Judged::Read(_)))
+    }
+
+    async fn read(&self, key: &ServiceKey) -> ModsReading {
+        let plan = match self.plan_of(key).await {
+            Ok(Judged::Read(plan)) => plan,
+            Ok(Judged::Done(_)) | Err(ModsError::NotAGameService) => {
+                return ModsReading::NotApplicable;
+            }
+            Err(_) => return ModsReading::Unreadable,
+        };
+        // Une lecture qui echoue ou depasse son temps ne fait JAMAIS echouer la sauvegarde.
+        let within = if self.budget < READ_BUDGET {
+            self.budget
+        } else {
+            SNAPSHOT_BUDGET
+        };
+        let read = tokio::time::timeout(
+            SNAPSHOT_BUDGET + Duration::from_secs(5),
+            self.read_volume_within(key, &plan, within),
+        )
+        .await;
+        let Ok(Ok((rows, gathered))) = read else {
+            return ModsReading::Unreadable;
+        };
+        let game = game_of(&plan, &rows, &gathered);
+        let manifest = gathered.manifest.as_ref();
+        let files = gathered
+            .files
+            .iter()
+            .filter_map(|found| {
+                let name = found.name.clone()?;
+                let identity = found.read.as_ref().and_then(|cached| {
+                    match game.loader {
+                        Some(server) => compat::choose(&cached.identities, server),
+                        None => cached.identities.first(),
+                    }
+                    .map(summary_of)
+                });
+                Some(SnapshotFile {
+                    name,
+                    retired: found.place == ModPlace::Retired,
+                    size: found.size,
+                    sha256: found.read.as_ref().map(|cached| cached.sha256.clone()),
+                    identity,
+                    origin: found_origin(found, manifest, &rows),
+                    unread: found.unread,
+                })
+            })
+            .collect();
+        ModsReading::Read(ModsRead {
+            dir: plan.dir.clone(),
+            retired_dir: plan.retired_dir_name.clone(),
+            data_target: plan.data_target.clone(),
+            snapshot: Snapshot {
+                loader: game.loader,
+                minecraft: game.minecraft.clone(),
+                files,
+            },
+        })
+    }
+
+    async fn current(&self, key: &ServiceKey) -> Option<CurrentMods> {
+        let plan = match self.plan_of(key).await {
+            Ok(Judged::Read(plan)) => plan,
+            _ => return None,
+        };
+        let (rows, gathered) = self.read_volume(key, &plan).await.ok()?;
+        let game = game_of(&plan, &rows, &gathered);
+        let mods = gathered
+            .files
+            .iter()
+            .filter(|found| !found.unread)
+            .map(|found| {
+                let place = if found.place == ModPlace::Retired {
+                    Place::Retired
+                } else if found.enabled {
+                    Place::Active
+                } else {
+                    Place::Disabled
+                };
+                CurrentMod {
+                    file_name: found.name.clone(),
+                    place,
+                    identity: found.read.as_ref().and_then(|cached| {
+                        match game.loader {
+                            Some(server) => compat::choose(&cached.identities, server),
+                            None => cached.identities.first(),
+                        }
+                        .map(summary_of)
+                    }),
+                }
+            })
+            .collect();
+        Some(CurrentMods {
+            mods,
+            unread: gathered.unread,
+        })
+    }
 }

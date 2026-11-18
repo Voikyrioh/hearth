@@ -4,10 +4,12 @@
 //! rien. Aucune erreur ne répète une clé, un nom de fichier, un chemin ni une valeur lue dans un jar.
 
 use axum::Json;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
-use hearth_proto::api::mods::ModsView;
+use hearth_proto::api::mods::{ModsCheckRequest, ModsCheckView, ModsView};
 use hearth_proto::error::ErrorCode;
 
+use super::auth::Requester;
 use super::{ApiError, AppState};
 use crate::application::mods::ModsError;
 use crate::domain::services::ServiceKey;
@@ -21,6 +23,18 @@ fn mods_error(error: ModsError) -> ApiError {
         ModsError::FolderBlocked => ApiError::new(
             ErrorCode::ModsFolderBlocked,
             "Le dossier des mods est un lien ou n'est pas un dossier : Hearth ne le lit pas.",
+        ),
+        ModsError::BatchInvalid => ApiError::new(
+            ErrorCode::ModsBatchInvalid,
+            "Le contrôle porte sur 1 à 8 dépôts, chacun une seule fois.",
+        ),
+        ModsError::DepositUnknown => ApiError::new(
+            ErrorCode::DepositUnknown,
+            "Ce dépôt n'existe pas ou n'est plus dans la zone d'attente.",
+        ),
+        ModsError::NotApplicable => ApiError::new(
+            ErrorCode::ModsNotApplicable,
+            "Le moteur de ce serveur ne charge pas de mods.",
         ),
         ModsError::Storage(message) => {
             tracing::error!(error = %message, "liste des mods en échec");
@@ -37,4 +51,28 @@ pub async fn list(
     let key = ServiceKey::parse(&key)
         .ok_or_else(|| ApiError::new(ErrorCode::ServiceNotFound, "Ce service n'existe pas."))?;
     state.mods.list(&key).await.map(Json).map_err(mods_error)
+}
+
+/// `POST /api/v1/services/{key}/mods/check` (HRT-257) : juge des `.jar` déposés par ce compte, sans rien écrire sur
+/// le service. Un dépôt refusé est retiré de la zone d'attente aussitôt.
+pub async fn check(
+    State(state): State<AppState>,
+    Requester(actor): Requester,
+    Path(key): Path<String>,
+    body: Result<Json<ModsCheckRequest>, JsonRejection>,
+) -> Result<Json<ModsCheckView>, ApiError> {
+    let key = ServiceKey::parse(&key)
+        .ok_or_else(|| ApiError::new(ErrorCode::ServiceNotFound, "Ce service n'existe pas."))?;
+    let Json(request) = body?;
+    let account = actor
+        .account
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    state
+        .mods
+        .check(&key, &account, &request.deposits)
+        .await
+        .map(Json)
+        .map_err(mods_error)
 }

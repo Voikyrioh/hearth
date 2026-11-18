@@ -10,6 +10,7 @@ use time::OffsetDateTime;
 
 use super::StoreError;
 use crate::domain::backups::BackupId;
+use crate::domain::mods::backup_list::{RecordedSet, SetState};
 use crate::domain::sealed::SealedBlob;
 use crate::domain::services::key::ServiceKey;
 
@@ -72,6 +73,25 @@ pub struct Published {
     pub skipped: u32,
     pub manifest_sha256: String,
     pub archive_sha256: String,
+    /// La liste des mods de cette sauvegarde (HRT-293, BR-MOD-034), écrite dans la MÊME transaction que le passage à
+    /// `ready` : une sauvegarde prête a sa liste, une sauvegarde interrompue n'en a pas. `None` : service sans mods.
+    pub mods: Option<ModsRecord>,
+}
+
+/// La liste des mods d'une sauvegarde, avec sa date d'enregistrement.
+#[derive(Debug, Clone)]
+pub struct ModsRecord {
+    pub set: RecordedSet,
+    pub at: OffsetDateTime,
+}
+
+/// Le résumé d'une liste, sans ses entrées (la liste des sauvegardes le joint).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModsSummaryRow {
+    pub state: SetState,
+    pub active: u32,
+    pub disabled: u32,
+    pub retired: u32,
 }
 
 /// Ce que l'on sait des fichiers d'une ligne AVANT de les écrire : de quoi les retrouver (et eux seuls) si
@@ -112,8 +132,17 @@ pub trait BackupRepo: Send + Sync {
     /// Les sauvegardes publiées d'un service, les plus récentes d'abord. Jamais une ligne `writing`.
     async fn list(&self, key: &ServiceKey) -> Result<Vec<BackupRow>, StoreError>;
 
-    /// Retire une ligne. `true` : elle existait.
+    /// Retire une ligne, et sa liste de mods dans la même transaction. `true` : elle existait.
     async fn delete(&self, id: &BackupId) -> Result<bool, StoreError>;
+
+    /// La liste des mods d'une sauvegarde, avec ses entrées. `None` : aucune liste (sauvegarde d'avant la 0.2.2).
+    async fn mods_of(&self, id: &BackupId) -> Result<Option<ModsRecord>, StoreError>;
+
+    /// Les résumés des listes de mods des sauvegardes d'un service, par identifiant de sauvegarde (sans les entrées).
+    async fn mods_summaries(
+        &self,
+        key: &ServiceKey,
+    ) -> Result<std::collections::HashMap<String, ModsSummaryRow>, StoreError>;
 
     /// Les lignes `writing` : des archives que l'agent n'a pas fini d'écrire (démarrage après un arrêt).
     async fn writing(&self) -> Result<Vec<BackupRow>, StoreError>;

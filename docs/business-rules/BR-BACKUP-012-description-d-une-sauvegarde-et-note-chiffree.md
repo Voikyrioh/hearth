@@ -28,6 +28,8 @@ La note : 80 caractères au plus, sans caractère de contrôle, scellée par Cha
 ## Règles liées
 - BR-BACKUP-014
 - BR-BACKUP-032
+- BR-MOD-034 (la liste des mods de la sauvegarde, tenue à côté de la ligne du registre ; `BackupView.mods` en est le résumé)
 
 ## Historique
 - 2026-11-14 : création (HRT-97, côté agent).
+- 2026-11-18 : `BackupView` gagne le champ facultatif `mods` pour un serveur à mods (HRT-293).

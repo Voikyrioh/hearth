@@ -215,12 +215,15 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::SettingsFileUnreadable // fichier de réglages que le format ne sait pas découper
         | ErrorCode::PackRefused // pack déposé refusé (HRT-124)
         | ErrorCode::ModsFolderBlocked // dossier des mods qui est un lien (HRT-256)
+        | ErrorCode::ModsBatchInvalid // lot de mods vide, trop gros ou répété (HRT-257)
+        | ErrorCode::ModsNotApplicable // moteur sans mods (HRT-257)
         | ErrorCode::SettingRefused => Some(Outcome::Failed(Reason::Validation)), // valeur de réglage refusée
         // Ressource inexistante.
         ErrorCode::ServiceNotFound // service inconnu
         | ErrorCode::NotAGameService // service qui n'est pas un serveur de jeu créé depuis une fiche
         | ErrorCode::OperationNotFound // opération inconnue, ou sur un service que le compte ne voit pas
         | ErrorCode::PackUnknown // pack déposé inconnu (HRT-124)
+        | ErrorCode::DepositUnknown // dépôt de mod inconnu (HRT-257)
         | ErrorCode::IllustrationAbsent // fiche listée sans illustration (HRT-238, lecture ouverte, jamais consignée)
         | ErrorCode::BackupNotFound => Some(Outcome::Failed(Reason::NotFound)), // sauvegarde inconnue
         // Installer depuis une fiche (HRT-101, BR-FICHE-032) : une cause typée par refus.

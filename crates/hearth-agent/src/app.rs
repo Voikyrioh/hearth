@@ -258,6 +258,8 @@ pub struct BackupParts {
     /// La racine des sauvegardes. `None` : la vraie (`[backups] root`, par défaut `/var/lib/hearth-backups`) ; les
     /// tests y posent un faux en mémoire.
     pub files: Option<Arc<dyn BackupFiles>>,
+    /// La lecture des mods d'un service (HRT-293). `None` : celle de l'agent ; les tests y posent un faux.
+    pub mods: Option<Arc<dyn crate::application::ports::ModsSnapshot>>,
 }
 
 impl BackupParts {
@@ -265,6 +267,7 @@ impl BackupParts {
         Self {
             timings: BackupTimings::production(),
             files: None,
+            mods: None,
         }
     }
 }
@@ -1138,6 +1141,7 @@ pub async fn start_engined(
             timings: engine.backups.timings,
         },
     );
+    backups.set_mods_snapshot(engine.backups.mods.clone().unwrap_or_else(|| mods.clone()));
     backups.recover_at_startup().await;
     // Reprendre un monde existant (HRT-105) : les dossiers ouverts aux services, tels que la configuration les écrit.
     let world_import = WorldImport::new(
@@ -1210,6 +1214,7 @@ pub async fn start_engined(
                 tokio::runtime::Handle::current(),
             ))
         });
+    mods.set_deposits(pack_deposits.clone());
     deployments.set_pack_intake(Arc::new(PackIntake::new(pack_deposits)));
     deployments.set_mod_origins(Arc::new(
         crate::infrastructure::sqlite::SqliteModOrigins::new(database.pool().clone()),

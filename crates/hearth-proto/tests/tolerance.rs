@@ -39,7 +39,8 @@ use hearth_proto::api::game_settings::{
 };
 use hearth_proto::api::metrics::HistoryWindow;
 use hearth_proto::api::mods::{
-    Applicable, EnvironmentView, MinecraftFrom, ModOrigin, ModPlace, PackKind, VerdictCode,
+    Applicable, BackupModPlace, ChangeKindView, CheckOutcome, EnvironmentView, MinecraftFrom,
+    ModOrigin, ModPlace, ModsListState, PackKind, VerdictCode,
 };
 use hearth_proto::api::operations::OperationStatus as HttpOperationStatus;
 use hearth_proto::api::packs::PackGenreWire;
@@ -208,6 +209,10 @@ fn enums() -> Vec<Entry> {
         entry!("api/catalog.rs::QuestionKind", Tolerant, QuestionKind),
         entry!("api/catalog.rs::WorldSavedView", Tolerant, WorldSavedView),
         entry!("api/mods.rs::Applicable", Tolerant, Applicable),
+        entry!("api/mods.rs::BackupModPlace", Tolerant, BackupModPlace),
+        entry!("api/mods.rs::ChangeKindView", Tolerant, ChangeKindView),
+        entry!("api/mods.rs::ModsListState", Tolerant, ModsListState),
+        entry!("api/mods.rs::CheckOutcome", Tolerant, CheckOutcome),
         entry!("api/mods.rs::EnvironmentView", Tolerant, EnvironmentView),
         entry!("api/mods.rs::MinecraftFrom", Tolerant, MinecraftFrom),
         entry!("api/mods.rs::ModOrigin", Tolerant, ModOrigin),

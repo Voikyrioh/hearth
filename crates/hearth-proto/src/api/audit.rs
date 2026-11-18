@@ -102,6 +102,8 @@ pub mod action {
     pub const SERVICE_WORLD_IMPORT: &str = "service.world.import";
     /// Les réglages d'un serveur de jeu sont enregistrés (HRT-108).
     pub const SERVICE_GAME_SETTINGS: &str = "service.game.settings";
+    /// Un lot de mods est appliqué à un serveur de jeu (HRT-257, HRT-258).
+    pub const SERVICE_MODS: &str = "service.mods";
     /// Un compte qui a le droit de gérer les services révèle le mot de passe d'un serveur de jeu (HRT-103,
     /// BR-JEU-026) : qui, quel service, jamais la valeur. Un refus faute de droit est consigné sous le même code.
     pub const SERVICE_GAME_PASSWORD_REVEAL: &str = "service.game.password.reveal";
@@ -123,7 +125,7 @@ pub mod action {
     pub const CATALOG_FICHE_REFUSED: &str = "catalog.fiche.refused";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 52] = [
+    pub const ALL: [&str; 53] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -170,6 +172,7 @@ pub mod action {
         SERVICE_FILE_WRITE,
         SERVICE_WORLD_IMPORT,
         SERVICE_GAME_SETTINGS,
+        SERVICE_MODS,
         SERVICE_GAME_PASSWORD_REVEAL,
         OPERATION_CANCEL,
         OPERATION_DECIDE,

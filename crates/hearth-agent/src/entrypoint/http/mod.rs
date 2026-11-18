@@ -171,6 +171,8 @@ const READ_ONLY_POSTS: &[&str] = &[
     // Lire un pack déposé avant de l'installer (HRT-124) : rien n'est rangé, rien n'est écrit.
     "/deployments/pack-check",
     "/services/{key}/settings/analyze",
+    // Contrôler des jars déposés (HRT-257) : rien n'est écrit sur le service ; un refus retire le dépôt de la zone d'attente.
+    "/services/{key}/mods/check",
     // Les sauvegardes (HRT-97) : l'estimation de la fenêtre de création n'écrit rien ; la vérification n'écrit que
     // l'état d'intégrité d'une sauvegarde.
     "/services/{key}/backups/preview",
@@ -507,6 +509,17 @@ pub static ENDPOINTS: &[Endpoint] = &[
         audit: None,
         route: || get(backups::list),
     },
+    // La liste des mods d'une sauvegarde et sa comparaison avec les mods actuels (HRT-293, BR-MOD-034 a 036) : le meme
+    // acces que la liste des sauvegardes, lecture seule, jamais journalisee.
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/backups/{id}/mods",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(backups::mods),
+    },
     Endpoint {
         method: Method::POST,
         path: "/services/{key}/backups/preview",
@@ -710,6 +723,17 @@ pub static ENDPOINTS: &[Endpoint] = &[
         tracked: false,
         audit: None,
         route: || get(mods::list),
+    },
+    // Contrôler des mods déposés (HRT-257, BR-MOD-021 à 023) : une consultation du droit de gérer les services ; seul
+    // un refus faute de droit est consigné (`service.mods`).
+    Endpoint {
+        method: Method::POST,
+        path: "/services/{key}/mods/check",
+        access: Access::Services,
+        version_checked: true,
+        tracked: false,
+        audit: Some(AuditAction::ServiceMods),
+        route: || post(mods::check),
     },
     // Le mot de passe du serveur de jeu (HRT-103, BR-JEU-025, BR-JEU-026) : réservé au droit « gérer les services »
     // (niveau `Services`), lu dans la description chiffrée, jamais dans le moteur ni le fichier. Comme la
@@ -1039,6 +1063,7 @@ mod tests {
                         | "/deployments/check"
                         | "/deployments/pack-check"
                         | "/services/{key}/settings/analyze"
+                        | "/services/{key}/mods/check"
                         | "/services/{key}/backups/preview"
                         | "/backups/{id}/verify"
                         | "/catalog/{id}/worlds/inspect"
@@ -1212,6 +1237,7 @@ mod tests {
         ("GET", "/services/{key}/game", OpenRead),
         // Les mods d'un serveur installé (HRT-256) : une consultation de tout compte authentifié.
         ("GET", "/services/{key}/mods", OpenRead),
+        ("POST", "/services/{key}/mods/check", ServiceCheck),
         // Le mot de passe du serveur de jeu (HRT-103) : le droit est exigé par le niveau, la révélation est consignée.
         ("GET", "/services/{key}/game-secret", Service),
         // Les réglages d'un serveur de jeu (HRT-108) : le droit est exigé par le niveau ; l'analyse d'un texte collé
@@ -1241,6 +1267,7 @@ mod tests {
         // Les sauvegardes (HRT-97) : la liste est ouverte à tout compte ; l'estimation et la vérification sont des
         // consultations du droit ; créer, supprimer et régler sont des actes confirmés (`0x19`, `0x1B`, `0x1C`).
         ("GET", "/services/{key}/backups", OpenRead),
+        ("GET", "/services/{key}/backups/{id}/mods", OpenRead),
         ("POST", "/services/{key}/backups/preview", ServiceCheck),
         ("POST", "/services/{key}/backups", Service),
         ("POST", "/backups/{id}/verify", ServiceCheck),

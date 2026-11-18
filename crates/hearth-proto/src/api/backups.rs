@@ -157,6 +157,9 @@ pub struct BackupView {
     /// Date de la dernière vérification réussie, RFC 3339 en UTC.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verified_at: Option<String>,
+    /// Le résumé de la liste des mods de cette sauvegarde (HRT-293) : absent pour un service sans mods.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mods: Option<super::mods::BackupModsSummary>,
 }
 
 /// Réponse de `GET /services/{key}/backups`.

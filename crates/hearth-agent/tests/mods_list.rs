@@ -467,3 +467,138 @@ async fn a_server_installed_before_the_rows_existed_reads_its_stored_pack_once_t
             .count();
     assert_eq!((opened_before, opened_after), (1, 1));
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Contrôler des dépôts (HRT-257)
+// ---------------------------------------------------------------------------------------------------------------
+
+use hearth_proto::api::mods::CheckOutcome;
+use support::fake_pack_deposits::FakePackDeposits;
+
+fn with_deposits(b: &Bench) -> (ModsService, Arc<FakePackDeposits>) {
+    let deposits = Arc::new(FakePackDeposits::new(b.fs.clone()));
+    let service = b.service();
+    service.set_deposits(deposits.clone());
+    (service, deposits)
+}
+
+fn ids(list: &[&str]) -> Vec<String> {
+    list.iter().map(|s| (*s).to_owned()).collect()
+}
+
+#[tokio::test]
+async fn a_check_adds_replaces_or_refuses_each_deposit_and_removes_the_refused_ones_only() {
+    let b = bench(20, "fabric", Some("1.20.1")).await;
+    b.put(
+        "mods/lithium-0.11.1.jar",
+        &fabric("lithium", "0.11.1", "~1.20.1", ""),
+    );
+    let (service, deposits) = with_deposits(&b);
+    deposits.put("ada", "D1", fabric("lithium", "0.11.2", "~1.20.1", ""));
+    deposits.put("ada", "D2", forge("forgey"));
+    deposits.put("ada", "D3", fabric("sodium", "0.5.3", "~1.20.1", ""));
+    deposits.put("ada", "D4", b"ceci n'est pas une archive".to_vec());
+    deposits.put("ada", "D5", fabric("old", "1.0.0", "~1.16", ""));
+    let before = b.fs.paths(&b.key);
+    let view = service
+        .check(&b.key, "ada", &ids(&["D1", "D2", "D3", "D4", "D5"]))
+        .await
+        .unwrap();
+    let f = &view.files;
+    assert_eq!(f[0].outcome, CheckOutcome::Replace);
+    assert_eq!(f[0].target_file.as_deref(), Some("lithium-0.11.2.jar"));
+    assert_eq!(f[0].replaces.as_ref().unwrap().file, "lithium-0.11.1.jar");
+    assert_eq!(
+        f[0].replaces.as_ref().unwrap().version.as_deref(),
+        Some("0.11.1")
+    );
+    assert_eq!(f[1].outcome, CheckOutcome::Refused);
+    assert_eq!(f[1].refusal.as_deref(), Some("MOD_INCOMPATIBLE_LOADER"));
+    let values = f[1].refusal_values.as_ref().unwrap();
+    assert_eq!(values.loader.as_deref(), Some("forge"));
+    assert_eq!(values.server_loader.as_deref(), Some("fabric"));
+    assert_eq!(f[2].outcome, CheckOutcome::Add);
+    assert_eq!(f[2].target_file.as_deref(), Some("sodium-0.5.3.jar"));
+    assert_eq!(f[3].refusal.as_deref(), Some("MOD_ARCHIVE_REFUSED"));
+    assert_eq!(f[4].refusal.as_deref(), Some("MOD_INCOMPATIBLE_MINECRAFT"));
+    assert_eq!(
+        f[4].refusal_values
+            .as_ref()
+            .unwrap()
+            .server_minecraft
+            .as_deref(),
+        Some("1.20.1")
+    );
+    // Les refusés quittent la zone d'attente, les acceptés y restent.
+    assert!(deposits.has("ada", "D1") && deposits.has("ada", "D3"));
+    assert!(!deposits.has("ada", "D2") && !deposits.has("ada", "D4") && !deposits.has("ada", "D5"));
+    // Rien n'est écrit sur le service.
+    assert_eq!(b.fs.paths(&b.key), before);
+}
+
+#[tokio::test]
+async fn a_check_judges_the_same_version_and_the_batch_duplicates() {
+    let b = bench(21, "fabric", Some("1.20.1")).await;
+    b.put(
+        "mods/lithium-0.11.2.jar",
+        &fabric("lithium", "0.11.2", "~1.20.1", ""),
+    );
+    let (service, deposits) = with_deposits(&b);
+    deposits.put("ada", "S1", fabric("lithium", "0.11.2", "~1.20.1", ""));
+    deposits.put("ada", "T1", fabric("twin", "1.0.0", "~1.20.1", ""));
+    deposits.put("ada", "T2", fabric("twin", "2.0.0", "~1.20.1", ""));
+    let view = service
+        .check(&b.key, "ada", &ids(&["S1", "T1", "T2"]))
+        .await
+        .unwrap();
+    assert_eq!(view.files[0].refusal.as_deref(), Some("MOD_SAME_VERSION"));
+    assert_eq!(
+        view.files[1].refusal.as_deref(),
+        Some("MOD_DUPLICATE_IN_BATCH")
+    );
+    assert_eq!(
+        view.files[2].refusal.as_deref(),
+        Some("MOD_DUPLICATE_IN_BATCH")
+    );
+}
+
+#[tokio::test]
+async fn a_check_refuses_a_bad_batch_a_foreign_deposit_and_an_engine_without_mods() {
+    let b = bench(22, "fabric", Some("1.20.1")).await;
+    let (service, deposits) = with_deposits(&b);
+    deposits.put("ada", "A1", fabric("a", "1.0.0", "~1.20.1", ""));
+    let key = &b.key;
+    assert!(matches!(
+        service.check(key, "ada", &[]).await,
+        Err(ModsError::BatchInvalid)
+    ));
+    let nine: Vec<String> = (0..9).map(|n| format!("X{n}")).collect();
+    assert!(matches!(
+        service.check(key, "ada", &nine).await,
+        Err(ModsError::BatchInvalid)
+    ));
+    assert!(matches!(
+        service.check(key, "ada", &ids(&["A1", "A1"])).await,
+        Err(ModsError::BatchInvalid)
+    ));
+    // Le dépôt d'un autre compte est inconnu, et rien n'est retiré pour autant.
+    assert!(matches!(
+        service.check(key, "bob", &ids(&["A1"])).await,
+        Err(ModsError::DepositUnknown)
+    ));
+    assert!(deposits.has("ada", "A1"));
+    // Un lot dont un dépôt est inconnu ne juge ni ne retire rien.
+    deposits.put("ada", "BAD", b"x".to_vec());
+    assert!(matches!(
+        service.check(key, "ada", &ids(&["BAD", "NOPE"])).await,
+        Err(ModsError::DepositUnknown)
+    ));
+    assert!(deposits.has("ada", "BAD"));
+    // Vanilla : pas de mods.
+    let v = bench(23, "vanilla", Some("1.20.1")).await;
+    let (service, _) = with_deposits(&v);
+    assert!(matches!(
+        service.check(&v.key, "ada", &ids(&["A1"])).await,
+        Err(ModsError::NotApplicable)
+    ));
+}

@@ -30,6 +30,7 @@ mod known_address_repo;
 mod login_attempt_repo;
 mod machine_info;
 mod mod_origins;
+mod mods_snapshot;
 mod monotonic_clock;
 mod network;
 mod op_journal;
@@ -72,7 +73,9 @@ pub use backup_files::{
     BackupFiles, BackupFsError, BackupSink, DiskSpace, Expected, FileIdent, FileStamp,
     Removed as BackupRemoved,
 };
-pub use backup_repo::{BackupRepo, BackupRow, NewBackup, Published, Publishing};
+pub use backup_repo::{
+    BackupRepo, BackupRow, ModsRecord, ModsSummaryRow, NewBackup, Published, Publishing,
+};
 pub use boot_info::BootInfo;
 pub use clock::Clock;
 pub use container_engine::{
@@ -97,6 +100,7 @@ pub use known_address_repo::{KnownAddressRepo, KnownAddressTx};
 pub use login_attempt_repo::{LoginAttemptRepo, LoginAttemptTx};
 pub use machine_info::MachineInfo;
 pub use mod_origins::{MAX_ORIGIN_ROWS, ModOrigins};
+pub use mods_snapshot::{CurrentMods, ModsRead, ModsReading, ModsSnapshot};
 pub use monotonic_clock::MonotonicClock;
 pub use network::NetworkAddresses;
 pub use op_journal::{
