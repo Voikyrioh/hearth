@@ -137,6 +137,14 @@ impl From<StoreError> for OpError {
     }
 }
 
+/// Les fichiers qu'une opération `mods` a posés et qui sont encore là : leurs origines `hearth` s'écrivent avec la
+/// clôture de l'opération (HRT-258).
+#[derive(Debug, Clone)]
+pub struct PostedMods {
+    pub service: ServiceKey,
+    pub files: Vec<crate::application::ports::HearthFile>,
+}
+
 /// Une opération à accepter.
 pub struct AcceptRequest {
     pub op_key: String,
@@ -706,17 +714,31 @@ impl ServiceOps {
         cause: Option<Cause>,
         draft: Option<AuditDraft>,
     ) -> Result<(), OpError> {
+        self.finish_with_origins(id, to, cause, draft, None).await
+    }
+
+    /// Comme `finish_with`, avec les origines `hearth` des mods posés par une opération `mods`, écrites dans la MÊME
+    /// transaction (HRT-258, BR-MOD-033) : l'issue, son entrée du journal et les origines passent ensemble ou pas du
+    /// tout. Si la clôture échoue, la seconde tentative n'écrit ni entrée ni origine.
+    pub async fn finish_with_origins(
+        &self,
+        id: &str,
+        to: OpStatus,
+        cause: Option<Cause>,
+        draft: Option<AuditDraft>,
+        origins: Option<&PostedMods>,
+    ) -> Result<(), OpError> {
         if !to.is_terminal() {
             return Err(OpError::IllegalTransition);
         }
-        match self.close(id, to, cause, draft.as_ref()).await {
-            Err(OpError::Storage(error)) if draft.is_some() => {
+        match self.close(id, to, cause, draft.as_ref(), origins).await {
+            Err(OpError::Storage(error)) if draft.is_some() || origins.is_some() => {
                 tracing::error!(
                     %error,
                     operation = id,
                     "clôture en échec (entrée du journal d'activité ou transition) : nouvelle tentative sans entrée"
                 );
-                self.close(id, to, cause, None).await
+                self.close(id, to, cause, None, None).await
             }
             other => other,
         }
@@ -729,6 +751,7 @@ impl ServiceOps {
         to: OpStatus,
         cause: Option<Cause>,
         draft: Option<&AuditDraft>,
+        origins: Option<&PostedMods>,
     ) -> Result<(), OpError> {
         // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC : la porte du service, tenue jusqu'à la fin de la publication.
         let service = self
@@ -754,6 +777,13 @@ impl ServiceOps {
         let mut pending = Pending::default();
         if let Some(draft) = draft {
             pending.record(&mut *tx, draft.event(now)).await?;
+        }
+        if let Some(posted) = origins
+            && !posted.files.is_empty()
+        {
+            tx.mod_origins()
+                .record_hearth(&posted.service, &posted.files, now)
+                .await?;
         }
         tx.commit().await?;
         pending.publish(&self.trail);

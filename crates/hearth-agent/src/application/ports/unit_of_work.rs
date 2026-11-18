@@ -2,7 +2,7 @@ use async_trait::async_trait;
 
 use super::{
     AccountTx, AdoptionTx, AttackModeTx, AuditTx, DeviceTx, KnownAddressTx, LoginAttemptTx,
-    OperationTx, ServiceOpTx, ServicesRightTx, SessionTx, StoreError,
+    ModOriginsTx, OperationTx, ServiceOpTx, ServicesRightTx, SessionTx, StoreError,
 };
 
 /// Point d'entrée des écritures. Le magasin est neutre : il ne porte aucun sujet (comptes,
@@ -49,6 +49,9 @@ pub trait UnitOfWork: Send {
     fn operations(&mut self) -> &mut dyn OperationTx;
 
     fn audit(&mut self) -> &mut dyn AuditTx;
+
+    /// Les origines des mods posés par une opération `mods` (HRT-258) : écrites avec sa clôture.
+    fn mod_origins(&mut self) -> &mut dyn ModOriginsTx;
 
     async fn commit(self: Box<Self>) -> Result<(), StoreError>;
 }

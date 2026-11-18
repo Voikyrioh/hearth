@@ -16,6 +16,7 @@ mod audit;
 mod auth;
 mod backups;
 mod catalog;
+mod console;
 mod deployments;
 mod devices;
 mod error;
@@ -118,6 +119,8 @@ pub struct AppState {
     pub game_settings: Arc<GameSettings>,
     /// Les mods d'un serveur de jeu installé : la liste lue dans le volume (HRT-256, ADR-0062).
     pub mods: Arc<crate::application::mods::ModsService>,
+    /// La console d'un serveur de jeu et les joueurs connectés (HRT-268, ADR-0067).
+    pub console: Arc<crate::application::console::ConsoleService>,
     pub stream: StreamContext,
     /// L'effacement physique des anciennes empreintes de requêtes est en attente (ADR-0034) : dit aux
     /// administrateurs par `GET /security`, sans rien de sensible.
@@ -724,6 +727,48 @@ pub static ENDPOINTS: &[Endpoint] = &[
         audit: None,
         route: || get(mods::list),
     },
+    // Appliquer un lot de mods (HRT-258, BR-MOD-025 à 027, 031) : acte `ModsApply` `0x20`, jamais couvert par l'élévation,
+    // droit « gérer les services », asynchrone (`202`). La réussite est écrite à la fin de l'opération (`service.mods`).
+    Endpoint {
+        method: Method::POST,
+        path: "/services/{key}/mods/apply",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceMods),
+        route: || post(mods::apply),
+    },
+    // La console d'un serveur de jeu (HRT-268, ADR-0067, BR-CONSOLE-002, 004 à 009, 011) : décrire et lire les joueurs
+    // sont ouverts à tout compte authentifié, sans effet ni journal ; envoyer une commande est l'acte `ConsoleCommand`
+    // `0x30` (libre : grille du pilotage ; sensible : mot de passe à chaque fois), droit « gérer les services » ; le
+    // refus faute de droit et chaque envoi sont consignés (`service.console`), jamais le texte ni la réponse.
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/console",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(console::describe),
+    },
+    Endpoint {
+        method: Method::POST,
+        path: "/services/{key}/console",
+        access: Access::Services,
+        version_checked: true,
+        tracked: true,
+        audit: Some(AuditAction::ServiceConsole),
+        route: || post(console::send),
+    },
+    Endpoint {
+        method: Method::GET,
+        path: "/services/{key}/players",
+        access: Access::Authenticated,
+        version_checked: true,
+        tracked: false,
+        audit: None,
+        route: || get(console::players),
+    },
     // Contrôler des mods déposés (HRT-257, BR-MOD-021 à 023) : une consultation du droit de gérer les services ; seul
     // un refus faute de droit est consigné (`service.mods`).
     Endpoint {
@@ -1238,6 +1283,13 @@ mod tests {
         // Les mods d'un serveur installé (HRT-256) : une consultation de tout compte authentifié.
         ("GET", "/services/{key}/mods", OpenRead),
         ("POST", "/services/{key}/mods/check", ServiceCheck),
+        // Appliquer un lot de mods (HRT-258) : un acte confirmé (`0x20`), jamais couvert par l'élévation.
+        ("POST", "/services/{key}/mods/apply", Service),
+        // La console d'un serveur de jeu (HRT-268) : décrire et lire les joueurs, ouverts à tout compte authentifié ;
+        // envoyer une commande est un acte confirmé (`0x30`, mot de passe selon la classe).
+        ("GET", "/services/{key}/console", OpenRead),
+        ("POST", "/services/{key}/console", Service),
+        ("GET", "/services/{key}/players", OpenRead),
         // Le mot de passe du serveur de jeu (HRT-103) : le droit est exigé par le niveau, la révélation est consignée.
         ("GET", "/services/{key}/game-secret", Service),
         // Les réglages d'un serveur de jeu (HRT-108) : le droit est exigé par le niveau ; l'analyse d'un texte collé
@@ -1479,6 +1531,8 @@ mod tests {
                 ("POST", "/operations/services/{id}/decision"),
                 ("POST", "/services/adopt"),
                 ("POST", "/services/{key}/backups"),
+                ("POST", "/services/{key}/console"),
+                ("POST", "/services/{key}/mods/apply"),
                 ("POST", "/services/{key}/release"),
                 ("POST", "/services/{key}/restart"),
                 ("POST", "/services/{key}/start"),

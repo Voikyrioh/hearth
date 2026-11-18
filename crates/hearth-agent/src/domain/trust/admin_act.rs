@@ -237,6 +237,33 @@ mod tests {
                 },
                 true,
             ),
+            // Une commande de console libre est couverte comme un acte de pilotage ; une commande sensible ne l'est jamais
+            // (HRT-268, BR-CONSOLE-005).
+            (
+                AdminAct::ConsoleCommand {
+                    target: "c_a".into(),
+                    digest: [0; 32],
+                    class: 1,
+                },
+                true,
+            ),
+            (
+                AdminAct::ConsoleCommand {
+                    target: "c_a".into(),
+                    digest: [0; 32],
+                    class: 2,
+                },
+                false,
+            ),
+            // Un lot de mods n'est JAMAIS couvert par l'élévation (HRT-258, BR-MOD-031).
+            (
+                AdminAct::ModsApply {
+                    target: "c_a".into(),
+                    count: 1,
+                    digest: [0; 32],
+                },
+                false,
+            ),
         ]
     }
 

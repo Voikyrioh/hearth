@@ -122,7 +122,8 @@ pub trait DecisionEffects: Send + Sync {
 }
 
 pub struct ServiceOpAccess {
-    effects: std::sync::OnceLock<Arc<dyn DecisionEffects>>,
+    /// Un exécuteur par genre d'opération (modification d'un service, lot de mods) : chacun ignore les autres genres.
+    effects: std::sync::Mutex<Vec<Arc<dyn DecisionEffects>>>,
     ops: Arc<ServiceOps>,
     registry: Arc<ServicesRegistry>,
     store: Arc<dyn Store>,
@@ -139,7 +140,7 @@ impl ServiceOpAccess {
         trail: Arc<AuditTrail>,
     ) -> Self {
         Self {
-            effects: std::sync::OnceLock::new(),
+            effects: std::sync::Mutex::new(Vec::new()),
             ops,
             registry,
             store,
@@ -150,9 +151,10 @@ impl ServiceOpAccess {
 
     /// Branche l'exécuteur des décisions (une seule fois, à la composition).
     pub fn set_effects(&self, effects: Arc<dyn DecisionEffects>) {
-        if self.effects.set(effects).is_err() {
-            tracing::warn!("exécuteur des décisions déjà branché");
-        }
+        self.effects
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(effects);
     }
 
     pub fn ops(&self) -> &Arc<ServiceOps> {
@@ -373,10 +375,16 @@ impl ServiceOpAccess {
         // décision, hors de la requête (le retour peut durer), jamais rejoués.
         if matches!(choice, Choice::Revert | Choice::Keep)
             && before.record.status == OpStatus::NeedsAttention
-            && let Some(effects) = self.effects.get()
         {
-            let (effects, done) = (Arc::clone(effects), snapshot.clone());
-            tokio::spawn(async move { effects.decided(done, choice).await });
+            let all: Vec<Arc<dyn DecisionEffects>> = self
+                .effects
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            for effects in all {
+                let done = snapshot.clone();
+                tokio::spawn(async move { effects.decided(done, choice).await });
+            }
         }
         Ok(snapshot)
     }

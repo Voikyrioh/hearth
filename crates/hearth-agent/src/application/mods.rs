@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use hearth_proto::api::mods::{
@@ -54,6 +54,10 @@ const READ_BUDGET: Duration = Duration::from_secs(20);
 const MAX_FILES_PER_DIR: usize = 1_024;
 /// Le cache d'identités en mémoire : au plus ce nombre de jars.
 const CACHE_CAP: usize = 4_096;
+#[path = "mods_apply.rs"]
+mod apply;
+pub use apply::{ApplyDeps, ApplyError, ApplyTimings};
+
 const MANIFEST_FILE: &str = ".modrinth-modpack-manifest.json";
 
 #[derive(Debug, Error)]
@@ -120,7 +124,19 @@ pub struct ModsService {
     pack_reread: StdMutex<HashSet<String>>,
     /// La zone d'attente des dépôts, pour contrôler des jars (HRT-257) ; posée par la racine de composition.
     deposits: std::sync::OnceLock<Arc<dyn PackDeposits>>,
+    /// Ce que l'application d'un lot demande (HRT-258) ; posé par la racine de composition.
+    apply_deps: std::sync::OnceLock<ApplyDeps>,
+    /// Les dernières lignes du jeu d'un lot qui n'a pas démarré, avec la cause reconnue : 24 heures en mémoire seulement
+    /// (HRT-259, BR-MOD-027).
+    tails: StdMutex<HashMap<String, KeptTail>>,
     budget: Duration,
+}
+
+/// Une queue de journal gardée pour une opération `mods` qui a dû revenir en arrière.
+struct KeptTail {
+    at: std::time::Instant,
+    lines: Vec<String>,
+    reason: Option<crate::domain::mods::failure::FailureReason>,
 }
 
 /// Ce que la fiche et la description disent du serveur, avant de toucher au volume.
@@ -177,8 +193,59 @@ impl ModsService {
             reading: StdMutex::new(HashMap::new()),
             pack_reread: StdMutex::new(HashSet::new()),
             deposits: std::sync::OnceLock::new(),
+            apply_deps: std::sync::OnceLock::new(),
+            tails: StdMutex::new(HashMap::new()),
             budget: READ_BUDGET,
         }
+    }
+
+    /// Garde la queue du jeu d'une opération (20 lignes au plus, 24 heures, 64 opérations au plus) avec sa cause.
+    fn keep_tail(
+        &self,
+        operation: &str,
+        lines: Vec<String>,
+        reason: Option<crate::domain::mods::failure::FailureReason>,
+    ) {
+        const KEEP: Duration = Duration::from_secs(24 * 3600);
+        const MAX: usize = 64;
+        let now = std::time::Instant::now();
+        let mut kept = self.tails.lock().unwrap_or_else(PoisonError::into_inner);
+        kept.retain(|_, tail| now.saturating_duration_since(tail.at) < KEEP);
+        if kept.len() >= MAX
+            && let Some(oldest) = kept
+                .iter()
+                .min_by_key(|(_, tail)| tail.at)
+                .map(|(id, _)| id.clone())
+        {
+            kept.remove(&oldest);
+        }
+        kept.insert(
+            operation.to_owned(),
+            KeptTail {
+                at: now,
+                lines,
+                reason,
+            },
+        );
+    }
+
+    /// `GET /operations/services/{id}/tail` pour une opération `mods` : les dernières lignes du jeu qui n'a pas démarré
+    /// avec la cause reconnue (HRT-259). `None` : aucune, ou plus de 24 heures.
+    pub fn tail(
+        &self,
+        operation: &str,
+    ) -> Option<hearth_proto::api::service_update::OperationTail> {
+        let now = std::time::Instant::now();
+        let mut kept = self.tails.lock().unwrap_or_else(PoisonError::into_inner);
+        kept.retain(|_, tail| {
+            now.saturating_duration_since(tail.at) < Duration::from_secs(24 * 3600)
+        });
+        kept.get(operation)
+            .map(|tail| hearth_proto::api::service_update::OperationTail {
+                lines: tail.lines.clone(),
+                reason: tail.reason.map(|r| r.code().to_owned()),
+                sentence: tail.reason.map(|r| r.sentence().to_owned()),
+            })
     }
 
     /// Un budget de lecture plus court (les essais).

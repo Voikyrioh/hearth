@@ -104,6 +104,10 @@ pub mod action {
     pub const SERVICE_GAME_SETTINGS: &str = "service.game.settings";
     /// Un lot de mods est appliqué à un serveur de jeu (HRT-257, HRT-258).
     pub const SERVICE_MODS: &str = "service.mods";
+    /// Une commande est envoyée à la console d'un serveur de jeu (HRT-268, BR-CONSOLE-009) : le verbe, la classe, le
+    /// joueur visé d'un verbe sensible, la longueur et l'issue ; jamais le reste du texte ni la réponse. Un refus faute
+    /// de droit est consigné sous le même code.
+    pub const SERVICE_CONSOLE: &str = "service.console";
     /// Un compte qui a le droit de gérer les services révèle le mot de passe d'un serveur de jeu (HRT-103,
     /// BR-JEU-026) : qui, quel service, jamais la valeur. Un refus faute de droit est consigné sous le même code.
     pub const SERVICE_GAME_PASSWORD_REVEAL: &str = "service.game.password.reveal";
@@ -125,7 +129,7 @@ pub mod action {
     pub const CATALOG_FICHE_REFUSED: &str = "catalog.fiche.refused";
 
     /// Tous les codes, dans l'ordre du catalogue.
-    pub const ALL: [&str; 53] = [
+    pub const ALL: [&str; 54] = [
         LOGIN,
         LOGIN_LOCKED,
         LOGOUT,
@@ -173,6 +177,7 @@ pub mod action {
         SERVICE_WORLD_IMPORT,
         SERVICE_GAME_SETTINGS,
         SERVICE_MODS,
+        SERVICE_CONSOLE,
         SERVICE_GAME_PASSWORD_REVEAL,
         OPERATION_CANCEL,
         OPERATION_DECIDE,

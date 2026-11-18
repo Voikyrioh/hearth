@@ -12,6 +12,8 @@ mods/
 ├── listing.rs      → noms de fichiers : alphabet sûr, `.jar` / `.jar.disabled`, nom de pose choisi par Hearth, noms dans « Mods retirés » — BR-MOD-020, 032
 ├── game_info.rs    → ce que Hearth lit du jeu : version dans `logs/latest.log`, manifeste Modrinth, origine d'un fichier (`resolve_origin`) — BR-MOD-021, 033
 ├── deposit.rs      → jugement d'un lot de jars déposés : ajout, remplacement ou refus avec son code (`judge_deposits`) — BR-MOD-023
+├── failure.rs      → cause reconnue d'un démarrage raté (liste fermée, sous-chaînes littérales) et sa phrase en clair — BR-MOD-027
+├── apply.rs        → plan d'un lot à appliquer : bornes (`validate`), refus (fichier absent, pack Modrinth, déjà actif, nom pris) et ordre des gestes (`plan`) — BR-MOD-024, 025, 032
 └── backup_list.rs  → liste des mods d'une sauvegarde recoupée avec le manifeste (`reconcile`) et comparaison avec les mods actuels (`compare`) — BR-MOD-034, 036
 ```
 

@@ -864,6 +864,7 @@ async fn no_path_no_secret_and_no_object_name_reaches_a_response_the_stream_the_
             ino: 42,
             kind: ObjectKind::PartialArchive,
         }],
+        ..UndoInfo::default()
     };
     ops.intent(&id, "stop_old", &undo).await.unwrap();
     let mut client = b.subscribed(&b.lucas).await;

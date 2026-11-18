@@ -21,7 +21,8 @@ use rustix::io::Errno;
 
 use super::SERVICES_DIR;
 use crate::application::ports::{
-    DirListing, EntryKind, EntryMeta, Erased, FsError, ListedEntry, Measure, Perms, ReadFile,
+    DirListing, EntryKind, EntryMeta, Erased, FileId, FsError, ListedEntry, Measure, Perms,
+    ReadFile,
 };
 use crate::domain::files::{MAX_DEPTH, RelPath};
 use crate::domain::services::ServiceKey;
@@ -363,6 +364,49 @@ impl UnixRoot {
             return Err(FsError::TooLarge);
         }
         Ok(out)
+    }
+
+    /// Renomme un fichier ordinaire sans rien remplacer (HRT-258) : chaque parent est ouvert sans suivre de lien ni
+    /// franchir de montage, le fichier est jugé par `lstat` AVANT, puis `renameat2(RENAME_NOREPLACE)`.
+    pub(super) fn rename_no_replace(
+        &self,
+        from: &RelPath,
+        to: &RelPath,
+    ) -> Result<FileId, FsError> {
+        let (from_parent, from_leaf) = self.parent_of(from)?;
+        let (to_parent, to_leaf) = self.parent_of(to)?;
+        let stat = statat(&from_parent, from_leaf, AtFlags::SYMLINK_NOFOLLOW).map_err(fs_error)?;
+        match file_type(&stat) {
+            FileType::RegularFile => {}
+            FileType::Symlink => return Err(FsError::Blocked),
+            _ => return Err(FsError::NotRegular),
+        }
+        renameat_with(
+            &from_parent,
+            from_leaf,
+            &to_parent,
+            to_leaf,
+            RenameFlags::NOREPLACE,
+        )
+        .map_err(fs_error)?;
+        fsync(&to_parent).map_err(fs_error)?;
+        if from_parent.as_raw_fd() != to_parent.as_raw_fd() {
+            fsync(&from_parent).map_err(fs_error)?;
+        }
+        Ok(FileId {
+            dev: u64::try_from(dev_of(&stat)).unwrap_or(u64::MAX),
+            ino: u64::from(stat.st_ino),
+        })
+    }
+
+    /// L'identité (périphérique, inode) de `rel`, sans suivre de lien.
+    pub(super) fn identity_of(&self, rel: &RelPath) -> Result<FileId, FsError> {
+        let (parent, leaf) = self.parent_of(rel)?;
+        let stat = statat(&parent, leaf, AtFlags::SYMLINK_NOFOLLOW).map_err(fs_error)?;
+        Ok(FileId {
+            dev: u64::try_from(dev_of(&stat)).unwrap_or(u64::MAX),
+            ino: u64::from(stat.st_ino),
+        })
     }
 
     /// Ce que `lstat` dit de `rel` (la racine si `rel` est vide), sans suivre de lien.

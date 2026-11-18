@@ -223,6 +223,7 @@ mod tests {
             _: &ServiceKey,
             _: &RelPath,
             _: &[u8; 32],
+            _: crate::application::ports::Perms,
         ) -> Result<(), DepositError> {
             Err(DepositError::Io)
         }

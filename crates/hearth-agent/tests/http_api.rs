@@ -1418,6 +1418,7 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     // L'image du serveur de jeu aussi (HRT-87) : sa modification la récupère avant de recréer le service.
     engine.have_image("ryshe/terraria:vanilla-1.4.5.8");
     let deploy_rig = support::api::DeployRig::new();
+    let console_engine = engine.clone();
     let state = support::api::state_with_deploy(
         &env,
         support::update::Rig::new(&env, false, false).service,
@@ -1440,6 +1441,16 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
     let game_rev = state.service_updates.view(&game_key).await.unwrap().rev;
     // Un troisième, dont on sauvegarde les données (HRT-97) : sa description a un dossier géré, pas de conteneur.
     let backup_key = support::game::terraria_service(&env, &deploy_rig.safe_fs, 3).await;
+    // Un serveur Minecraft à mods (HRT-258) dont on retire un mod, et un serveur Minecraft en marche dont la console
+    // répond (HRT-268).
+    let mods_key =
+        support::game::minecraft_mods_service(&env, &deploy_rig.safe_fs, 4, "fabric", "1.20.1")
+            .await;
+    deploy_rig
+        .safe_fs
+        .seed_file(&mods_key, "data/mods/old.jar", b"PK-un-jar");
+    let console_key =
+        support::game::minecraft_console_service(&env, &console_engine, &state.services, 5).await;
     // Deux opérations de service dans le journal (HRT-144) : une qu'on annulera, une qui attend une décision.
     let (cancel_op, decide_op) = {
         use hearth_agent::application::service_ops::AcceptRequest;
@@ -1808,6 +1819,26 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
                 )
                 .await
             }
+            // Appliquer un lot de mods (HRT-258) : `202`, et UNE entrée réussie, écrite à la fin de l'opération.
+            ("POST", "/services/{key}/mods/apply") => {
+                api.act(
+                    &marie,
+                    Method::POST,
+                    &format!("/services/{}/mods/apply", mods_key.as_str()),
+                    json!({ "retire": ["old.jar"] }),
+                )
+                .await
+            }
+            // Envoyer une commande à la console (HRT-268) : `200`, UNE entrée réussie, écrite dans la requête.
+            ("POST", "/services/{key}/console") => {
+                api.act(
+                    &marie,
+                    Method::POST,
+                    &format!("/services/{}/console", console_key.as_str()),
+                    json!({ "command": "list", "class": 1 }),
+                )
+                .await
+            }
             // Ouvrir un dépôt dans la zone d'attente (HRT-95) : `201`, UNE entrée réussie, écrite dans la requête.
             ("POST", "/deposits") => {
                 api.act(
@@ -1918,6 +1949,9 @@ async fn every_modifying_route_leaves_exactly_one_success_entry() {
             // La liste des mods d'un serveur et celle d'une sauvegarde (HRT-256, HRT-293) : deux lectures, aucune entrée
             // de journal ; la seconde sur une clé mal formée (404), son banc de sauvegardes est testé à part.
             "/services/{key}/mods" => format!("/services/{}/mods", game_key.as_str()),
+            // La console et les joueurs d'un serveur de jeu (HRT-268) : deux lectures, aucune entrée de journal.
+            "/services/{key}/console" => format!("/services/{}/console", console_key.as_str()),
+            "/services/{key}/players" => format!("/services/{}/players", console_key.as_str()),
             "/services/{key}/backups/{id}/mods" => {
                 "/services/pas-une-cle/backups/x/mods".to_owned()
             }

@@ -209,6 +209,103 @@ protocol = "source_rcon"
 port = "rcon"
 password = "rcon"
 
+# Ce que Hearth peut faire de la console (HRT-267, ADR-0067) : tout ce qui est propre au jeu est ici. Les verbes refusés
+# se demandent autrement ; les verbes sensibles exigent le mot de passe ; les commandes rapides sont celles de l'écran.
+[remote_console.use]
+reply_timeout_s = 10
+refused = [
+  { verb = "stop",    reason = "use_hearth_stop" },
+  { verb = "restart", reason = "use_hearth_restart" },
+  { verb = "reload",  reason = "breaks_server" },
+]
+
+[[remote_console.use.sensitive]]
+verb = "op"
+title = "Donner les droits d'opérateur à {joueur} ?"
+sentence = "Un opérateur peut taper toutes les commandes du jeu depuis sa partie : changer le mode de jeu, bannir, donner des objets, modifier le monde. Il garde ces droits jusqu'à ce que vous les retiriez."
+target = "first_arg"
+
+[[remote_console.use.sensitive]]
+verb = "deop"
+title = "Retirer les droits d'opérateur à {joueur} ?"
+sentence = "{joueur} ne pourra plus taper les commandes réservées aux opérateurs. Vous pourrez les lui redonner plus tard."
+target = "first_arg"
+
+[[remote_console.use.sensitive]]
+verb = "ban"
+title = "Bannir {joueur} ?"
+sentence = "{joueur} ne pourra plus se connecter à ce serveur tant que vous ne l'aurez pas gracié. S'il est connecté, il est expulsé."
+target = "first_arg"
+
+[[remote_console.use.sensitive]]
+verb = "ban-ip"
+title = "Bannir cette adresse ?"
+sentence = "Plus aucun joueur ne pourra se connecter depuis cette adresse, quel que soit son pseudo, tant que vous ne l'aurez pas graciée."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "pardon"
+title = "Gracier {joueur} ?"
+sentence = "{joueur} pourra de nouveau se connecter à ce serveur."
+target = "first_arg"
+
+[[remote_console.use.sensitive]]
+verb = "pardon-ip"
+title = "Gracier cette adresse ?"
+sentence = "Les joueurs de cette adresse pourront de nouveau se connecter à ce serveur."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "kick"
+title = "Expulser {joueur} ?"
+sentence = "{joueur} est déconnecté tout de suite. Il peut se reconnecter aussitôt, sauf s'il est banni."
+target = "first_arg"
+
+[[remote_console.use.sensitive]]
+verb = "whitelist"
+title = "Changer la liste blanche ?"
+sentence = "La liste blanche décide qui peut entrer sur le serveur quand elle est activée. Un mauvais réglage peut fermer la porte à tout le monde ou l'ouvrir à n'importe qui."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "save-off"
+title = "Arrêter l'enregistrement automatique ?"
+sentence = "Tant que l'enregistrement n'est pas rallumé, le monde n'est plus écrit sur le disque : un arrêt brutal fait perdre tout ce qui s'est passé depuis. Pensez à taper save-on."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "execute"
+title = "Exécuter une commande composée ?"
+sentence = "La commande execute peut lancer n'importe quelle autre commande à la place d'un joueur, d'un lieu ou d'une entité. Hearth ne peut pas savoir ce qu'elle fera."
+target = "none"
+
+[remote_console.use.players]
+command = "list"
+reader = "minecraft_list"
+
+[[remote_console.use.quick]]
+id = "save"
+label = "Enregistrer le monde"
+text = "save-all"
+mode = "send"
+
+[[remote_console.use.quick]]
+id = "day"
+label = "Mettre le jour"
+text = "time set day"
+mode = "send"
+
+[[remote_console.use.quick]]
+id = "say"
+label = "Écrire un message à tous"
+text = "say"
+mode = "fill"
+
+[remote_console.use.before_stop]
+command = "save-all flush"
+expect = "Saved the game"
+timeout_s = 60
+
 [[agreement]]
 id = "eula"
 title = "Contrat de licence de Minecraft (EULA)"

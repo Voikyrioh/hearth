@@ -749,6 +749,15 @@ pub(crate) struct Finish {
 }
 
 impl Finish {
+    /// L'issue que le cœur de la sauvegarde a décidée (HRT-258 : l'opération `mods` la reprend à son compte).
+    pub(crate) fn status(&self) -> OpStatus {
+        self.status
+    }
+
+    pub(crate) fn cause(&self) -> Option<Cause> {
+        self.cause
+    }
+
     fn failed(cause: Cause) -> Self {
         Self {
             status: OpStatus::Failed,
@@ -786,6 +795,48 @@ pub(crate) struct Job {
     forced_stop: AtomicBool,
     /// La lecture des mods prise AVANT l'arrêt et la copie (HRT-293) ; consommée par la publication.
     mods_read: Mutex<Option<ModsReading>>,
+}
+
+impl Job {
+    /// L'identifiant de l'opération qui porte cette sauvegarde.
+    pub(crate) fn op_id(&self) -> &str {
+        &self.id
+    }
+
+    pub(crate) fn backup_id(&self) -> &BackupId {
+        &self.backup
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn actor(&self) -> &Actor {
+        &self.actor
+    }
+
+    /// Les conteneurs que l'opération a arrêtés (à relancer).
+    pub(crate) fn stopped_containers(&self) -> Vec<String> {
+        self.stopped
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// Ce que la partie synchrone d'un lot de mods a décidé pour sa sauvegarde « Avant mods » (HRT-258).
+pub(crate) struct ModsPrepared {
+    pub(crate) name: String,
+    /// Le service tournait au moment du jugement.
+    pub(crate) running: bool,
+    containers: Vec<String>,
+    grace_s: u32,
+    folders: Vec<ManagedFolder>,
+    rules: IgnoreRules,
+    image: String,
+    note: Option<crate::domain::sealed::SealedBlob>,
+    estimate_bytes: u64,
+    backup: BackupId,
 }
 
 struct Subject {
@@ -1426,6 +1477,204 @@ impl Backups {
         })
     }
 
+    /// La partie synchrone de la sauvegarde « Avant mods » d'un lot (HRT-258, BR-MOD-026) : les mêmes refus que
+    /// `create` (moteur, service adopté ou inconnu, opération en cours, état, racine, dossiers, espace pour la
+    /// sauvegarde PLUS `extra_bytes`, la taille des dépôts), sans rien accepter ni écrire.
+    pub(crate) async fn prepare_for_mods(
+        &self,
+        key: &ServiceKey,
+        extra_bytes: u64,
+    ) -> Result<ModsPrepared, BackupFailed> {
+        self.ops.wait_closed(key).await;
+        let subject = self.subject(key).await?;
+        let named = |error| BackupFailed::named(error, &subject.name);
+        if let Some(busy) = self.busy_of(key) {
+            return Err(named(busy));
+        }
+        let running = is_running(subject.state);
+        if let Some(state) = subject.state
+            && !backable(state)
+        {
+            return Err(named(BackupError::NotBackable(state)));
+        }
+        self.check_root().await.map_err(named)?;
+        let (folders, _) = self.folders_of(key, subject.body.as_ref());
+        if folders.is_empty() {
+            return Err(named(BackupError::NothingToSave));
+        }
+        let rules = self.rules_of(key, Vec::new()).await?;
+        let estimate = self.estimate(key, &folders, &rules).await?;
+        let Some(space) = self.space().await else {
+            return Err(named(BackupError::Unavailable));
+        };
+        if let SpaceVerdict::Refused {
+            needed,
+            free,
+            reserve,
+        } = judge(
+            estimate.bytes.saturating_add(extra_bytes),
+            space.free,
+            space.total,
+        ) {
+            return Err(named(BackupError::NoSpace {
+                needed,
+                free,
+                reserve,
+            }));
+        }
+        let backup = BackupId::parse(&self.ids.new_id()).ok_or_else(|| {
+            BackupFailed::named(
+                BackupError::Internal("identifiant illisible".into()),
+                &subject.name,
+            )
+        })?;
+        let day: String = rfc3339(self.clock.now()).chars().take(10).collect();
+        let sealed = self
+            .seal_note(key, &backup, &format!("Avant mods, {day}"))
+            .await
+            .map_err(named)?;
+        Ok(ModsPrepared {
+            name: subject.name.clone(),
+            running,
+            containers: subject.containers,
+            grace_s: subject.grace_s,
+            folders,
+            rules,
+            image: subject
+                .body
+                .as_ref()
+                .map(|body| image_reference(&body.image))
+                .unwrap_or_default(),
+            note: Some(sealed),
+            estimate_bytes: estimate.bytes,
+            backup,
+        })
+    }
+
+    /// Accepte l'opération `mods` (verrou exclusif du service ET place `heavy_io`) puis la démarre ; rend la tâche de
+    /// sauvegarde que le plan de l'opération porte. Les refus de verrou sont ceux d'une sauvegarde.
+    pub(crate) async fn accept_for_mods(
+        &self,
+        key: &ServiceKey,
+        prepared: ModsPrepared,
+        actor: Actor,
+        op_key: &str,
+        plan: crate::domain::ops::OpPlan,
+    ) -> Result<Arc<Job>, BackupFailed> {
+        let named = |error| BackupFailed::named(error, &prepared.name);
+        let op = self
+            .ops
+            .accept_after_wait(AcceptRequest {
+                op_key: op_key.to_owned(),
+                service: key.clone(),
+                service_name: prepared.name.clone(),
+                kind: OpKind::Mods,
+                account: account_of(&actor),
+                plan,
+                forced: false,
+                reserve_name: None,
+                heavy_io: true,
+            })
+            .await
+            .map_err(|error| match error {
+                OpError::Locked(Refusal::HeavyIoBusy { service }) => {
+                    named(BackupError::HeavyBusy { service })
+                }
+                OpError::Locked(Refusal::ServiceBusy { holder }) => named(BackupError::Busy {
+                    by: self.holder_account(key),
+                    kind: match holder {
+                        Holder::Operation(kind) => kind,
+                        Holder::FileWrites => OpKind::Mods,
+                    },
+                }),
+                OpError::ServiceBusy => named(BackupError::Busy {
+                    by: self.holder_account(key),
+                    kind: OpKind::Mods,
+                }),
+                other => named(BackupError::Internal(other.to_string())),
+            })?;
+        if let Err(error) = self.ops.start(&op).await {
+            journal(
+                self.ops
+                    .finish(&op, OpStatus::Failed, Some(Cause::StepFailed))
+                    .await,
+                "finish",
+            );
+            return Err(named(BackupError::Internal(error.to_string())));
+        }
+        let mode = if prepared.running {
+            BackupMode::StopCopyStart
+        } else {
+            BackupMode::Stopped
+        };
+        Ok(Arc::new(Job {
+            id: op,
+            key: key.clone(),
+            name: prepared.name,
+            actor,
+            backup: prepared.backup,
+            mode,
+            containers: prepared.containers,
+            grace_s: prepared.grace_s,
+            folders: prepared.folders,
+            rules: prepared.rules,
+            image: prepared.image,
+            note: prepared.note,
+            estimate_bytes: prepared.estimate_bytes,
+            stopped: Mutex::new(Vec::new()),
+            forced_stop: AtomicBool::new(false),
+            mods_read: Mutex::new(None),
+        }))
+    }
+
+    /// Les conteneurs consignés d'un service (HRT-259 : le retour d'un lot « à vérifier » les arrête puis les relance).
+    pub(crate) async fn containers_for(&self, key: &ServiceKey) -> Vec<String> {
+        self.containers.of(key).await.unwrap_or_default()
+    }
+
+    /// Lit la liste des mods AVANT l'arrêt et la copie (HRT-293), comme une sauvegarde.
+    pub(crate) async fn read_mods_for(&self, job: &Job) {
+        self.read_mods(job).await;
+    }
+
+    /// Arrête les conteneurs du service (l'étape `stop` de l'opération `mods`) : même code qu'une sauvegarde.
+    pub(crate) async fn stop_for_mods(&self, job: &Job) -> Result<(), Finish> {
+        self.stop_service(job).await
+    }
+
+    /// Arrête de nouveau le service relancé avec de mauvais mods, avant le retour des fichiers (HRT-259) : l'arrêt voulu
+    /// est INSCRIT (base et registre) comme pour le premier arrêt, pour que le service ne passe pas par « En erreur » et
+    /// ne soit pas relancé par sa règle de redémarrage. `false` : un conteneur ne s'est pas arrêté.
+    pub(crate) async fn stop_again_for_mods(&self, job: &Job) -> bool {
+        let context = StopContext {
+            registry: &self.registry,
+            ops: &self.ops,
+            engine: self.engine.as_ref(),
+            intents: self.intents.as_ref(),
+            clock: self.clock.as_ref(),
+        };
+        let request = StopRequest {
+            key: &job.key,
+            operation: &job.id,
+            step: step::STOP,
+            containers: &job.containers,
+            grace_s: job.grace_s,
+            account: account_of(&job.actor),
+            margin: self.context.timings.stop_margin,
+            floor: self.context.timings.stop_floor,
+        };
+        stop_running(&context, &request).await.is_ok()
+    }
+
+    /// Relance ce que l'opération a arrêté (HRT-258) ; `Err` : un conteneur n'est pas reparti.
+    pub(crate) async fn start_for_mods(&self, job: &Job) -> Result<(), ()> {
+        let stopped = job.stopped_containers();
+        if stopped.is_empty() {
+            return Ok(());
+        }
+        self.start_service(job, &stopped).await
+    }
+
     fn holder_account(&self, key: &ServiceKey) -> String {
         self.ops.busy(key).map(|(by, _)| by).unwrap_or_default()
     }
@@ -1705,6 +1954,7 @@ impl Backups {
                 ino: ident.1,
                 kind: ObjectKind::PartialArchive,
             }],
+            ..UndoInfo::default()
         };
         if let Err(finish) = self.begin(job, step::COPY, &undo).await {
             self.discard_part(job, ident).await;

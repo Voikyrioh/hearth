@@ -1489,8 +1489,11 @@ impl Deployments {
                 let (Some((deposit, rel, sha256)), Some(deposits)) = (&pack, &deposits) else {
                     return Err(());
                 };
+                let pack_perms = Ownership::new(0, 0)
+                    .and_then(|owner| Perms::new(owner, 0o644))
+                    .ok_or(())?;
                 deposits
-                    .place(deposit, &account, &key, rel, sha256)
+                    .place(deposit, &account, &key, rel, sha256, pack_perms)
                     .map_err(|_| ())?;
             }
             Ok(())
@@ -1607,6 +1610,7 @@ impl Deployments {
                 ino: import.ino,
                 kind: ObjectKind::ImportDir,
             }],
+            ..UndoInfo::default()
         };
         self.begin_with(job, step::WORLD, &undo).await?;
 

@@ -219,18 +219,69 @@ impl CreatedObject {
     }
 }
 
+/// Le genre d'un mouvement de fichier d'une opération `mods` (HRT-258, Q-T6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveKind {
+    /// `mods/x.jar` vers `mods-retires/` (retrait, ou ancien fichier d'un remplacement).
+    Retired,
+    /// `mods/x.jar` vers `mods/x.jar.disabled`.
+    Disabled,
+    /// `mods/x.jar.disabled` vers `mods/x.jar`.
+    Enabled,
+    /// `mods-retires/x.jar` vers `mods/`.
+    Restored,
+    /// Un fichier posé par l'opération (`from` vide) : le défaire, c'est le mettre dans `mods-retires`.
+    Placed,
+}
+
+/// Un mouvement de fichier, écrit au journal AVANT le geste (sans inode : il n'est pas encore connu pour un fichier
+/// posé) puis APRÈS (avec l'inode). Les chemins sont relatifs au dossier géré qui porte les mods (`data`), sans `..`.
+/// L'inode sert au retour : un fichier remplacé entre-temps n'est jamais déplacé à sa place.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FileMove {
+    pub kind: MoveKind,
+    /// Chemin d'origine (vide pour `Placed`).
+    pub from: String,
+    pub to: String,
+    pub dev: u64,
+    pub ino: u64,
+}
+
+impl FileMove {
+    fn is_well_formed(&self) -> bool {
+        let part = |text: &str| {
+            !text.is_empty()
+                && text.chars().count() <= MAX_OBJECT_PATH_CHARS
+                && !text.starts_with('/')
+                && !text.contains(['\\', ':'])
+                && !text.chars().any(char::is_control)
+                && text
+                    .split('/')
+                    .all(|part| !part.is_empty() && part != "." && part != "..")
+        };
+        part(&self.to)
+            && (self.kind == MoveKind::Placed && self.from.is_empty() || part(&self.from))
+    }
+}
+
 /// Ce qu'il faut pour défaire, et ce que l'étape a créé. Jamais de secret. Les champs qui s'ajouteront
 /// (ancien nom d'un conteneur, dossier échangé) seront facultatifs.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UndoInfo {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub created: Vec<CreatedObject>,
+    /// Les mouvements de fichiers d'une opération `mods` (HRT-258) : un par ligne du journal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub moves: Vec<FileMove>,
 }
 
 impl UndoInfo {
     pub fn is_well_formed(&self) -> bool {
         self.created.len() <= MAX_CREATED_PER_ROW
             && self.created.iter().all(CreatedObject::is_well_formed)
+            && self.moves.len() <= MAX_CREATED_PER_ROW
+            && self.moves.iter().all(FileMove::is_well_formed)
     }
 
     /// Relit un `undo_json` stocké ; un texte illisible ou qui nomme un chemin hors règle est refusé,
@@ -404,6 +455,7 @@ mod tests {
     fn a_doubtful_undo_line_is_refused_whole() {
         let ok = UndoInfo {
             created: vec![object("a/b")],
+            ..UndoInfo::default()
         };
         assert_eq!(UndoInfo::from_json(&ok.to_json()), Some(ok));
         assert_eq!(UndoInfo::from_json("{}"), Some(UndoInfo::default()));

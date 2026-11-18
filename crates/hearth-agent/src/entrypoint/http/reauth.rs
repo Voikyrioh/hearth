@@ -28,10 +28,12 @@ use hearth_proto::api::accounts::{
     ChangeOwnPasswordRequest, ChangeRoleRequest, CreateAccountRequest, RoleName,
 };
 use hearth_proto::api::backups::{BackupMode, BackupRequest, BackupSettings};
+use hearth_proto::api::console::ConsoleRequest;
 use hearth_proto::api::deploy::DeploySpec;
 use hearth_proto::api::game_settings::{
     ChangeAction, DriftResolution, SaveOrigin, SaveSettingsRequest, SettingEffect,
 };
+use hearth_proto::api::mods::ModsApplyRequest;
 use hearth_proto::api::reauth::{
     Reauth, ReauthMode, SetReauthRequest, lenient_reauth, reauth_refusal,
 };
@@ -109,6 +111,12 @@ enum Parsed {
     /// Déposer un fichier dans la zone d'attente (HRT-95) : le dernier nom et la taille sont signés
     /// (`AdminAct::file_deposit`, la fonction de la liaison cliente) ; jamais un chemin.
     Deposit(DepositRequest),
+    /// Appliquer un lot de mods (HRT-258) : le nombre de changements et l'empreinte de leur liste (chacun préfixé de
+    /// son genre) sont signés (`AdminAct::mods_apply`, la fonction de la liaison cliente) ; jamais un nom de fichier.
+    ModsApply(Box<ModsApplyRequest>),
+    /// Envoyer une commande à la console (HRT-268) : l'empreinte de la ligne normalisée et la classe sont signées
+    /// (`AdminAct::console_command`, la fonction de la liaison cliente) ; jamais le texte.
+    Console(ConsoleRequest),
     /// Acte dont la cible est dans le chemin et dont aucun paramètre ne vient du corps.
     TargetOnly,
 }
@@ -226,6 +234,10 @@ impl Parsed {
                 .map(Self::BackupCreate),
             ActKind::BackupSettings => serde_json::from_slice(bytes).ok().map(Self::BackupSettings),
             ActKind::FileWrite => serde_json::from_slice(bytes).ok().map(Self::Deposit),
+            ActKind::ModsApply => serde_json::from_slice::<ModsApplyRequest>(bytes)
+                .ok()
+                .map(|request| Self::ModsApply(Box::new(request))),
+            ActKind::ConsoleCommand => serde_json::from_slice(bytes).ok().map(Self::Console),
         }
     }
 
@@ -306,6 +318,12 @@ impl Parsed {
                 }
             }
             (Self::Deposit(request), _) => AdminAct::file_deposit(request),
+            (Self::ModsApply(request), _) => {
+                AdminAct::mods_apply(std::borrow::Cow::Borrowed(id), request)
+            }
+            (Self::Console(request), _) => {
+                AdminAct::console_command(std::borrow::Cow::Borrowed(id), request)
+            }
             (Self::Decide(request), _) => AdminAct::OperationDecide {
                 target: id,
                 choice: request.choice,
@@ -334,6 +352,8 @@ impl Parsed {
                 | ActKind::BackupCreate
                 | ActKind::BackupSettings
                 | ActKind::FileWrite
+                | ActKind::ModsApply
+                | ActKind::ConsoleCommand
                 | ActKind::GameSettingsSave,
             ) => return None,
         })

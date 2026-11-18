@@ -532,9 +532,11 @@ impl ServiceUpdates {
     /// `GET /operations/services/{id}/tail` : les dernières lignes du nouveau service qui n'a pas démarré
     /// (`BR-EDIT-020`), gardées 24 heures en mémoire. `None` : aucune.
     pub fn tail(&self, operation_id: &str) -> Option<OperationTail> {
-        self.tails
-            .read(operation_id)
-            .map(|lines| OperationTail { lines })
+        self.tails.read(operation_id).map(|lines| OperationTail {
+            lines,
+            reason: None,
+            sentence: None,
+        })
     }
 
     // -----------------------------------------------------------------------------------------

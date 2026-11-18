@@ -5,7 +5,10 @@ use sqlx::{Row, SqlitePool};
 use time::OffsetDateTime;
 
 use super::convert::{format_date, storage};
-use crate::application::ports::{MAX_ORIGIN_ROWS, ModOrigins, StoreError};
+use super::store::SqliteUnitOfWork;
+use crate::application::ports::{
+    HearthFile, MAX_ORIGIN_ROWS, ModOrigins, ModOriginsTx, StoreError,
+};
 use crate::domain::mods::game_info::OriginRow;
 use crate::domain::services::ServiceKey;
 
@@ -25,6 +28,52 @@ fn unreadable(what: &str) -> StoreError {
     StoreError::Unavailable {
         resource: RESOURCE,
         message: format!("{what} illisible"),
+    }
+}
+
+#[async_trait]
+impl ModOriginsTx for SqliteUnitOfWork {
+    async fn record_hearth(
+        &mut self,
+        key: &ServiceKey,
+        files: &[HearthFile],
+        at: OffsetDateTime,
+    ) -> Result<(), StoreError> {
+        let at = format_date(RESOURCE, at)?;
+        for file in files {
+            let Ok(size) = i64::try_from(file.size) else {
+                continue;
+            };
+            if size == 0 || file.sha256.len() != 64 {
+                continue;
+            }
+            sqlx::query(
+                "INSERT OR REPLACE INTO service_mod_origins
+                 (service_key, file_name, size_bytes, crc32, sha256, origin, recorded_at)
+                 VALUES (?, ?, ?, NULL, ?, 'hearth', ?)",
+            )
+            .bind(key.as_str())
+            .bind(&file.file_name)
+            .bind(size)
+            .bind(&file.sha256)
+            .bind(&at)
+            .execute(&mut *self.tx)
+            .await
+            .map_err(storage(RESOURCE))?;
+        }
+        // Au plus `MAX_ORIGIN_ROWS` lignes par service : les plus anciennes lignes `hearth` sont oubliées.
+        sqlx::query(
+            "DELETE FROM service_mod_origins
+             WHERE service_key = ?1 AND origin = 'hearth' AND rowid IN (
+                 SELECT rowid FROM service_mod_origins WHERE service_key = ?1
+                 ORDER BY recorded_at DESC, rowid DESC LIMIT -1 OFFSET ?2)",
+        )
+        .bind(key.as_str())
+        .bind(i64::try_from(MAX_ORIGIN_ROWS).unwrap_or(i64::MAX))
+        .execute(&mut *self.tx)
+        .await
+        .map_err(storage(RESOURCE))?;
+        Ok(())
     }
 }
 

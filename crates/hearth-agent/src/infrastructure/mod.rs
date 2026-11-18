@@ -8,6 +8,7 @@ pub mod backup_archive;
 pub mod backup_files;
 pub mod clock;
 pub mod config;
+pub mod console;
 pub mod created_objects;
 pub mod crypto;
 pub mod data_dir;

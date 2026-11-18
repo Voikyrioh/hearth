@@ -364,13 +364,102 @@ pub enum RemoteConsoleProtocol {
     TelnetLine,
 }
 
-/// Console distante déclarée. Hearth ne s'y connecte pas dans ce format (ADR-0052, point 8).
+/// Console distante déclarée. Hearth ne s'y connecte que si `[remote_console.use]` l'y autorise (HRT-267, ADR-0067).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteConsole {
     pub protocol: RemoteConsoleProtocol,
     pub port: String,
     pub password: String,
+    /// Ce que Hearth peut faire de cette console : tout ce qui est propre au jeu (verbes refusés, sensibles, joueurs,
+    /// commandes rapides) vit ici, jamais dans le client ni dans l'agent.
+    #[serde(default, rename = "use")]
+    pub console_use: Option<RemoteConsoleUse>,
+}
+
+fn default_reply_timeout_s() -> u32 {
+    10
+}
+
+/// `[remote_console.use]` : l'autorisation de Hearth de parler à la console, et ce qui est propre au jeu.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteConsoleUse {
+    #[serde(default = "default_reply_timeout_s")]
+    pub reply_timeout_s: u32,
+    #[serde(default)]
+    pub refused: Vec<RefusedVerb>,
+    #[serde(default)]
+    pub sensitive: Vec<SensitiveVerb>,
+    #[serde(default)]
+    pub players: Option<PlayersCommand>,
+    #[serde(default)]
+    pub quick: Vec<QuickCommand>,
+    #[serde(default)]
+    pub before_stop: Option<BeforeStop>,
+}
+
+/// Un verbe que Hearth n'envoie jamais, avec la raison (liste fermée : `use_hearth_stop`, `use_hearth_restart`,
+/// `breaks_server`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RefusedVerb {
+    pub verb: String,
+    pub reason: String,
+}
+
+/// Quel argument de la commande est pris pour `{joueur}` et pour le journal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SensitiveTarget {
+    FirstArg,
+    None,
+}
+
+/// Un verbe sensible : le mot de passe est exigé, la fenêtre dit pourquoi avec les mots du jeu.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SensitiveVerb {
+    pub verb: String,
+    pub title: String,
+    pub sentence: String,
+    pub target: SensitiveTarget,
+}
+
+/// La commande qui liste les joueurs et le lecteur de sa réponse (liste fermée : `minecraft_list`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayersCommand {
+    pub command: String,
+    pub reader: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuickMode {
+    /// Envoyée telle quelle.
+    Send,
+    /// Posée dans le champ de saisie, à compléter.
+    Fill,
+}
+
+/// Une commande rapide proposée par l'écran.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuickCommand {
+    pub id: String,
+    pub label: String,
+    pub text: String,
+    pub mode: QuickMode,
+}
+
+/// L'ordre à envoyer avant un arrêt demandé par Hearth, et la réponse attendue (HRT-292).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BeforeStop {
+    pub command: String,
+    pub expect: String,
+    pub timeout_s: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -253,6 +253,70 @@ pub struct ModsCheckView {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// Appliquer un lot (HRT-258) : `POST /services/{key}/mods/apply`
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Un ajout du lot : un dépôt contrôlé, son empreinte SHA-256 (celle que l'agent a lue au contrôle : si le dépôt a
+/// changé, l'opération refuse) et le fichier qu'il remplace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModAdd {
+    pub deposit: String,
+    pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replace: Option<String>,
+}
+
+/// Le corps de `POST /services/{key}/mods/apply`. Les cinq listes sont des changements ; au moins un, 64 au plus,
+/// dont 8 ajouts au plus.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct ModsApplyRequest {
+    #[serde(default)]
+    pub add: Vec<ModAdd>,
+    /// Des `.jar` actifs de `data/mods` : ils partent dans « Mods retirés ».
+    #[serde(default)]
+    pub retire: Vec<String>,
+    /// Des fichiers de « Mods retirés » : ils reviennent dans `data/mods`.
+    #[serde(default)]
+    pub restore: Vec<String>,
+    /// Des `.jar` actifs : ils deviennent `.jar.disabled` dans `data/mods`.
+    #[serde(default)]
+    pub disable: Vec<String>,
+    /// Des `.jar.disabled` : ils redeviennent `.jar` dans `data/mods`.
+    #[serde(default)]
+    pub enable: Vec<String>,
+}
+
+impl ModsApplyRequest {
+    /// Le nombre total de changements.
+    pub fn total(&self) -> usize {
+        self.add.len()
+            + self.retire.len()
+            + self.restore.len()
+            + self.disable.len()
+            + self.enable.len()
+    }
+
+    /// Chaque changement préfixé de son genre (`add:`, `retire:`, `restore:`, `disable:`, `enable:`), la matière
+    /// de l'empreinte que l'acte `ModsApply` signe. Un ajout est désigné par son dépôt, jamais par un nom.
+    pub fn change_labels(&self) -> Vec<String> {
+        let mut labels = Vec::with_capacity(self.total());
+        labels.extend(self.add.iter().map(|a| format!("add:{}", a.deposit)));
+        labels.extend(self.retire.iter().map(|n| format!("retire:{n}")));
+        labels.extend(self.restore.iter().map(|n| format!("restore:{n}")));
+        labels.extend(self.disable.iter().map(|n| format!("disable:{n}")));
+        labels.extend(self.enable.iter().map(|n| format!("enable:{n}")));
+        labels
+    }
+}
+
+/// La réponse `202` de `POST /services/{key}/mods/apply`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModsApplyAccepted {
+    pub operation_id: String,
+    pub backup_id: String,
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // La liste des mods d'une sauvegarde (HRT-293) : `GET /services/{key}/backups/{id}/mods`
 // ---------------------------------------------------------------------------------------------------------------
 

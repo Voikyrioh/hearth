@@ -238,6 +238,13 @@ pub struct UpdateAccepted {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationTail {
     pub lines: Vec<String>,
+    /// La cause reconnue dans ces lignes, en liste fermée (HRT-259 : `duplicate_mod`, `missing_dependency`,
+    /// `incompatible`, `out_of_memory`) ; absente quand l'agent ne la reconnaît pas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// La phrase en clair de cette cause (HRT-259), en français ; absente avec elle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sentence: Option<String>,
 }
 
 impl fmt::Debug for OperationTail {

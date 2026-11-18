@@ -21,10 +21,12 @@ pub enum OpKind {
     Backup,
     Restore,
     WorldImport,
+    /// Appliquer un lot de mods (HRT-258).
+    Mods,
 }
 
 impl OpKind {
-    pub const ALL: [OpKind; 10] = [
+    pub const ALL: [OpKind; 11] = [
         Self::Start,
         Self::Stop,
         Self::Restart,
@@ -35,6 +37,7 @@ impl OpKind {
         Self::Backup,
         Self::Restore,
         Self::WorldImport,
+        Self::Mods,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -49,6 +52,7 @@ impl OpKind {
             Self::Backup => "backup",
             Self::Restore => "restore",
             Self::WorldImport => "world_import",
+            Self::Mods => "mods",
         }
     }
 
@@ -68,6 +72,7 @@ impl OpKind {
             Self::Backup => OperationKind::Backup,
             Self::Restore => OperationKind::Restore,
             Self::WorldImport => OperationKind::WorldImport,
+            Self::Mods => OperationKind::Mods,
         }
     }
 
@@ -86,6 +91,7 @@ impl OpKind {
             Self::Backup => AuditAction::ServiceBackupCreate,
             Self::Restore => AuditAction::ServiceBackupRestore,
             Self::WorldImport => AuditAction::ServiceWorldImport,
+            Self::Mods => AuditAction::ServiceMods,
         }
     }
 
@@ -101,9 +107,12 @@ impl OpKind {
     }
 
     /// Le genre prend l'unique place des opérations lourdes du serveur (BR-FILES-024) : sauvegarde,
-    /// restauration, reprise de monde.
+    /// restauration, reprise de monde, et les mods (leur sauvegarde « Avant mods », BR-BACKUP-010).
     pub const fn takes_heavy_io(self) -> bool {
-        matches!(self, Self::Backup | Self::Restore | Self::WorldImport)
+        matches!(
+            self,
+            Self::Backup | Self::Restore | Self::WorldImport | Self::Mods
+        )
     }
 
     /// Le verrou que le genre prend sur son service (BR-LIFE-013) : tous les genres sont EXCLUSIFS.
@@ -120,7 +129,8 @@ impl OpKind {
             | Self::Resources
             | Self::Backup
             | Self::Restore
-            | Self::WorldImport => LockMode::Exclusive,
+            | Self::WorldImport
+            | Self::Mods => LockMode::Exclusive,
         }
     }
 
@@ -132,6 +142,9 @@ impl OpKind {
             Self::Deploy | Self::Update | Self::Restore => {
                 &[Choice::Revert, Choice::Keep, Choice::Verified]
             }
+            // Un lot de mods se « revient » (les mouvements du journal rejoués à l'envers) ou se vérifie ; il ne se
+            // « garde » pas (HRT-259).
+            Self::Mods => &[Choice::Revert, Choice::Verified],
             Self::Start
             | Self::Stop
             | Self::Restart
@@ -534,7 +547,12 @@ mod tests {
 
     #[test]
     fn the_migration_lists_exactly_these_kinds_and_statuses() {
-        let sql = include_str!("../../../migrations/0012_service_specs_and_ops.sql");
+        // La liste des genres est refaite par `0019_mods.sql` (`mods`, HRT-258) : les deux fichiers ensemble.
+        let sql = format!(
+            "{}{}",
+            include_str!("../../../migrations/0012_service_specs_and_ops.sql"),
+            include_str!("../../../migrations/0019_mods.sql")
+        );
         for kind in OpKind::ALL {
             assert!(sql.contains(&format!("'{}'", kind.as_str())), "{kind:?}");
         }

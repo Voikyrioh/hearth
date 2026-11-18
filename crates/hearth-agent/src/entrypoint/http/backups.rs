@@ -37,7 +37,7 @@ use crate::domain::services::{ServiceKey, ServiceStateKind};
 use crate::entrypoint::services_wire;
 
 /// Le refus d'un geste de sauvegarde, avec le service visé quand il est publié.
-pub struct BackupFailure(ApiError, Option<Target>);
+pub struct BackupFailure(pub(super) ApiError, pub(super) Option<Target>);
 
 impl IntoResponse for BackupFailure {
     fn into_response(self) -> Response {
@@ -49,7 +49,7 @@ impl IntoResponse for BackupFailure {
     }
 }
 
-fn failure(failed: BackupFailed) -> BackupFailure {
+pub(super) fn failure(failed: BackupFailed) -> BackupFailure {
     let target = failed
         .name
         .as_deref()
@@ -58,7 +58,7 @@ fn failure(failed: BackupFailed) -> BackupFailure {
     BackupFailure(backup_error(failed.error), target)
 }
 
-fn backup_error(error: BackupError) -> ApiError {
+pub(super) fn backup_error(error: BackupError) -> ApiError {
     match error {
         BackupError::EngineUnavailable(engine) => ApiError(ErrorBody::with_details(
             ErrorCode::EngineUnavailable,

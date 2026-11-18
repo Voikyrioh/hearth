@@ -45,6 +45,8 @@ struct State {
     list_error: Option<EngineError>,
     /// Conteneurs dont l'inspection échoue (la liste les nomme, l'inspection répond par l'erreur).
     inspect_errors: BTreeMap<String, EngineError>,
+    /// L'adresse privée de chaque conteneur dans son réseau (HRT-267) ; absente : `None`.
+    private_addresses: BTreeMap<String, std::net::Ipv4Addr>,
     /// Variables d'environnement (nom, valeur) par conteneur, pour `env`.
     envs: BTreeMap<String, Vec<(String, String)>>,
     /// Combien de fois `env` a été appelée.
@@ -160,6 +162,9 @@ struct DeployScript {
     exit_once_on_start: BTreeMap<String, i64>,
     /// Le programme du conteneur de ce NOM écrit cette ligne dans ses journaux à chaque démarrage (HRT-87).
     log_on_start: BTreeMap<String, String>,
+    /// Comme `log_on_start`, mais pour le PROCHAIN démarrage seulement (un lot de mods qui ne démarre pas, puis le
+    /// retour qui démarre sain, HRT-259).
+    log_once_on_start: BTreeMap<String, String>,
 }
 
 /// Un ordre d'écriture reçu par le faux, dans l'ordre.
@@ -309,6 +314,7 @@ impl FakeEngine {
                 containers: BTreeMap::new(),
                 list_error: None,
                 inspect_errors: BTreeMap::new(),
+                private_addresses: BTreeMap::new(),
                 envs: BTreeMap::new(),
                 env_reads: 0,
                 events_broken: false,
@@ -333,6 +339,15 @@ impl FakeEngine {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// L'adresse privée que `private_address` rend pour ce conteneur (HRT-267).
+    pub fn set_private_address(&self, id: &str, address: Option<std::net::Ipv4Addr>) {
+        let mut state = self.lock();
+        match address {
+            Some(address) => state.private_addresses.insert(id.to_owned(), address),
+            None => state.private_addresses.remove(id),
+        };
     }
 
     /// Règle ce que la prochaine sonde verra.
@@ -631,6 +646,13 @@ impl FakeEngine {
     }
 
     /// Le programme du conteneur de ce nom écrit cette ligne dans ses journaux à chaque démarrage.
+    pub fn log_once_on_start(&self, name: &str, text: &str) {
+        self.lock()
+            .deploy
+            .log_once_on_start
+            .insert(name.to_owned(), text.to_owned());
+    }
+
     pub fn log_on_start(&self, name: &str, text: &str) {
         self.lock()
             .deploy
@@ -823,7 +845,9 @@ impl FakeEngine {
                 .get(id)
                 .map(|container| container.name.clone())
                 .unwrap_or_default();
-            if let Some(text) = state.deploy.log_on_start.get(&name).cloned() {
+            let once_text = state.deploy.log_once_on_start.remove(&name);
+            if let Some(text) = once_text.or_else(|| state.deploy.log_on_start.get(&name).cloned())
+            {
                 let at_ms = Self::script_now(&state).unix_timestamp() * 1000;
                 let mut bytes = text.into_bytes();
                 bytes.push(b'\n');
@@ -982,6 +1006,10 @@ impl ContainerEngine for FakeEngine {
             return Err(error);
         }
         Ok(state.containers.get(id).cloned())
+    }
+
+    async fn private_address(&self, id: &str) -> Result<Option<std::net::Ipv4Addr>, EngineError> {
+        Ok(self.lock().private_addresses.get(id).copied())
     }
 
     async fn env(&self, id: &str) -> Result<Option<Vec<EnvEntry>>, EngineError> {

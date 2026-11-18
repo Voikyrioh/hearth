@@ -106,6 +106,9 @@ pub enum AuditAction {
     /// Un lot de mods est appliqué à un serveur (HRT-258) ; un refus faute de droit sur les routes des mods est
     /// consigné sous le même code (HRT-257).
     ServiceMods,
+    /// Une commande est envoyée à la console d'un serveur de jeu (HRT-268) ; un refus faute de droit est consigné sous
+    /// le même code. Jamais le texte ni la réponse.
+    ServiceConsole,
     /// Un compte qui a le droit de gérer les services révèle le mot de passe d'un serveur de jeu (HRT-103,
     /// BR-JEU-026) : jamais la valeur. Un refus faute de droit est consigné sous le même code.
     ServiceGamePasswordReveal,
@@ -126,7 +129,7 @@ pub enum AuditAction {
 
 impl AuditAction {
     /// Toutes les actions, dans l'ordre du catalogue.
-    pub const ALL: [AuditAction; 53] = [
+    pub const ALL: [AuditAction; 54] = [
         Self::Login,
         Self::LoginLocked,
         Self::Logout,
@@ -174,6 +177,7 @@ impl AuditAction {
         Self::ServiceWorldImport,
         Self::ServiceGameSettings,
         Self::ServiceMods,
+        Self::ServiceConsole,
         Self::ServiceGamePasswordReveal,
         Self::OperationCancel,
         Self::OperationDecide,
@@ -232,6 +236,7 @@ impl AuditAction {
             Self::ServiceWorldImport => action::SERVICE_WORLD_IMPORT,
             Self::ServiceGameSettings => action::SERVICE_GAME_SETTINGS,
             Self::ServiceMods => action::SERVICE_MODS,
+            Self::ServiceConsole => action::SERVICE_CONSOLE,
             Self::ServiceGamePasswordReveal => action::SERVICE_GAME_PASSWORD_REVEAL,
             Self::OperationCancel => action::OPERATION_CANCEL,
             Self::OperationDecide => action::OPERATION_DECIDE,
@@ -291,6 +296,7 @@ impl AuditAction {
             Self::ServiceWorldImport => "Reprise d'un monde",
             Self::ServiceGameSettings => "Réglages d'un jeu",
             Self::ServiceMods => "Mods modifiés",
+            Self::ServiceConsole => "Commande envoyée à la console",
             Self::ServiceGamePasswordReveal => "Mot de passe de serveur de jeu révélé",
             Self::OperationCancel => "Annulation d'une opération",
             Self::OperationDecide => "Décision sur une opération",

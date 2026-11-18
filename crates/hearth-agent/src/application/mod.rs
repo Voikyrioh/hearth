@@ -6,6 +6,7 @@ pub mod audit;
 pub mod backups;
 pub mod catalog;
 pub mod closing_gates;
+pub mod console;
 pub mod delete;
 pub mod deployments;
 pub mod elevation;

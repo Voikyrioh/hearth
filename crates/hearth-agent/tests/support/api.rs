@@ -263,7 +263,7 @@ fn state_over_rig(
         },
         Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         Arc::new(super::fake_random::FakeRandom::counting_from(0)),
-        phases,
+        phases.clone(),
         None,
     );
     let service_updates = hearth_agent::application::service_update::ServiceUpdates::new(
@@ -300,7 +300,7 @@ fn state_over_rig(
     );
     let service_ops = Arc::new(
         hearth_agent::application::service_op_access::ServiceOpAccess::new(
-            ops,
+            ops.clone(),
             services.clone(),
             Arc::new(hearth_agent::infrastructure::sqlite::SqliteStore::new(
                 env.db.pool().clone(),
@@ -310,7 +310,40 @@ fn state_over_rig(
         ),
     );
     service_ops.set_effects(service_updates.clone());
+    // Appliquer un lot de mods (HRT-258) : la sauvegarde « Avant mods », le journal, les phases du jeu, le moteur.
+    let mods = Arc::new(hearth_agent::application::mods::ModsService::new(
+        specs.clone(),
+        Arc::new(hearth_agent::application::catalog::CatalogService::embedded(true)),
+        rig.safe_fs.clone(),
+        Arc::new(hearth_agent::infrastructure::sqlite::SqliteModOrigins::new(
+            env.db.pool().clone(),
+        )),
+    ));
+    mods.set_apply(hearth_agent::application::mods::ApplyDeps {
+        backups: backups.clone(),
+        ops: ops.clone(),
+        phases: phases.clone(),
+        engine: engine.clone(),
+        timings: hearth_agent::application::mods::ApplyTimings {
+            poll: std::time::Duration::from_millis(20),
+            steady: std::time::Duration::from_millis(100),
+        },
+    });
+    service_ops.set_effects(mods.clone());
+    let console = hearth_agent::application::console::ConsoleService::new(
+        specs.clone(),
+        Arc::new(hearth_agent::application::catalog::CatalogService::embedded(true)),
+        services.clone(),
+        ops.clone(),
+        phases.clone(),
+        engine.clone(),
+        super::fake_game_console::FakeGameConsole::new(),
+        game_settings.clone(),
+        env.audit_sink.clone(),
+        env.clock.clone(),
+    );
     AppState {
+        console,
         service_updates,
         service_ops,
         service_lifecycle,
@@ -329,14 +362,7 @@ fn state_over_rig(
             super::engine::fast_transfers(),
         ),
         game_settings,
-        mods: Arc::new(hearth_agent::application::mods::ModsService::new(
-            specs.clone(),
-            Arc::new(hearth_agent::application::catalog::CatalogService::embedded(true)),
-            rig.safe_fs.clone(),
-            Arc::new(hearth_agent::infrastructure::sqlite::SqliteModOrigins::new(
-                env.db.pool().clone(),
-            )),
-        )),
+        mods,
         catalog: Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),
         world_import: hearth_agent::application::world_import::WorldImport::new(
             Arc::new(hearth_agent::application::catalog::CatalogService::embedded(false)),

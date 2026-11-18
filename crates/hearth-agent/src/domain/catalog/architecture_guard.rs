@@ -110,6 +110,47 @@ fn i4_the_loading_directory_is_self_contained_because_build_rs_and_xtask_include
 }
 
 #[test]
+fn the_game_console_is_reached_only_from_the_console_use_case_the_adapter_and_the_composition_root()
+{
+    // HRT-267, ADR-0067 : `GameConsole` (et son client RCON) ne sont atteints que par le cas d'usage de la console,
+    // l'adaptateur, le port et la racine de composition ; jamais par une route ni un autre cas d'usage.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    sources(&root, &mut files);
+    let allowed = [
+        "application/ports/game_console.rs",
+        "application/ports/mod.rs",
+        "application/console.rs",
+        "infrastructure/console/",
+        "app.rs",
+        "domain/catalog/architecture_guard.rs",
+    ];
+    let mut offences = Vec::new();
+    for path in &files {
+        let relative = path
+            .strip_prefix(&root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if allowed
+            .iter()
+            .any(|ok| relative.starts_with(ok) || relative == *ok)
+        {
+            continue;
+        }
+        let text = std::fs::read_to_string(path).expect("lisible");
+        // Le client concret est `infrastructure::console::SourceRcon` ; le mot « SourceRcon » seul est aussi la valeur
+        // `RemoteConsoleProtocol::SourceRcon` que le chargeur de fiches lit.
+        for token in ["GameConsole", "console::SourceRcon"] {
+            if text.contains(token) {
+                offences.push(format!("{relative} contient {token}"));
+            }
+        }
+    }
+    assert!(offences.is_empty(), "{offences:#?}");
+}
+
+#[test]
 fn i4_the_engine_port_has_no_function_that_runs_a_command_in_a_container() {
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application/ports/container_engine.rs");

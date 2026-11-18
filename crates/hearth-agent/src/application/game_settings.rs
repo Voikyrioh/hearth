@@ -1688,6 +1688,27 @@ impl GameSettings {
         Ok(value)
     }
 
+    /// Le mot de passe de la console du jeu (`[remote_console] password`, un secret TIRÉ par Hearth à l'installation),
+    /// descellé de la description du service pour UN échange (HRT-268, ADR-0067 D3). Jamais rendu à un client, jamais
+    /// tracé : seul `ConsoleService` l'appelle, juste avant de parler au jeu.
+    pub async fn console_secret(&self, key: &ServiceKey) -> Result<Secret, SettingsError> {
+        let loaded = self.load(key).await?;
+        let id = loaded
+            .fiche
+            .file
+            .remote_console
+            .as_ref()
+            .map(|console| console.password.clone())
+            .ok_or(SettingsError::NotAGameService)?;
+        let (settings, generated) = self.spec_secrets(&loaded).await?;
+        generated
+            .get(&id)
+            .or_else(|| settings.get(&id))
+            .filter(|secret| !secret.expose().is_empty())
+            .map(|secret| Secret::new(secret.expose().to_owned()))
+            .ok_or(SettingsError::SecretsUnreadable)
+    }
+
     // -------------------------------------------------------------------------------------------------
     // Recréer un fichier disparu (quatrième moment d'écriture de BR-FICHE-048)
     // -------------------------------------------------------------------------------------------------

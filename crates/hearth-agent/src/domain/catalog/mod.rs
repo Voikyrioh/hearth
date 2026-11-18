@@ -37,6 +37,8 @@ mod architecture_guard;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(test)]
+mod tests_console;
+#[cfg(test)]
 mod tests_fiches;
 #[cfg(test)]
 mod tests_io;

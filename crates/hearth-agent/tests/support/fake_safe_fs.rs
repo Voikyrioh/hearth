@@ -10,8 +10,8 @@ use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 use hearth_agent::application::ports::{
-    DirListing, EntryKind, EntryMeta, Erased, FsError, ListedEntry, Measure, Perms, ReadFile,
-    SafeFs, ServiceRoot,
+    DirListing, EntryKind, EntryMeta, Erased, FileId, FsError, ListedEntry, Measure, Perms,
+    ReadFile, SafeFs, ServiceRoot,
 };
 use hearth_agent::domain::files::RelPath;
 use hearth_agent::domain::services::ServiceKey;
@@ -50,6 +50,10 @@ struct EraseHooks {
     listed: Vec<String>,
     /// Les ouvertures en lecture attendent ici tant que ceci est vrai (de quoi regarder une sauvegarde en cours).
     held_reads: bool,
+    /// Les renommages dont la CIBLE se termine par un de ces textes échouent (HRT-258 : une erreur au milieu de la mise en place).
+    rename_fails: Vec<String>,
+    /// Chaque renommage sans remplacement demandé : `(origine, cible)`.
+    renames: Vec<(String, String)>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -98,6 +102,16 @@ impl FakeSafeFs {
 
     fn hooks(&self) -> std::sync::MutexGuard<'_, EraseHooks> {
         self.hooks.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Tout renommage sans remplacement dont la cible finit par `suffix` échoue (`Io(Other)`).
+    pub fn fail_renames_to(&self, suffix: &str) {
+        self.hooks().rename_fails.push(suffix.to_owned());
+    }
+
+    /// Les renommages sans remplacement demandés, dans l'ordre.
+    pub fn renames(&self) -> Vec<(String, String)> {
+        self.hooks().renames.clone()
     }
 
     /// Ce chemin refuse de partir à l'effacement (droits refusés), lui et tout ce qu'il contient.
@@ -659,5 +673,66 @@ impl ServiceRoot for FakeRoot {
                 Some(_) => Err(FsError::NotRegular),
             }
         })
+    }
+
+    fn rename_noreplace(&self, from: &RelPath, to: &RelPath) -> Result<FileId, FsError> {
+        let (from_text, to_text) = (from.to_string(), to.to_string());
+        {
+            let mut hooks = self.fs.hooks();
+            hooks.renames.push((from_text.clone(), to_text.clone()));
+            if hooks
+                .rename_fails
+                .iter()
+                .any(|s| to_text.ends_with(s.as_str()))
+            {
+                return Err(FsError::Io(std::io::ErrorKind::Other));
+            }
+        }
+        self.with(|tree| {
+            parent_must_be_dir(tree, from)?;
+            parent_must_be_dir(tree, to)?;
+            match tree.get(&from_text) {
+                None => return Err(FsError::NotFound),
+                Some(Node::File(..)) => {}
+                Some(Node::Link(_)) => return Err(FsError::Blocked),
+                Some(_) => return Err(FsError::NotRegular),
+            }
+            if tree.contains_key(&to_text) {
+                return Err(FsError::Io(std::io::ErrorKind::AlreadyExists));
+            }
+            let node = tree.remove(&from_text).ok_or(FsError::NotFound)?;
+            let id = identity_of_node(&node);
+            tree.insert(to_text, node);
+            Ok(id)
+        })
+    }
+
+    fn identify(&self, rel: &RelPath) -> Result<FileId, FsError> {
+        self.with(|tree| {
+            parent_must_be_dir(tree, rel)?;
+            tree.get(&rel.to_string())
+                .map(identity_of_node)
+                .ok_or(FsError::NotFound)
+        })
+    }
+}
+
+/// Le faux n'a pas d'inode : l'identité d'un fichier est une empreinte de son contenu et de ses droits (un fichier
+/// remplacé par un autre a une autre identité).
+fn identity_of_node(node: &Node) -> FileId {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    match node {
+        Node::File(bytes, perms) => {
+            bytes.hash(&mut hasher);
+            perms.hash(&mut hasher);
+        }
+        Node::Dir => 1u8.hash(&mut hasher),
+        Node::Link(target) => target.hash(&mut hasher),
+        Node::Special => 2u8.hash(&mut hasher),
+    }
+    FileId {
+        dev: 1,
+        ino: hasher.finish(),
     }
 }

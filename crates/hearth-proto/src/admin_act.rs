@@ -72,11 +72,16 @@ pub enum ActKind {
     /// Écrire un fichier sur le serveur : pour l'instant, déposer un fichier dans la zone d'attente de l'agent
     /// par un transfert reprenable (HRT-95, BR-FILES-019, BR-MOD-015).
     FileWrite,
+    /// Appliquer un lot de mods à un serveur de jeu (HRT-258, ADR-0062) : jamais couvert par l'élévation.
+    ModsApply,
+    /// Envoyer une commande à la console d'un serveur de jeu (HRT-268, ADR-0067) : acte de pilotage pour une commande
+    /// libre, mot de passe à chaque fois pour une commande sensible.
+    ConsoleCommand,
 }
 
 impl ActKind {
     /// Tous les actes `0x05`, dans l'ordre des codes.
-    pub const ALL: [ActKind; 25] = [
+    pub const ALL: [ActKind; 27] = [
         Self::AccountCreate,
         Self::AccountRole,
         Self::AccountPassword,
@@ -102,6 +107,8 @@ impl ActKind {
         Self::BackupSettings,
         Self::OperationDecide,
         Self::GameSettingsSave,
+        Self::ModsApply,
+        Self::ConsoleCommand,
     ];
 
     /// Les actes DÉCLARÉS dont la route n'existe pas encore : leur lot l'ajoute à `ROUTES` et à `ENDPOINTS`
@@ -140,6 +147,8 @@ impl ActKind {
             Self::BackupSettings => 0x1C,
             Self::OperationDecide => 0x1D,
             Self::GameSettingsSave => 0x1E,
+            Self::ModsApply => 0x20,
+            Self::ConsoleCommand => 0x30,
         }
     }
 
@@ -173,6 +182,8 @@ impl ActKind {
             Self::BackupSettings => action::SERVICE_BACKUP_SETTINGS,
             Self::OperationDecide => action::OPERATION_DECIDE,
             Self::GameSettingsSave => action::SERVICE_GAME_SETTINGS,
+            Self::ModsApply => action::SERVICE_MODS,
+            Self::ConsoleCommand => action::SERVICE_CONSOLE,
             Self::FileWrite => action::SERVICE_FILE_WRITE,
         }
     }
@@ -303,6 +314,20 @@ pub enum AdminAct<'a> {
         origin: &'a str,
         effect: &'a str,
     },
+    /// Appliquer un lot de mods au service `target` : le NOMBRE de changements et l'empreinte de leur liste triée,
+    /// chacun préfixé de son genre (jamais un nom de fichier ni un octet de contenu), voir `AdminAct::mods_apply`.
+    ModsApply {
+        target: Cow<'a, str>,
+        count: u32,
+        digest: [u8; FINGERPRINT_LEN],
+    },
+    /// Envoyer une commande à la console du service `target` : l'empreinte SHA-256 de la ligne normalisée et sa classe
+    /// (`1` libre, `2` sensible). Jamais le texte de la commande.
+    ConsoleCommand {
+        target: Cow<'a, str>,
+        digest: [u8; FINGERPRINT_LEN],
+        class: u8,
+    },
     /// Écrire un fichier : la cible (`deposit` pour la zone d'attente de l'agent, ou la clé d'un service), le geste
     /// (`upload`), le DERNIER nom du fichier (jamais un chemin) et sa taille en octets. Jamais le contenu.
     FileWrite {
@@ -397,6 +422,35 @@ impl AdminAct<'_> {
         Self::ServicesAdopt { count, fingerprint }
     }
 
+    /// L'acte d'application d'un lot de mods (HRT-258, `0x20`) : le nombre de changements et l'empreinte SHA-256 de
+    /// leur liste triée, chacun préfixé de son genre. Source unique pour l'agent et la liaison cliente.
+    pub fn mods_apply<'a>(
+        target: Cow<'a, str>,
+        request: &crate::api::mods::ModsApplyRequest,
+    ) -> AdminAct<'a> {
+        let labels = request.change_labels();
+        let (count, digest) = sorted_digest(labels.iter().map(String::as_str));
+        AdminAct::ModsApply {
+            target,
+            count,
+            digest,
+        }
+    }
+
+    /// L'acte d'une commande de console (HRT-268, `0x30`) : la clé du service, l'empreinte de la ligne normalisée et la
+    /// classe que le client a jugée. Source unique pour l'agent (qui reconstruit l'acte depuis le corps) et la liaison
+    /// cliente (qui le signe). Jamais le texte.
+    pub fn console_command<'a>(
+        target: Cow<'a, str>,
+        request: &crate::api::console::ConsoleRequest,
+    ) -> AdminAct<'a> {
+        AdminAct::ConsoleCommand {
+            target,
+            digest: request.act_digest(),
+            class: request.class,
+        }
+    }
+
     /// L'acte d'enregistrement des réglages d'un jeu (HRT-108, `0x1E`) : la révision de base, le NOMBRE de
     /// changements (réglages de la fiche et réglages inconnus), l'empreinte SHA-256 de leurs IDENTIFIANTS triés
     /// (chacun précédé de sa longueur sur deux octets, ceux d'un réglage inconnu préfixés de `other:`), l'origine
@@ -459,6 +513,8 @@ impl AdminAct<'_> {
             Self::BackupSettings { .. } => ActKind::BackupSettings,
             Self::OperationDecide { .. } => ActKind::OperationDecide,
             Self::GameSettingsSave { .. } => ActKind::GameSettingsSave,
+            Self::ModsApply { .. } => ActKind::ModsApply,
+            Self::ConsoleCommand { .. } => ActKind::ConsoleCommand,
             Self::FileWrite { .. } => ActKind::FileWrite,
         }
     }
@@ -483,6 +539,8 @@ impl AdminAct<'_> {
             | Self::ServiceDelete { target, .. }
             | Self::BackupCreate { target, .. }
             | Self::BackupSettings { target, .. }
+            | Self::ModsApply { target, .. }
+            | Self::ConsoleCommand { target, .. }
             | Self::FileWrite { target, .. }
             | Self::GameSettingsSave { target, .. } => target,
             Self::ServiceDeploy { name, .. } => name,
@@ -550,8 +608,11 @@ impl AdminAct<'_> {
                     digest.to_vec(),
                 ]
             }
-            Self::BackupSettings { count, digest, .. } => {
+            Self::BackupSettings { count, digest, .. } | Self::ModsApply { count, digest, .. } => {
                 vec![count.to_string().into_bytes(), digest.to_vec()]
+            }
+            Self::ConsoleCommand { digest, class, .. } => {
+                vec![hex(digest).into_bytes(), class.to_string().into_bytes()]
             }
             Self::OperationDecide { choice, .. } => vec![choice.as_str().as_bytes().to_vec()],
             Self::GameSettingsSave {
@@ -641,10 +702,14 @@ pub fn covered_by_elevation(act: &AdminAct<'_>) -> bool {
         | AdminAct::FileWrite { .. }
         | AdminAct::GameSettingsSave { .. } => true,
         AdminAct::OperationDecide { .. }
+        | AdminAct::ModsApply { .. }
         | AdminAct::ServiceDeploy { .. }
         | AdminAct::ServiceUpdate { .. }
         | AdminAct::ServiceDelete { .. }
         | AdminAct::BackupDelete { .. } => false,
+        // Une commande libre se juge comme un acte de pilotage ; une commande sensible ou d'une classe inconnue n'est
+        // jamais couverte (HRT-268, ADR-0067 D6).
+        AdminAct::ConsoleCommand { class, .. } => *class == crate::api::console::CLASS_FREE,
     }
 }
 
@@ -684,7 +749,8 @@ pub const fn is_piloting(kind: ActKind) -> bool {
         ActKind::ServiceStart
         | ActKind::ServiceStop
         | ActKind::ServiceRestart
-        | ActKind::OperationDecide => true,
+        | ActKind::OperationDecide
+        | ActKind::ConsoleCommand => true,
         ActKind::AccountCreate
         | ActKind::AccountRole
         | ActKind::AccountPassword
@@ -705,7 +771,8 @@ pub const fn is_piloting(kind: ActKind) -> bool {
         | ActKind::BackupDelete
         | ActKind::BackupSettings
         | ActKind::FileWrite
-        | ActKind::GameSettingsSave => false,
+        | ActKind::GameSettingsSave
+        | ActKind::ModsApply => false,
     }
 }
 
@@ -719,6 +786,12 @@ pub const fn is_piloting(kind: ActKind) -> bool {
 ///
 /// Le réglage `each` du compte et le mode attaque restent appliqués par l'appelant sur `UnlessElevated`.
 pub fn password_need(act: &AdminAct<'_>, trust: TrustLevel) -> PasswordNeed {
+    // Une commande de console sensible (ou d'une classe inconnue) : le mot de passe à chaque fois, dans tous les états.
+    if let AdminAct::ConsoleCommand { class, .. } = act
+        && *class != crate::api::console::CLASS_FREE
+    {
+        return PasswordNeed::Yes;
+    }
     if is_piloting(act.kind()) {
         return match trust {
             TrustLevel::Normal => PasswordNeed::No,
@@ -946,6 +1019,23 @@ pub const ROUTES: &[RouteAct] = &[
         kinds: &[ActKind::GameSettingsSave],
         contract: Contract::Reauth,
     },
+    // Appliquer un lot de mods (HRT-258, BR-MOD-031) : la clé du service est la cible signée, le nombre de changements
+    // et l'empreinte de leur liste (chacun préfixé de son genre) les paramètres signés ; JAMAIS couvert par l'élévation.
+    RouteAct {
+        method: "POST",
+        pattern: "/services/{key}/mods/apply",
+        kinds: &[ActKind::ModsApply],
+        contract: Contract::Reauth,
+    },
+    // Envoyer une commande à la console d'un serveur de jeu (HRT-268, BR-CONSOLE-005) : la clé du service est la cible
+    // signée, l'empreinte de la ligne normalisée et sa classe les paramètres signés ; libre = grille du pilotage,
+    // sensible = mot de passe à chaque fois.
+    RouteAct {
+        method: "POST",
+        pattern: "/services/{key}/console",
+        kinds: &[ActKind::ConsoleCommand],
+        contract: Contract::Reauth,
+    },
     // Déposer un fichier dans la zone d'attente de l'agent (HRT-95, BR-FILES-019, BR-FILES-023) : la cible signée est
     // `deposit`, les paramètres signés le geste, le dernier nom du fichier et sa taille (jamais un chemin ni un
     // octet de contenu) ; couvert par l'élévation. L'envoi lui-même passe par le WebSocket du transfert.
@@ -1021,13 +1111,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_mods_batch_is_signed_by_its_count_and_a_digest_of_genre_prefixed_changes() {
+        use crate::api::mods::{ModAdd, ModsApplyRequest};
+        let request = ModsApplyRequest {
+            add: vec![ModAdd {
+                deposit: "01J".into(),
+                sha256: "ab".into(),
+                replace: None,
+            }],
+            retire: vec!["a.jar".into()],
+            ..ModsApplyRequest::default()
+        };
+        let act = AdminAct::mods_apply("h_01".into(), &request);
+        assert_eq!(act.kind(), ActKind::ModsApply);
+        assert_eq!(act.code(), 0x20);
+        assert_eq!(act.target(), "h_01");
+        // Le même lot dans un autre ordre se signe pareil ; un nom, un genre ou un nombre de plus change l'acte.
+        let reordered = ModsApplyRequest {
+            retire: vec!["a.jar".into()],
+            add: request.add.clone(),
+            ..ModsApplyRequest::default()
+        };
+        assert_eq!(
+            AdminAct::mods_apply("h_01".into(), &reordered).params(),
+            act.params()
+        );
+        let other_genre = ModsApplyRequest {
+            disable: vec!["a.jar".into()],
+            add: request.add.clone(),
+            ..ModsApplyRequest::default()
+        };
+        assert_ne!(
+            AdminAct::mods_apply("h_01".into(), &other_genre).params(),
+            act.params()
+        );
+        let more = ModsApplyRequest {
+            retire: vec!["a.jar".into(), "b.jar".into()],
+            add: request.add.clone(),
+            ..ModsApplyRequest::default()
+        };
+        assert_ne!(
+            AdminAct::mods_apply("h_01".into(), &more).params(),
+            act.params()
+        );
+        // Un ajout est désigné par son dépôt : le contenu ni le nom envoyé ne sont signés.
+        assert_eq!(request.change_labels(), ["add:01J", "retire:a.jar"]);
+        // Jamais couvert par l'élévation (BR-MOD-031) : le mot de passe à chaque fois.
+        assert_eq!(password_need(&act, TrustLevel::Normal), PasswordNeed::Yes);
+    }
+
+    #[test]
     fn the_codes_are_the_documented_ones_unique_and_nine_is_reserved() {
         let codes: Vec<u8> = ActKind::ALL.iter().map(|kind| kind.code()).collect();
         assert_eq!(
             codes,
             vec![
                 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-                0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x19, 0x1B, 0x1C, 0x1D, 0x1E
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x16, 0x19, 0x1B, 0x1C, 0x1D, 0x1E, 0x20, 0x30
             ]
         );
         let mut sorted = codes.clone();
@@ -1052,14 +1192,14 @@ mod tests {
             // Une route ET une seule, ou « déclaré, route à venir » : jamais les deux, jamais aucun.
             assert_eq!(routed + waiting, 1, "{kind:?}");
         }
-        // Vingt-cinq actes en 0x05 : tous ont leur route (dont deux pour le mode attaque), aucun n'est plus
-        // déclaré sans route (HRT-97) ; vingt-quatre routes d'acte (dont le retrait d'un poste, sous son contrat)
+        // Vingt-six actes en 0x05 (HRT-258 : `ModsApply`) : tous ont leur route (dont deux pour le mode attaque), aucun n'est plus
+        // déclaré sans route (HRT-97) ; vingt-cinq routes d'acte (dont le retrait d'un poste, sous son contrat)
         // en plus du réglage de fréquence.
-        assert_eq!(in_routes.len(), 25);
+        assert_eq!(in_routes.len(), 27);
         assert_eq!(ActKind::DECLARED_WITHOUT_ROUTE.len(), 0);
         assert_eq!(
             ROUTES.iter().filter(|r| r.pattern != "/me/reauth").count(),
-            24
+            26
         );
     }
 
@@ -1509,6 +1649,16 @@ mod tests {
                 origin: "form",
                 effect: "restart",
             },
+            ActKind::ModsApply => AdminAct::ModsApply {
+                target: target.into(),
+                count: 1,
+                digest: [0; FINGERPRINT_LEN],
+            },
+            ActKind::ConsoleCommand => AdminAct::ConsoleCommand {
+                target: target.into(),
+                digest: [0; FINGERPRINT_LEN],
+                class: 1,
+            },
         }
     }
 
@@ -1520,7 +1670,7 @@ mod tests {
     ];
 
     #[test]
-    fn only_the_four_piloting_acts_are_piloting() {
+    fn only_the_five_piloting_acts_are_piloting() {
         let piloting: Vec<ActKind> = ActKind::ALL
             .into_iter()
             .filter(|kind| is_piloting(*kind))
@@ -1531,7 +1681,8 @@ mod tests {
                 ActKind::ServiceStart,
                 ActKind::ServiceStop,
                 ActKind::ServiceRestart,
-                ActKind::OperationDecide
+                ActKind::OperationDecide,
+                ActKind::ConsoleCommand
             ]
         );
         assert!(!is_piloting(ActKind::OperationCancel));
@@ -1564,6 +1715,48 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_console_command_follows_the_grid_when_free_and_always_asks_when_sensitive() {
+        use crate::api::console::{CLASS_FREE, CLASS_SENSITIVE, ConsoleRequest};
+        let act_of_class = |class: u8| {
+            AdminAct::console_command(
+                "h_01".into(),
+                &ConsoleRequest {
+                    command: "time set day".into(),
+                    class,
+                },
+            )
+        };
+        let free = act_of_class(CLASS_FREE);
+        assert_eq!(free.code(), 0x30);
+        assert_eq!(password_need(&free, TrustLevel::Normal), PasswordNeed::No);
+        assert_eq!(
+            password_need(&free, TrustLevel::Alert),
+            PasswordNeed::UnlessElevated
+        );
+        assert_eq!(password_need(&free, TrustLevel::Attack), PasswordNeed::Yes);
+        assert_eq!(password_need(&free, TrustLevel::Unknown), PasswordNeed::Yes);
+        assert!(covered_by_elevation(&free));
+        let sensitive = act_of_class(CLASS_SENSITIVE);
+        for trust in ALL_TRUST {
+            assert_eq!(password_need(&sensitive, trust), PasswordNeed::Yes);
+        }
+        assert!(!covered_by_elevation(&sensitive));
+        assert_eq!(password_need_announced(&sensitive, None), PasswordNeed::Yes);
+        // Une classe inconnue se traite comme sensible.
+        for trust in ALL_TRUST {
+            assert_eq!(password_need(&act_of_class(9), trust), PasswordNeed::Yes);
+        }
+        // La classe et l'empreinte sont signées, jamais le texte.
+        assert_ne!(free.params(), sensitive.params());
+        assert_eq!(free.params().len(), 2);
+        assert!(
+            free.params()
+                .iter()
+                .all(|p| !String::from_utf8_lossy(p).contains("time"))
+        );
     }
 
     #[test]

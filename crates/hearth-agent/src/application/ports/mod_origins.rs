@@ -14,6 +14,28 @@ use crate::domain::services::ServiceKey;
 /// Au plus ce nombre de lignes par service ; au-delà, les plus anciennes lignes `hearth` sont oubliées.
 pub const MAX_ORIGIN_ROWS: usize = 4_096;
 
+/// Un fichier posé par une opération `mods` : nom sans `.disabled`, taille, SHA-256 (HRT-258, BR-MOD-033).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HearthFile {
+    pub file_name: String,
+    pub size: u64,
+    pub sha256: String,
+}
+
+/// L'écriture des origines `hearth`, DANS la transaction qui clôt l'opération `mods` (une origine n'existe que pour
+/// une application réussie, jamais à moitié).
+#[async_trait]
+pub trait ModOriginsTx: Send {
+    /// Inscrit les fichiers posés ; au-delà de `MAX_ORIGIN_ROWS` lignes pour le service, les plus anciennes lignes
+    /// `hearth` sont oubliées. Une ligne déjà là pour ce nom est remplacée (le fichier posé de nouveau).
+    async fn record_hearth(
+        &mut self,
+        key: &ServiceKey,
+        files: &[HearthFile],
+        at: OffsetDateTime,
+    ) -> Result<(), StoreError>;
+}
+
 #[async_trait]
 pub trait ModOrigins: Send + Sync {
     /// Les lignes d'un service (au plus `MAX_ORIGIN_ROWS`).

@@ -930,3 +930,104 @@ fn stat_describes_the_root_a_file_and_a_link_without_following_it() {
         Some(FsError::NotFound)
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Renommer sans remplacer (HRT-258) : la seule voie de déplacement des mods
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn a_rename_without_replacement_moves_the_file_keeps_its_inode_and_never_overwrites() {
+    let f = fixture();
+    f.root.make_dirs(&rel("mods"), perms(0o750)).unwrap();
+    f.root
+        .make_dirs(&rel("mods-retires"), perms(0o750))
+        .unwrap();
+    f.root
+        .write_file(&rel("mods/a.jar"), b"jar-a", perms(0o644))
+        .unwrap();
+    f.root
+        .write_file(&rel("mods/b.jar"), b"jar-b", perms(0o644))
+        .unwrap();
+    let inode_before = std::fs::metadata(f.root_path.join("mods/a.jar"))
+        .unwrap()
+        .ino();
+    let moved = f
+        .root
+        .rename_no_replace(&rel("mods/a.jar"), &rel("mods-retires/a.jar"))
+        .unwrap();
+    assert_eq!(moved.ino, inode_before, "le même fichier, pas une copie");
+    assert!(!f.root_path.join("mods/a.jar").exists());
+    assert_eq!(
+        std::fs::read(f.root_path.join("mods-retires/a.jar")).unwrap(),
+        b"jar-a"
+    );
+    assert_eq!(
+        f.root.identity_of(&rel("mods-retires/a.jar")).unwrap(),
+        moved
+    );
+    // Une cible qui existe n'est jamais remplacée, quel que soit son contenu.
+    let target_inode = std::fs::metadata(f.root_path.join("mods-retires/a.jar"))
+        .unwrap()
+        .ino();
+    assert_eq!(
+        f.root
+            .rename_no_replace(&rel("mods/b.jar"), &rel("mods-retires/a.jar")),
+        Err(FsError::Io(std::io::ErrorKind::AlreadyExists))
+    );
+    assert_eq!(
+        std::fs::read(f.root_path.join("mods/b.jar")).unwrap(),
+        b"jar-b"
+    );
+    assert_eq!(
+        std::fs::metadata(f.root_path.join("mods-retires/a.jar"))
+            .unwrap()
+            .ino(),
+        target_inode
+    );
+}
+
+#[test]
+fn a_rename_refuses_a_link_in_either_path_a_link_as_source_and_a_mount_point() {
+    let f = fixture();
+    f.root.make_dirs(&rel("mods"), perms(0o750)).unwrap();
+    f.root
+        .write_file(&rel("mods/a.jar"), b"jar-a", perms(0o644))
+        .unwrap();
+    // Un dossier remplacé par un lien vers l'EXTÉRIEUR : ni lu, ni déplacé vers, ni déplacé depuis.
+    symlink(&f.outside, f.root_path.join("mods-retires")).unwrap();
+    assert_eq!(
+        f.root
+            .rename_no_replace(&rel("mods/a.jar"), &rel("mods-retires/a.jar")),
+        Err(FsError::Blocked)
+    );
+    assert_eq!(
+        f.root
+            .rename_no_replace(&rel("mods-retires/precious"), &rel("mods/precious")),
+        Err(FsError::Blocked)
+    );
+    assert!(
+        f.outside.join("precious").exists(),
+        "l'extérieur n'a pas bougé"
+    );
+    assert!(!f.outside.join("a.jar").exists());
+    // Un lien comme fichier source n'est jamais déplacé.
+    symlink(
+        f.outside.join("precious"),
+        f.root_path.join("mods/link.jar"),
+    )
+    .unwrap();
+    assert_eq!(
+        f.root
+            .rename_no_replace(&rel("mods/link.jar"), &rel("mods/other.jar")),
+        Err(FsError::Blocked)
+    );
+    assert!(f.outside.join("precious").exists());
+    // Un point de montage (autre périphérique que la racine) n'est jamais franchi.
+    let wrong = open_service_root(&f.data, &f.key, false).unwrap();
+    let wrong = wrong.with_dev(f.root.dev() + 1);
+    assert_eq!(
+        wrong.rename_no_replace(&rel("mods/a.jar"), &rel("mods/b.jar")),
+        Err(FsError::CrossesDevice)
+    );
+    assert!(f.root_path.join("mods/a.jar").exists());
+}

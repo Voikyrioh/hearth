@@ -31,6 +31,7 @@ use hearth_proto::api::catalog::{
     CharsetView, EvidenceView, FicheStatus, ItemCharsetView, LevelView, PortMappingView,
     QuestionKind, SecretKindView, WorldSavedView,
 };
+use hearth_proto::api::console::{ConsoleOutcome, ConsoleState, UnavailableReason};
 use hearth_proto::api::deploy::{
     DeployPlace, DeployProtocol, DeploySource, MountStatus, NameStatus, PortStatus,
 };
@@ -44,6 +45,7 @@ use hearth_proto::api::mods::{
 };
 use hearth_proto::api::operations::OperationStatus as HttpOperationStatus;
 use hearth_proto::api::packs::PackGenreWire;
+use hearth_proto::api::players::PlayersState;
 use hearth_proto::api::reauth::ReauthMode;
 use hearth_proto::api::security::{AttackModeEnd, AttackModeState, SessionDevice};
 use hearth_proto::api::service_delete::FolderFate;
@@ -208,6 +210,14 @@ fn enums() -> Vec<Entry> {
         entry!("api/catalog.rs::EvidenceView", Tolerant, EvidenceView),
         entry!("api/catalog.rs::QuestionKind", Tolerant, QuestionKind),
         entry!("api/catalog.rs::WorldSavedView", Tolerant, WorldSavedView),
+        entry!("api/console.rs::ConsoleOutcome", Tolerant, ConsoleOutcome),
+        entry!("api/console.rs::ConsoleState", Tolerant, ConsoleState),
+        entry!(
+            "api/console.rs::UnavailableReason",
+            Tolerant,
+            UnavailableReason
+        ),
+        entry!("api/players.rs::PlayersState", Tolerant, PlayersState),
         entry!("api/mods.rs::Applicable", Tolerant, Applicable),
         entry!("api/mods.rs::BackupModPlace", Tolerant, BackupModPlace),
         entry!("api/mods.rs::ChangeKindView", Tolerant, ChangeKindView),

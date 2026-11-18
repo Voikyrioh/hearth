@@ -137,6 +137,13 @@ pub struct EntryMeta {
     pub nlink: u64,
 }
 
+/// Le périphérique et l'inode d'un fichier : ce qui dit que c'est TOUJOURS lui (HRT-258, retour d'un lot de mods).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FileId {
+    pub dev: u64,
+    pub ino: u64,
+}
+
 /// Un nom et ce qu'il désigne.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListedEntry {
@@ -245,4 +252,12 @@ pub trait ServiceRoot: Send + Sync {
 
     /// La cible d'un lien symbolique, sans la suivre. `NotRegular` si l'élément n'est pas un lien.
     fn read_link(&self, rel: &RelPath) -> Result<String, FsError>;
+
+    /// Renomme `from` en `to` dans la MÊME racine, sans jamais remplacer (`renameat2` `RENAME_NOREPLACE`, chaque
+    /// parent ouvert sans suivre de lien ni franchir de montage), seulement un fichier ordinaire (HRT-258, Q-T4).
+    /// `Io(AlreadyExists)` si la cible existe. Rend l'identité du fichier déplacé.
+    fn rename_noreplace(&self, from: &RelPath, to: &RelPath) -> Result<FileId, FsError>;
+
+    /// L'identité (périphérique, inode) de l'élément `rel`, sans suivre de lien (HRT-258).
+    fn identify(&self, rel: &RelPath) -> Result<FileId, FsError>;
 }
