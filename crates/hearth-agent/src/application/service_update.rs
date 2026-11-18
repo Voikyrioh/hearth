@@ -1361,6 +1361,7 @@ impl ServiceUpdates {
                 created_by: &job.account,
                 rev: revision.rev,
                 managed_root: &self.context.services_root,
+                jvm_options_env: self.deployments.jvm_options_env(&revision.body).as_deref(),
             },
         )
         .map_err(|error| {

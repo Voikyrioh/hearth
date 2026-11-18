@@ -330,6 +330,10 @@ pub struct EnvVar {
     pub secret: Option<String>,
     pub owner: Option<OwnerKind>,
     pub when: Option<When>,
+    /// Cette variable porte les options de la JVM : quand le service a une limite de mémoire, l'agent y ajoute
+    /// `-XX:MaxRAM=<limite en octets>` (FIX:01M7Q1M71TKSBWVV0C0GTXWWXZ). Exige une valeur fixe.
+    #[serde(default)]
+    pub jvm_max_ram: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

@@ -1344,6 +1344,16 @@ impl Deployments {
                 return Err(Finish::failed(Cause::StepFailed));
             }
         };
+    /// La variable des options de la JVM déclarée par la fiche du service (FIX:01M7Q1M71TKSBWVV0C0GTXWWXZ) : lue
+    /// dans la fiche EMBARQUÉE de l'agent, donc un serveur déjà installé la reçoit à sa prochaine recréation, sans
+    /// montée de version de fiche.
+    pub fn jvm_options_env(&self, body: &SpecBody) -> Option<String> {
+        let spec_fiche = body.fiche.as_ref()?;
+        self.installer
+            .fiche(&spec_fiche.id)
+            .and_then(|fiche| fiche.jvm_options_env().map(str::to_owned))
+    }
+
         let SecretsAccess::Opened(secrets) = access else {
             tracing::error!("secrets du déploiement illisibles : rien n'est créé");
             return Err(Finish::failed(Cause::StepFailed));
@@ -1370,6 +1380,7 @@ impl Deployments {
     async fn prepare_folders(&self, job: &Job) -> Result<(), Finish> {
         if job.mounts.is_empty() {
             return Ok(());
+                jvm_options_env: self.jvm_options_env(&revision.body).as_deref(),
         }
         let fs = self.safe_fs.clone();
         let key = job.key.clone();

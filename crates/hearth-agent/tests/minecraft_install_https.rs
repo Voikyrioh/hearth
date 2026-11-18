@@ -238,7 +238,8 @@ async fn a_fabric_server_pack_like_prominence_ii_installs_with_a_big_memory_and_
     assert_eq!(value("MEMORY").as_deref(), Some(""));
     assert_eq!(
         value("JVM_XX_OPTS").as_deref(),
-        Some("-XX:MaxRAMPercentage=75")
+        Some("-XX:MaxRAMPercentage=75 -XX:MaxRAM=10737418240"),
+        "FIX:01M7Q1M71TKSBWVV0C0GTXWWXZ : la JVM reçoit la limite du service"
     );
     assert_eq!(value("STOP_DURATION").as_deref(), Some("180"));
     assert!(

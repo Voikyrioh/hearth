@@ -97,6 +97,9 @@ pub struct PlanContext<'a> {
     /// `<données de l'agent>/services` : le dossier géré par Hearth, sous lequel vit un sous-dossier par
     /// service.
     pub managed_root: &'a str,
+    /// Le nom de la variable qui porte les options de la JVM, déclaré par la fiche du service (`jvm_max_ram`) ;
+    /// `None` pour un service sans fiche ou d'une fiche qui n'en déclare pas.
+    pub jvm_options_env: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -119,6 +122,23 @@ pub fn image_reference(image: &super::spec::SpecImage) -> String {
     match &image.digest {
         Some(digest) => format!("{}:{}@{digest}", image.repository, image.tag),
         None => format!("{}:{}", image.repository, image.tag),
+    }
+}
+
+/// Les options de la JVM avec la limite de mémoire du service (`-XX:MaxRAM=<octets>`). Une option `MaxRAM` déjà
+/// présente est laissée telle quelle (rien n'est dupliqué).
+fn with_max_ram(options: &str, memory_bytes: u64) -> String {
+    if options
+        .split_whitespace()
+        .any(|option| option.starts_with("-XX:MaxRAM="))
+    {
+        return options.to_owned();
+    }
+    let added = format!("-XX:MaxRAM={memory_bytes}");
+    if options.trim().is_empty() {
+        added
+    } else {
+        format!("{} {added}", options.trim_end())
     }
 }
 
@@ -167,10 +187,14 @@ pub fn plan_from_spec(
             .env
             .iter()
             .map(|entry| {
-                (
-                    Secret::new(entry.name.expose().to_owned()),
-                    Secret::new(entry.value.expose().to_owned()),
-                )
+                let name = entry.name.expose();
+                let mut value = entry.value.expose().to_owned();
+                // FIX:01M7Q1M71TKSBWVV0C0GTXWWXZ : la JVM ne voit pas toujours la limite du conteneur (noyau 6.18) ;
+                // on la lui donne, et `MaxRAMPercentage` de la fiche s'applique alors à elle.
+                if context.jvm_options_env == Some(name) {
+                    value = with_max_ram(&value, memory_bytes);
+                }
+                (Secret::new(name.to_owned()), Secret::new(value))
             })
             .collect(),
         command: secrets.command.as_ref().map(|command| {
@@ -216,6 +240,7 @@ mod tests {
                 created_by: "marie",
                 rev: 1,
                 managed_root: "/var/lib/hearth/services",
+                jvm_options_env: None,
             },
         )
         .expect("plan")
@@ -267,6 +292,7 @@ mod tests {
             created_by: "marie",
             rev: 1,
             managed_root: "/var/lib/hearth/services",
+            jvm_options_env: None,
         };
         let digest = format!("sha256:{}", "ab".repeat(32));
         valid.body.image.digest = Some(digest.clone());
@@ -330,6 +356,7 @@ mod tests {
             created_by: "m",
             rev: 1,
             managed_root: "/r",
+            jvm_options_env: None,
         };
         let mut body = valid.body.clone();
         body.memory_bytes = None;
@@ -352,5 +379,79 @@ mod tests {
             plan_from_spec(&valid.body, &valid.secrets, &context).err(),
             Some(PlanError::NotAHearthKey)
         );
+    }
+    /// FIX:01M7Q1M71TKSBWVV0C0GTXWWXZ : la limite du service est donnée à la JVM, et rien d'autre ne change.
+    fn plan_with_jvm(env_name: Option<&str>) -> ContainerPlan {
+        let mut spec = json();
+        spec["env"] = serde_json::json!([
+            {"name": "JVM_XX_OPTS", "value": "-XX:MaxRAMPercentage=75"},
+            {"name": "TOKEN", "value": "x"}
+        ]);
+        spec["resources"] = serde_json::json!({"cpu_millis": 500, "memory_bytes": 12u64 << 30});
+        let spec = serde_json::from_value(spec).expect("spec");
+        let valid = validate(
+            &spec,
+            Some(Machine {
+                cpus: 8,
+                memory_bytes: 32 << 30,
+            }),
+        )
+        .expect("valide");
+        let key = ServiceKey::parse(KEY).expect("clé");
+        plan_from_spec(
+            &valid.body,
+            &valid.secrets,
+            &PlanContext {
+                key: &key,
+                install_id: "inst-1",
+                created_by: "marie",
+                rev: 1,
+                managed_root: "/r",
+                jvm_options_env: env_name,
+            },
+        )
+        .expect("plan")
+    }
+
+    fn env_of(plan: &ContainerPlan, name: &str) -> Option<String> {
+        plan.env
+            .iter()
+            .find(|(n, _)| n.expose() == name)
+            .map(|(_, v)| v.expose().to_owned())
+    }
+
+    #[test]
+    fn a_declared_jvm_variable_receives_the_memory_limit_and_nothing_else_changes() {
+        let with = plan_with_jvm(Some("JVM_XX_OPTS"));
+        let without = plan_with_jvm(None);
+        assert_eq!(
+            env_of(&with, "JVM_XX_OPTS").as_deref(),
+            Some("-XX:MaxRAMPercentage=75 -XX:MaxRAM=12884901888")
+        );
+        assert_eq!(
+            env_of(&without, "JVM_XX_OPTS").as_deref(),
+            Some("-XX:MaxRAMPercentage=75")
+        );
+        // Le reste du plan est identique.
+        assert_eq!(env_of(&with, "TOKEN"), env_of(&without, "TOKEN"));
+        assert_eq!(with.env.len(), without.env.len());
+        assert_eq!(with.image, without.image);
+        assert_eq!(with.labels, without.labels);
+        assert_eq!(with.binds, without.binds);
+        assert_eq!(with.ports, without.ports);
+        assert_eq!(
+            (with.cpu_millis, with.memory_bytes, with.restart),
+            (without.cpu_millis, without.memory_bytes, without.restart)
+        );
+    }
+
+    #[test]
+    fn another_variable_is_left_alone_and_an_existing_max_ram_is_not_duplicated() {
+        assert_eq!(
+            env_of(&plan_with_jvm(Some("OTHER")), "JVM_XX_OPTS").as_deref(),
+            Some("-XX:MaxRAMPercentage=75")
+        );
+        assert_eq!(with_max_ram("-XX:MaxRAM=1", 5), "-XX:MaxRAM=1");
+        assert_eq!(with_max_ram("", 5), "-XX:MaxRAM=5");
     }
 }

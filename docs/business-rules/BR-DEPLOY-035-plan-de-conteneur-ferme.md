@@ -34,3 +34,4 @@ BR-DEPLOY-012
 ## Historique
 - 2026-10-17 — création (HRT-68, déployer une image, côté agent).
 - 2026-10-19 — `no-new-privileges` et borne de processus posés d'office (review de la PR #107).
+- 2026-11-18 : précision (HRT-295, FIX:01M7Q1M71TKSBWVV0C0GTXWWXZ) : le plan reste fermé (aucun champ nouveau) ; `plan_from_spec` ajoute `-XX:MaxRAM=<limite en octets>` à la SEULE variable que la fiche déclare `jvm_max_ram`, quand le service a sa limite de mémoire (BR-DEPLOY-038).

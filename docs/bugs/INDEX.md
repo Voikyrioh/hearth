@@ -166,3 +166,4 @@ Code changé, commit hash, stratégie (patch, refactoring).
 ```
 
 Pointeur code : `// FIX:{ULID}` au-dessus de la ligne corrigée.
+| [FIX-01M7Q1M71TKSBWVV0C0GTXWWXZ](./FIX-01M7Q1M71TKSBWVV0C0GTXWWXZ.md) | Un serveur Minecraft limité en mémoire était tué par le noyau : la JVM ne voyait pas la limite du conteneur (HRT-295) | 2026-11-18 |

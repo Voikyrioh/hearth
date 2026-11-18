@@ -368,6 +368,7 @@ async fn run_scenario(
             created_by: "fiche-live",
             rev: 1,
             managed_root: &managed_root,
+            jvm_options_env: None,
         },
     )
     .expect("plan");

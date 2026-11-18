@@ -1276,6 +1276,16 @@ fn check_agreements(file: &FicheFile) -> Result<(), FicheRefusee> {
             || !literal_ok(&binds.accepted_value, MAX_LITERAL_CHARS)
         {
             return Err(refuse(
+        if env.jvm_max_ram && env.value.is_none() {
+            return Err(refuse(
+                f,
+                at,
+                Motif::ChampIncoherent {
+                    champ: "jvm_max_ram".into(),
+                    avec: "(exige une valeur fixe)".into(),
+                },
+            ));
+        }
                 f,
                 at,
                 Motif::ValeurFixeInvalide {

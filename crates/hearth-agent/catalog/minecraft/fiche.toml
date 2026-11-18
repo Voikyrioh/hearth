@@ -169,7 +169,8 @@ name = "GID"
 owner = "gid"
 
 # Le tas de la JVM suit la limite de mémoire du service : `MEMORY` vide laisse la JVM calculer son tas, et
-# `MaxRAMPercentage` le fixe à 75 % de la limite (le reste sert aux mémoires hors tas). Documentation de l'image :
+# `MaxRAMPercentage` le fixe à 75 % de la limite (le reste sert aux mémoires hors tas). La limite est donnée à la
+# JVM par l'agent (`MaxRAM`, voir plus bas) : la détection de conteneur de la JVM n'est pas fiable. Documentation de l'image :
 # « To let the JVM calculate heap size automatically, unset MEMORY with an empty value ». C'est donc le curseur de
 # mémoire de l'installation qui règle Minecraft, jamais un chiffre de la fiche. Vérifié par le banc d'essai réel : avec
 # 10 Gio, le serveur du pack occupe 7,6 Gio (tas de 7,5 Gio au plus).
@@ -177,9 +178,12 @@ owner = "gid"
 name = "MEMORY"
 value = ""
 
+# Sur certains noyaux (6.18), la JVM ne lit pas la limite du conteneur et prendrait 75 % de la mémoire de l'HÔTE :
+# l'agent ajoute donc lui-même `-XX:MaxRAM=<limite du service en octets>` à cette variable (`jvm_max_ram`).
 [[env]]
 name = "JVM_XX_OPTS"
 value = "-XX:MaxRAMPercentage=75"
+jvm_max_ram = true
 
 # Attente de l'enregistrement du monde à l'arrêt : un gros monde ou un gros pack demande du temps (60 s par défaut).
 [[env]]

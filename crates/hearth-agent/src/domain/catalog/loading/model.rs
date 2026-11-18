@@ -88,6 +88,15 @@ impl Fiche {
         &self.file.id
     }
 
+    /// La variable qui porte les options de la JVM (`jvm_max_ram`), si la fiche en déclare une.
+    pub fn jvm_options_env(&self) -> Option<&str> {
+        self.file
+            .env
+            .iter()
+            .find(|var| var.jvm_max_ram)
+            .map(|var| var.name.as_str())
+    }
+
     pub fn setting(&self, id: &str) -> Option<&Setting> {
         self.settings.iter().find(|s| s.id == id)
     }
