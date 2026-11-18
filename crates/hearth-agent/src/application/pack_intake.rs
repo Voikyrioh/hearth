@@ -66,6 +66,17 @@ pub fn pack_limits() -> ArchiveLimits {
     limits
 }
 
+/// Les bornes de lecture d'un `.jar` de mod (HRT-254, BR-MOD-022) : 256 Mio le fichier, 1 Gio déballé, 65 536
+/// entrées ; le reste (profondeur, taux de compression, vérification des sommes) est celui de l'ADR-0055.
+#[allow(clippy::field_reassign_with_default)] // `verify_data` n'est pas constructible hors du module `archive`
+pub fn jar_limits() -> ArchiveLimits {
+    let mut limits = ArchiveLimits::default();
+    limits.max_file_size = 256 << 20;
+    limits.max_unpacked = 1 << 30;
+    limits.max_entries = 65_536;
+    limits
+}
+
 pub struct PackIntake {
     deposits: Arc<dyn PackDeposits>,
 }
@@ -329,3 +340,11 @@ mod tests {
         assert_eq!(pack_limits().max_file_size, 4 * GIB);
     }
 }
+
+    #[test]
+    fn the_jar_limits_are_256_mib_one_gib_and_65536_entries() {
+        let limits = jar_limits();
+        assert_eq!(limits.max_file_size, 256 << 20);
+        assert_eq!(limits.max_unpacked, GIB);
+        assert_eq!(limits.max_entries, 65_536);
+    }
