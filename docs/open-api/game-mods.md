@@ -1,6 +1,6 @@
 # Mods d'un serveur de jeu installé (HRT-256, ADR-0062)
 
-La liste des mods d'un serveur installé est lue dans le volume du service, écrit par le jeu et par ses mods : l'agent la tient pour hostile. Règles `BR-MOD-020`, `021`, `022`, `030`, `031`, `032`, `033` ; lecture d'archive : ADR-0055. Écrire (poser, retirer, désactiver) arrive avec HRT-258.
+La liste des mods d'un serveur installé est lue dans le volume du service, écrit par le jeu et par ses mods : l'agent la tient pour hostile. Règles `BR-MOD-020`, `021`, `022`, `030`, `031`, `032`, `033` ; lecture d'archive : ADR-0055. Écrire (poser, retirer, désactiver) : `POST …/mods/apply` ci-dessous (HRT-258, `BR-MOD-024` à `027`).
 
 ## `GET /api/v1/services/{key}/mods`
 
@@ -65,3 +65,25 @@ Corps : `{ "deposits": ["01J...", "..."] }` (1 à 8 identifiants de dépôts de 
 Écarts avec la conception technique (section 7) : `MODS_BATCH_INVALID` répond `422` (le protocole n'emploie pas `400`) ; `refusal_values.minecraft` (plage du mod en texte) est omis, la plage n'étant gardée que sous forme d'intervalles (`identity.minecraft_declared` dit seulement qu'elle est comprise).
 
 Erreurs : `404 SERVICE_NOT_FOUND`, `404 NOT_A_GAME_SERVICE`, `404 DEPOSIT_UNKNOWN` (un dépôt inconnu ou d'un autre compte arrête tout le contrôle, rien n'est retiré), `409 MODS_NOT_APPLICABLE` (Vanilla, Paper, Purpur), `422 MODS_BATCH_INVALID`, `500 INTERNAL_ERROR`.
+
+## `POST /api/v1/services/{key}/mods/apply` (HRT-258, HRT-259)
+
+Acte signé `ModsApply` (`0x20`), **jamais couvert par l'élévation** : le mot de passe est toujours demandé. Droit « gérer les services ». Les paramètres signés : la clé du service, le nombre de changements et l'empreinte de leur liste triée (chacun préfixé de son genre : `add:{dépôt}`, `retire:`, `restore:`, `disable:`, `enable:` ; jamais un contenu).
+
+```json
+{
+  "add": [{ "deposit": "01J…", "sha256": "hex", "replace": "lithium-0.11.1.jar" }],
+  "retire": ["iris-1.6.4.jar"],
+  "restore": ["clumps-12.0.0.3.jar"],
+  "disable": ["fabric-carpet-1.20-1.4.112.jar"],
+  "enable": ["iris-1.6.4.jar.disabled"]
+}
+```
+
+Bornes : 1 à 64 changements, 8 ajouts au plus, noms de l'alphabet sûr (`.jar` ou `.jar.disabled`), aucun fichier de `mods` deux fois, un nom de `restore` une fois ; `disable` ne prend que des `.jar`, `enable` que des `.jar.disabled`. `sha256` est l'empreinte du dépôt que le client a calculée : l'agent la compare à celle qu'il lit, jamais cru. Réponse `202` : `{ "operation_id": "…", "backup_id": "…" }` ; suivi par `GET /operations/services/{id}` (genre `mods`, étapes `stop`, `copy`, `verify`, `place`, `start`, `watch`) et la queue de journal existante.
+
+Refus synchrones (rien n'est arrêté ni écrit) : `404 NOT_A_GAME_SERVICE`, `409 MODS_NOT_APPLICABLE`, `409 OPERATION_IN_PROGRESS` (autre opération sur le service), `409 HEAVY_IO_BUSY` (autre opération lourde sur le serveur), `422 MODS_BATCH_INVALID`, `422 MOD_REFUSED` (`details.deposit`, `details.refusal` : un code de `mods/check`, ou `MOD_REPLACE_MISMATCH` pour un `replace` qui ne désigne pas le fichier de même identifiant), `422 MOD_FILE_MISSING`, `422 MOD_IN_MODRINTH_PACK`, `422 MOD_ALREADY_ACTIVE`, `422 MOD_NAME_TAKEN`, `422 MODS_FOLDER_BLOCKED`, `507 NO_SPACE` / `422 PATH_REFUSED` selon l'espace des sauvegardes (BR-BACKUP-009), `401/403` acte non signé ou droit absent.
+
+Écarts avec la conception technique (section 7) : le service adopté ou sans fiche répond `404 NOT_A_GAME_SERVICE` comme toutes les routes de jeu ; les refus de verrou et d'espace reprennent ceux des sauvegardes ; les bornes (`MODS_BATCH_INVALID`) sont jugées avant la lecture du volume.
+
+Issue : `succeeded` ; `cancelled` (avant `place`) ; `failed` (`step_failed`, erreur au milieu de `place` : mouvements défaits) ; `rolled_back` (le serveur n'a pas dit « prêt » : `stopped_right_after_start`, `timeout`, `not_restarted`) ; `interrupted` (retour impossible). Journal d'activité : `service.mods`, des nombres et des noms sûrs.
