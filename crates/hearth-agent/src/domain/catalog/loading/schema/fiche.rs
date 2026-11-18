@@ -687,11 +687,15 @@ pub struct Migration {
 /// `fetch_by_agent` arrivent avec leurs tickets (HRT-126) ; une valeur inconnue est refusée au chargement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)] // les noms de la fiche (`drop_files`, `drop_pack`, `drop_jars`)
 pub enum ModWay {
     /// Fichiers déposés dans le dossier de rôle `mods`.
     DropFiles,
     /// Un pack déposé (`[mods.pack]`).
     DropPack,
+    /// Des fichiers `.jar` posés un à un dans le dossier des mods d'un dossier de rôle `data` (`[mods.jars]`,
+    /// HRT-253, ADR-0062).
+    DropJars,
 }
 
 /// Genre de pack, reconnu par le CONTENU de l'archive, jamais par son nom (BR-MOD-007). Aucun genre
@@ -726,4 +730,17 @@ pub struct PackWay {
 pub struct Mods {
     pub ways: Vec<ModWay>,
     pub pack: Option<PackWay>,
+    pub jars: Option<ModsJars>,
+}
+
+/// Les mods `.jar` d'un serveur installé (HRT-253, BR-MOD-001) : le dossier de rôle `data` qui les contient, le
+/// sous-dossier lu par le jeu, le sous-dossier « Mods retirés » (jamais lu par le jeu) et les variantes (moteurs)
+/// qui les prennent. Aucun chemin libre : `dir` et `retired_dir` sont un seul composant.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModsJars {
+    pub folder: String,
+    pub dir: String,
+    pub retired_dir: String,
+    pub variants: Vec<String>,
 }

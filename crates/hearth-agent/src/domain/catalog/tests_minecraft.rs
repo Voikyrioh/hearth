@@ -300,5 +300,9 @@ fn the_fiche_exposes_no_player_identity_and_no_curseforge_key() {
         assert!(!setting.key.starts_with("CF_"), "{}", setting.id);
     }
     let mods = fiche.file.mods.as_ref().expect("voies de mods");
-    assert_eq!(mods.ways.len(), 1, "seul le dépôt d'un pack est offert");
+    assert_eq!(
+        mods.ways.len(),
+        2,
+        "le dépôt d'un pack et celui de fichiers .jar"
+    );
 }

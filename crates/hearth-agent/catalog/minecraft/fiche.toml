@@ -11,7 +11,7 @@
 
 format = 2
 id = "minecraft"
-version = 4
+version = 5
 family = "minecraft"
 name = "Minecraft Java"
 summary = "Le serveur de Minecraft Java : officiel, Paper, Purpur, Fabric, Quilt, Forge ou NeoForge, avec ou sans pack de mods."
@@ -221,10 +221,19 @@ key = "EULA"
 accepted_value = "TRUE"
 
 [mods]
-ways = ["drop_pack"]
+ways = ["drop_pack", "drop_jars"]
 
 [mods.pack]
 folder = "packs"
+
+# Les mods `.jar` d'un serveur installé (HRT-253, ADR-0062) : le jeu lit `/data/mods`, Hearth y pose et y renomme des
+# fichiers (jamais de suppression) ; « Mods retirés » (`/data/mods-retires`) n'est jamais lu par le jeu. L'arrêt simple
+# enregistre le monde (`by_image_on_signal`). Vanilla, Paper et Purpur ne prennent pas de mods `.jar` (BR-MOD-030).
+[mods.jars]
+folder = "data"
+dir = "mods"
+retired_dir = "mods-retires"
+variants = ["fabric", "quilt", "forge", "neoforge", "modrinth"]
 
 # Un pack serveur (`.zip`, `mods` et `config` à la racine) : `GENERIC_PACK`, avec un moteur à mods.
 [[mods.pack.genre]]

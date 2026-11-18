@@ -22,7 +22,7 @@ use super::loader::{check_text, check_variant_refs};
 use super::memory::{TierId, TierListError, declared_ids, hidden_ids, recommended_gap};
 use super::model::{Fiche, Setting, ValueSpec};
 use super::schema::fiche::{
-    Channel, ChannelKind, Derive, Evidence, FicheFile, FolderRole, MemoryTier, ModWay,
+    Channel, ChannelKind, Derive, Evidence, FicheFile, FolderRole, MemoryTier, ModWay, Mods,
     PlainEvidence, PortRole, Proof, Publish, Status, Step, StepKind, WorldSaved,
 };
 use super::schema::settings::{ArgForm, SettingsFile};
@@ -469,6 +469,7 @@ pub fn check_fiche_file(file: &FicheFile) -> Result<(), FicheRefusee> {
     check_folders(file)?;
     check_mods(file)?;
     check_no_curseforge(file)?;
+    check_no_remove_old_mods(file)?;
     check_ports(file)?;
     check_channels(file)?;
     check_env_and_secrets(file)?;
@@ -781,6 +782,7 @@ fn check_mods(file: &FicheFile) -> Result<(), FicheRefusee> {
             "`drop_files` demande un dossier de rôle `mods` écrit par l'agent",
         ));
     }
+    check_mods_jars(file, mods)?;
     let wants_pack = mods.ways.contains(&ModWay::DropPack);
     match (&mods.pack, wants_pack) {
         (None, true) => return Err(incoherent("mods.pack", "`drop_pack` demande `[mods.pack]`")),
@@ -831,6 +833,116 @@ fn check_mods(file: &FicheFile) -> Result<(), FicheRefusee> {
             return Err(refuse(f, at, Motif::ListeDeVariantesVide));
         }
         check_variant_refs(file, f, &at, &genre.variants)?;
+    }
+    Ok(())
+}
+
+/// I-MOD (HRT-253, BR-MOD-001) : `drop_jars` si et seulement si `[mods.jars]` ; le dossier est de rôle `data`,
+/// sauvegardé et inscriptible ; `dir` et `retired_dir` sont deux composants sûrs et différents ; les variantes
+/// existent ; l'arrêt enregistre le monde par le signal (l'opération des mods ne déroule aucune suite d'arrêt).
+fn check_mods_jars(file: &FicheFile, mods: &Mods) -> Result<(), FicheRefusee> {
+    let f = Fichier::Fiche;
+    let incoherent =
+        |at: &str, raison: &'static str| refuse(f, at.to_owned(), Motif::ModsIncoherent { raison });
+    let wants = mods.ways.contains(&ModWay::DropJars);
+    let jars = match (&mods.jars, wants) {
+        (None, true) => {
+            return Err(incoherent("mods.jars", "`drop_jars` demande `[mods.jars]`"));
+        }
+        (Some(_), false) => {
+            return Err(incoherent(
+                "mods.jars",
+                "`[mods.jars]` demande la voie `drop_jars`",
+            ));
+        }
+        (None, false) => return Ok(()),
+        (Some(jars), true) => jars,
+    };
+    let Some(folder) = file.folder.iter().find(|d| d.id == jars.folder) else {
+        return Err(refuse(
+            f,
+            "mods.jars.folder",
+            Motif::DossierInconnu {
+                id: jars.folder.clone(),
+            },
+        ));
+    };
+    if folder.role != FolderRole::Data || !folder.backup || folder.read_only {
+        return Err(incoherent(
+            "mods.jars.folder",
+            "le dossier des mods est un dossier de rôle `data`, sauvegardé et inscriptible",
+        ));
+    }
+    for (at, name) in [
+        ("mods.jars.dir", &jars.dir),
+        ("mods.jars.retired_dir", &jars.retired_dir),
+    ] {
+        if !jars_dir_ok(name) {
+            return Err(refuse(
+                f,
+                at,
+                Motif::IdentifiantInvalide {
+                    ou: "sous-dossier des mods (un seul composant de 1 à 32 caractères a-z, 0-9, tiret)",
+                },
+            ));
+        }
+    }
+    if jars.dir == jars.retired_dir {
+        return Err(incoherent(
+            "mods.jars.retired_dir",
+            "« Mods retirés » est un autre dossier que celui lu par le jeu",
+        ));
+    }
+    check_variant_refs(file, f, "mods.jars.variants", &jars.variants)?;
+    if file.stop.world_saved != WorldSaved::ByImageOnSignal {
+        return Err(incoherent(
+            "stop.world_saved",
+            "une fiche à mods `.jar` enregistre le monde par le signal d'arrêt (`by_image_on_signal`)",
+        ));
+    }
+    Ok(())
+}
+
+/// Un composant de chemin sûr : 1 à 32 caractères `[a-z0-9-]`.
+fn jars_dir_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 32
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// BR-MOD-028 : aucune variable `REMOVE_OLD_MODS` (valeur fixe, variante, variable d'un genre, réglage), car
+/// l'image supprimerait des fichiers du dossier des mods.
+fn check_no_remove_old_mods(file: &FicheFile) -> Result<(), FicheRefusee> {
+    let f = Fichier::Fiche;
+    let forbidden = |name: &str| name.eq_ignore_ascii_case("REMOVE_OLD_MODS");
+    let refused =
+        |at: String, ou: &str| refuse(f, at, Motif::RemoveOldModsInterdit { ou: ou.into() });
+    for (i, env) in file.env.iter().enumerate() {
+        if forbidden(&env.name) {
+            return Err(refused(format!("env[{i}]"), "variable fixe"));
+        }
+    }
+    for (i, variant) in file.variant.iter().enumerate() {
+        for (j, env) in variant.env.iter().enumerate() {
+            if forbidden(&env.name) {
+                return Err(refused(
+                    format!("variant[{i}].env[{j}]"),
+                    "variable d'une variante",
+                ));
+            }
+        }
+    }
+    if let Some(pack) = file.mods.as_ref().and_then(|m| m.pack.as_ref()) {
+        for (i, genre) in pack.genre.iter().enumerate() {
+            if forbidden(&genre.env) {
+                return Err(refused(
+                    format!("mods.pack.genre[{i}]"),
+                    "variable d'un genre de pack",
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -1164,6 +1276,16 @@ fn check_env_and_secrets(file: &FicheFile) -> Result<(), FicheRefusee> {
         if let Some(value) = &env.value {
             fixed_value_ok(&at, value)?;
         }
+        if env.jvm_max_ram && env.value.is_none() {
+            return Err(refuse(
+                f,
+                at,
+                Motif::ChampIncoherent {
+                    champ: "jvm_max_ram".into(),
+                    avec: "(exige une valeur fixe)".into(),
+                },
+            ));
+        }
         if let Some(secret) = &env.secret
             && !file.secret.iter().any(|s| &s.id == secret)
         {
@@ -1276,16 +1398,6 @@ fn check_agreements(file: &FicheFile) -> Result<(), FicheRefusee> {
             || !literal_ok(&binds.accepted_value, MAX_LITERAL_CHARS)
         {
             return Err(refuse(
-        if env.jvm_max_ram && env.value.is_none() {
-            return Err(refuse(
-                f,
-                at,
-                Motif::ChampIncoherent {
-                    champ: "jvm_max_ram".into(),
-                    avec: "(exige une valeur fixe)".into(),
-                },
-            ));
-        }
                 f,
                 at,
                 Motif::ValeurFixeInvalide {
@@ -1723,6 +1835,18 @@ pub fn check_cross(fiche: &Fiche) -> Result<(), FicheRefusee> {
                 at,
                 Motif::IdentifiantInvalide {
                     ou: "nom de variable d'un réglage",
+                },
+            ));
+        }
+        // BR-MOD-028 : aucun réglage n'écrit `REMOVE_OLD_MODS`.
+        if channel.is_some_and(|c| c.kind == ChannelKind::Env)
+            && setting.key.eq_ignore_ascii_case("REMOVE_OLD_MODS")
+        {
+            return Err(refuse(
+                s,
+                at,
+                Motif::RemoveOldModsInterdit {
+                    ou: "réglage".into(),
                 },
             ));
         }

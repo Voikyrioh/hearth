@@ -477,6 +477,7 @@ fn mods_view(fiche: &Fiche) -> Option<ModsView> {
         .map(|way| match way {
             ModWay::DropFiles => "drop_files".to_owned(),
             ModWay::DropPack => "drop_pack".to_owned(),
+            ModWay::DropJars => "drop_jars".to_owned(),
         })
         .collect();
     let pack = mods.pack.as_ref().map(|pack| PackWayView {
