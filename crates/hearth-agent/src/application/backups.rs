@@ -725,9 +725,15 @@ fn copy_blocking(job: CopyJob) -> CopyOutcome {
 // Le cas d'usage
 // ---------------------------------------------------------------------------------------------
 
+/// L'issue du cœur d'une sauvegarde (`Backups::copy_and_verify`).
+pub(crate) enum CopyVerified {
+    Over(Finish),
+    Halted,
+}
+
 /// Ce que l'exécution décide de son issue.
 #[derive(Debug)]
-struct Finish {
+pub(crate) struct Finish {
     status: OpStatus,
     cause: Option<Cause>,
     note: BackupNote,
@@ -752,7 +758,7 @@ impl Finish {
 }
 
 /// Tout ce qu'une exécution emporte avec elle. Aucun secret, aucune note en clair.
-struct Job {
+pub(crate) struct Job {
     id: String,
     key: ServiceKey,
     name: String,
@@ -1477,15 +1483,29 @@ impl Backups {
                 return Some(self.finish_after(job, Finish::cancelled()).await);
             }
         }
+        // 2 et 3. La copie puis la vérification (cœur partagé : `copy_and_verify`).
+        let finish = match self.copy_and_verify(job).await {
+            CopyVerified::Halted => return None,
+            CopyVerified::Over(finish) => finish,
+        };
+        Some(self.finish_after(job, finish).await)
+    }
+
+    /// Le cœur d'une sauvegarde, SANS verrou ni arrêt ni relance : crée l'archive, la copie, la publie (ligne
+    /// `ready`), puis la relit (`BR-BACKUP-009`, `010`, `013`, `015`, `025`, `032`). Une autre opération du service
+    /// (HRT-255, `mods` : « Avant mods ») l'appelle une fois son propre verrou pris et son service arrêté ; le
+    /// service est relancé par l'appelant. `Over(finish)` : l'issue à rendre (la partie écrite d'un échec est déjà
+    /// retirée, la relance et le règlement restent à l'appelant) ; `Halted` : l'agent s'arrête.
+    pub(crate) async fn copy_and_verify(&self, job: &Job) -> CopyVerified {
         // 2. La copie.
         let copied = match self.copy(job).await {
-            CopyEnd::Halted => return None,
-            CopyEnd::Over(Err(finish)) => return Some(self.finish_after(job, finish).await),
+            CopyEnd::Halted => return CopyVerified::Halted,
+            CopyEnd::Over(Err(finish)) => return CopyVerified::Over(finish),
             CopyEnd::Over(Ok(copied)) => copied,
         };
         // 3. La vérification.
         if let Err(finish) = self.begin(job, step::VERIFY, &UndoInfo::default()).await {
-            return Some(self.finish_after(job, finish).await);
+            return CopyVerified::Over(finish);
         }
         let verified = self.verify_new(job).await;
         let finish = match verified {
@@ -1500,9 +1520,9 @@ impl Backups {
             Err(Some(finish)) => finish,
             // L'agent s'arrête pendant la relecture : l'opération reste en cours (interrompue au prochain
             // démarrage), l'archive reste publiée, non vérifiée.
-            Err(None) => return None,
+            Err(None) => return CopyVerified::Halted,
         };
-        Some(self.finish_after(job, finish).await)
+        CopyVerified::Over(finish)
     }
 
     /// 4. Relance du service arrêté par cette opération, quelle que soit l'issue (`BR-BACKUP-008`).
