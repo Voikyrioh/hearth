@@ -171,13 +171,15 @@ impl ConsolePolicy {
 }
 
 /// La classe d'une ligne : le verbe (premier mot en minuscules ASCII, préfixe `minecraft:` retiré) est refusé,
-/// sensible ou libre selon la politique de la fiche.
+/// sensible ou libre selon la politique de la fiche ; un verbe à espace de noms inconnu (`x:y`) est sensible.
 pub fn classify(policy: &ConsolePolicy, line: &ConsoleLine) -> ConsoleClass {
     let verb = line.verb();
     if let Some(reason) = policy.refusal(&verb) {
         return ConsoleClass::Refused(reason);
     }
-    if policy.is_sensitive(&verb) {
+    // Un verbe d'un autre espace de noms (`mod:commande`, hors `minecraft:`) est celui d'un mod : Hearth ne sait pas ce
+    // qu'il fait, le mot de passe est exigé (ADR-0067).
+    if policy.is_sensitive(&verb) || verb.contains(':') {
         ConsoleClass::Sensitive
     } else {
         ConsoleClass::Free
@@ -264,6 +266,9 @@ mod tests {
     fn the_verb_is_judged_lowercase_without_the_minecraft_prefix() {
         assert_eq!(class("time set day"), ConsoleClass::Free);
         assert_eq!(class("/minecraft:op Bram"), ConsoleClass::Sensitive);
+        // Un verbe de mod (autre espace de noms) est sensible par défaut ; `minecraft:` est retiré avant.
+        assert_eq!(class("coolmod:wipe all"), ConsoleClass::Sensitive);
+        assert_eq!(class("minecraft:list"), ConsoleClass::Free);
         assert_eq!(class("OP Bram"), ConsoleClass::Sensitive);
         assert_eq!(
             class("STOP"),

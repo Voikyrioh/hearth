@@ -50,7 +50,10 @@ fn the_embedded_minecraft_fiche_declares_what_hearth_may_do_with_its_console() {
             "kick",
             "whitelist",
             "save-off",
-            "execute"
+            "execute",
+            "function",
+            "schedule",
+            "datapack"
         ]
     );
     assert_eq!(usage.sensitive[0].target, SensitiveTarget::FirstArg);
@@ -118,6 +121,11 @@ fn a_trapped_console_block_is_refused_with_the_console_motif() {
     // Une commande rapide envoyée de classe sensible.
     assert!(
         refusal(&changed("text = \"save-all\"", "text = \"op Bram\"")).contains("classe libre")
+    );
+    // Une commande rapide d'un mod (espace de noms inconnu) est sensible par défaut : jamais envoyée sans mot de passe.
+    assert!(
+        refusal(&changed("text = \"save-all\"", "text = \"coolmod:wipe\""))
+            .contains("classe libre")
     );
     // Un texte non ASCII, ou de plus de 64 caractères.
     assert!(

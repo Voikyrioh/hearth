@@ -18,9 +18,11 @@ Une commande est une seule ligne de 1 à 256 points de code, sans caractère de 
 
 ## Vérification
 - `hearth-proto/src/console.rs::tests` (forme, 256 points de code acceptés et 257 refusés, caractères interdits, `/minecraft:op Bram` sensible, `STOP` refusée, seul le premier mot juge)
+- `hearth-proto/src/console.rs::tests` : un verbe de mod (`coolmod:wipe`) est sensible, `minecraft:list` libre
 
 ## Règles liées
 - BR-CONSOLE-001, BR-CONSOLE-005
 
 ## Historique
 - 2026-11-18 : création (HRT-267).
+- 2026-11-23 : un verbe à espace de noms inconnu (`mod:commande`) est sensible par défaut ; `function`, `schedule`, `datapack` sensibles dans la fiche Minecraft (revue Stephen, ADR-0067 points 11 et 12).

@@ -25,6 +25,8 @@ Voiky (2026-11-17) : écrire dans la console du serveur Minecraft depuis Hearth 
 8. **Journal** : action `service.console` : premier mot (forme fermée, sinon `other`), classe, joueur visé d'un verbe sensible (forme de pseudo seulement), nombre de caractères, issue ; jamais le reste du texte ni la réponse.
 9. **Joueurs connectés** : commande de la fiche (`list`) envoyée par l'agent hors débit, lecteur pur d'une liste fermée (`minecraft_list`), cache de 10 s par service, noms hors forme comptés sans être rendus, jamais un chiffre deviné ; lecture sans acte ni journal, droit de lire le service.
 10. **Avant un arrêt (bonus)** : étape `console_save` facultative (commande et signe de la fiche, délai borné), jamais bloquante, jamais rejouée par `recover` ; réalise sous une forme étroite l'étape `console_command` annoncée par l'ADR-0052 point 8.
+11. **Verbes qui en lancent d'autres** (revue du 23/11/2026) : `function`, `schedule` et `datapack` sont SENSIBLES dans la fiche Minecraft (ils exécutent des suites de commandes que Hearth ne peut pas juger, comme `execute`). Un verbe à espace de noms inconnu (`mod:commande`, tout ce qui reste avec un `:` une fois `minecraft:` retiré) est sensible PAR DÉFAUT, dans `classify` et dans le jugement des littéraux de la fiche (une commande rapide ou des joueurs ne peuvent pas en porter un).
+12. **Phase de jeu inconnue** : si la phase du jeu n'est pas connue (l'agent vient de redémarrer, le signe « prêt » n'est pas encore relu), la commande PART quand même ; une console encore injoignable répond `CONSOLE_UNREACHABLE` (le début du démarrage). Refuser d'avance fermerait la console après chaque redémarrage de l'agent alors que le jeu tourne.
 
 ## Comment l'appliquer
 - `hearth-proto` : `console.rs` (pur), `api/console.rs`, `api/players.rs`, `ActKind::ConsoleCommand = 0x30` dans `ROUTES`, `password_need`, action `service.console`, capacité `game-console` dans `/hello`.
@@ -35,7 +37,7 @@ Voiky (2026-11-17) : écrire dans la console du serveur Minecraft depuis Hearth 
 - Pas pour un service adopté (BR-JEU-001), ni pour les invités du portail.
 - Pas pour appliquer un réglage sans redémarrer (chaque réglage devra être prouvé sur la vraie image).
 - Pas d'autre protocole que `source_rcon` sans un avenant (`telnet_line` reste déclaré, non parlé).
-- La classe n'est pas une barrière complète : une commande ajoutée par un mod qui donne des droits est « libre ». Le droit de gérer les services reste la barrière.
+- La classe n'est pas une barrière complète : une commande de `minecraft:` absente de la fiche est « libre » (un verbe de mod à espace de noms est sensible, point 11). Le droit de gérer les services reste la barrière.
 - Moteur sans privilèges : l'hôte ne joint pas l'adresse du conteneur ; la console y est injoignable jusqu'à une décision (ADR-0042 brouillon).
 
 ## Alternatives rejetées

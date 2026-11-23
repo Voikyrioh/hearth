@@ -1456,7 +1456,11 @@ fn check_console_use(file: &FicheFile) -> Result<(), FicheRefusee> {
             .unwrap_or_default()
             .to_ascii_lowercase();
         let verb = lower.strip_prefix("minecraft:").unwrap_or(&lower);
-        if refused.iter().any(|v| v == verb) || sensitive.iter().any(|v| v == verb) {
+        // Un verbe à espace de noms (`mod:commande`) est sensible par défaut (`hearth_proto::console::classify`).
+        if refused.iter().any(|v| v == verb)
+            || sensitive.iter().any(|v| v == verb)
+            || verb.contains(':')
+        {
             return Err(bad(chemin, raison));
         }
         Ok(())

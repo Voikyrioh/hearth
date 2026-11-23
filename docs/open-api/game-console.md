@@ -29,6 +29,8 @@ Accès : droit « gérer les services » (niveau `Services`), acte `ConsoleComma
 
 Réponse `200` : `{ "outcome": "answered | empty | no_answer", "reply": "Made Bram a server operator", "truncated": false }` (`reply` absent pour `empty` et `no_answer` ; `no_answer` : la commande a peut-être été exécutée, elle n'est jamais renvoyée).
 
+Classe : un verbe à espace de noms inconnu (`mod:commande`, `minecraft:` retiré) est SENSIBLE par défaut ; `function`, `schedule` et `datapack` sont sensibles dans la fiche Minecraft (ADR-0067, points 11 et 12). Phase du jeu inconnue (agent redémarré) : la commande part, `CONSOLE_UNREACHABLE` est possible au début du démarrage.
+
 Refus, dans cet ordre, rien n'est envoyé au jeu :
 
 | HTTP | Code | Condition |
@@ -37,7 +39,7 @@ Refus, dans cet ordre, rien n'est envoyé au jeu :
 | 409 | `SERVICE_ADOPTED` | service adopté |
 | 409 | `CONSOLE_NOT_AVAILABLE` | fiche sans `[remote_console.use]` |
 | 422 | `CONSOLE_COMMAND_INVALID` (`details.reason` : `empty`, `too_long`, `control_char`) | forme |
-| 422 | `CONSOLE_COMMAND_REFUSED` (`details.reason` : `use_hearth_stop`, `use_hearth_restart`, `breaks_server`) | verbe refusé (inscrit) |
+| 422 | `CONSOLE_COMMAND_REFUSED` (`details.reason` : `use_hearth_stop`, `use_hearth_restart`, `breaks_server`) | verbe refusé (inscrit ; un refus prend un jeton du débit AVANT d'être inscrit, `429` au-delà de la rafale) |
 | 422 | `CONSOLE_CLASS_MISMATCH` | classe signée différente de la classe rejugée |
 | 409 | `SERVICE_NOT_RUNNING` / `SERVICE_STARTING` | arrêté / pas encore prêt |
 | 409 | `OPERATION_IN_PROGRESS` | verrou exclusif tenu |

@@ -279,6 +279,24 @@ title = "Exécuter une commande composée ?"
 sentence = "La commande execute peut lancer n'importe quelle autre commande à la place d'un joueur, d'un lieu ou d'une entité. Hearth ne peut pas savoir ce qu'elle fera."
 target = "none"
 
+[[remote_console.use.sensitive]]
+verb = "function"
+title = "Lancer une fonction ?"
+sentence = "Une fonction exécute une suite de commandes écrite à l'avance. Hearth ne peut pas savoir ce qu'elle fera : elle peut donner des droits, changer le monde ou bannir des joueurs."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "schedule"
+title = "Programmer une fonction pour plus tard ?"
+sentence = "Une fonction programmée se lancera seule, plus tard, sans que personne ne la tape. Hearth ne peut pas savoir ce qu'elle fera."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "datapack"
+title = "Changer les packs de données ?"
+sentence = "Un pack de données ajoute ou retire des fonctions et des règles du jeu, qui peuvent lancer des commandes seules. Un mauvais réglage peut abîmer le monde."
+target = "none"
+
 [remote_console.use.players]
 command = "list"
 reader = "minecraft_list"
