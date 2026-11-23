@@ -94,6 +94,9 @@ use crate::domain::services::plan::image_reference;
 use crate::domain::services::spec::{SpecBody, SpecMountKind};
 use crate::domain::services::{EngineState, KeyKind, ServiceKey, ServiceStateKind, TransitionKind};
 
+/// Au plus ce temps pour lire un chemin de la racine des sauvegardes (un partage mort ne bloque pas la requête).
+const PATH_FACTS_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Les durées d'une sauvegarde. Les tests les raccourcissent.
 #[derive(Debug, Clone, Copy)]
 pub struct BackupTimings {
@@ -994,7 +997,7 @@ impl Backups {
     async fn path_facts(&self, path: &str) -> Option<PathFacts> {
         let paths = Arc::clone(&self.host_paths);
         let path = path.to_owned();
-        tokio::task::spawn_blocking(move || {
+        let work = tokio::task::spawn_blocking(move || {
             let mut remaining: Vec<String> = Vec::new();
             let mut current = path.trim_end_matches('/').to_owned();
             loop {
@@ -1021,10 +1024,14 @@ impl Backups {
                     }
                 }
             }
-        })
-        .await
-        .ok()
-        .flatten()
+        });
+        // Un partage réseau mort ne fait pas pendre la requête : au-delà du délai, on ne sait pas (`None`, jamais un feu
+        // vert), comme `fate_now` de la suppression. La lecture bloquée finit seule dans son fil.
+        tokio::time::timeout(PATH_FACTS_TIMEOUT, work)
+            .await
+            .ok()?
+            .ok()
+            .flatten()
     }
 
     /// La racine des sauvegardes chevauche-t-elle un dossier de données ? Jugé sur les chemins canoniques ET sur

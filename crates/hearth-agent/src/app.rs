@@ -1026,7 +1026,13 @@ pub async fn start_engined(
     let host_paths: Arc<dyn crate::application::ports::HostPaths> = engine
         .host_paths
         .unwrap_or_else(|| Arc::new(crate::infrastructure::host::paths::SystemHostPaths));
-    let deletion_root = match host_paths.resolve(&config.data_dir.to_string_lossy()) {
+    // Lu hors du fil asynchrone : un disque lent ou un partage mort ne fige pas le démarrage (repli : la configuration).
+    let data_dir = config.data_dir.to_string_lossy().into_owned();
+    let resolver = Arc::clone(&host_paths);
+    let resolved = tokio::task::spawn_blocking(move || resolver.resolve(&data_dir))
+        .await
+        .unwrap_or(crate::application::ports::Resolved::Unreadable);
+    let deletion_root = match resolved {
         crate::application::ports::Resolved::Found { canonical, .. } => {
             std::path::Path::new(&canonical)
                 .join(SERVICES_DIR)
