@@ -147,9 +147,9 @@ describe("la colonne « Mods »", () => {
     await openTab(wrapper, "h_mc");
     const text = (id: string) => rowOf(wrapper, id).get("[data-backup-mods-column]").text();
     expect(text("01SIMBKAAAAAAA")).toBe("3 actifs, 1 désactivé");
-    expect(text("01SIMBKBBBBBBB")).toBe("Non enregistrée");
-    expect(text("01SIMBKCCCCCCC")).toBe("Illisible");
-    expect(text("01SIMBKDDDDDDD")).toBe("Non sauvegardés");
+    expect(text("01SIMBKBBBBBBB")).toBe("Mods non enregistrés");
+    expect(text("01SIMBKCCCCCCC")).toBe("Mods illisibles");
+    expect(text("01SIMBKDDDDDDD")).toBe("Mods non sauvegardés");
     wrapper.unmount();
   });
 
@@ -174,7 +174,9 @@ describe("la ligne dépliée", () => {
     );
     const names = wrapper.findAll("[data-backup-mods-row] strong").map((el) => el.text());
     expect(names).toEqual(["Carpet", "Iris", "Non reconnu dans cette sauvegarde", "Sodium"]);
-    expect(wrapper.get("[data-backup-mods-retired]").text()).toBe("Mods retirés : 1");
+    expect(wrapper.get("[data-backup-mods-retired]").text()).toBe(
+      "Mods retirés : 1 (Old 0.1, dans « Mods retirés »).",
+    );
     expect(wrapper.get("[data-backup-mods-table]").text()).toContain(
       "Fichier au nom illisible n° 4",
     );

@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { oneLineButtons } from "./oneLine";
 
 // HRT-263, HRT-294 : les mods d'un serveur Minecraft, sur le pont SIMULÉ (aucun réseau ; la chaîne réelle agent, liaison,
 // coquille est prouvée côté Rust). L'agent simulé juge comme le vrai ; la suite de l'opération est pilotée par le test.
@@ -236,3 +237,27 @@ test("l'onglet Sauvegardes : la colonne Mods, la ligne dépliée, la comparaison
     "Lithium : 0.11.1 dans la sauvegarde, 0.11.2 aujourd'hui",
   );
 });
+
+for (const width of [1100, 1280] as const) {
+  test(`aucun bouton sur deux lignes : liste des mods avec un lot, à ${width} px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await open(page);
+    await page.locator("[data-mod-row='lithium-0.11.2.jar'] [data-mod-switch]").click();
+    await expect(page.locator("[data-mods-pending-bar]")).toContainText("Lithium sera désactivé");
+    const result = await oneLineButtons(page);
+    expect(result.seen).toBeGreaterThan(0);
+    expect(result.failures).toEqual([]);
+  });
+
+  test(`aucun bouton sur deux lignes : ajouter des mods, à ${width} px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await open(page);
+    await page.locator("[data-mods-add]").click();
+    await expect(page.locator("[data-mods-deposit]")).toBeVisible();
+    const result = await oneLineButtons(page);
+    expect(result.seen).toBeGreaterThan(0);
+    expect(result.failures).toEqual([]);
+  });
+}

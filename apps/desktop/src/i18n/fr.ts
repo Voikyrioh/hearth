@@ -1030,6 +1030,7 @@ export const fr = {
       unverifiedOne: "{n} non vérifié",
       restart: "Les changements demandent un redémarrage du serveur.",
     },
+    engine: { java: "Minecraft Java", version: "version {minecraft}" },
     versionLine: "Version de Minecraft du serveur : {minecraft} ({source}).",
     versionLineBare: "Version de Minecraft du serveur : {minecraft}.",
     versionUnknown:
@@ -1154,6 +1155,15 @@ export const fr = {
       one: "1 changement prêt",
       many: "{n} changements prêts",
       text: " : rien n'est fait tant que vous n'avez pas appliqué.",
+      textNamed: " : {sentence}. Rien n'est fait tant que vous n'avez pas appliqué.",
+      will: {
+        add: "{name} sera ajouté",
+        replace: "{name} sera remplacé par la version {to}",
+        retire: "{name} sera mis de côté",
+        restore: "{name} sera remis",
+        disable: "{name} sera désactivé",
+        enable: "{name} sera réactivé",
+      },
       cancelAll: "Tout annuler",
       apply: "Vérifier et appliquer",
       unread: "Attendez la fin de la lecture des mods avant d'appliquer.",
@@ -1207,6 +1217,10 @@ export const fr = {
       more: "Déposer d'autres fichiers",
       continue: "Continuer avec {n} fichiers",
       continueOne: "Continuer avec 1 fichier",
+      retiredVersion:
+        "Une autre version de ce mod ({version}) est dans « Mods retirés ». Elle y reste : rien n'est remis.",
+      retired:
+        "Une autre version de ce mod est dans « Mods retirés ». Elle y reste : rien n'est remis.",
       room: "Le lot peut encore recevoir {n} ajouts : décochez des remplacements ou retirez des fichiers.",
     },
     checkSentence: {
@@ -1308,6 +1322,22 @@ export const fr = {
         other: "L'application du lot a été refusée.",
       },
     },
+    summary: {
+      add: "{n} ajouts",
+      addOne: "1 ajout",
+      replace: "{n} remplacements",
+      replaceOne: "1 remplacement",
+      retire: "{n} retraits",
+      retireOne: "1 retrait",
+      restore: "{n} remises",
+      restoreOne: "1 remise",
+      disable: "{n} désactivations",
+      disableOne: "1 désactivation",
+      enable: "{n} réactivations",
+      enableOne: "1 réactivation",
+      plain: "{text}.",
+      withRetired: "{text}. Les fichiers retirés sont mis de côté.",
+    },
     progress: {
       title: "Mise en place des mods",
       lead: "Étape {n} sur {total}. Vous pouvez quitter cette page : Hearth continue sur le serveur et le journal d'activité garde la trace.",
@@ -1338,9 +1368,14 @@ export const fr = {
     },
     fail: {
       title: "Le serveur n'a pas démarré avec ces mods",
-      reverted: "Le serveur n'a pas démarré avec ces mods. Hearth a remis les mods d'avant.",
-      failed:
-        "La mise en place a échoué. Hearth a défait ce qui avait été fait : les mods sont ceux d'avant.",
+      titleFailed: "La mise en place des mods a échoué",
+      revertedRunning: "Hearth a remis les mods d'avant : le serveur est reparti avec eux.",
+      revertedStopped:
+        "Hearth a remis les mods d'avant. Le serveur est arrêté : démarrez-le quand vous voulez.",
+      failedRunning:
+        "Hearth a défait ce qui avait été fait : les mods sont ceux d'avant, et le serveur est reparti avec eux.",
+      failedStopped:
+        "Hearth a défait ce qui avait été fait : les mods sont ceux d'avant. Le serveur est arrêté : démarrez-le quand vous voulez.",
       says: "Ce que dit le serveur",
       inClear: "En clair : {sentence}",
       backup: "Votre monde n'a pas été touché ; la sauvegarde « {note} » reste disponible.",
@@ -1422,7 +1457,7 @@ export const fr = {
         "La console répond quand le serveur est prêt. Un gros pack peut prendre plusieurs minutes.",
       busy: "Une opération est en cours sur ce serveur.",
       busyHelp: "La console revient à la fin de l'opération.",
-      readonly: "Lecture seule.",
+      readonly: "La console est en lecture seule.",
       readonlyHelp:
         "Vous lisez la console. Écrire dedans demande le droit de gérer les services, donné par un administrateur.",
       rate: "Trop de commandes d'un coup.",
@@ -1454,10 +1489,6 @@ export const fr = {
         "Hearth n'est pas à jour pour juger cette commande : mettez le client à jour, puis réessayez.",
       gone: "Ce serveur n'a plus de console ouverte à Hearth.",
       other: "La commande a été refusée.",
-    },
-    exchange: {
-      label: "Commandes envoyées depuis cet écran",
-      empty: "Les commandes que vous envoyez d'ici et leurs réponses s'affichent ici.",
     },
     quick: {
       title: "Commandes rapides",
@@ -1492,7 +1523,7 @@ export const fr = {
     readShort: "Lu dans la console il y a {age}.",
     ageSeconds: "{n} s",
     ageMinutes: "{n} min",
-    stopped: "Personne : le serveur est arrêté.",
+    stopped: "Personne n'est connecté : le serveur est arrêté.",
     starting: "Le nombre de joueurs s'affiche quand le serveur est prêt.",
     unavailable: "Hearth n'a pas pu lire les joueurs connectés.",
     writeToPlayers: "Écrire aux joueurs dans la console",
@@ -2014,9 +2045,9 @@ export const fr = {
       activeOne: "{n} actif",
       disabled: "{n} désactivés",
       disabledOne: "{n} désactivé",
-      notRecorded: "Non enregistrée",
-      unreadable: "Illisible",
-      notInBackup: "Non sauvegardés",
+      notRecorded: "Mods non enregistrés",
+      unreadable: "Mods illisibles",
+      notInBackup: "Mods non sauvegardés",
       unknown: "Inconnue",
       reading: "Lecture des mods de la sauvegarde",
       failed: "Hearth n'a pas pu lire les mods de cette sauvegarde.",
@@ -2024,7 +2055,18 @@ export const fr = {
         "Les mods de cette sauvegarde ne sont pas lisibles : la sauvegarde n'existe plus pour ce serveur.",
       engine: "Au moment de la sauvegarde : {loader}, Minecraft {minecraft}.",
       unrecognized: "Non reconnu dans cette sauvegarde",
-      retired: "Mods retirés : {n}",
+      title: "Mods de cette sauvegarde",
+      retired: "Mods retirés : {n} ({names}, dans « Mods retirés »).",
+      retiredBare: "Mods retirés : {n}.",
+      copyNote:
+        "« Copier la liste » copie les {n} mods activés, avec le moteur, la version de Minecraft et l'adresse du serveur.",
+      copyNoteOne:
+        "« Copier la liste » copie le mod activé, avec le moteur, la version de Minecraft et l'adresse du serveur.",
+      legend: {
+        notRecorded: "sauvegarde faite avant que Hearth enregistre les mods.",
+        unreadable: "la sauvegarde a réussi, mais Hearth n'a pas pu lire ses mods.",
+        notInBackup: "le dossier des mods est ignoré par les sauvegardes.",
+      },
       copyTitle: "Mods de la sauvegarde du {date}",
       place: {
         active: "Activé",
@@ -2049,12 +2091,24 @@ export const fr = {
         same: "Les mods actuels sont les mêmes que dans cette sauvegarde.",
         partial: "Comparaison partielle : {n} mods ne sont pas encore lus.",
         partialOne: "Comparaison partielle : 1 mod n'est pas encore lu.",
-        added: "Ajoutés depuis",
-        removed: "Retirés depuis",
+        title: "Comparer avec les mods actuels",
+        intro:
+          "Depuis cette sauvegarde, {n} changements sur le serveur. Rien n'est modifié par cette comparaison.",
+        introOne:
+          "Depuis cette sauvegarde, 1 changement sur le serveur. Rien n'est modifié par cette comparaison.",
+        prepared:
+          "Les changements préparés dans l'onglet Mods et pas encore appliqués ne comptent pas : ils ne sont pas encore sur le serveur.",
+        added: "Ajouté depuis",
+        removed: "Retiré depuis",
         versionChanged: "Version changée",
-        enabled: "Activés depuis",
-        disabled: "Désactivés depuis",
-        versionLine: "{name} : {backup} dans la sauvegarde, {current} aujourd'hui",
+        enabled: "Activé depuis",
+        disabled: "Désactivé depuis",
+        addedLine: "{mod}. Il n'était pas dans cette sauvegarde.",
+        removedLine: "{mod} était dans cette sauvegarde, il n'est plus dans les mods actifs.",
+        enabledLine: "{mod} était désactivé dans la sauvegarde, il est activé aujourd'hui.",
+        disabledLine: "{mod} était activé dans la sauvegarde, il est désactivé aujourd'hui.",
+        unknownLine: "{mod} a changé depuis cette sauvegarde.",
+        versionLine: "{name} : {backup} dans la sauvegarde, {current} aujourd'hui.",
       },
     },
     colActions: "Actions",
@@ -2326,6 +2380,7 @@ export const fr = {
     },
   },
   serviceDetail: {
+    operationRunning: "Opération en cours",
     back: "Retour à la liste",
     region: "Détail du service {name}",
     sections: "Sections du service",
@@ -2483,6 +2538,7 @@ export const fr = {
     activeLineText: "Ligne du {time} : {text}",
     emptyTitle: "Ce service n'a encore rien écrit",
     emptyText: "Les lignes apparaîtront ici dès que le programme en écrira.",
+    emptyQuiet: "Le serveur n'a encore rien écrit. Ses lignes et vos commandes apparaîtront ici.",
     stoppedBanner:
       "Ce service est arrêté. Aucune nouvelle ligne n'arrivera tant qu'il ne redémarre pas.",
     stoppedCode: "S'est arrêté avec le {code} il y a {age}.",

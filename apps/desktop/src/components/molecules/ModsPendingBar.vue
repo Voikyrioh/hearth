@@ -5,7 +5,13 @@ import { t } from "@/i18n";
 
 // La barre « N changements prêts » (HRT-262, maquette Main révisée) : ce que le lot contient, « Tout annuler » et « Vérifier
 // et appliquer ». Rien n'est fait tant que le compte n'a pas appliqué (écran « Vérifiez avant d'appliquer », HRT-263).
-defineProps<{ count: number; busy?: boolean; blockedReason?: string }>();
+defineProps<{
+  count: number;
+  /** Quand le lot ne compte qu'un changement : ce changement, en une phrase (« Simple Voice Chat sera désactivé »). */
+  sentence?: string;
+  busy?: boolean;
+  blockedReason?: string;
+}>();
 const emit = defineEmits<{ cancelAll: []; review: [] }>();
 </script>
 
@@ -13,7 +19,7 @@ const emit = defineEmits<{ cancelAll: []; review: [] }>();
   <div class="bar" role="status" data-mods-pending-bar>
     <HIcon name="clock" size="sm" />
     <span class="bar__text">
-      <strong>{{ t(count === 1 ? "mods.bar.one" : "mods.bar.many", { n: count }) }}</strong>{{ t("mods.bar.text") }}
+      <strong>{{ t(count === 1 ? "mods.bar.one" : "mods.bar.many", { n: count }) }}</strong>{{ sentence ? t("mods.bar.textNamed", { sentence }) : t("mods.bar.text") }}
     </span>
     <span class="bar__actions">
       <HButton variant="secondary" size="sm" data-mods-cancel-all @click="emit('cancelAll')">
@@ -36,7 +42,12 @@ const emit = defineEmits<{ cancelAll: []; review: [] }>();
 </template>
 
 <style scoped>
+/* Colle au bas de la zone qui défile : le lot et « Vérifier et appliquer » restent à portée sur une longue liste. */
 .bar {
+  position: sticky;
+  bottom: var(--space-3);
+  z-index: var(--z-raised);
+  box-shadow: var(--card-edge);
   display: flex;
   flex-wrap: wrap;
   align-items: center;

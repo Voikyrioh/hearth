@@ -333,6 +333,14 @@ const PENDING_KEYS: Record<Gesture, MessageKey> = {
   restore: "mods.pending.restore",
 };
 
+/** La ligne de l'en-tête d'un serveur Minecraft : « Minecraft Java, Fabric, version 1.20.1 » (ce que l'on sait de lui). */
+export function engineLine(game: ModsGame): string {
+  const parts = [t("mods.engine.java")];
+  if (game.loader !== null) parts.push(loaderName(game.loader));
+  if (game.minecraft !== null) parts.push(t("mods.engine.version", { minecraft: game.minecraft }));
+  return parts.join(", ");
+}
+
 export function pendingText(gesture: Gesture): string {
   return t(PENDING_KEYS[gesture]);
 }

@@ -74,6 +74,18 @@ describe("l'onglet « Mods » : existence", () => {
     wrapper.unmount();
   });
 
+  it("l'en-tête du service dit le moteur et la version de Minecraft, quel que soit l'onglet", async () => {
+    const { wrapper } = await open();
+    await wrapper.get("[data-tab='mods']").trigger("click");
+    await flushPromises();
+    const line = wrapper.get("[data-detail-engine]").text();
+    expect(line).toMatch(/^Minecraft Java, .+, version \d/);
+    await wrapper.get("[data-tab='logs']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-detail-engine]").text()).toBe(line);
+    wrapper.unmount();
+  });
+
   it("n'existe pas pour un serveur dont la fiche n'offre pas la voie", async () => {
     const { wrapper } = await open(undefined, "h_terraria");
     expect(wrapper.find("[data-tab='mods']").exists()).toBe(false);

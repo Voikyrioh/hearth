@@ -44,6 +44,13 @@ export function columnText(summary: BackupModsSummary): string {
   }
 }
 
+/** La légende des trois mots de la colonne « Mods » qui ne sont pas une liste (sous le tableau des sauvegardes). */
+export const MODS_LEGEND: { term: MessageKey; text: MessageKey }[] = [
+  { term: "backups.mods.notRecorded", text: "backups.mods.legend.notRecorded" },
+  { term: "backups.mods.unreadable", text: "backups.mods.legend.unreadable" },
+  { term: "backups.mods.notInBackup", text: "backups.mods.legend.notInBackup" },
+];
+
 /** La phrase d'un état sans liste lisible (BR-MOD-034) ; `null` : une liste existe. */
 export function stateSentence(state: BackupModsState): string | null {
   switch (state) {
@@ -91,6 +98,22 @@ export function listed(view: BackupMods): BackupModItem[] {
 
 export function retiredCount(view: BackupMods): number {
   return view.mods.filter((item) => item.place === "retired").length;
+}
+
+/** « Mods retirés : 1 (Iris 1.6.4, dans « Mods retirés »). » : les noms et versions des mods mis de côté. */
+export function retiredLine(view: BackupMods): string {
+  const retired = view.mods.filter((item) => item.place === "retired");
+  const names = retired.map((item) => {
+    const version = item.identity?.version;
+    return version ? `${itemName(item)} ${safeText(version)}` : itemName(item);
+  });
+  return t("backups.mods.retired", { n: retired.length, names: names.join(", ") });
+}
+
+/** Ce que « Copier la liste » copie : les mods activés, dit une fois avec leur nombre. */
+export function copyNote(view: BackupMods): string {
+  const n = view.mods.filter((item) => item.place === "active").length;
+  return t(n === 1 ? "backups.mods.copyNoteOne" : "backups.mods.copyNote", { n });
 }
 
 const PLACE_KEYS: Record<string, MessageKey> = {
@@ -142,20 +165,31 @@ function changeName(change: ModChange): string {
   return safeText(change.name ?? change.id ?? change.file ?? "?");
 }
 
+const LINE_KEYS: Record<ChangeKind, MessageKey> = {
+  added: "backups.mods.compare.addedLine",
+  removed: "backups.mods.compare.removedLine",
+  version_changed: "backups.mods.compare.versionLine",
+  enabled: "backups.mods.compare.enabledLine",
+  disabled: "backups.mods.compare.disabledLine",
+  unknown: "backups.mods.compare.unknownLine",
+};
+
+/** Une phrase par changement, avec la version : « Spark 1.10.53. Il n'était pas dans cette sauvegarde. » */
+function changeLine(kind: ChangeKind, change: ModChange): string {
+  const backup = safeText(change.backupVersion ?? "?");
+  const current = safeText(change.currentVersion ?? "?");
+  const seen =
+    kind === "removed" ? change.backupVersion : (change.currentVersion ?? change.backupVersion);
+  const mod = seen ? `${changeName(change)} ${safeText(seen)}` : changeName(change);
+  return t(LINE_KEYS[kind], { mod, name: changeName(change), backup, current });
+}
+
 /** Les changements regroupés par genre, dans l'ordre : ajouté, retiré, version changée, activé, désactivé. */
 export function groupChanges(changes: readonly ModChange[]): ChangeGroup[] {
   return GROUPS.flatMap(({ kind, title }) => {
     const lines = changes
       .filter((change) => change.kind === kind)
-      .map((change) =>
-        kind === "version_changed"
-          ? t("backups.mods.compare.versionLine", {
-              name: changeName(change),
-              backup: safeText(change.backupVersion ?? "?"),
-              current: safeText(change.currentVersion ?? "?"),
-            })
-          : changeName(change),
-      );
+      .map((change) => changeLine(kind, change));
     return lines.length === 0 ? [] : [{ kind, title: t(title), lines }];
   });
 }

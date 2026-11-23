@@ -221,9 +221,11 @@ describe("le suivi, la fin et l'échec", () => {
     await flushPromises();
     await flushPromises();
     const text = wrapper.get("[data-mods-progress]").text();
-    expect(text).toContain(
-      "Le serveur n'a pas démarré avec ces mods. Hearth a remis les mods d'avant.",
-    );
+    expect(text).toContain("Le serveur n'a pas démarré avec ces mods");
+    expect(text).toContain("Hearth a remis les mods d'avant");
+    // Le titre n'est dit qu'une fois, et la phrase dit si le serveur est reparti.
+    expect(text.split("Le serveur n'a pas démarré avec ces mods").length).toBe(2);
+    expect(text).toMatch(/le serveur est (reparti avec eux|arrêté)/);
     expect(wrapper.get("[data-mods-fail-tail]").text()).toContain("requires balm 7.x");
     expect(wrapper.get("[data-mods-fail-sentence]").text()).toContain(
       "En clair : Le mod Waystones",

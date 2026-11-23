@@ -10,6 +10,7 @@ import type { BackupModsEntry } from "@/composables/useBackupMods";
 import { useCopyText } from "@/composables/useCopyText";
 import { t } from "@/i18n";
 import {
+  copyNote,
   copyOf,
   engineLine,
   hasList,
@@ -19,6 +20,7 @@ import {
   listed,
   placeText,
   retiredCount,
+  retiredLine,
   stateSentence,
 } from "@/services/backupMods";
 import { loaderName, originLabel } from "@/services/mods";
@@ -58,67 +60,73 @@ const compare = computed(() => view.value?.compare ?? null);
     </Callout>
     <template v-else-if="view">
       <p v-if="sentence" class="bm__sentence" data-backup-mods-sentence>{{ sentence }}</p>
-      <template v-if="showList">
-        <p class="bm__engine" data-backup-mods-engine>{{ engineLine(view) }}</p>
-        <table class="bm__table" data-backup-mods-table>
-          <thead>
-            <tr>
-              <th scope="col">{{ t("mods.table.mod") }}</th>
-              <th scope="col">{{ t("mods.table.version") }}</th>
-              <th scope="col">{{ t("mods.table.loader") }}</th>
-              <th scope="col">{{ t("mods.table.state") }}</th>
-              <th scope="col">{{ t("mods.table.origin") }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in rows" :key="`${item.rank}-${item.file ?? ''}`" data-backup-mods-row>
-              <td>
-                <strong>{{ itemName(item) }}</strong>
-                <span v-if="itemFile(item)" class="bm__file">{{ itemFile(item) }}</span>
-                <span v-else-if="itemRank(item)" class="bm__file">{{ itemRank(item) }}</span>
-              </td>
-              <td class="bm__mono">{{ item.identity?.version ?? "" }}</td>
-              <td>{{ item.identity ? loaderName(item.identity.loader) : "" }}</td>
-              <td>
-                <HTag :tone="item.place === 'disabled' ? 'neutral' : 'ok'">{{ placeText(item) }}</HTag>
-              </td>
-              <td>{{ originLabel(item.origin) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <p v-if="retired > 0" class="bm__retired" data-backup-mods-retired>
-          {{ t("backups.mods.retired", { n: retired }) }}
-        </p>
-        <div class="bm__bar">
-          <HButton
-            variant="secondary"
-            size="sm"
-            data-backup-mods-copy
-            @click="copier.copy(copyOf(view, createdAt, address))"
-          >
-            <HIcon :name="copier.state.value === 'copied' ? 'check' : 'copy'" size="sm" />
-            {{ t(copier.state.value === "copied" ? "mods.players.copiedButton" : "mods.players.copy") }}
-          </HButton>
-          <HButton
-            v-if="!comparing"
-            variant="secondary"
-            size="sm"
-            needs-link
-            data-backup-mods-compare
-            @click="emit('compare')"
-          >
-            {{ t("backups.mods.compare.button") }}
-          </HButton>
-          <HButton v-else variant="ghost" size="sm" data-backup-mods-hide @click="emit('hideCompare')">
-            {{ t("backups.mods.compare.hide") }}
-          </HButton>
-        </div>
-        <p v-if="copier.state.value === 'failed'" class="bm__retired" role="alert">
-          {{ t("mods.players.copyFailed") }}
-        </p>
+      <div v-if="showList" :class="['bm__cols', { 'bm__cols--compare': comparing }]">
+        <section class="bm__list" :aria-label="t('backups.mods.title')">
+          <header class="bm__head">
+            <div class="bm__heading">
+              <h4 class="bm__title" data-backup-mods-title>{{ t("backups.mods.title") }}</h4>
+              <p class="bm__engine" data-backup-mods-engine>{{ engineLine(view) }}</p>
+            </div>
+            <HButton
+              variant="secondary"
+              size="sm"
+              data-backup-mods-copy
+              @click="copier.copy(copyOf(view, createdAt, address))"
+            >
+              <HIcon :name="copier.state.value === 'copied' ? 'check' : 'copy'" size="sm" />
+              {{ t(copier.state.value === "copied" ? "mods.players.copiedButton" : "mods.players.copy") }}
+            </HButton>
+          </header>
+          <table class="bm__table" data-backup-mods-table>
+            <thead>
+              <tr>
+                <th scope="col">{{ t("mods.table.mod") }}</th>
+                <th scope="col">{{ t("mods.table.version") }}</th>
+                <th scope="col">{{ t("mods.table.loader") }}</th>
+                <th scope="col">{{ t("mods.table.state") }}</th>
+                <th scope="col">{{ t("mods.table.origin") }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in rows" :key="`${item.rank}-${item.file ?? ''}`" data-backup-mods-row>
+                <td>
+                  <strong>{{ itemName(item) }}</strong>
+                  <span v-if="itemFile(item)" class="bm__file">{{ itemFile(item) }}</span>
+                  <span v-else-if="itemRank(item)" class="bm__file">{{ itemRank(item) }}</span>
+                </td>
+                <td class="bm__mono">{{ item.identity?.version ?? "" }}</td>
+                <td>{{ item.identity ? loaderName(item.identity.loader) : "" }}</td>
+                <td>
+                  <HTag :tone="item.place === 'disabled' ? 'neutral' : 'ok'">{{ placeText(item) }}</HTag>
+                </td>
+                <td>{{ originLabel(item.origin) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-if="retired > 0" class="bm__retired" data-backup-mods-retired>{{ retiredLine(view) }}</p>
+          <p class="bm__retired" data-backup-mods-copy-note>{{ copyNote(view) }}</p>
+          <div class="bm__bar">
+            <HButton
+              v-if="!comparing"
+              variant="secondary"
+              size="sm"
+              needs-link
+              data-backup-mods-compare
+              @click="emit('compare')"
+            >
+              {{ t("backups.mods.compare.button") }}
+            </HButton>
+            <HButton v-else variant="ghost" size="sm" data-backup-mods-hide @click="emit('hideCompare')">
+              {{ t("backups.mods.compare.hide") }}
+            </HButton>
+          </div>
+          <p v-if="copier.state.value === 'failed'" class="bm__retired" role="alert">
+            {{ t("mods.players.copyFailed") }}
+          </p>
+        </section>
         <BackupModsCompare v-if="compare" :compare="compare" />
         <HSkeleton v-else-if="comparing" size="md" role="status" :aria-label="t('backups.mods.compare.reading')" />
-      </template>
+      </div>
     </template>
   </div>
 </template>
@@ -175,5 +183,51 @@ const compare = computed(() => view.value?.compare ?? null);
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
+}
+
+/* Liste et comparaison côte à côte quand il y a la place ; l'une sous l'autre dans une fenêtre étroite. */
+.bm__cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.bm__cols--compare {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+}
+
+@container bk (max-width: 859px) {
+  .bm__cols--compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.bm__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.bm__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.bm__heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.bm__title {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: var(--fw-semibold);
 }
 </style>

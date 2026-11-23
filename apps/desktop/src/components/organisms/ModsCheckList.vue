@@ -5,9 +5,10 @@ import HButton from "@/components/atoms/HButton.vue";
 import HCheckbox from "@/components/atoms/HCheckbox.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HTag from "@/components/atoms/HTag.vue";
+import ModsWarning from "@/components/molecules/ModsWarning.vue";
 import type { PendingAdd } from "@/composables/useServiceMods";
 import { t } from "@/i18n";
-import type { ModCheckFile, ModsGame } from "@/link";
+import type { ModCheckFile, ModsGame, ModsView } from "@/link";
 import { loaderName, modName } from "@/services/mods";
 import { acceptedSentence, checkTitle, refusalSentence } from "@/services/modsDeposit";
 
@@ -19,6 +20,8 @@ import { acceptedSentence, checkTitle, refusalSentence } from "@/services/modsDe
 const props = defineProps<{
   files: readonly ModCheckFile[];
   game: ModsGame;
+  /** La liste des mods du serveur : un contrôle signale qu'une autre version du mod est dans « Mods retirés ». */
+  view?: ModsView | null;
   /** Le nom sur le poste d'un fichier déposé (identifiant du dépôt -> nom). */
   nameOf: (deposit: string) => string;
   /** L'empreinte du fichier local, celle que l'agent compare à la sienne. */
@@ -73,6 +76,18 @@ function titleOf(file: ModCheckFile): string {
   return props.nameOf(file.deposit);
 }
 
+/** Une autre version du mod déposé est dans « Mods retirés » : dit avant, jamais découvert après. */
+function retiredNote(file: ModCheckFile): string | null {
+  const id = file.identity?.id;
+  if (!id || !isAccepted(file)) return null;
+  const other = props.view?.mods.find((mod) => mod.place === "retired" && mod.identity?.id === id);
+  if (!other?.identity) return null;
+  const version = other.identity.version;
+  return t(version ? "mods.check.retiredVersion" : "mods.check.retired", {
+    version: version ? safeText(version) : "",
+  });
+}
+
 function done() {
   const entries: PendingAdd[] = [];
   for (const file of chosen.value) {
@@ -109,6 +124,10 @@ function done() {
         </div>
         <p class="mc__sentence" data-mods-check-sentence>
           {{ isAccepted(file) ? acceptedSentence(file, game) : refusalSentence(file, game) }}
+        </p>
+        <p v-if="retiredNote(file)" class="mc__note" data-mods-check-retired>
+          <HIcon name="info" size="sm" />
+          {{ retiredNote(file) }}
         </p>
         <HCheckbox
           v-if="file.outcome === 'replace' && file.replaces"
@@ -147,7 +166,7 @@ function done() {
         {{ t("mods.check.more") }}
       </HButton>
     </div>
-    <p class="mc__warning">{{ t("mods.warning") }}</p>
+    <ModsWarning class="mc__warning" />
   </section>
 </template>
 
@@ -171,6 +190,15 @@ function done() {
 .mc__sentence {
   margin: 0;
   color: var(--tx-secondary);
+}
+
+.mc__note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--tx-secondary);
+  font-size: var(--fs-small);
 }
 
 .mc__warning {

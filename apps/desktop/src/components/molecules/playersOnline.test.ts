@@ -82,7 +82,7 @@ describe("ce que la carte dit", () => {
   });
 
   it.each([
-    ["stopped", "Personne : le serveur est arrêté."],
+    ["stopped", "Personne n'est connecté : le serveur est arrêté."],
     ["starting", "Le nombre de joueurs s'affiche quand le serveur est prêt."],
     ["unavailable", "Hearth n'a pas pu lire les joueurs connectés."],
   ] as const)("l'état %s dit sa phrase, sans aucun chiffre", (state, sentence) => {

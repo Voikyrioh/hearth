@@ -24,6 +24,8 @@ export interface ChangeRow {
   sign: "+" | "~" | "-";
   title: string;
   detail: string;
+  /** Le changement dit en une phrase courte, pour la barre « 1 changement prêt » : « Simple Voice Chat sera désactivé ». */
+  sentence: string;
 }
 
 type Source = {
@@ -34,6 +36,11 @@ type Source = {
 
 function itemOf(view: ModsView, file: string, place: ModItem["place"]): ModItem | undefined {
   return view.mods.find((mod) => mod.file === file && mod.place === place);
+}
+
+function bareName(view: ModsView, file: string, place: ModItem["place"]): string {
+  const item = itemOf(view, file, place);
+  return item ? modName(item) : safeText(file);
 }
 
 function nameOf(view: ModsView, file: string, place: ModItem["place"]): string {
@@ -56,6 +63,7 @@ export function changeRows(source: Source): ChangeRow[] {
         sign: "+",
         title: t("mods.apply.add", { name }),
         detail: t("mods.apply.addDetail"),
+        sentence: t("mods.bar.will.add", { name: safeText(name) }),
       });
     } else {
       const old = itemOf(source.view, add.replace, "active");
@@ -69,6 +77,10 @@ export function changeRows(source: Source): ChangeRow[] {
           to: safeText(add.identity?.version ?? ""),
         }),
         detail: t("mods.apply.replaceDetail"),
+        sentence: t("mods.bar.will.replace", {
+          name: oldName,
+          to: safeText(add.identity?.version ?? ""),
+        }),
       });
     }
   }
@@ -78,6 +90,7 @@ export function changeRows(source: Source): ChangeRow[] {
       sign: "-",
       title: t("mods.apply.retire", { name: nameOf(source.view, file, "active") }),
       detail: t("mods.apply.retireDetail"),
+      sentence: t("mods.bar.will.retire", { name: bareName(source.view, file, "active") }),
     });
   }
   for (const file of source.batch.restore) {
@@ -86,6 +99,7 @@ export function changeRows(source: Source): ChangeRow[] {
       sign: "+",
       title: t("mods.apply.restore", { name: nameOf(source.view, file, "retired") }),
       detail: t("mods.apply.restoreDetail"),
+      sentence: t("mods.bar.will.restore", { name: bareName(source.view, file, "retired") }),
     });
   }
   for (const file of source.batch.disable) {
@@ -94,6 +108,7 @@ export function changeRows(source: Source): ChangeRow[] {
       sign: "-",
       title: t("mods.apply.disable", { name: nameOf(source.view, file, "active") }),
       detail: t("mods.apply.disableDetail"),
+      sentence: t("mods.bar.will.disable", { name: bareName(source.view, file, "active") }),
     });
   }
   for (const file of source.batch.enable) {
@@ -102,6 +117,7 @@ export function changeRows(source: Source): ChangeRow[] {
       sign: "+",
       title: t("mods.apply.enable", { name: nameOf(source.view, file, "active") }),
       detail: t("mods.apply.enableDetail"),
+      sentence: t("mods.bar.will.enable", { name: bareName(source.view, file, "active") }),
     });
   }
   return rows;
@@ -125,6 +141,23 @@ const STEP_TITLES: Record<StepId, MessageKey> = {
 
 export function stepTitle(step: StepId): string {
   return t(STEP_TITLES[step]);
+}
+
+const SUMMARY_KEYS = ["add", "replace", "retire", "restore", "disable", "enable"] as const;
+
+/**
+ * Ce que la mise en place fait, en comptes (« 1 ajout, 1 remplacement, 1 retrait »), pour le suivi : là, aucune liste de
+ * changements n'est au-dessus, « les changements ci-dessus » ne dirait rien.
+ */
+export function placeSummary(rows: readonly ChangeRow[]): string {
+  const parts: string[] = [];
+  for (const kind of SUMMARY_KEYS) {
+    const n = rows.filter((row) => row.key.startsWith(`${kind}:`)).length;
+    if (n > 0) parts.push(t(n === 1 ? `mods.summary.${kind}One` : `mods.summary.${kind}`, { n }));
+  }
+  const text = parts.join(", ");
+  const retired = rows.some((row) => row.key.startsWith("retire:"));
+  return retired ? t("mods.summary.withRetired", { text }) : t("mods.summary.plain", { text });
 }
 
 export function stepText(step: StepId, count: number, playersKnown: boolean): string {

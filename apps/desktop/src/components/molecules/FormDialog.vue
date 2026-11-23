@@ -212,8 +212,9 @@ function onNativeClose() {
   gap: var(--space-3);
 }
 
+/* La raison prend sa propre ligne : les deux boutons restent côte à côte, jamais l'un sous l'autre. */
 .dialog__reason {
-  flex: 1 1 auto;
+  flex: 1 1 100%;
   margin: 0;
   color: var(--tx-secondary);
 }

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import { type RouteLocationNormalized, useRouter } from "vue-router";
 import { clip, safeText } from "@/audit/text";
 import BoundedText from "@/components/atoms/BoundedText.vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
+import HSpinner from "@/components/atoms/HSpinner.vue";
 import HTabs from "@/components/atoms/HTabs.vue";
 import { formatDateTime } from "@/composables/format";
 import { useNow } from "@/composables/useNow";
@@ -104,6 +105,14 @@ const service = computed<ServiceInfo | null>(() => {
   return null;
 });
 const gone = computed(() => props.opened.kind === "gone");
+/** « Minecraft Java, Fabric, version 1.20.1 » : lu avec les mods, montré à côté du nom quel que soit l'onglet. */
+const engine = ref<string | null>(null);
+watch(
+  () => service.value?.key,
+  () => {
+    engine.value = null;
+  },
+);
 
 // L'opération qui tient ce service (HRT-84) : sa carte, et le verrou des boutons de pilotage (BR-SVC-031).
 const operations = useServiceOpsStore();
@@ -319,6 +328,7 @@ const commandNote = computed(() => {
           <h2 :id="titleId" ref="title" class="detail__title" tabindex="-1" data-detail-title>
             <BoundedText :text="shownName" :label="t('serviceDetail.nameLabel')" />
           </h2>
+          <span v-if="engine" class="detail__engine" data-detail-engine>{{ engine }}</span>
           <span class="detail__tags">
             <OriginTags :service="service" part="origin" />
             <OriginTags :service="service" part="details" />
@@ -327,6 +337,10 @@ const commandNote = computed(() => {
         <p v-if="!gone" class="detail__state">
           <ServiceStateBadge :state="service.state" />
           <span v-if="state" class="detail__since">{{ state }}</span>
+          <span v-if="ongoing" class="detail__operation" data-detail-operation>
+            <HSpinner />
+            {{ t("serviceDetail.operationRunning") }}
+          </span>
         </p>
         <p v-if="adopted" class="detail__adopted" data-detail-adopted>{{ adopted }}</p>
       </template>
@@ -408,6 +422,7 @@ const commandNote = computed(() => {
         :console-open="doors.console.value !== null"
         @open-console="changeTab('console')"
         @open-logs="changeTab('logs')"
+        @engine="engine = $event"
         @add-server="emit('addServer')"
       />
     </div>
@@ -741,6 +756,20 @@ const commandNote = computed(() => {
   align-items: center;
   gap: var(--space-2) var(--space-3);
   margin: 0;
+}
+
+.detail__engine {
+  color: var(--tx-secondary);
+  font-size: var(--fs-small);
+}
+
+.detail__operation {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--cool);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-medium);
 }
 
 .detail__since,

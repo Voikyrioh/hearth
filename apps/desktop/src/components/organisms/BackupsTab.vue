@@ -17,6 +17,7 @@ import { useServiceBackups } from "@/composables/useServiceBackups";
 import { t } from "@/i18n";
 import type { BackupInfo, ServiceInfo } from "@/link";
 import { formatSize } from "@/serviceOps/messages";
+import { MODS_LEGEND } from "@/services/backupMods";
 import {
   blockedReason,
   dataRoots,
@@ -338,6 +339,11 @@ const resultLines = computed<ResultLine[]>(() => {
           @mods-compare="mods.compare($event.id)"
           @mods-hide-compare="mods.hideCompare($event.id)"
         />
+        <ul v-if="backups.some((backup) => backup.mods)" class="bt__legend" data-backups-mods-legend>
+          <li v-for="entry in MODS_LEGEND" :key="entry.term">
+            <strong>{{ t(entry.term) }}</strong> : {{ t(entry.text) }}
+          </li>
+        </ul>
       </template>
     </template>
 
@@ -415,6 +421,17 @@ const resultLines = computed<ResultLine[]>(() => {
 }
 
 .bt__reason,
+.bt__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  padding: 0;
+  color: var(--tx-secondary);
+  font-size: var(--fs-small);
+  list-style: none;
+}
+
 .bt__soft {
   margin: 0;
   color: var(--tx-secondary);

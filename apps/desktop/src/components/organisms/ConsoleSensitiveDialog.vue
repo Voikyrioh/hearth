@@ -6,7 +6,7 @@ import { t } from "@/i18n";
 
 // La confirmation d'une commande de console (HRT-269, BR-CONSOLE-004, 005, maquette ConsoleSensible) : pour une commande
 // SENSIBLE, le titre et la phrase de la fiche (« Donner les droits d'opérateur à Bram ? »), la commande telle qu'elle
-// partira, le mot de passe demandé À CHAQUE commande de ce genre, même juste après l'avoir tapé ; pour une commande libre
+// partira, le mot de passe demandé À CHAQUE commande de ce genre (la phrase qui le dit vient après le champ) ; pour une commande libre
 // que l'état de confiance soumet au mot de passe (alerte, attaque), la même fenêtre sans le titre propre au verbe. Rien
 // ne part avant « Envoyer la commande » ; « Annuler » ne laisse rien partir.
 defineProps<{
@@ -33,10 +33,12 @@ const emit = defineEmits<{ close: [] }>();
     <div v-if="pending" class="cs" data-console-confirm>
       <p class="cs__command" data-console-confirm-command><span aria-hidden="true">&gt;</span> {{ pending.command }}</p>
       <p v-if="pending.sentence" class="cs__sentence" data-console-confirm-sentence>{{ pending.sentence }}</p>
-      <p class="cs__note">
+    </div>
+    <template #after>
+      <p v-if="pending" class="cs__note" data-console-confirm-note>
         {{ pending.class === 2 ? t("console.confirm.eachTime") : t("console.confirm.trust") }}
       </p>
-    </div>
+    </template>
   </AdminActDialog>
 </template>
 

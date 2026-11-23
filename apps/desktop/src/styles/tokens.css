@@ -242,7 +242,7 @@
   /* Mods d'un service (HRT-262) : largeurs fixes des colonnes (le nom prend le reste) et hauteur du journal de la console. */
   --mods-col-version: 96px;
   --mods-col-loader: 88px;
-  --mods-col-target: 104px;
+  --mods-col-target: 132px;
   --mods-col-state: 152px;
   --mods-col-origin: 152px;
   --mods-col-enabled: 72px;

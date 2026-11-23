@@ -10,7 +10,7 @@ import { t } from "@/i18n";
 import type { ModsView } from "@/link";
 import { dateOf } from "@/services/backups";
 import { countsOf } from "@/services/mods";
-import { stepStates, stepsFor, stepText, stepTitle } from "@/services/modsApply";
+import { placeSummary, stepStates, stepsFor, stepText, stepTitle } from "@/services/modsApply";
 
 // Le suivi d'un lot de mods et son issue (HRT-263, BR-MOD-025 à 027, maquettes Suivi, Fin, Echec) : les étapes cochées au
 // fil du flux, quittable (l'opération continue sur le serveur), « Annuler l'opération » jusqu'au début de la mise en place ;
@@ -22,6 +22,8 @@ const props = defineProps<{
   apply: ReturnType<typeof useModsApply>;
   /** La liste des mods relue après la fin : « reparti avec N mods ». */
   view: ModsView | null;
+  /** Le serveur tourne maintenant : il est reparti avec les mods d'avant (ou jamais arrêté). */
+  running?: boolean;
 }>();
 const emit = defineEmits<{ close: []; players: []; logs: [] }>();
 
@@ -59,6 +61,14 @@ const noteOf = computed(() => {
   if (!found) return null;
   return found.note ? safeText(found.note) : dateOf(found.createdAt);
 });
+/** Ce qui est arrivé après l'échec, et si le serveur est reparti : dit, jamais laissé à deviner. */
+const failSentence = computed(() => {
+  const back = props.running === true;
+  if (outcome.value === "rolled_back") {
+    return t(back ? "mods.fail.revertedRunning" : "mods.fail.revertedStopped");
+  }
+  return t(back ? "mods.fail.failedRunning" : "mods.fail.failedStopped");
+});
 const enabledCount = computed(() => (props.view ? countsOf(props.view).enabled : 0));
 
 function stateText(state: "done" | "running" | "waiting"): string {
@@ -84,7 +94,7 @@ function close() {
         <li v-for="item in states" :key="item.step" :class="['mp__step', `mp__step--${item.state}`]" data-mods-progress-step :data-state="item.state">
           <span class="mp__step-text">
             <strong>{{ stepTitle(item.step) }}</strong>
-            <span class="mp__detail">{{ stepText(item.step, launch.count, true) }}</span>
+            <span class="mp__detail">{{ item.step === "place" ? placeSummary(launch.rows) : stepText(item.step, launch.count, true) }}</span>
           </span>
           <span class="mp__state">{{ stateText(item.state) }}</span>
         </li>
@@ -150,9 +160,9 @@ function close() {
 
     <!-- L'échec : le serveur n'a pas démarré, les mods d'avant sont remis -->
     <template v-else-if="outcome === 'rolled_back' || outcome === 'failed'">
-      <h3 class="mp__title" data-mods-end="rolled_back">{{ t("mods.fail.title") }}</h3>
-      <Callout tone="warn" data-mods-fail-lead>
-        {{ t(outcome === "rolled_back" ? "mods.fail.reverted" : "mods.fail.failed") }}
+      <Callout tone="warn" :data-mods-end="outcome === 'failed' ? 'failed' : 'rolled_back'" data-mods-fail-lead>
+        <strong class="mp__title">{{ t(outcome === "rolled_back" ? "mods.fail.title" : "mods.fail.titleFailed") }}</strong>
+        {{ failSentence }}
       </Callout>
       <section v-if="apply.tail.value && apply.tail.value.lines.length > 0" class="mp__block" data-mods-fail-tail>
         <h4 class="mp__subtitle">{{ t("mods.fail.says") }}</h4>

@@ -109,6 +109,32 @@ describe("déposer des fichiers", () => {
     wrapper.unmount();
   });
 
+  it("une autre version du mod déposé dans « Mods retirés » est dite au contrôle", async () => {
+    const ctx = await open((bridge) => {
+      bridge.mods.seed("forge", "h_mc", {
+        mods: [
+          simMod({
+            file: "chunky-fabric-1.2.0.jar",
+            place: "retired",
+            origin: "hearth",
+            identity: identity("chunky", "Chunky", "1.2.0"),
+          }),
+        ],
+      });
+      bridge.mods.willRead("chunky-fabric-1.3.146.jar", {
+        identity: identity("chunky", "Chunky", "1.3.146"),
+      });
+    });
+    await deposit(ctx, ["C:\\dl\\chunky-fabric-1.3.146.jar"]);
+    const { wrapper } = ctx;
+    await wrapper.get("[data-mods-deposit-check]").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-mods-check-retired]").text()).toContain(
+      "Une autre version de ce mod (1.2.0) est dans « Mods retirés »",
+    );
+    wrapper.unmount();
+  });
+
   it("la case « Remplacer… » est décochée d'office ; non cochée, le fichier est laissé de côté", async () => {
     const ctx = await open();
     await deposit(ctx, [

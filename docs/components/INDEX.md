@@ -222,4 +222,4 @@ Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,orga
 - [ModsApplyDialog](./ModsApplyDialog.md), [ModsProgress](./ModsProgress.md) : vérifier, suivre et finir l'application d'un lot de mods (HRT-263)
 - [ModsPlayersList](./ModsPlayersList.md) : la liste à copier pour les joueurs (HRT-264)
 - [BackupModsPanel](./BackupModsPanel.md), [BackupModsCompare](./BackupModsCompare.md) : les mods d'une sauvegarde et leur comparaison avec les mods actuels (HRT-294)
-- [ConsoleTab](./ConsoleTab.md), [ConsoleCommandField](./ConsoleCommandField.md), [ConsoleExchange](./ConsoleExchange.md), [ConsoleSensitiveDialog](./ConsoleSensitiveDialog.md) : l'onglet Console d'un serveur de jeu (HRT-269)
+- [ConsoleTab](./ConsoleTab.md), [ConsoleCommandField](./ConsoleCommandField.md), [LogExchangeRow](./LogExchangeRow.md), [ModsWarning](./ModsWarning.md), [ConsoleSensitiveDialog](./ConsoleSensitiveDialog.md) : l'onglet Console d'un serveur de jeu (HRT-269)

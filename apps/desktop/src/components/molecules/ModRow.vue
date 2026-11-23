@@ -22,7 +22,7 @@ import type { RightsGate } from "@/services/rights";
 // Une ligne de la liste des mods (HRT-261, HRT-262, maquette Main) : nom et fichier, version, moteur, version de
 // Minecraft visée, état (le verdict en une pastille et, sous le nom, une phrase), origine, interrupteur « Activé »
 // (`role="switch"`, cible de 44 px) et « Retirer » / « Remettre » / « Annuler ». Un geste préparé dit ce qu'il fera au
-// prochain redémarrage (interrupteur en pointillé, « Annuler » à la place de « Retirer »). Aucun geste ne part d'ici :
+// prochain redémarrage (interrupteur en pointillé et bleuté, distinct de l'actif, « Annuler » à la place de « Retirer »). Aucun geste ne part d'ici :
 // la ligne émet, le lot est tenu par `useServiceMods`. Un mod du pack Modrinth et un fichier au nom illisible ont
 // l'interrupteur et « Retirer » inactifs avec leur raison ; sans le droit, la raison est celle que le détail écrit déjà.
 const props = defineProps<{
@@ -118,7 +118,7 @@ const targetMinecraft = computed(() => {
         :hint="reason ?? undefined"
         :aria-label="t('mods.switchLabel', { name })"
         :described-by="describedBy"
-        :class="{ 'row__toggle--pending': switchPending }"
+        :pending="switchPending"
         data-mod-switch
         @update:model-value="emit('toggle')"
       />
@@ -235,11 +235,6 @@ const targetMinecraft = computed(() => {
 
 .row__switch {
   text-align: center;
-}
-
-.row__toggle--pending {
-  outline: var(--border-width) dashed var(--cool);
-  outline-offset: var(--space-half);
 }
 
 .row__action {

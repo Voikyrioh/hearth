@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { oneLineButtons } from "./oneLine";
 
 // HRT-269, HRT-291 : la console d'un serveur Minecraft, sur le pont SIMULÉ (aucun réseau ; la chaîne réelle agent, liaison,
 // coquille est prouvée côté Rust). L'agent simulé juge comme le vrai. Serveur « forge » : administrateur avec le droit de gérer
@@ -103,4 +104,32 @@ test("serveur arrêté : champ inactif avec sa phrase", async ({ page }) => {
   await open(page, "stopped");
   await expect(page.locator("[data-console-input]")).toBeDisabled();
   await expect(page.locator("[data-console-help]")).toContainText("Démarrez le serveur");
+});
+
+for (const width of [1100, 1280] as const) {
+  test(`aucun bouton sur deux lignes : console et fenêtre « op », à ${width} px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await open(page);
+    let result = await oneLineButtons(page);
+    expect(result.seen).toBeGreaterThan(0);
+    expect(result.failures).toEqual([]);
+    await page.locator("[data-console-input]").fill("op Bram");
+    await page.locator("[data-console-send]").click();
+    await expect(page.locator("dialog[open]")).toContainText(
+      "Donner les droits d'opérateur à Bram ?",
+    );
+    result = await oneLineButtons(page);
+    expect(result.failures).toEqual([]);
+  });
+}
+
+test("une commande envoyée prend sa place dans le journal, avec sa réponse", async ({ page }) => {
+  await open(page);
+  await page.locator("[data-console-input]").fill("list");
+  await page.locator("[data-console-send]").click();
+  const log = page.locator("[data-console-log]");
+  await expect(log.locator("[data-console-entry]")).toHaveCount(1);
+  await expect(log.locator("[data-console-reply]")).toContainText("There are 2 of a max of 20");
 });

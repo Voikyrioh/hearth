@@ -7,6 +7,7 @@ import Callout from "@/components/molecules/Callout.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import ModRow from "@/components/molecules/ModRow.vue";
 import ModsPendingBar from "@/components/molecules/ModsPendingBar.vue";
+import ModsWarning from "@/components/molecules/ModsWarning.vue";
 import ModsApplyDialog from "@/components/organisms/ModsApplyDialog.vue";
 import ModsCheckList from "@/components/organisms/ModsCheckList.vue";
 import ModsDepositDialog from "@/components/organisms/ModsDepositDialog.vue";
@@ -27,6 +28,7 @@ import {
   blockersAfter,
   blockingBanner,
   dependentsNote,
+  engineLine,
   headingOf,
   noModsText,
   notesOf,
@@ -61,6 +63,8 @@ const emit = defineEmits<{
   addServer: [];
   openConsole: [];
   openLogs: [];
+  /** Ce que l'on sait du moteur (« Minecraft Java, Fabric, version 1.20.1 »), pour l'en-tête du service. */
+  engine: [line: string | null];
 }>();
 
 const flow = useServiceMods(
@@ -211,6 +215,11 @@ function labelOfReplaced(item: ModItem): string | undefined {
 }
 
 const view = flow.view;
+watch(
+  () => view.value?.game,
+  (game) => emit("engine", game ? engineLine(game) : null),
+  { immediate: true },
+);
 const active = computed(() => view.value?.mods.filter((mod) => mod.place === "active") ?? []);
 const retired = computed(() => view.value?.mods.filter((mod) => mod.place === "retired") ?? []);
 const banners = computed(() => (view.value ? bannerItems(view.value) : { items: [], more: 0 }));
@@ -287,6 +296,7 @@ function keyOf(item: ModItem): string {
       v-else-if="view && screen === 'check' && deposit.check.value.kind === 'done'"
       :files="deposit.check.value.files"
       :game="view.game"
+      :view="view"
       :name-of="deposit.nameOfDeposit"
       :sha-of="deposit.shaOf"
       :room="room"
@@ -325,6 +335,7 @@ function keyOf(item: ModItem): string {
       :server-id="serverId"
       :apply="apply"
       :view="view"
+      :running="running"
       @close="closeProgress"
       @players="openPlayers"
       @logs="emit('openLogs')"
@@ -370,6 +381,7 @@ function keyOf(item: ModItem): string {
       <ModsPendingBar
         v-if="flow.changeCount.value > 0"
         :count="flow.changeCount.value"
+        :sentence="rows.length === 1 ? rows[0]?.sentence : undefined"
         :blocked-reason="unread > 0 ? t('mods.bar.unread') : undefined"
         @cancel-all="cancelAll"
         @review="openReview"
@@ -467,7 +479,7 @@ function keyOf(item: ModItem): string {
         </li>
       </ul>
       <p class="mt__help" data-mods-help>{{ t("mods.help") }}</p>
-      <p class="mt__warning" data-mods-warning>{{ t("mods.warning") }}</p>
+      <ModsWarning class="mt__warning" />
     </template>
   </div>
 </template>
@@ -513,7 +525,6 @@ function keyOf(item: ModItem): string {
 .mt__version,
 .mt__more,
 .mt__help,
-.mt__warning,
 .mt__empty {
   margin: 0;
   color: var(--tx-secondary);
@@ -525,10 +536,6 @@ function keyOf(item: ModItem): string {
   font-size: var(--fs-small);
 }
 
-.mt__warning {
-  color: var(--tx-secondary);
-  font-size: var(--fs-small);
-}
 
 .mt__table-wrap {
   container: mtw / inline-size;

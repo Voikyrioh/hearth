@@ -3,6 +3,7 @@ import { computed, onMounted } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
 import Callout from "@/components/molecules/Callout.vue";
+import ModsWarning from "@/components/molecules/ModsWarning.vue";
 import PlayersOnlineCard from "@/components/molecules/PlayersOnlineCard.vue";
 import AdminActPanel from "@/components/organisms/AdminActPanel.vue";
 import { useAdminAct } from "@/composables/useAdminAct";
@@ -169,7 +170,7 @@ const act = useAdminAct({
     </section>
       </div>
     </div>
-    <p class="ma__warning">{{ t("mods.warning") }}</p>
+    <ModsWarning class="ma__warning" />
   </form>
 </template>
 

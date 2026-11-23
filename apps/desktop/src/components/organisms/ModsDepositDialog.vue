@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import Callout from "@/components/molecules/Callout.vue";
+import ModsWarning from "@/components/molecules/ModsWarning.vue";
 import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import type { DepositItem, useModsDeposit } from "@/composables/useModsDeposit";
 import { t } from "@/i18n";
@@ -154,7 +155,7 @@ function sizeOf(item: DepositItem): string | null {
       </HButton>
       <span v-if="!deposit.allSent.value" class="md__hint" data-mods-deposit-check-note>{{ t("mods.deposit.checkNote") }}</span>
     </div>
-    <p class="md__warning">{{ t("mods.warning") }}</p>
+    <ModsWarning class="md__warning" />
 
     <AdminActDialog
       :open="deposit.sendOpen.value"
