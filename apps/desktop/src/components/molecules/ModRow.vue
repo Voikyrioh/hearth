@@ -221,6 +221,12 @@ const targetMinecraft = computed(() => {
   white-space: nowrap;
 }
 
+.row :deep(.tag) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .row__switch {
   text-align: center;
 }

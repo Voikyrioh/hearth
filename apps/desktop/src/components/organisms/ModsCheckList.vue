@@ -203,6 +203,12 @@ function done() {
   gap: var(--space-3);
 }
 
+.mc__head :deep(.tag) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .mc__name {
   font-weight: var(--fw-semibold);
 }

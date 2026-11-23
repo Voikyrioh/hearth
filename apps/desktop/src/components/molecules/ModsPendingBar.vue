@@ -13,8 +13,7 @@ const emit = defineEmits<{ cancelAll: []; review: [] }>();
   <div class="bar" role="status" data-mods-pending-bar>
     <HIcon name="clock" size="sm" />
     <span class="bar__text">
-      <strong>{{ t(count === 1 ? "mods.bar.one" : "mods.bar.many", { n: count }) }}</strong>
-      {{ t("mods.bar.text") }}
+      <strong>{{ t(count === 1 ? "mods.bar.one" : "mods.bar.many", { n: count }) }}</strong>{{ t("mods.bar.text") }}
     </span>
     <span class="bar__actions">
       <HButton variant="secondary" size="sm" data-mods-cancel-all @click="emit('cancelAll')">

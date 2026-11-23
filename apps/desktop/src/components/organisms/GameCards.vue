@@ -38,6 +38,8 @@ const props = defineProps<{
   supported: boolean;
   /** L'agent annonce `game-console` : la carte des joueurs connectés peut exister (HRT-291). */
   consoleServed: boolean;
+  /** L'onglet « Console » existe : « Écrire aux joueurs dans la console » est proposé (HRT-291). */
+  consoleOpen?: boolean;
 }>();
 const emit = defineEmits<{ retryRights: []; openConsole: [] }>();
 
@@ -134,7 +136,9 @@ const stopped = computed(
       :state="players.state.value"
       :now="clock"
       :refreshing="players.refreshing.value"
+      :link-label="consoleOpen ? t('players.writeToPlayers') : undefined"
       @refresh="players.refresh()"
+      @open-console="emit('openConsole')"
     />
     <GameAddressCard
       :addresses="addresses"

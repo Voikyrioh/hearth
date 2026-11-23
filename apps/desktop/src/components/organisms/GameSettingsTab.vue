@@ -39,9 +39,11 @@ const props = defineProps<{
   connected: boolean;
   /** Le moteur est prêt : sinon on enregistre quand même, mais on ne redémarre pas. */
   engineReady: boolean;
+  /** L'agent parle à la console de ce jeu : « Ce qui attend la console » ne garde que ce qui attend vraiment (HRT-269). */
+  consoleServed?: boolean;
 }>();
 
-const emit = defineEmits<{ restart: [service: ServiceInfo] }>();
+const emit = defineEmits<{ restart: [service: ServiceInfo]; openConsole: [] }>();
 
 const state = useGameSettings(
   () => props.serverId,
@@ -252,7 +254,7 @@ function openToken(id: string) {
             @remove="state.removeOther"
             @keep="state.keepOther"
           />
-          <ConsoleWaitSection />
+          <ConsoleWaitSection :served="consoleServed" @open-console="emit('openConsole')" />
         </template>
       </GameSettingsList>
 

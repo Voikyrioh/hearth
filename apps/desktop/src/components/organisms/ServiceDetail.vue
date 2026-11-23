@@ -42,6 +42,7 @@ import OperationCard from "../molecules/OperationCard.vue";
 import OriginTags from "../molecules/OriginTags.vue";
 import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
 import BackupsTab from "./BackupsTab.vue";
+import ConsoleTab from "./ConsoleTab.vue";
 import EnvVarsSection from "./EnvVarsSection.vue";
 import GameCards from "./GameCards.vue";
 import GameSettingsTab from "./GameSettingsTab.vue";
@@ -175,6 +176,7 @@ const doors = useServiceDoors(
   () => [service.value?.state ?? "", ongoing.value?.operation.kind ?? ""].join("|"),
 );
 const hasMods = computed(() => doors.hasMods.value && service.value !== null);
+const hasConsole = computed(() => doors.console.value !== null && service.value !== null);
 
 // Un lot de mods non appliqué se perd en quittant l'onglet : la sortie demande confirmation (BR-MOD-025, HRT-262).
 const modsDirty = ref(false);
@@ -211,6 +213,7 @@ const tabs = computed(() => [
     ? [{ id: "settings" as const, label: t("serviceDetail.tabSettings") }]
     : []),
   ...(hasMods.value ? [{ id: "mods" as const, label: t("mods.tab") }] : []),
+  ...(hasConsole.value ? [{ id: "console" as const, label: t("console.tab") }] : []),
   ...(hasBackups.value ? [{ id: "backups" as const, label: t("serviceDetail.tabBackups") }] : []),
   { id: "logs" as const, label: t("serviceDetail.tabLogs") },
 ]);
@@ -257,7 +260,7 @@ const commandNote = computed(() => {
 
 <template>
   <section
-    :class="['detail', { 'detail--logs': tab === 'logs', 'detail--wide': tab === 'backups' || tab === 'settings' }]"
+    :class="['detail', { 'detail--logs': tab === 'logs', 'detail--wide': tab === 'backups' || tab === 'settings' || tab === 'mods' || tab === 'console' }]"
     :aria-label="service ? t('serviceDetail.region', { name: clip(service.name, 80).text }) : t('serviceDetail.unnamed')"
     :aria-busy="opened.kind === 'waiting' ? 'true' : undefined"
     :data-gone="gone ? '' : undefined"
@@ -357,7 +360,9 @@ const commandNote = computed(() => {
         :service="service"
         :connected="connected"
         :engine-ready="engineReady"
+        :console-served="hasConsole"
         @restart="emit('gesture', service, 'restart')"
+        @open-console="changeTab('console')"
       />
     </div>
 
@@ -384,6 +389,32 @@ const commandNote = computed(() => {
         @open-console="changeTab('console')"
         @open-logs="changeTab('logs')"
         @add-server="emit('addServer')"
+      />
+    </div>
+
+    <!-- L'onglet Console (HRT-269) : le journal, les commandes envoyées d'ici, le champ, les joueurs -->
+    <div
+      v-if="service && tab === 'console' && hasConsole && doors.console.value"
+      :id="`${idBase}-panel-console`"
+      class="detail__console"
+      role="tabpanel"
+      :aria-labelledby="`${idBase}-tab-console`"
+      :aria-hidden="gone ? 'true' : undefined"
+      :inert="gone ? true : undefined"
+      data-detail-console
+    >
+      <ConsoleTab
+        :server-id="serverId"
+        :service="service"
+        :view="doors.console.value"
+        :gate="gate"
+        :connected="connected"
+        :engine-ready="engineReady"
+        :gone="gone"
+        :last-contact-at="lastContactAt"
+        @refresh="doors.reload()"
+        @start="emit('gesture', service, 'start')"
+        @follow="title?.scrollIntoView?.({ block: 'start' })"
       />
     </div>
 
@@ -472,6 +503,7 @@ const commandNote = computed(() => {
         :gone="gone"
         :supported="gameSettings"
         :console-served="gameConsole"
+        :console-open="hasConsole"
         @open-console="changeTab('console')"
         @retry-rights="emit('retryRights')"
       />

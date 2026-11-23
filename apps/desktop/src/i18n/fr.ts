@@ -1145,7 +1145,7 @@ export const fr = {
     bar: {
       one: "1 changement prêt",
       many: "{n} changements prêts",
-      text: "Rien n'est fait tant que vous n'avez pas appliqué.",
+      text: " : rien n'est fait tant que vous n'avez pas appliqué.",
       cancelAll: "Tout annuler",
       apply: "Vérifier et appliquer",
       unread: "Attendez la fin de la lecture des mods avant d'appliquer.",
@@ -1375,6 +1375,94 @@ export const fr = {
       text: "Les changements préparés ne sont pas gardés : ils seront perdus si vous quittez l'onglet Mods.",
       confirm: "Quitter sans appliquer",
       stay: "Rester sur l'onglet",
+    },
+  },
+  // La console d'un serveur de jeu (HRT-269, BR-CONSOLE-002 à 010).
+  console: {
+    tab: "Console",
+    title: "Console du jeu",
+    lead: "Ce que le serveur écrit, et les commandes que vous lui envoyez. Une commande part vers le jeu telle quelle : le jeu la comprend, Hearth ne la modifie pas.",
+    unknown:
+      "Le résultat n'est pas connu : le lien est tombé avant la réponse. La commande a peut-être été exécutée : regardez le journal avant de la renvoyer. Hearth ne renvoie jamais une commande tout seul.",
+    field: {
+      label: "Commande",
+      send: "Envoyer",
+      start: "Démarrer",
+      follow: "Voir le suivi",
+      hint: "Une seule ligne, {n} caractères au plus. La commande part telle que vous l'écrivez.",
+      refused:
+        "Hearth n'enverra pas cette commande : la phrase qui suivra dit quoi faire à la place.",
+      sensitive:
+        "« {verb} » demande votre mot de passe : Hearth vous le redemande à chaque commande de ce genre.",
+    },
+    issue: {
+      empty: "Écrivez une commande.",
+      tooLong: "{n} caractères au plus.",
+      oneLine: "Une seule ligne à la fois.",
+      control: "Ce caractère ne peut pas être envoyé.",
+    },
+    block: {
+      stopped: "Le serveur est arrêté.",
+      stoppedHelp: "Démarrez le serveur pour écrire dans sa console.",
+      starting: "Le serveur démarre.",
+      startingHelp:
+        "La console répond quand le serveur est prêt. Un gros pack peut prendre plusieurs minutes.",
+      busy: "Une opération est en cours sur ce serveur.",
+      busyHelp: "La console revient à la fin de l'opération.",
+      readonly: "Lecture seule.",
+      readonlyHelp:
+        "Vous lisez la console. Écrire dedans demande le droit de gérer les services, donné par un administrateur.",
+      rate: "Trop de commandes d'un coup.",
+      rateHelp:
+        "Vingt commandes en une minute, c'est la limite. Vous pourrez envoyer celle-ci dans {n} secondes.",
+      unavailable: "La console n'est pas ouverte.",
+      unavailableHelp: "Hearth ne parle pas à la console de ce serveur.",
+    },
+    refused: {
+      stop: "Commande non envoyée. Pour arrêter le serveur, utilisez le bouton « Arrêter » : il enregistre le monde, et le serveur ne repart pas tout seul.",
+      restart:
+        "Commande non envoyée. Pour redémarrer le serveur, utilisez le bouton « Redémarrer » de Hearth.",
+      breaks:
+        "Commande non envoyée. Cette commande recharge le serveur à chaud et peut le casser : redémarrez-le plutôt.",
+      other: "Commande non envoyée : Hearth ne l'envoie pas à ce jeu.",
+    },
+    reply: {
+      empty: "Commande envoyée. Le jeu n'a rien répondu.",
+      noAnswer:
+        "Le jeu n'a pas répondu en 10 secondes. La commande a peut-être été exécutée : regardez le journal avant de la renvoyer.",
+      unknown:
+        "Le résultat n'est pas connu : le lien est tombé avant la réponse. Regardez le journal avant de renvoyer la commande.",
+      truncated: "Réponse coupée : la suite est dans le journal du serveur.",
+      unreachable: "Hearth n'a pas pu joindre la console du jeu.",
+    },
+    refusal: {
+      invalid: "Cette ligne n'est pas une commande que Hearth peut envoyer.",
+      classMismatch:
+        "Hearth n'est pas à jour pour juger cette commande : mettez le client à jour, puis réessayez.",
+      gone: "Ce serveur n'a plus de console ouverte à Hearth.",
+      other: "La commande a été refusée.",
+    },
+    exchange: {
+      label: "Commandes envoyées depuis cet écran",
+      empty: "Les commandes que vous envoyez d'ici et leurs réponses s'affichent ici.",
+    },
+    quick: {
+      title: "Commandes rapides",
+      fill: "Une commande « à compléter » pose son début dans le champ : vous écrivez la suite, puis vous envoyez.",
+    },
+    watch: {
+      title: "Ce que Hearth surveille",
+      sensitive: "Les commandes {verbs} demandent votre mot de passe à chaque fois.",
+      stop: "Arrêter ou relancer le serveur : par les boutons de Hearth, jamais par la console.",
+      journal: "Chaque commande est inscrite au journal d'activité.",
+    },
+    confirm: {
+      freeTitle: "Envoyer cette commande ?",
+      send: "Envoyer la commande",
+      cancel: "Annuler",
+      eachTime: "Demandé à chaque commande de ce genre, même si vous venez de le taper.",
+      trust:
+        "Votre mot de passe est demandé pour cette commande, comme pour démarrer ou arrêter le serveur.",
     },
   },
   // Les joueurs connectés d'un serveur de jeu (HRT-291, BR-CONSOLE-011).
@@ -3377,6 +3465,8 @@ export const fr = {
     consoleTitle: "Ce qui attend la console",
     consoleLead: "Cette fonction attend la console de Hearth, qui n'est pas encore livrée.",
     consoleSoon: "Bientôt",
+    consoleServed:
+      "Voir qui est connecté, écrire aux joueurs, bannir ou régler l'heure se font maintenant dans l'onglet Console.",
     consoleApply: "Appliquer un réglage sans redémarrer",
     consoleApplyWay: "Enregistrez le réglage, puis redémarrez le service.",
     consoleWho: "Voir qui est connecté",
