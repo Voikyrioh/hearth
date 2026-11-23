@@ -25,6 +25,8 @@ Après la mise en place, le service est relancé puis surveillé : succès = le 
 - `tests/mods_apply_https.rs` (conteneur sorti avant le signe, délai dépassé, erreur au milieu de `place`, `the_last_lines_of_the_game_and_the_plain_cause_are_kept_after_a_rollback`, `an_unrecognised_failure_keeps_the_lines_without_a_cause`, `a_return_that_does_not_come_up_either_is_interrupted_stops_the_game_and_relaunches_nothing`)
 - `crates/hearth-agent/src/domain/mods/failure.rs::tests`
 - `tests/mods_apply_https.rs::reverting_a_batch_whose_undo_was_cut_in_the_middle_finishes_the_return_and_closes_the_operation`
+- `tests/mods_apply_https.rs::a_return_whose_stop_fails_moves_nothing_and_leaves_the_operation_interrupted`
+- `crates/hearth-agent/src/application/mods_apply_tests.rs` (`moves_of` : done remplace l'intention, undone retire, orphelin gardé, Failed ignoré ; `revert_blocking` : pose et déplacement en intention seule non adoptés, rejeu sans renommage)
 
 ## Règles liées
 - BR-MOD-024, BR-MOD-025, BR-MOD-032, BR-EDIT-020
@@ -33,3 +35,4 @@ Après la mise en place, le service est relancé puis surveillé : succès = le 
 - 2026-11-18 : complétée (HRT-259) : surveillance après le retour, arrêt voulu inscrit pendant le retour, queue de 20 lignes gardée 24 h et phrase en clair.
 - 2026-11-18 : création (HRT-258 pour l'erreur au milieu de `place`, HRT-259 pour le retour automatique).
 - 2026-11-23 : « Revenir à l'état d'avant » d'un lot « à vérifier » rejouable (un mouvement déjà revenu compte comme revenu, une ligne `undone` par mouvement) ; l'arrêt qui échoue ne déplace rien ; relance par le chemin commun avec surveillance ; une pose dont seule l'intention est au journal n'est jamais adoptée sans vérification (revue Stephen).
+- 2026-11-23 : le retour d'un lot « à vérifier » arrête TOUJOURS les conteneurs consignés avant de déplacer (un jeu relancé à la main entre-temps), et ne relance que si le lot avait une étape `stop` (seconde passe Stephen, M2).

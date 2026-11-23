@@ -1199,11 +1199,9 @@ impl ModsService {
                 .steps()
                 .iter()
                 .any(|planned| planned.name.as_str() == step::STOP);
-            let containers = if was_running {
-                deps.backups.containers_for(&record.service).await
-            } else {
-                Vec::new()
-            };
+            // Les conteneurs consignés sont toujours arrêtés avant de déplacer : `stop_running` ne fait rien si rien ne
+            // tourne, et un jeu relancé à la main entre-temps ne doit pas avoir ses fichiers déplacés sous lui.
+            let containers = deps.backups.containers_for(&record.service).await;
             let Some(job) = deps.backups.revert_job(
                 &record.service,
                 &record.id,
@@ -1232,7 +1230,7 @@ impl ModsService {
             if !outcome.all {
                 return false;
             }
-            if containers.is_empty() {
+            if !was_running || containers.is_empty() {
                 return true;
             }
             // La relance et la surveillance de l'état d'avant, comme le retour automatique : un jeu qui ne revient
@@ -1259,3 +1257,7 @@ impl ModsService {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "mods_apply_tests.rs"]
+mod tests;

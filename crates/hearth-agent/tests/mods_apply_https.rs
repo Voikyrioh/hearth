@@ -869,27 +869,6 @@ async fn a_return_that_does_not_come_up_either_is_interrupted_stops_the_game_and
 // ---------------------------------------------------------------------------------------------
 
 impl Bench {
-    /// Un second agent sur la même base, le même moteur et les mêmes dossiers : le redémarrage de l'agent.
-    async fn restarted(&self) -> Agent {
-        let mut parts = parts_supervised(
-            self.engine.clone(),
-            Arc::new(FakeSupervisor::new()),
-            fast_timings(),
-        );
-        parts.host_ports = Arc::new(FakeHostPorts::new());
-        parts.free_space = Arc::new(FakeFreeSpace::new());
-        parts.safe_fs = Some(self.safe_fs.clone());
-        parts.backups.files = Some(Arc::new(FakeBackupFiles::new()));
-        parts.catalog.include_preview = true;
-        parts.catalog.pack_deposits = Some(self.deposits.clone());
-        parts.catalog.service = Some(Arc::new(CatalogService::from_parts(
-            vec![self.fiche.clone()],
-            Vec::new(),
-            true,
-        )));
-        https::start_engined(&self.env, parts).await
-    }
-
     async fn wait_step(&self, id: &str, wanted: &str) {
         let started = Instant::now();
         loop {
@@ -907,6 +886,34 @@ impl Bench {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
+}
+
+/// Un second agent sur la même base, le même moteur et les mêmes dossiers : le redémarrage de l'agent. Prend les pièces
+/// du banc une à une pour que le test ait pu rendre le premier agent (`Agent::shutdown`) avant d'en lancer un second.
+async fn restarted(
+    env: &Env,
+    engine: &Arc<FakeEngine>,
+    safe_fs: &Arc<FakeSafeFs>,
+    deposits: &Arc<FakePackDeposits>,
+    fiche: &Fiche,
+) -> Agent {
+    let mut parts = parts_supervised(
+        engine.clone(),
+        Arc::new(FakeSupervisor::new()),
+        fast_timings(),
+    );
+    parts.host_ports = Arc::new(FakeHostPorts::new());
+    parts.free_space = Arc::new(FakeFreeSpace::new());
+    parts.safe_fs = Some(safe_fs.clone());
+    parts.backups.files = Some(Arc::new(FakeBackupFiles::new()));
+    parts.catalog.include_preview = true;
+    parts.catalog.pack_deposits = Some(deposits.clone());
+    parts.catalog.service = Some(Arc::new(CatalogService::from_parts(
+        vec![fiche.clone()],
+        Vec::new(),
+        true,
+    )));
+    https::start_engined(env, parts).await
 }
 
 #[tokio::test]
@@ -930,7 +937,9 @@ async fn reverting_a_batch_whose_undo_was_cut_in_the_middle_finishes_the_return_
     assert_eq!(reply.status, 202, "{}", reply.text);
     let id = reply.body["operation_id"].as_str().unwrap().to_owned();
     b.wait_step(&id, "watch").await;
-    let second = b.restarted().await;
+    // L'agent d'avant s'arrête AVANT que le second ne démarre : jamais deux agents sur la même base.
+    b.agent.shutdown().await;
+    let second = restarted(&b.env, &b.engine, &b.safe_fs, &b.deposits, &b.fiche).await;
     // Avec les anciens mods, le jeu redit « prêt ».
     b.engine.log_on_start(&server.name, READY);
     // Le retour de l'agent d'avant avait déjà rendu le premier mouvement (l'ancien jar) avant d'être coupé.
@@ -969,7 +978,10 @@ async fn reverting_a_batch_whose_undo_was_cut_in_the_middle_finishes_the_return_
         assert!(started.elapsed() < Duration::from_secs(15), "{operation:?}");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert_eq!(b.content(&server, "mods/old.jar"), Some(old));
+    assert_eq!(
+        b.safe_fs.content(&server.key, "data/mods/old.jar"),
+        Some(old)
+    );
     let paths = b.safe_fs.paths(&server.key);
     assert!(
         !paths
@@ -982,5 +994,72 @@ async fn reverting_a_batch_whose_undo_was_cut_in_the_middle_finishes_the_return_
             .iter()
             .any(|p| p.starts_with("data/mods-retires/") && p.contains("new")),
         "le fichier posé est rangé dans Mods retirés : {paths:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_return_whose_stop_fails_moves_nothing_and_leaves_the_operation_interrupted() {
+    let b = bench().await;
+    let server = b.install("mc", "fabric").await;
+    let old = fabric("old", "1.0.0");
+    let new = fabric("new", "1.0.0");
+    b.put(&server, "mods/old.jar", &old);
+    b.engine.log_on_start(&server.name, "Loading...");
+    let reply = b
+        .apply(
+            &server,
+            json!({ "add": [b.deposit("D-NEW", &new)], "retire": ["old.jar"] }),
+        )
+        .await;
+    assert_eq!(reply.status, 202, "{}", reply.text);
+    let id = reply.body["operation_id"].as_str().unwrap().to_owned();
+    b.wait_step(&id, "watch").await;
+    b.agent.shutdown().await;
+    let second = restarted(&b.env, &b.engine, &b.safe_fs, &b.deposits, &b.fiche).await;
+    let before = b.safe_fs.paths(&server.key);
+    let renames_before = b.safe_fs.renames().len();
+    // Le jeu tourne : l'arrêt voulu avant le retour est refusé par le moteur.
+    b.engine.fail_stop(
+        &server.container,
+        Some(hearth_agent::application::ports::EngineError::Refused),
+    );
+    let reply = second
+        .confirmed(
+            &b.ada,
+            "POST",
+            &format!("/operations/services/{id}/decision"),
+            json!({ "choice": "revert" }),
+        )
+        .await
+        .send()
+        .await;
+    assert_eq!(reply.status, 200, "{}", reply.text);
+    let started = Instant::now();
+    let operation = loop {
+        let reply = second
+            .request("GET", &format!("/operations/services/{id}"))
+            .token(&b.ada.token)
+            .send()
+            .await;
+        let operation: OperationView = serde_json::from_value(reply.body).unwrap();
+        if matches!(
+            operation.status,
+            OperationStatus::Interrupted | OperationStatus::RolledBack
+        ) {
+            break operation;
+        }
+        assert!(started.elapsed() < Duration::from_secs(15), "{operation:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(
+        operation.status,
+        OperationStatus::Interrupted,
+        "{operation:?}"
+    );
+    assert_eq!(b.safe_fs.paths(&server.key), before, "data/mods inchangé");
+    assert_eq!(
+        b.safe_fs.renames().len(),
+        renames_before,
+        "aucun renommage après l'arrêt raté"
     );
 }
