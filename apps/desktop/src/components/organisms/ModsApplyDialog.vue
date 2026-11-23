@@ -36,6 +36,8 @@ const props = defineProps<{
   now: number;
   /** « Ouvrir la console » existe : l'onglet Console est offert pour ce serveur. */
   consoleOpen: boolean;
+  /** Les mods qui empêcheront encore le serveur de démarrer après ce lot (une phrase chacun). */
+  blockers: string[];
 }>();
 const emit = defineEmits<{
   back: [];
@@ -88,6 +90,13 @@ const act = useAdminAct({
     <h3 class="ma__title">{{ t("mods.apply.title") }}</h3>
     <p class="ma__lead">{{ t("mods.apply.lead") }}</p>
 
+    <div class="ma__grid">
+      <div class="ma__col">
+    <section v-if="blockers.length > 0" class="ma__block ma__block--alert" data-mods-apply-blockers>
+      <h4 class="ma__subtitle">{{ t("mods.apply.blockersTitle") }}</h4>
+      <Callout v-for="line in blockers" :key="line" tone="error" role="alert" data-mods-apply-blocker>{{ line }}</Callout>
+    </section>
+
     <section class="ma__block" data-mods-apply-changes>
       <h4 class="ma__subtitle">{{ t("mods.apply.changes") }}</h4>
       <ul class="ma__list">
@@ -114,7 +123,8 @@ const act = useAdminAct({
         </li>
       </ol>
     </section>
-
+      </div>
+      <div class="ma__col">
     <PlayersOnlineCard
       v-if="running"
       :state="players"
@@ -147,8 +157,7 @@ const act = useAdminAct({
       <Callout v-if="act.error.value" tone="error" role="alert" data-mods-apply-error>
         {{ act.error.value }}
       </Callout>
-    </section>
-
+    
     <div class="ma__bar">
       <HButton variant="ghost" data-mods-apply-back @click="emit('back')">
         {{ t("mods.apply.backToList") }}
@@ -156,6 +165,9 @@ const act = useAdminAct({
       <HButton type="submit" :disabled="!act.canSend.value" :busy="act.sending.value" data-mods-apply-submit>
         {{ t(running ? "mods.apply.submit" : "mods.apply.submitStopped") }}
       </HButton>
+    </div>
+    </section>
+      </div>
     </div>
     <p class="ma__warning">{{ t("mods.warning") }}</p>
   </form>
@@ -185,6 +197,26 @@ const act = useAdminAct({
 
 .ma__warning {
   font-size: var(--fs-small);
+}
+
+.ma__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.ma__col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+@container (max-width: 760px) {
+  .ma__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .ma__block {

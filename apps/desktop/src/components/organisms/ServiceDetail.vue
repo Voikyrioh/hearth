@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, useId } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId } from "vue";
+import { type RouteLocationNormalized, useRouter } from "vue-router";
 import { clip, safeText } from "@/audit/text";
 import BoundedText from "@/components/atoms/BoundedText.vue";
 import HButton from "@/components/atoms/HButton.vue";
@@ -9,6 +10,7 @@ import HTabs from "@/components/atoms/HTabs.vue";
 import { formatDateTime } from "@/composables/format";
 import { useNow } from "@/composables/useNow";
 import { useServiceDoors } from "@/composables/useServiceDoors";
+import { dropKeptBatch, hasKeptBatch } from "@/composables/useServiceMods";
 import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
 import { backupsDoor } from "@/services/backups";
@@ -115,6 +117,13 @@ const lock = computed(() =>
     : { locked: false, by: null, own: false },
 );
 const allowed = computed(() => canAct(props.gate));
+/** Le suivi d'un changement de mods est dit UNE fois, dans l'onglet Mods : ni carte ni bandeau d'opération au-dessus. */
+const followedInTab = computed(
+  () =>
+    props.tab === "mods" &&
+    ongoing.value?.operation.kind === "mods" &&
+    ongoing.value.operation.decision === null,
+);
 /** Ce que le pilotage montre : les gestes de l'état, bloqués ou non (HRT-65, BR-LIFE-003, 013). */
 const controls = computed<Controls | null>(() =>
   service.value
@@ -178,20 +187,19 @@ const doors = useServiceDoors(
 const hasMods = computed(() => doors.hasMods.value && service.value !== null);
 const hasConsole = computed(() => doors.console.value !== null && service.value !== null);
 
-// Un lot de mods non appliqué se perd en quittant l'onglet : la sortie demande confirmation (BR-MOD-025, HRT-262).
-const modsDirty = ref(false);
-const leaving = ref<{ kind: "tab"; tab: ServiceTab } | { kind: "back" } | null>(null);
+// Un lot de mods non appliqué survit au changement d'onglet (il vit au niveau du service, HRT-262) ; il se perd en quittant
+// le détail (bouton « Retour », Échap, bouton précédent du navigateur, autre service) : la sortie demande confirmation (BR-MOD-025).
+const modsDirty = computed(
+  () => service.value !== null && hasKeptBatch(props.serverId, service.value.key),
+);
+const leaving = ref<{ kind: "back" } | { kind: "route"; to: RouteLocationNormalized } | null>(null);
 
 function changeTab(next: ServiceTab) {
-  if (props.tab === "mods" && next !== "mods" && modsDirty.value) {
-    leaving.value = { kind: "tab", tab: next };
-    return;
-  }
   emit("update:tab", next);
 }
 
 function leaveDetail() {
-  if (props.tab === "mods" && modsDirty.value) {
+  if (modsDirty.value) {
     leaving.value = { kind: "back" };
     return;
   }
@@ -201,11 +209,22 @@ function leaveDetail() {
 function confirmLeave() {
   const target = leaving.value;
   leaving.value = null;
-  modsDirty.value = false;
   if (target === null) return;
-  if (target.kind === "tab") emit("update:tab", target.tab);
+  if (service.value) dropKeptBatch(props.serverId, service.value.key);
+  if (target.kind === "route") void router.push(target.to);
   else emit("back");
 }
+
+// Le bouton précédent du navigateur passe par la même confirmation : la navigation est retenue, puis rejouée si l'on confirme.
+const router = useRouter();
+const removeGuard = router.beforeEach((to, from) => {
+  if (!modsDirty.value || leaving.value !== null) return true;
+  const sameService = to.name === from.name && to.query.service === from.query.service;
+  if (sameService) return true;
+  leaving.value = { kind: "route", to };
+  return false;
+});
+onBeforeUnmount(removeGuard);
 
 const tabs = computed(() => [
   { id: "detail" as const, label: t("serviceDetail.tabDetail") },
@@ -311,16 +330,26 @@ const commandNote = computed(() => {
         </p>
         <p v-if="adopted" class="detail__adopted" data-detail-adopted>{{ adopted }}</p>
       </template>
+
+      <!-- Les onglets restent avec le nom : toujours visibles, au défilement comme à l'ouverture d'un écran de l'onglet -->
+      <HTabs
+        v-if="service"
+        :model-value="tab"
+        :tabs="tabs"
+        :label="t('serviceDetail.sections')"
+        :id-base="idBase"
+        @update:model-value="changeTab($event)"
+      />
     </div>
 
     <header v-if="service" class="detail__head">
       <!-- Une action tient le service : les boutons de pilotage sont désactivés, quel que soit l'état réel (BR-SVC-031) -->
-      <Callout v-if="!gone && lock.locked" tone="info" data-detail-busy>
+      <Callout v-if="!gone && lock.locked && !followedInTab" tone="info" data-detail-busy>
         {{ busyText(lock) }}
         <template v-if="lock.by"> {{ lock.by }}</template>
       </Callout>
       <OperationCard
-        v-if="!gone && ongoing"
+        v-if="!gone && ongoing && !followedInTab"
         :operation="ongoing.operation"
         :name="ongoing.name"
         :detailed="allowed"
@@ -330,17 +359,9 @@ const commandNote = computed(() => {
       />
       <!-- Démarrer, arrêter, redémarrer (HRT-65) : les gestes que l'état offre, la raison écrite dessous si un geste est bloqué -->
       <LifecycleButtons
-        v-if="!gone && tab === 'detail' && controls"
+        v-if="!gone && (tab === 'detail' || tab === 'console') && controls"
         :controls="controls"
         @gesture="emit('gesture', service, $event)"
-      />
-
-      <HTabs
-        :model-value="tab"
-        :tabs="tabs"
-        :label="t('serviceDetail.sections')"
-        :id-base="idBase"
-        @update:model-value="changeTab($event)"
       />
     </header>
 
@@ -385,7 +406,6 @@ const commandNote = computed(() => {
         :connected="connected"
         :console-served="gameConsole"
         :console-open="doors.console.value !== null"
-        @dirty="modsDirty = $event"
         @open-console="changeTab('console')"
         @open-logs="changeTab('logs')"
         @add-server="emit('addServer')"
@@ -680,7 +700,7 @@ const commandNote = computed(() => {
   min-width: 0;
 }
 
-.detail__head > :deep(.tabs) {
+.detail__pinned > :deep(.tabs) {
   align-self: stretch;
 }
 

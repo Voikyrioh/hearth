@@ -840,6 +840,14 @@ export class TauriLinkBridge implements LinkBridge {
   }
 
   // Envoyer un fichier dans la zone d'attente de l'agent (HRT-96) : la coquille lit le fichier local.
+  /** Le système dit les chemins des fichiers lâchés sur la fenêtre (`tauri://drag-drop`). */
+  async onFilesDropped(listener: (paths: string[]) => void): Promise<Unsubscribe> {
+    return listen<{ paths?: string[] }>("tauri://drag-drop", (event) => {
+      const paths = event.payload.paths;
+      if (Array.isArray(paths) && paths.length > 0) listener(paths);
+    });
+  }
+
   async pickDepositFiles(): Promise<string[]> {
     return unwrap(await commands.pickDepositFiles()).map((source) => source.path);
   }

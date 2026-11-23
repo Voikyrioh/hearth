@@ -108,7 +108,7 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
           <th scope="col">{{ t("backups.colDate") }}</th>
           <th scope="col">{{ t("backups.colNote") }}</th>
           <th scope="col" class="bk__num">{{ t("backups.colSize") }}</th>
-          <th scope="col">{{ t("backups.colMode") }}</th>
+          <th scope="col" class="bk__wide">{{ t("backups.colMode") }}</th>
           <th scope="col">{{ t("backups.colState") }}</th>
           <th v-if="withMods" scope="col">{{ t("backups.colMods") }}</th>
           <th scope="col" class="bk__actions-head">{{ t("backups.colActions") }}</th>
@@ -137,6 +137,7 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
             </td>
             <td class="bk__date">
               <span class="bk__when" data-backup-date>{{ dateOf(backup.createdAt) }}</span>
+              <span class="bk__modeline bk__soft">{{ modeLabel(backup.mode) }}</span>
               <span v-if="flagLabels(backup).length > 0" class="bk__flags" data-backup-flags>
                 <HTag v-for="label in flagLabels(backup)" :key="label" :tone="flagIsWarning(label) ? 'warn' : 'neutral'">{{ label }}</HTag>
               </span>
@@ -149,7 +150,7 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
               <span data-backup-size>{{ formatSize(backup.archiveBytes) }}</span>
               <span class="bk__soft bk__line2">{{ dataLine(backup) }}</span>
             </td>
-            <td data-backup-mode>{{ modeLabel(backup.mode) }}</td>
+            <td class="bk__wide" data-backup-mode>{{ modeLabel(backup.mode) }}</td>
             <td class="bk__state">
               <span v-if="verifying.has(backup.id)" class="bk__verifying" role="status" data-backup-verifying>
                 <HSpinner :label="t('backups.verifying')" />
@@ -167,6 +168,7 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
               <span v-if="backup.mods" class="bk__mods-text">{{ columnText(backup.mods) }}</span>
             </td>
             <td class="bk__actions">
+              <div class="bk__buttons">
               <HButton
                 variant="secondary"
                 size="sm"
@@ -191,6 +193,7 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
               >
                 {{ t("backups.remove") }}
               </HButton>
+              </div>
             </td>
           </tr>
           <tr v-if="open.has(backup.id)" :id="`${idBase}-${backup.id}`" class="bk__more" data-backup-more>
@@ -236,6 +239,7 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
 
 <style scoped>
 .bk {
+  container: bk / inline-size;
   min-width: 0;
   overflow-x: auto;
   border-radius: var(--radius-card);
@@ -299,10 +303,25 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
 }
 
 .bk__date {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
   min-width: var(--backup-date-min);
+}
+
+.bk__date > * {
+  display: block;
+}
+
+.bk__date > * + * {
+  margin-top: var(--space-1);
+}
+
+/* Le mode de la copie : sa propre colonne quand il y a la place, sinon sous la date. */
+.bk__modeline {
+  display: none;
+  font-size: var(--fs-small);
+}
+
+.bk__wide {
+  min-width: var(--backup-mode-min);
 }
 
 .bk__when {
@@ -319,7 +338,7 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
 
 .bk__note {
   min-width: var(--backup-note-min);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .bk__num {
@@ -375,10 +394,40 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
 }
 
 .bk__actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.bk__buttons {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--space-2);
+}
+
+/* Étroit (1100 px de fenêtre) : le mode passe sous la date, les boutons s'empilent : rien n'est coupé ni caché. */
+@container bk (max-width: 859px) {
+  .bk__wide {
+    display: none;
+  }
+
+  .bk__modeline {
+    display: block;
+  }
+
+  .bk__date,
+  .bk__state {
+    min-width: var(--backup-date-narrow);
+  }
+
+  .bk__note {
+    min-width: var(--backup-note-narrow);
+  }
+
+  .bk__buttons {
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
 }
 
 .bk__actions-head {

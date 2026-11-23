@@ -782,6 +782,18 @@ export class SimulatedLinkBridge implements LinkBridge {
     return this.transfers.pick();
   }
 
+  /** Les dépôts glissés d'un test : `sim.dropFiles([...])`. */
+  private dropListeners = new Set<(paths: string[]) => void>();
+  dropFiles(paths: string[]): void {
+    for (const listener of this.dropListeners) listener(paths);
+  }
+  async onFilesDropped(listener: (paths: string[]) => void): Promise<Unsubscribe> {
+    this.dropListeners.add(listener);
+    return () => {
+      this.dropListeners.delete(listener);
+    };
+  }
+
   async pickDepositFiles(): Promise<string[]> {
     return this.transfers.pickMany();
   }

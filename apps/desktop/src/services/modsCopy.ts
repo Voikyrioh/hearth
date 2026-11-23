@@ -36,11 +36,14 @@ export interface CopyEntry {
   version: string | null;
   loader: string;
   environment: ModEnvironment;
+  /** Un autre mod de la liste a besoin de celui-ci : il va chez les joueurs même s'il dit « serveur seulement ». */
+  needed?: boolean;
 }
 
 /** Un mod de la liste : son nom, sa version, son moteur et ce qu'il dit de son environnement. */
-export function entryOf(identity: ModIdentity): CopyEntry {
+export function entryOf(identity: ModIdentity, needed = false): CopyEntry {
   return {
+    needed,
     name: safeText(identity.name ?? identity.id),
     version: identity.version === null ? null : safeText(identity.version),
     loader: identity.loader,
@@ -48,9 +51,16 @@ export function entryOf(identity: ModIdentity): CopyEntry {
   };
 }
 
-/** Les mods à installer chez les joueurs : tous sauf ceux qui disent n'agir que sur le serveur. */
+/** Les mods à installer chez les joueurs : tous sauf ceux qui disent n'agir que sur le serveur (une dépendance y va toujours). */
 export function toInstall(entries: readonly CopyEntry[]): CopyEntry[] {
-  return entries.filter((entry) => audienceOf(entry.environment) === "players");
+  return entries.filter(
+    (entry) => entry.needed === true || audienceOf(entry.environment) === "players",
+  );
+}
+
+/** Un mod ne se donne pas aux joueurs quand le serveur lui-même ne peut pas le charger (incompatible, doublon). */
+export function loadsOnServer(code: string): boolean {
+  return !["incompatible_loader", "incompatible_minecraft", "duplicate"].includes(code);
 }
 
 /**

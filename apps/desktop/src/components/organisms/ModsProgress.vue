@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
+import HMeter from "@/components/atoms/HMeter.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import type { useModsApply } from "@/composables/useModsApply";
@@ -42,6 +43,14 @@ const position = computed(() => {
   const at = states.value.findIndex((item) => item.state === "running");
   return Math.max(1, at + 1);
 });
+/** La phrase du haut porte le nom de l'étape en cours : le même que dans la liste (« Mise en place des mods »). */
+const currentTitle = computed(() => {
+  const step = plan.value[position.value - 1];
+  return step ? stepTitle(step) : t("mods.progress.title");
+});
+const ratio = computed(
+  () => (position.value - 1) / plan.value.length + 1 / (plan.value.length * 2),
+);
 const canCancel = computed(
   () => operation.value?.cancellable === true && finished.value === undefined,
 );
@@ -66,10 +75,11 @@ function close() {
   <section v-if="launch" class="mp" data-mods-progress>
     <!-- Le suivi : tant que l'opération court -->
     <template v-if="!finished">
-      <h3 class="mp__title">{{ t("mods.progress.title") }}</h3>
+      <h3 class="mp__title" data-mods-progress-title>{{ currentTitle }}</h3>
       <p class="mp__lead" data-mods-progress-lead>
         {{ t("mods.progress.lead", { n: position, total: plan.length }) }}
       </p>
+      <HMeter :ratio="ratio" :label="t('mods.progress.meter', { n: position, total: plan.length })" />
       <ol class="mp__steps">
         <li v-for="item in states" :key="item.step" :class="['mp__step', `mp__step--${item.state}`]" data-mods-progress-step :data-state="item.state">
           <span class="mp__step-text">
@@ -107,10 +117,10 @@ function close() {
 
     <!-- La fin réussie -->
     <template v-else-if="outcome === 'succeeded'">
-      <h3 class="mp__title" data-mods-end="succeeded">{{ t("mods.end.title") }}</h3>
-      <p class="mp__lead">
+      <Callout tone="ok" data-mods-end="succeeded">
+        <strong class="mp__title">{{ t(launch.running ? "mods.end.title" : "mods.end.titleStopped") }}</strong>
         {{ t(launch.running ? "mods.end.leadRunning" : "mods.end.leadStopped", { n: enabledCount }) }}
-      </p>
+      </Callout>
       <section class="mp__block">
         <h4 class="mp__subtitle">{{ t("mods.end.changed") }}</h4>
         <ul class="mp__list">
@@ -122,7 +132,9 @@ function close() {
             </span>
           </li>
         </ul>
-        <p v-if="noteOf" class="mp__detail" data-mods-end-backup>{{ t("mods.end.backup", { note: noteOf }) }}</p>
+        <p class="mp__detail" data-mods-end-backup>
+          {{ noteOf ? t("mods.end.backup", { note: noteOf }) : t("mods.end.backupBare") }}
+        </p>
       </section>
       <section class="mp__block" data-mods-end-players>
         <h4 class="mp__subtitle">{{ t("mods.end.playersTitle") }}</h4>
@@ -193,6 +205,10 @@ function close() {
   font-family: var(--font-title);
   font-size: var(--fs-h3);
   font-weight: var(--fw-semibold);
+}
+
+.mp__title {
+  display: block;
 }
 
 .mp__lead,

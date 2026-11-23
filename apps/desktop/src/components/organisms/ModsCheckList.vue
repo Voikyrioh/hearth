@@ -125,7 +125,7 @@ function done() {
         />
         <div v-if="isAccepted(file) && file.verdict?.code === 'to_complete'" class="mc__row">
           <HButton variant="secondary" size="sm" data-mods-check-more @click="emit('more')">
-            {{ t("mods.check.depositMissing") }}
+            {{ t("mods.check.depositMissing", { names: (file.verdict?.missing ?? []).map((id) => safeText(id)).join(", ") }) }}
           </HButton>
         </div>
         <div v-if="!isAccepted(file)" class="mc__row">

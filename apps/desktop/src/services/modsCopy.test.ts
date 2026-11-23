@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { audienceOf, copyText, entryOf, toInstall } from "./modsCopy";
+import { audienceOf, copyText, entryOf, loadsOnServer, toInstall } from "./modsCopy";
 
 // La liste à donner aux joueurs (HRT-264, BR-MOD-029) : jamais « Obligatoire », un mod qui ne dit rien est classé chez les joueurs.
 const id = (name: string, environment: "both" | "server" | "client" | "unknown") =>
@@ -46,5 +46,32 @@ describe("la liste des joueurs", () => {
       "X ? (Quilt, Minecraft ?)",
     ]);
     expect(toInstall([id("A", "server")])).toEqual([]);
+  });
+});
+
+describe("dépendances et mods que le serveur ne charge pas", () => {
+  it("une dépendance « serveur seulement » dont un autre mod a besoin va chez les joueurs", () => {
+    const library = entryOf(
+      {
+        id: "balm",
+        name: "Balm",
+        version: "1.0",
+        loader: "fabric",
+        minecraftDeclared: true,
+        environment: "server",
+      },
+      true,
+    );
+    expect(toInstall([library, id("Carpet", "server")]).map((entry) => entry.name)).toEqual([
+      "Balm",
+    ]);
+  });
+
+  it("un mod incompatible ou en double n'est jamais donné aux joueurs", () => {
+    expect(loadsOnServer("incompatible_loader")).toBe(false);
+    expect(loadsOnServer("incompatible_minecraft")).toBe(false);
+    expect(loadsOnServer("duplicate")).toBe(false);
+    expect(loadsOnServer("compatible")).toBe(true);
+    expect(loadsOnServer("to_complete")).toBe(true);
   });
 });

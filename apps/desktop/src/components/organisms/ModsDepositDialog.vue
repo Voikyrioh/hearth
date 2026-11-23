@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import type { DepositItem, useModsDeposit } from "@/composables/useModsDeposit";
 import { t } from "@/i18n";
+import { getLinkBridge, type Unsubscribe } from "@/link";
 import { formatSize, ratioOf, statusText } from "@/transfers/messages";
 
 // « Ajouter des mods » (HRT-262, BR-MOD-015, 022, maquette Depot) : choisir des fichiers `.jar` (8 au plus), les voir partir
@@ -21,6 +23,21 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ back: [] }>();
 
+// Glisser des fichiers .jar sur la fenêtre revient à les choisir (le système donne leurs chemins).
+let stopDrop: Unsubscribe | undefined;
+let alive = true;
+onMounted(async () => {
+  const stop = await getLinkBridge().onFilesDropped((paths) => {
+    if (props.canWrite) void props.deposit.dropped(paths);
+  });
+  if (alive) stopDrop = stop;
+  else stop();
+});
+onBeforeUnmount(() => {
+  alive = false;
+  stopDrop?.();
+});
+
 function statusOf(item: DepositItem): string {
   if (item.refused !== null) return item.refused;
   const transfer = props.deposit.transferOf(item);
@@ -33,6 +50,16 @@ function statusOf(item: DepositItem): string {
   }
   return transfer.status === "done" ? t("mods.deposit.sent") : statusText(transfer);
 }
+
+/** Les fichiers dont l'envoi attend un geste : nommés, jamais « un envoi » tout court. */
+const stuckNames = computed(() =>
+  props.deposit.items.value
+    .filter((item) => {
+      const status = props.deposit.transferOf(item)?.status;
+      return status === "failed" || status === "cancelled" || status === "interrupted";
+    })
+    .map((item) => item.name),
+);
 
 function sizeOf(item: DepositItem): string | null {
   const transfer = props.deposit.transferOf(item);
@@ -86,7 +113,7 @@ function sizeOf(item: DepositItem): string | null {
     </section>
 
     <Callout v-if="deposit.needsGesture.value" tone="warn" data-mods-deposit-gesture>
-      {{ t("mods.deposit.needsGesture") }}
+      {{ t("mods.deposit.needsGesture", { names: stuckNames.join(", ") }) }}
     </Callout>
     <Callout v-if="deposit.check.value.kind === 'failed'" tone="error" role="alert" data-mods-check-failed>
       {{ t("mods.deposit.checkFailed") }}
@@ -125,7 +152,7 @@ function sizeOf(item: DepositItem): string | null {
       >
         {{ t("mods.deposit.send") }}
       </HButton>
-      <span class="md__hint">{{ t("mods.deposit.checkNote") }}</span>
+      <span v-if="!deposit.allSent.value" class="md__hint" data-mods-deposit-check-note>{{ t("mods.deposit.checkNote") }}</span>
     </div>
     <p class="md__warning">{{ t("mods.warning") }}</p>
 

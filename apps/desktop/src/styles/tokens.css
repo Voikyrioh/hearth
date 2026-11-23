@@ -235,6 +235,19 @@
   --backup-progress-min: 128px;
   --backup-detail-col: 224px;
   --backup-path-basis: 224px;
+  --backup-mode-min: 144px;
+  --backup-date-narrow: 128px;
+  --backup-note-narrow: 96px;
+
+  /* Mods d'un service (HRT-262) : largeurs fixes des colonnes (le nom prend le reste) et hauteur du journal de la console. */
+  --mods-col-version: 96px;
+  --mods-col-loader: 88px;
+  --mods-col-target: 104px;
+  --mods-col-state: 152px;
+  --mods-col-origin: 152px;
+  --mods-col-enabled: 72px;
+  --mods-col-action: 120px;
+  --console-log-height: 45vh;
 
   /* États */
   --opacity-disabled: 0.7;

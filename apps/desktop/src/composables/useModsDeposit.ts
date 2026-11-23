@@ -1,5 +1,5 @@
 import { computed, ref } from "vue";
-import type { ActReport } from "@/composables/useReauth";
+import { type ActReport, useReauth } from "@/composables/useReauth";
 import { useServerAction } from "@/composables/useServerAction";
 import { logUiError } from "@/errors/report";
 import { t } from "@/i18n";
@@ -45,6 +45,9 @@ export type CheckState =
 export function useModsDeposit(serverId: () => string, key: () => string) {
   const transfers = useTransfersStore();
   const sendAction = useServerAction(serverId);
+  // L'envoi est un acte `file_write`, couvert par l'élévation : sans mot de passe à saisir, il part tout de suite, sans fenêtre.
+  const reauth = useReauth(serverId, () => "file_write");
+  void reauth.load();
 
   const items = ref<DepositItem[]>([]);
   const check = ref<CheckState>({ kind: "idle" });
@@ -81,7 +84,29 @@ export function useModsDeposit(serverId: () => string, key: () => string) {
     if (picking.value) return;
     picking.value = true;
     try {
-      const paths = await getLinkBridge().pickDepositFiles();
+      await addPaths(await getLinkBridge().pickDepositFiles());
+    } catch (error) {
+      if (!failureOf(error)) logUiError(error, "modsDeposit:pick");
+    } finally {
+      picking.value = false;
+    }
+  }
+
+  /** Des fichiers glissés sur la fenêtre : mêmes règles que la boîte « Ouvrir ». */
+  async function dropped(paths: string[]): Promise<void> {
+    if (picking.value) return;
+    picking.value = true;
+    try {
+      await addPaths(paths);
+    } catch (error) {
+      if (!failureOf(error)) logUiError(error, "modsDeposit:drop");
+    } finally {
+      picking.value = false;
+    }
+  }
+
+  async function addPaths(paths: string[]): Promise<void> {
+    {
       const added: DepositItem[] = [];
       for (const path of paths) {
         const name = nameOfPath(path);
@@ -99,11 +124,12 @@ export function useModsDeposit(serverId: () => string, key: () => string) {
       }
       items.value = [...items.value, ...added];
       check.value = { kind: "idle" };
-      if (added.some((item) => item.refused === null)) sendOpen.value = true;
-    } catch (error) {
-      if (!failureOf(error)) logUiError(error, "modsDeposit:pick");
-    } finally {
-      picking.value = false;
+      if (added.some((item) => item.refused === null)) {
+        const direct =
+          reauth.supported.value && !reauth.keyMissing.value && !reauth.needsPassword.value;
+        // Un refus ou un lien tombé : la fenêtre s'ouvre, elle dit pourquoi et redemande ce qu'il faut.
+        if (!direct || (await send(null)).kind !== "done") sendOpen.value = true;
+      }
     }
   }
 
@@ -207,6 +233,7 @@ export function useModsDeposit(serverId: () => string, key: () => string) {
     needsGesture,
     transferOf,
     choose,
+    dropped,
     send,
     sendRefusalText,
     runCheck,

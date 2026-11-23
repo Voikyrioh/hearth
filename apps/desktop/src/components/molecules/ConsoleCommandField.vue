@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, nextTick, onMounted, ref, useId } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import { t } from "@/i18n";
 import { blockText, type FieldBlock } from "@/services/console";
@@ -36,6 +36,20 @@ const text = computed(() => (props.block ? blockText(props.block) : null));
 const sensitive = computed(() => (props.judged?.kind === "sensitive" ? props.judged.verb : null));
 const refused = computed(() => props.judged?.kind === "refused");
 
+const input = ref<HTMLTextAreaElement | null>(null);
+
+/** Le curseur entre dans le champ, après ce qui y est déjà (une commande « à compléter » : « say » puis le curseur). */
+async function focus(): Promise<void> {
+  await nextTick();
+  const field = input.value;
+  if (!field || field.disabled) return;
+  field.focus();
+  const end = field.value.length;
+  field.setSelectionRange?.(end, end);
+}
+defineExpose({ focus });
+onMounted(() => void focus());
+
 function onInput(event: Event) {
   emit("update:modelValue", (event.target as HTMLTextAreaElement).value);
 }
@@ -48,6 +62,7 @@ function onInput(event: Event) {
       <span class="cf__prompt" aria-hidden="true">&gt;</span>
       <textarea
         :id="inputId"
+        ref="input"
         class="cf__input"
         rows="1"
         wrap="off"
@@ -78,12 +93,12 @@ function onInput(event: Event) {
     <p :id="helpId" class="cf__help" data-console-help>
       <template v-if="text">
         {{ text.help }}
-        <HButton v-if="block?.kind === 'stopped' && canStart" variant="ghost" size="sm" data-console-start @click="emit('start')">
+        <button v-if="block?.kind === 'stopped' && canStart" type="button" class="cf__link" data-console-start @click="emit('start')">
           {{ t("console.field.start") }}
-        </HButton>
-        <HButton v-if="block?.kind === 'busy'" variant="ghost" size="sm" data-console-follow @click="emit('follow')">
+        </button>
+        <button v-if="block?.kind === 'busy'" type="button" class="cf__link" data-console-follow @click="emit('follow')">
           {{ t("console.field.follow") }}
-        </HButton>
+        </button>
       </template>
       <template v-else-if="issue">{{ issue }}</template>
       <template v-else-if="refused">{{ t("console.field.refused") }}</template>
@@ -137,6 +152,19 @@ function onInput(event: Event) {
 .cf__input:focus-visible {
   outline: var(--focus-ring) solid var(--ac);
   outline-offset: var(--focus-offset);
+}
+
+/* « Démarrer » et « Voir le suivi » sont des liens (orange souligné, maquette Connectes), pas des boutons. */
+.cf__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ac);
+  font: inherit;
+  font-weight: var(--fw-semibold);
+  text-decoration: underline;
+  text-underline-offset: var(--space-half);
+  cursor: pointer;
 }
 
 .cf__help {

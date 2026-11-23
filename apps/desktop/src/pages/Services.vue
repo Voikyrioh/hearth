@@ -214,8 +214,10 @@ const barShown = computed(
     door.value.kind !== "hidden" &&
     !listEmpty.value &&
     shown.value.kind !== "loading" &&
-    !(opened.value && tab.value === "logs"),
+    !openedAside.value,
 );
+/** Un service ouvert sur un autre onglet que la vue d'ensemble prend toute la page : ni moteur, ni opérations, ni « Ajouter ». */
+const openedAside = computed(() => opened.value !== null && tab.value !== "detail");
 /** « Ajouter un serveur de jeu » (onglet Mods d'un moteur sans mods) : le Catalogue. */
 function goCatalogue() {
   if (server.value) void router.push({ name: "catalogue", params: { id: server.value.id } });
@@ -439,6 +441,7 @@ async function openDocs() {
 
     <template v-else>
       <EnginePanel
+        v-if="!openedAside"
         :engine="engine"
         :counts="counts"
         :is-admin="isAdmin"
@@ -450,6 +453,7 @@ async function openDocs() {
 
       <!-- Les opérations en cours : visibles de tous les comptes (BR-SVC-029) -->
       <OperationsStrip
+        v-if="!openedAside"
         :operations="running"
         :launched-by="launchedByOf"
         :allowed="rights.canAct.value"

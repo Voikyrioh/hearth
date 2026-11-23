@@ -1,5 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hasKeptBatch } from "@/composables/useServiceMods";
 import type { ModItem, ModsView } from "@/link";
 import { simMod } from "@/link/simulated-mods";
 import type { RightsGate } from "@/services/rights";
@@ -101,7 +102,7 @@ describe("la liste", () => {
     const say = (file: string) => rowOf(wrapper, file).find("[data-mod-sentence]").text();
     expect(say("a.jar")).toBe("Ce mod n'est pas compatible avec Minecraft 1.20.1.");
     expect(say("b.jar")).toBe("Ce mod n'est pas compatible avec Fabric.");
-    expect(say("c.jar")).toBe("Ce mod a besoin du mod balm, qui n'est pas installé.");
+    expect(say("c.jar")).toBe("Ce mod a besoin du mod Balm, qui n'est pas installé.");
     expect(say("d.jar")).toContain("Hearth ne sait pas");
     expect(say("e.jar")).toBe("Hearth ne lit pas la fiche d'identité de ce fichier.");
     expect(rowOf(wrapper, "a.jar").find("[data-mod-state]").text()).toBe("Incompatible");
@@ -230,10 +231,10 @@ describe("l'interrupteur, « Retirer » et le lot", () => {
       "Sera désactivé au prochain redémarrage",
     );
     expect(row.find("[data-mod-switch]").attributes("aria-checked")).toBe("false");
-    expect(wrapper.emitted("dirty")?.at(-1)).toEqual([true]);
+    expect(hasKeptBatch("forge", "h_mc")).toBe(true);
     await row.find("[data-mod-undo]").trigger("click");
     expect(rowOf(wrapper, "a.jar").find("[data-mod-pending-text]").exists()).toBe(false);
-    expect(wrapper.emitted("dirty")?.at(-1)).toEqual([false]);
+    expect(hasKeptBatch("forge", "h_mc")).toBe(false);
     // Rien n'est écrit sur le serveur : aucun lot reçu.
     expect(bridge.mods.received).toHaveLength(0);
   });
@@ -310,6 +311,6 @@ describe("l'interrupteur, « Retirer » et le lot", () => {
     await wrapper.setProps({ connected: true });
     await flushPromises();
     expect(rowOf(wrapper, "a.jar").exists()).toBe(false);
-    expect(wrapper.emitted("dirty")?.at(-1)).toEqual([false]);
+    expect(hasKeptBatch("forge", "h_mc")).toBe(false);
   });
 });

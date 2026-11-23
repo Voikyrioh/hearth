@@ -526,6 +526,8 @@ export interface LinkBridge {
   pickDepositFile(): Promise<string | null>;
   /** La même boîte avec plusieurs fichiers (les mods d'un lot, HRT-262) : les chemins choisis, ou rien si le compte annule. */
   pickDepositFiles(): Promise<string[]>;
+  /** Des fichiers glissés sur la fenêtre (le système donne leurs chemins) ; l'abonnement se défait avec la fonction rendue. */
+  onFilesDropped(listener: (paths: string[]) => void): Promise<Unsubscribe>;
   /**
    * L'empreinte SHA-256 (hexadécimal) du fichier local choisi : l'agent la compare à celle qu'il lit dans la zone
    * d'attente avant de poser un mod (BR-MOD-022). `null` : fichier illisible, jamais une empreinte devinée.

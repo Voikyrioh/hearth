@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useId, watch } from "vue";
+import { computed, nextTick, ref, useId, watch } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
@@ -24,6 +24,7 @@ import { MAX_BATCH_ADDS, type ModItem, type ServiceInfo } from "@/link";
 import { addressesOf } from "@/services/game";
 import {
   bannerItems,
+  blockersAfter,
   blockingBanner,
   dependentsNote,
   headingOf,
@@ -57,8 +58,6 @@ const props = defineProps<{
   consoleOpen?: boolean;
 }>();
 const emit = defineEmits<{
-  /** Un lot non appliqué existe (ou n'existe plus) : le détail demande confirmation avant de quitter l'onglet. */
-  dirty: [dirty: boolean];
   addServer: [];
   openConsole: [];
   openLogs: [];
@@ -70,6 +69,7 @@ const flow = useServiceMods(
   () => props.connected,
 );
 const titleId = useId();
+const root = ref<HTMLElement | null>(null);
 const deposit = useModsDeposit(
   () => props.serverId,
   () => props.service.key,
@@ -80,6 +80,17 @@ const screen = ref<"list" | "deposit" | "check" | "review" | "progress" | "playe
 const address = ref<string | null>(null);
 const canWrite = computed(() => canAct(props.gate));
 const room = computed(() => MAX_BATCH_ADDS - flow.adds.value.length);
+
+// Chaque écran s'ouvre en haut (jamais au milieu du défilement du précédent).
+watch(screen, async () => {
+  await nextTick();
+  const top = root.value;
+  if (!top) return;
+  // Le haut de l'écran se place sous l'en-tête collant (nom et onglets), jamais derrière lui.
+  const pinned = top.closest("[data-service-detail]")?.querySelector("[data-detail-pinned]");
+  top.style.setProperty("scroll-margin-top", `${pinned?.getBoundingClientRect().height ?? 0}px`);
+  top.scrollIntoView?.({ block: "start" });
+});
 
 // Le contrôle s'ouvre dès que l'agent l'a rendu.
 watch(
@@ -102,6 +113,16 @@ const running = computed(
 const players = useOnlinePlayers(
   () => props.serverId,
   () => (props.consoleServed === true && screen.value === "review" ? props.service.key : null),
+);
+/** Les mods qui empêcheront encore le serveur de démarrer une fois le lot appliqué. */
+const blockers = computed(() =>
+  view.value
+    ? blockersAfter(
+        view.value,
+        flow.pending.value,
+        flow.adds.value.map(itemOfAdd).filter((item) => item.verdict.code !== "compatible"),
+      )
+    : [],
 );
 const rows = computed(() =>
   view.value
@@ -189,11 +210,6 @@ function labelOfReplaced(item: ModItem): string | undefined {
   return t("mods.pending.replacedBy", { version: add.identity?.version ?? add.targetFile });
 }
 
-watch(
-  () => flow.changeCount.value > 0,
-  (dirty) => emit("dirty", dirty),
-);
-
 const view = flow.view;
 const active = computed(() => view.value?.mods.filter((mod) => mod.place === "active") ?? []);
 const retired = computed(() => view.value?.mods.filter((mod) => mod.place === "retired") ?? []);
@@ -226,7 +242,7 @@ function keyOf(item: ModItem): string {
 </script>
 
 <template>
-  <div class="mt" data-mods-tab>
+  <div ref="root" class="mt" data-mods-tab>
     <div v-if="flow.list.value.kind === 'loading'" class="mt__loading" role="status" :aria-label="t('mods.reading')" data-mods-loading>
       <HSkeleton v-for="n in 5" :key="n" size="lg" />
     </div>
@@ -290,6 +306,7 @@ function keyOf(item: ModItem): string {
       :players-refreshing="players.refreshing.value"
       :now="clock"
       :console-open="consoleOpen === true"
+      :blockers="blockers"
       @back="screen = 'list'"
       @refresh-players="players.refresh()"
       @open-console="emit('openConsole')"
@@ -343,7 +360,7 @@ function keyOf(item: ModItem): string {
           role="alert"
           data-mods-banner
         >
-          {{ blockingBanner(item, view.game) }}
+          {{ blockingBanner(item, view.game, view) }}
         </Callout>
         <p v-if="banners.more > 0" class="mt__more" data-mods-banner-more>
           {{ t("mods.banner.more", { n: banners.more }) }}
@@ -366,12 +383,22 @@ function keyOf(item: ModItem): string {
 
       <div class="mt__table-wrap">
         <table class="mt__table" :aria-labelledby="titleId" data-mods-table>
+          <colgroup>
+            <col class="mt__c-mod" />
+            <col class="mt__c-version" />
+            <col class="mt__c-loader" />
+            <col class="mt__c-target" />
+            <col class="mt__c-state" />
+            <col class="mt__c-origin" />
+            <col class="mt__c-enabled" />
+            <col class="mt__c-action" />
+          </colgroup>
           <thead>
             <tr>
               <th scope="col">{{ t("mods.table.mod") }}</th>
               <th scope="col">{{ t("mods.table.version") }}</th>
-              <th scope="col">{{ t("mods.table.loader") }}</th>
-              <th scope="col">{{ t("mods.table.target") }}</th>
+              <th scope="col" class="mt__wide">{{ t("mods.table.loader") }}</th>
+              <th scope="col" class="mt__wide">{{ t("mods.table.target") }}</th>
               <th scope="col">{{ t("mods.table.state") }}</th>
               <th scope="col">{{ t("mods.table.origin") }}</th>
               <th scope="col" class="mt__center">{{ t("mods.table.enabled") }}</th>
@@ -504,15 +531,59 @@ function keyOf(item: ModItem): string {
 }
 
 .mt__table-wrap {
+  container: mtw / inline-size;
   overflow-x: auto;
   border-radius: var(--radius-card);
   background: var(--card);
   box-shadow: var(--card-edge);
 }
 
+/* Largeurs fixes : le nom prend le reste, l'état, l'origine et les actions ne sont jamais coupés ni cachés. */
 .mt__table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.mt__c-version {
+  width: var(--mods-col-version);
+}
+
+.mt__c-loader {
+  width: var(--mods-col-loader);
+}
+
+.mt__c-target {
+  width: var(--mods-col-target);
+}
+
+.mt__c-state {
+  width: var(--mods-col-state);
+}
+
+.mt__c-origin {
+  width: var(--mods-col-origin);
+}
+
+.mt__c-enabled {
+  width: var(--mods-col-enabled);
+}
+
+.mt__c-action {
+  width: var(--mods-col-action);
+}
+
+/* Étroit (1100 px de fenêtre) : le moteur et la version visée cèdent la place, l'état dit déjà ce qui ne va pas. */
+@container mtw (max-width: 859px) {
+  .mt__c-loader,
+  .mt__c-target {
+    display: none;
+  }
+
+  .mt__table .mt__wide,
+  .mt__table :deep(.row__wide) {
+    display: none;
+  }
 }
 
 .mt__table th {

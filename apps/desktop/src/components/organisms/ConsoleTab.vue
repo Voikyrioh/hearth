@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
 import ConsoleCommandField from "@/components/molecules/ConsoleCommandField.vue";
@@ -12,7 +12,7 @@ import { useNow } from "@/composables/useNow";
 import { useOnlinePlayers } from "@/composables/useOnlinePlayers";
 import { useServiceConsole } from "@/composables/useServiceConsole";
 import { t } from "@/i18n";
-import type { ConsoleView, ServiceInfo } from "@/link";
+import type { ConsoleView, QuickCommand, ServiceInfo } from "@/link";
 import { canAct, type RightsGate } from "@/services/rights";
 
 // L'onglet « Console » d'un serveur de jeu dont l'agent parle à la console (HRT-269, BR-CONSOLE-002 à 010, maquettes
@@ -51,6 +51,15 @@ const verbs = computed(() =>
 const blocked = computed(() => console_.block.value !== null);
 const canStart = computed(() => canAct(props.gate));
 
+const field = ref<InstanceType<typeof ConsoleCommandField> | null>(null);
+
+/** Une commande rapide « à compléter » pose son début : le curseur entre dans le champ, après lui. */
+async function quick(command: QuickCommand): Promise<void> {
+  await console_.quick(command);
+  await nextTick();
+  void field.value?.focus();
+}
+
 function refusalText(): string | undefined {
   return console_.refusal.value;
 }
@@ -77,8 +86,8 @@ function refusalText(): string | undefined {
           :deploying="service.state === 'deploying'"
           />
         </div>
-        <ConsoleExchange :entries="console_.exchanges.value" />
         <ConsoleCommandField
+          ref="field"
           v-model="console_.typed.value"
           :block="console_.block.value"
           :issue="console_.issue.value"
@@ -91,6 +100,7 @@ function refusalText(): string | undefined {
           @start="emit('start')"
           @follow="emit('follow')"
         />
+        <ConsoleExchange :entries="console_.exchanges.value" />
       </div>
 
       <aside class="ct__side">
@@ -111,7 +121,7 @@ function refusalText(): string | undefined {
               needs-link
               :disabled="blocked"
               :data-console-quick-id="command.id"
-              @click="console_.quick(command)"
+              @click="quick(command)"
             >
               {{ command.label }}
             </HButton>
@@ -181,7 +191,8 @@ function refusalText(): string | undefined {
 .ct__log {
   display: flex;
   flex-direction: column;
-  height: calc(var(--log-min-height) + var(--log-chrome));
+  height: var(--console-log-height);
+  min-height: var(--log-min-height);
   min-width: 0;
 }
 

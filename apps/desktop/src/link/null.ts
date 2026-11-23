@@ -202,6 +202,9 @@ export class NullLinkBridge implements LinkBridge {
   async deleteService(): Promise<never> {
     return this.unavailable();
   }
+  async onFilesDropped(): Promise<Unsubscribe> {
+    return () => {};
+  }
   async pickDepositFiles(): Promise<never> {
     return this.unavailable();
   }

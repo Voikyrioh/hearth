@@ -82,16 +82,15 @@ const readLine = computed(() => {
     <p v-if="readLine && shown?.kind === 'count'" class="players__note" data-players-read>
       {{ readLine }}
     </p>
-    <HButton
+    <button
       v-if="linkLabel"
-      variant="ghost"
-      size="sm"
+      type="button"
       class="players__link"
       data-players-console
       @click="emit('openConsole')"
     >
       {{ linkLabel }}
-    </HButton>
+    </button>
   </DashCard>
 </template>
 
@@ -141,7 +140,21 @@ const readLine = computed(() => {
   font-size: var(--fs-body);
 }
 
+/* Un lien vers l'onglet Console, pas un bouton : orange souligné (maquette Connectes). */
 .players__link {
   align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ac);
+  font: inherit;
+  font-weight: var(--fw-semibold);
+  text-decoration: underline;
+  text-underline-offset: var(--space-half);
+  cursor: pointer;
+}
+
+.players__link:hover {
+  color: var(--ac-hover, var(--ac));
 }
 </style>

@@ -41,6 +41,12 @@ const updates = useUpdatesStore();
 // les écrans du serveur.
 const transfers = useTransfersStore();
 const serverTransfers = computed(() => (server.value ? transfers.of(server.value.id) : []));
+/** Sur l'onglet Mods, un envoi fini n'est plus répété ici (sa ligne dit « Envoyé ») : restent ceux qui attendent un geste. */
+const shownTransfers = computed(() =>
+  onModsTab.value
+    ? serverTransfers.value.filter((transfer) => transfer.status !== "done")
+    : serverTransfers.value,
+);
 let stopWatchingTransfers: (() => void) | undefined;
 let unmounted = false;
 onMounted(async () => {
@@ -80,6 +86,11 @@ const stamp = computed(() =>
   state.value !== "connected" && securityEntry.value?.at
     ? t("security.lastKnown", { time: formatClock(securityEntry.value.at) })
     : undefined,
+);
+/** L'onglet Mods d'un service ouvert montre lui-même ses envois : la carte « Transferts » n'y est pas répétée (HRT-262). */
+const onModsTab = computed(
+  () =>
+    route.name === "services" && route.query.service !== undefined && route.query.onglet === "mods",
 );
 const onSecurityPage = computed(() => route.name === "security");
 const askedHere = computed(() => security.dialog?.serverId === server.value?.id);
@@ -141,7 +152,7 @@ function openSecurityPage() {
         @close="security.closeDialog()"
       />
       <TransfersStrip
-        :transfers="serverTransfers"
+        :transfers="shownTransfers"
         @resume="transfers.resume($event.id)"
         @cancel="transfers.cancel($event.id)"
         @dismiss="transfers.dismiss($event.id)"

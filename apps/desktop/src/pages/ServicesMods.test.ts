@@ -80,12 +80,18 @@ describe("l'onglet « Mods » : existence", () => {
     wrapper.unmount();
   });
 
-  it("quitter l'onglet avec un lot non appliqué demande confirmation ; rester garde le lot", async () => {
+  it("changer d'onglet garde le lot ; quitter le détail avec un lot non appliqué demande confirmation", async () => {
     const { wrapper } = await open();
     await wrapper.get("[data-tab='mods']").trigger("click");
     await flushPromises();
     await wrapper.get("[data-mod-row='lithium.jar'] [data-mod-retire]").trigger("click");
     await wrapper.get("[data-tab='logs']").trigger("click");
+    await flushPromises();
+    expect(document.body.textContent).not.toContain("Quitter sans appliquer ?");
+    await wrapper.get("[data-tab='mods']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-mods-pending-bar]").exists()).toBe(true);
+    await wrapper.get("[data-detail-back]").trigger("click");
     await flushPromises();
     expect(document.body.textContent).toContain("Quitter sans appliquer ?");
     expect(wrapper.find("[data-mods-tab]").exists()).toBe(true);

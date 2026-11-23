@@ -90,7 +90,10 @@ export function isBlocking(item: ModItem): boolean {
   if (item.place !== "active" || !item.enabled) return false;
   const code = item.verdict.code;
   return (
-    code === "incompatible_loader" || code === "incompatible_minecraft" || code === "duplicate"
+    code === "incompatible_loader" ||
+    code === "incompatible_minecraft" ||
+    code === "duplicate" ||
+    code === "to_complete"
   );
 }
 
@@ -98,7 +101,10 @@ export function isBlocking(item: ModItem): boolean {
 function namesOf(ids: readonly string[], view: ModsView | null): string[] {
   return ids.map((id) => {
     const found = view?.mods.find((mod) => mod.identity?.id === id);
-    return safeText(found?.identity?.name ?? id);
+    if (found?.identity?.name) return safeText(found.identity.name);
+    // Un mod absent n'a pas de nom lisible : son identifiant, avec une majuscule (« Balm », pas « balm »).
+    const shown = safeText(id);
+    return shown.charAt(0).toUpperCase() + shown.slice(1);
   });
 }
 
@@ -139,16 +145,47 @@ export function verdictSentence(
 }
 
 /** Le bandeau d'un mod qui empêche le serveur de démarrer (maquette Main, BR-MOD-021). */
-export function blockingBanner(item: ModItem, game: ModsGame): string {
+export function blockingBanner(
+  item: ModItem,
+  game: ModsGame,
+  view: ModsView | null = null,
+): string {
   const name = modName(item);
   switch (item.verdict.code) {
     case "duplicate":
       return t("mods.banner.duplicate", { name });
     case "incompatible_loader":
       return t("mods.banner.incompatibleLoader", { name, loader: loaderName(game.loader) });
+    case "to_complete": {
+      const names = namesOf(item.verdict.missing, view);
+      return names.length === 1
+        ? t("mods.banner.toCompleteOne", { name, needed: names[0] ?? "" })
+        : t("mods.banner.toComplete", { name, needed: joined(names) });
+    }
     default:
       return t("mods.banner.incompatibleMinecraft", { name, minecraft: game.minecraft ?? "?" });
   }
+}
+
+/**
+ * Les mods qui empêcheront le démarrage APRÈS le lot (rappelés dans « Vérifiez avant d'appliquer ») : un mod que le lot
+ * désactive ou retire ne compte plus, un ajout qui ne peut pas démarrer compte.
+ */
+export function blockersAfter(
+  view: ModsView,
+  pending: ReadonlyMap<string, Gesture>,
+  added: readonly ModItem[],
+): string[] {
+  const kept = view.mods.filter((mod) => {
+    const gesture = mod.file === null ? undefined : pending.get(mod.file);
+    if (gesture === "disable" || gesture === "retire") return false;
+    if (mod.place === "retired") return gesture === "restore" && mod.verdict.code !== "compatible";
+    if (!mod.enabled) return gesture === "enable";
+    return true;
+  });
+  return [...kept.map((mod) => ({ ...mod, place: "active" as const, enabled: true })), ...added]
+    .filter(isBlocking)
+    .map((mod) => blockingBanner(mod, view.game, view));
 }
 
 /** Les mods qui ne peuvent pas démarrer, à dire en bandeau : trois au plus, le reste se compte. */
@@ -164,6 +201,10 @@ export interface Counts {
   enabled: number;
   compatible: number;
   incompatible: number;
+  /** Activés, mais il leur manque un autre mod : le serveur ne démarrera pas. */
+  toComplete: number;
+  /** Activés, que Hearth ne peut pas juger (version non vérifiée, fiche illisible). */
+  unverified: number;
   disabled: number;
   retired: number;
 }
@@ -175,7 +216,12 @@ export function countsOf(view: ModsView): Counts {
     installed: active.length,
     enabled: enabled.length,
     compatible: enabled.filter((mod) => mod.verdict.code === "compatible").length,
-    incompatible: enabled.filter(isBlocking).length,
+    incompatible: enabled.filter((mod) => isBlocking(mod) && mod.verdict.code !== "to_complete")
+      .length,
+    toComplete: enabled.filter((mod) => mod.verdict.code === "to_complete").length,
+    unverified: enabled.filter((mod) =>
+      ["unverified", "unknown", "unrecognized"].includes(mod.verdict.code),
+    ).length,
     disabled: active.length - enabled.length,
     retired: view.mods.filter((mod) => mod.place === "retired").length,
   };
@@ -210,6 +256,10 @@ export function subheadingOf(view: ModsView): string {
   ];
   if (counts.incompatible > 0)
     parts.push(plural(counts.incompatible, "mods.sub.incompatibleOne", "mods.sub.incompatible"));
+  if (counts.toComplete > 0)
+    parts.push(plural(counts.toComplete, "mods.sub.toCompleteOne", "mods.sub.toComplete"));
+  if (counts.unverified > 0)
+    parts.push(plural(counts.unverified, "mods.sub.unverifiedOne", "mods.sub.unverified"));
   if (counts.disabled > 0)
     parts.push(plural(counts.disabled, "mods.sub.disabledOne", "mods.sub.disabled"));
   return `${parts.join(", ")}. ${t("mods.sub.restart")}`;

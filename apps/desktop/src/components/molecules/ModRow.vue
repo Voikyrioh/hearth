@@ -91,15 +91,15 @@ const targetMinecraft = computed(() => {
     <td>
       <div class="row__name">
         <strong class="row__title">{{ name }}</strong>
-        <span v-if="file" class="row__file">{{ file }}</span>
+        <span v-if="file" class="row__file" :title="file">{{ file }}</span>
         <span v-if="pending" class="row__pending" data-mod-pending-text>{{ pendingLabel ?? (pending === 'add' || pending === 'replaced' ? '' : pendingText(pending)) }}</span>
         <span v-if="sentence && !retired" class="row__sentence" data-mod-sentence>{{ sentence }}</span>
         <span v-if="note" class="row__note" data-mod-note>{{ note }}</span>
       </div>
     </td>
     <td class="row__mono">{{ item.identity?.version ?? "" }}</td>
-    <td>{{ item.identity ? loaderName(item.identity.loader) : "" }}</td>
-    <td class="row__mono">{{ item.identity ? targetMinecraft : "" }}</td>
+    <td class="row__wide">{{ item.identity ? loaderName(item.identity.loader) : "" }}</td>
+    <td class="row__wide row__mono row__target">{{ item.identity ? targetMinecraft : "" }}</td>
     <td>
       <HTag :tone="pill.tone === 'neutral' ? 'neutral' : pill.tone" data-mod-state>
         <HIcon
@@ -180,7 +180,7 @@ const targetMinecraft = computed(() => {
 }
 
 .row__title {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   font-weight: var(--fw-semibold);
 }
 
@@ -188,7 +188,9 @@ const targetMinecraft = computed(() => {
   color: var(--tx-faint);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .row__pending {
@@ -204,6 +206,10 @@ const targetMinecraft = computed(() => {
 
 .row__note {
   color: var(--warn);
+}
+
+.row__target {
+  white-space: nowrap;
 }
 
 .row__mono {

@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { logUiError } from "@/errors/report";
 import {
   failureOf,
@@ -34,6 +34,50 @@ export interface PendingAdd {
   replaceVersion: string | null;
 }
 
+/** Le lot d'un service : ses gestes, les raisons des gestes écartés et ses ajouts. */
+interface KeptBatch {
+  pending: Map<string, Gesture>;
+  refusedNote: Map<string, string>;
+  adds: PendingAdd[];
+}
+
+/**
+ * Les lots non appliqués, gardés au niveau du service (HRT-262, constat B2) : changer d'onglet (« Ouvrir la console »)
+ * ne perd jamais le lot ; seuls « Annuler tout », « Appliquer » ou une sortie confirmée du détail le vident. Un lot par
+ * serveur et service (clé stable), jamais écrit ailleurs qu'en mémoire.
+ */
+const kept = reactive(new Map<string, KeptBatch>());
+
+function keptKey(serverId: string, serviceKey: string): string {
+  return `${serverId}|${serviceKey}`;
+}
+
+function keptOf(serverId: string, serviceKey: string): KeptBatch {
+  const key = keptKey(serverId, serviceKey);
+  let found = kept.get(key);
+  if (!found) {
+    kept.set(key, { pending: new Map(), refusedNote: new Map(), adds: [] });
+    found = kept.get(key) as KeptBatch;
+  }
+  return found;
+}
+
+/** Ce service a un lot non appliqué (le détail demande confirmation avant de le quitter). */
+export function hasKeptBatch(serverId: string, serviceKey: string): boolean {
+  const found = kept.get(keptKey(serverId, serviceKey));
+  return found !== undefined && found.pending.size + found.adds.length > 0;
+}
+
+/** Vide le lot d'un service (sortie confirmée). */
+export function dropKeptBatch(serverId: string, serviceKey: string): void {
+  kept.delete(keptKey(serverId, serviceKey));
+}
+
+/** Vide tous les lots (les tests, la déconnexion). */
+export function dropAllKeptBatches(): void {
+  kept.clear();
+}
+
 /** Quand des jars ne sont pas encore lus, la liste est relue après ce délai (BR-MOD-020 : « Lecture des mods en cours »). */
 export const REREAD_MS = 3_000;
 
@@ -61,7 +105,13 @@ export function useServiceMods(
   const view = computed(() => (list.value.kind === "ready" ? list.value.view : null));
 
   /** Les ajouts contrôlés du lot : 8 au plus (BR-MOD-022). */
-  const adds = ref<PendingAdd[]>([]);
+  const lot = keptOf(serverId(), service().key);
+  const adds = computed({
+    get: () => lot.adds,
+    set: (value: PendingAdd[]) => {
+      lot.adds = value;
+    },
+  });
 
   function stopTimer() {
     if (timer !== undefined) clearTimeout(timer);
@@ -69,9 +119,19 @@ export function useServiceMods(
   }
 
   /** Les gestes préparés sur un fichier existant : fichier -> geste. */
-  const pending = ref(new Map<string, Gesture>());
+  const pending = computed({
+    get: () => lot.pending,
+    set: (value: Map<string, Gesture>) => {
+      lot.pending = value;
+    },
+  });
   /** Pourquoi un geste n'est pas entré dans le lot (dit sous la ligne, jamais en silence). */
-  const refusedNote = ref(new Map<string, string>());
+  const refusedNote = computed({
+    get: () => lot.refusedNote,
+    set: (value: Map<string, string>) => {
+      lot.refusedNote = value;
+    },
+  });
 
   function prune(next: ModsView) {
     const present = new Map(next.mods.map((mod) => [mod.file, mod] as const));

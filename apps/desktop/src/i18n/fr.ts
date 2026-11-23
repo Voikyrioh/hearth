@@ -1024,6 +1024,10 @@ export const fr = {
       incompatibleOne: "{n} incompatible",
       disabled: "{n} désactivés",
       disabledOne: "{n} désactivé",
+      toComplete: "{n} à compléter",
+      toCompleteOne: "{n} à compléter",
+      unverified: "{n} non vérifiés",
+      unverifiedOne: "{n} non vérifié",
       restart: "Les changements demandent un redémarrage du serveur.",
     },
     versionLine: "Version de Minecraft du serveur : {minecraft} ({source}).",
@@ -1081,6 +1085,10 @@ export const fr = {
         "{name} ne peut pas démarrer ici. Il n'est pas compatible avec {loader}. Désactivez-le ou retirez-le.",
       incompatibleMinecraft:
         "{name} ne peut pas démarrer ici. Il n'est pas compatible avec Minecraft {minecraft}. Désactivez-le ou retirez-le.",
+      toCompleteOne:
+        "{name} ne peut pas démarrer ici. Il a besoin du mod {needed}, qui n'est pas installé. Installez {needed} ou désactivez {name}.",
+      toComplete:
+        "{name} ne peut pas démarrer ici. Il a besoin des mods {needed}, qui ne sont pas installés. Installez-les ou désactivez {name}.",
       more: "Et {n} autres mods dans le même cas.",
     },
     plugins: {
@@ -1157,7 +1165,7 @@ export const fr = {
       back: "Retour à la liste des mods",
       title: "Ajouter des mods",
       lead: "Choisissez les fichiers de mods que vous avez téléchargés. Hearth les contrôle avant de toucher au serveur : rien n'est écrit tant que vous n'avez pas appliqué.",
-      zone: "Choisissez vos fichiers .jar, 8 au plus à la fois.",
+      zone: "Glissez vos fichiers .jar ici, ou choisissez-les : 8 au plus à la fois.",
       choose: "Choisir des fichiers",
       only: "Seuls les fichiers .jar sont acceptés.",
       count: "{n} fichiers déposés",
@@ -1171,7 +1179,7 @@ export const fr = {
       tooMany: "Un lot compte 8 fichiers au plus : {name} n'a pas été ajouté.",
       unreadable: "Hearth n'a pas pu lire {name} : il n'a pas été ajouté.",
       needsGesture:
-        "Un envoi est interrompu ou a échoué : reprenez-le depuis le panneau Transferts, ou retirez le fichier de la liste.",
+        "L'envoi de {names} est interrompu ou a échoué : reprenez-le depuis la carte Transferts, ou retirez le fichier de la liste.",
       check: "Contrôler les fichiers",
       checkNote: "Le contrôle commence quand tous les envois sont terminés.",
       checkFailed: "Le contrôle n'a pas pu se faire. Réessayez dans un instant.",
@@ -1194,7 +1202,7 @@ export const fr = {
     check: {
       lead: "Hearth a comparé chaque mod au moteur de votre serveur ({loader}) et à sa version de Minecraft ({minecraft}). Rien n'a encore été modifié.",
       replace: "Remplacer {old} {oldVersion} par la version {newVersion}",
-      depositMissing: "Déposer le mod manquant",
+      depositMissing: "Déposer le mod {names}",
       drop: "Retirer de la liste",
       more: "Déposer d'autres fichiers",
       continue: "Continuer avec {n} fichiers",
@@ -1232,6 +1240,7 @@ export const fr = {
     apply: {
       title: "Vérifiez avant d'appliquer",
       lead: "Minecraft ne charge pas un mod en cours de partie : le serveur doit redémarrer. Hearth s'en occupe et vous dit tout ce qui va se passer, dans l'ordre.",
+      blockersTitle: "Ces mods empêcheront encore le serveur de démarrer",
       changes: "Ce qui va changer",
       order: "Dans cet ordre",
       stopped:
@@ -1255,9 +1264,9 @@ export const fr = {
         start: "Redémarrage",
       },
       stepText: {
-        stop: "Le monde est enregistré avant l'arrêt. Les joueurs connectés sont déconnectés.",
+        stop: "Hearth demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Les joueurs connectés sont déconnectés.",
         stopUnknown:
-          "Le monde est enregistré avant l'arrêt. Les joueurs connectés seront déconnectés.",
+          "Hearth demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Les joueurs connectés seront déconnectés.",
         save: "Une copie de tout le dossier du serveur, avant la moindre modification.",
         placeOne: "Le changement ci-dessus.",
         place: "Les {n} changements ci-dessus.",
@@ -1302,6 +1311,7 @@ export const fr = {
     progress: {
       title: "Mise en place des mods",
       lead: "Étape {n} sur {total}. Vous pouvez quitter cette page : Hearth continue sur le serveur et le journal d'activité garde la trace.",
+      meter: "Étape {n} sur {total}",
       state: { done: "Terminé", running: "En cours", waiting: "En attente" },
       cancel: "Annuler l'opération",
       cancelNote:
@@ -1314,11 +1324,12 @@ export const fr = {
     },
     end: {
       title: "Les mods sont en place, le serveur est reparti",
+      titleStopped: "Les mods sont en place",
       leadRunning: "Le serveur est reparti avec {n} mods activés.",
       leadStopped: "Les mods sont en place. Le serveur est resté arrêté ({n} mods activés).",
       changed: "Ce qui a changé",
-      backup:
-        "Sauvegarde faite avant : « {note} ». Elle reste dans l'onglet Sauvegardes tant que vous ne la supprimez pas.",
+      backup: "Sauvegarde faite avant : {note}. Elle reste dans l'onglet Sauvegardes.",
+      backupBare: "Une sauvegarde a été faite avant. Elle reste dans l'onglet Sauvegardes.",
       playersTitle: "Pensez à vos joueurs",
       playersText:
         "Pour se connecter, vos joueurs doivent avoir les mêmes mods que le serveur : le même moteur et la même version de Minecraft. Ce n'est pas le cas de tous les mods : certains ne servent que sur le serveur.",
@@ -1363,6 +1374,8 @@ export const fr = {
       reason: {
         server: "Le mod dit qu'il n'agit que sur le serveur.",
         both: "Le mod le dit : il se charge des deux côtés.",
+        needed:
+          "Un autre mod de la liste a besoin de celui-ci : installez-le aussi chez les joueurs.",
         client: "Le mod dit qu'il se charge chez le joueur.",
         unknown: "Le mod ne dit rien : en cas de doute, installez-le chez le joueur.",
       },
@@ -1372,9 +1385,9 @@ export const fr = {
     },
     leave: {
       title: "Quitter sans appliquer ?",
-      text: "Les changements préparés ne sont pas gardés : ils seront perdus si vous quittez l'onglet Mods.",
+      text: "Les changements préparés ne sont pas gardés : ils seront perdus si vous quittez ce serveur.",
       confirm: "Quitter sans appliquer",
-      stay: "Rester sur l'onglet",
+      stay: "Rester ici",
     },
   },
   // La console d'un serveur de jeu (HRT-269, BR-CONSOLE-002 à 010).
@@ -1419,7 +1432,7 @@ export const fr = {
       unavailableHelp: "Hearth ne parle pas à la console de ce serveur.",
     },
     refused: {
-      stop: "Commande non envoyée. Pour arrêter le serveur, utilisez le bouton « Arrêter » : il enregistre le monde, et le serveur ne repart pas tout seul.",
+      stop: "Commande non envoyée. Pour arrêter le serveur, utilisez le bouton « Arrêter » : le jeu enregistre alors son monde, et le serveur ne repart pas tout seul.",
       restart:
         "Commande non envoyée. Pour redémarrer le serveur, utilisez le bouton « Redémarrer » de Hearth.",
       breaks:
@@ -2316,7 +2329,7 @@ export const fr = {
     back: "Retour à la liste",
     region: "Détail du service {name}",
     sections: "Sections du service",
-    tabDetail: "Détail",
+    tabDetail: "Vue d'ensemble",
     tabLogs: "Journaux",
     tabSettings: "Réglages",
     tabBackups: "Sauvegardes",
@@ -2411,7 +2424,7 @@ export const fr = {
   // Journaux d'un service (HRT-67). Les textes marqués « Hors spec » n'ont pas de formulation validée : à faire valider.
   logs: {
     notice:
-      "Les journaux affichent tout ce que le programme écrit, secrets compris. Ne les partage pas sans les relire.",
+      "Les journaux affichent tout ce que le programme écrit, secrets compris. Ne les partagez pas sans les relire.",
     region: "Journaux de {name}",
     regionHint:
       "Flèches haut et bas : ligne précédente ou suivante. Début et Fin : première et dernière ligne.",

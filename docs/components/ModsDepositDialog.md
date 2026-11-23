@@ -7,3 +7,4 @@ Organisme · `apps/desktop/src/components/organisms/ModsDepositDialog.vue`
 - Props : `serverId`, `deposit` (retour de `useModsDeposit`), `canWrite`, `connected`
 - Événements : `back`
 - Notes : écart à la maquette : pas de glisser-déposer (la coquille ne le relaie pas encore), la zone dit « Choisissez vos fichiers ». Tests `pages/ServicesModsBatch.test.ts`.
+- Notes (revue Nora 022) : l'envoi part sans fenêtre quand l'acte `file_write` ne demande pas de mot de passe ; les fichiers glissés sur la fenêtre (`bridge.onFilesDropped`, événement `tauri://drag-drop`) suivent les mêmes règles que la boîte « Ouvrir ».

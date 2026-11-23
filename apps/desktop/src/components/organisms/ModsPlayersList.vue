@@ -2,12 +2,11 @@
 import { computed } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
-import HTag from "@/components/atoms/HTag.vue";
 import { useCopyText } from "@/composables/useCopyText";
 import { t } from "@/i18n";
 import type { ModsView } from "@/link";
 import { loaderName, modName } from "@/services/mods";
-import { audienceOf, audienceReason, copyText, entryOf } from "@/services/modsCopy";
+import { audienceOf, audienceReason, copyText, entryOf, loadsOnServer } from "@/services/modsCopy";
 
 // « Ce que vos joueurs doivent installer » (HRT-264, BR-MOD-029, maquette Joueurs) : chaque mod ACTIVÉ, « Aussi chez les
 // joueurs » ou « Serveur seulement » d'après ce que le mod dit de lui-même (jamais « Obligatoire » : Hearth ne le sait
@@ -21,23 +20,50 @@ const props = defineProps<{
 const emit = defineEmits<{ back: [] }>();
 
 const copier = useCopyText(() => t("mods.players.copied"));
+/** Les mods activés que le serveur charge : ni désactivé, ni retiré, ni incompatible (jamais donnés aux joueurs). */
 const mods = computed(() =>
-  props.view.mods.filter((mod) => mod.place === "active" && mod.enabled && mod.identity !== null),
+  props.view.mods.filter(
+    (mod) =>
+      mod.place === "active" &&
+      mod.enabled &&
+      mod.identity !== null &&
+      loadsOnServer(mod.verdict.code),
+  ),
 );
+/** Les mods qui vont chez les joueurs : ceux qui le disent (ou se taisent), et ce dont ils ont besoin. */
+const withPlayers = computed(() => {
+  const direct = new Set(
+    mods.value.flatMap((mod) =>
+      mod.identity && audienceOf(mod.identity.environment) === "players" ? [mod.identity.id] : [],
+    ),
+  );
+  return new Set(
+    mods.value.flatMap((mod) =>
+      mod.identity && mod.verdict.neededBy.some((id) => direct.has(id)) ? [mod.identity.id] : [],
+    ),
+  );
+});
 const rows = computed(() =>
-  mods.value.map((mod) => ({
-    key: `${mod.rank}-${mod.file ?? ""}`,
-    name: modName(mod),
-    version: mod.identity?.version ?? "",
-    audience: audienceOf(mod.identity?.environment ?? "unknown"),
-    reason: audienceReason(mod.identity?.environment ?? "unknown"),
-  })),
+  mods.value.map((mod) => {
+    const environment = mod.identity?.environment ?? "unknown";
+    const dependency =
+      audienceOf(environment) === "server" && withPlayers.value.has(mod.identity?.id ?? "");
+    return {
+      key: `${mod.rank}-${mod.file ?? ""}`,
+      name: modName(mod),
+      version: mod.identity?.version ?? "",
+      audience: dependency ? ("players" as const) : audienceOf(environment),
+      reason: dependency ? t("mods.players.reason.needed") : audienceReason(environment),
+    };
+  }),
 );
 const text = computed(() =>
   copyText({
     address: props.address,
     minecraft: props.view.game.minecraft,
-    entries: mods.value.flatMap((mod) => (mod.identity ? [entryOf(mod.identity)] : [])),
+    entries: mods.value.flatMap((mod) =>
+      mod.identity ? [entryOf(mod.identity, withPlayers.value.has(mod.identity.id))] : [],
+    ),
   }),
 );
 </script>
@@ -80,9 +106,10 @@ const text = computed(() =>
             <td class="mpl__name">{{ row.name }}</td>
             <td class="mpl__mono">{{ row.version }}</td>
             <td>
-              <HTag :tone="row.audience === 'players' ? 'accent' : 'neutral'">
+              <span :class="['mpl__where', `mpl__where--${row.audience}`]" data-mods-players-where>
+                <HIcon :name="row.audience === 'players' ? 'alert' : 'check'" size="sm" />
                 {{ t(row.audience === "players" ? "mods.players.both" : "mods.players.serverOnly") }}
-              </HTag>
+              </span>
             </td>
             <td class="mpl__why">{{ row.reason }}</td>
           </tr>
@@ -173,6 +200,23 @@ const text = computed(() =>
 .mpl__mono {
   font-family: var(--font-mono);
   font-size: var(--fs-small);
+}
+
+/* Un repère à lire, pas un bouton : ni fond, ni bord, ni forme de pastille. */
+.mpl__where {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.mpl__where--players {
+  color: var(--warn);
+}
+
+.mpl__where--server {
+  color: var(--ok);
 }
 
 .mpl__why {
