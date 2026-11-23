@@ -84,8 +84,7 @@ export function sensitiveTitle(title: string, player: string | null): string {
     .replaceAll(" de {joueur}", "")
     .replaceAll(" à {joueur}", "")
     .replaceAll(" {joueur}", "")
-    .replaceAll("{joueur}", "")
-    .replace(/\s+([?!.])/g, "$1");
+    .replaceAll("{joueur}", "");
 }
 
 /** Le code signé de la classe : `1` libre, `2` sensible ; une commande refusée n'a pas d'acte. */

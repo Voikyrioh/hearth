@@ -34,6 +34,7 @@ import { openedService } from "@/services/detail";
 import { shortAge } from "@/services/format";
 import { type Controls, controlsOf } from "@/services/lifecycle";
 import { pilotLock } from "@/services/pilot";
+import { type ServiceTab, TAB_QUERY, tabOfQuery } from "@/services/tabs";
 import { show } from "@/services/view";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import { useServicesStore } from "@/stores/services";
@@ -70,16 +71,9 @@ const selectedKey = computed(() => {
  * `?onglet=sauvegardes` les sauvegardes (HRT-98), tout autre
  * valeur (ou rien) le détail.
  */
-const TAB_QUERY = { logs: "journaux", settings: "reglages", backups: "sauvegardes" } as const;
-const tab = computed<"detail" | "settings" | "backups" | "logs">(() => {
-  const raw = route.query.onglet;
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  if (value === TAB_QUERY.logs) return "logs";
-  if (value === TAB_QUERY.backups) return "backups";
-  return value === TAB_QUERY.settings ? "settings" : "detail";
-});
+const tab = computed<ServiceTab>(() => tabOfQuery(route.query.onglet));
 
-function setTab(next: "detail" | "settings" | "backups" | "logs") {
+function setTab(next: ServiceTab) {
   const { onglet: _tab, ...rest } = route.query;
   void router.replace({ query: next === "detail" ? rest : { ...rest, onglet: TAB_QUERY[next] } });
 }
@@ -533,6 +527,8 @@ async function openDocs() {
                 'svc__work--logs': opened && tab === 'logs',
                 'svc__work--settings': opened && tab === 'settings',
                 'svc__work--backups': opened && tab === 'backups',
+                'svc__work--mods': opened && tab === 'mods',
+                'svc__work--console': opened && tab === 'console',
                 'svc__work--grey':
                   (list.kind === 'live' && degradedList) || (list.kind === 'stale' && staleList),
               },
@@ -580,6 +576,7 @@ async function openDocs() {
                 :game-settings="rights.gameSettings.value"
                 :service-delete="rights.serviceDelete.value"
                 :service-backups="rights.serviceBackups.value"
+                :game-console="rights.gameConsole.value"
                 @update:tab="setTab"
                 @back="closeDetail"
                 @open-other="openDetail"
@@ -767,11 +764,15 @@ async function openDocs() {
 }
 
 /* Les sauvegardes aussi : la table a besoin de la largeur (HRT-98). */
-.svc__work--backups .svc__list {
+.svc__work--backups .svc__list,
+.svc__work--mods .svc__list,
+.svc__work--console .svc__list {
   display: none;
 }
 
-.svc__work--backups .svc__detail {
+.svc__work--backups .svc__detail,
+.svc__work--mods .svc__detail,
+.svc__work--console .svc__detail {
   max-width: none;
 }
 

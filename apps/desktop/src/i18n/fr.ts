@@ -1007,6 +1007,26 @@ export const fr = {
   },
   // Le détail d'un service (HRT-63, BR-SVC-007 à 009, 016, 023, 027, 028). Textes de la spec `voir-les-services` et du
   // design du lot 1, mot pour mot ; les autres sont marqués « hors spec ».
+  // Les joueurs connectés d'un serveur de jeu (HRT-291, BR-CONSOLE-011).
+  players: {
+    title: "Joueurs connectés",
+    refresh: "Relire les joueurs connectés",
+    reading: "Lecture des joueurs connectés",
+    outOf: "sur {max} places",
+    nobody: "Personne n'est connecté",
+    places: "{max} places",
+    more: "et {n} autres joueurs",
+    hidden: "{n} pseudos ne sont pas affichés.",
+    read: "Lu dans la console du jeu il y a {age}, relu toutes les 30 s tant que cette page est ouverte.",
+    readShort: "Lu dans la console il y a {age}.",
+    ageSeconds: "{n} s",
+    ageMinutes: "{n} min",
+    stopped: "Personne : le serveur est arrêté.",
+    starting: "Le nombre de joueurs s'affiche quand le serveur est prêt.",
+    unavailable: "Hearth n'a pas pu lire les joueurs connectés.",
+    writeToPlayers: "Écrire aux joueurs dans la console",
+    openConsole: "Ouvrir la console",
+  },
   serviceOps: {
     // La bande « Opérations en cours » (BR-SVC-029) et la carte d'une opération (HRT-84).
     stripTitle: "Opérations en cours",

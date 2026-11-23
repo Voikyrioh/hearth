@@ -28,6 +28,7 @@ import { imageLabel, loopBand, portLabel, stateLine } from "@/services/format";
 import { type Controls, controlsOf, type Gesture } from "@/services/lifecycle";
 import { busyText, pilotLock } from "@/services/pilot";
 import { canAct, type RightsGate } from "@/services/rights";
+import type { ServiceTab } from "@/services/tabs";
 import { useServersStore } from "@/stores/servers";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import Callout from "../molecules/Callout.vue";
@@ -60,13 +61,15 @@ const props = defineProps<{
   /** Mettre le focus sur le titre à l'ouverture (ouvert par un geste, jamais par l'adresse). */
   focusTitle: boolean;
   /** L'onglet affiché (dans l'adresse : `&onglet=journaux`, `&onglet=reglages` ou `&onglet=sauvegardes`). */
-  tab: "detail" | "settings" | "backups" | "logs";
+  tab: ServiceTab;
   /** L'agent annonce `game-settings` (`ServiceRights.gameSettings`) : l'onglet « Réglages » peut exister. */
   gameSettings: boolean;
   /** L'agent annonce `service-delete` (`ServiceRights.serviceDelete`) : la carte « Suppression » peut exister (HRT-86). */
   serviceDelete: boolean;
   /** L'agent annonce `service-backups` (`ServiceRights.serviceBackups`) : l'onglet « Sauvegardes » peut exister (HRT-98). */
   serviceBackups: boolean;
+  /** L'agent annonce `game-console` (`ServiceRights.gameConsole`) : la carte des joueurs et l'onglet « Console » peuvent exister (HRT-291, HRT-269). */
+  gameConsole: boolean;
   /** Dernier contact avec le serveur (pour « Vu il y a… » dans les journaux). */
   lastContactAt: number | null;
 }>();
@@ -74,7 +77,7 @@ const emit = defineEmits<{
   back: [];
   openOther: [key: string];
   retryRights: [];
-  "update:tab": [tab: "detail" | "settings" | "backups" | "logs"];
+  "update:tab": [tab: ServiceTab];
   decide: [operation: TrackedOperation];
   gesture: [service: ServiceInfo, gesture: Gesture];
   delete: [service: ServiceInfo];
@@ -384,6 +387,8 @@ const commandNote = computed(() => {
         :engine-ready="engineReady"
         :gone="gone"
         :supported="gameSettings"
+        :console-served="gameConsole"
+        @open-console="emit('update:tab', 'console')"
         @retry-rights="emit('retryRights')"
       />
 

@@ -15,8 +15,10 @@ Le nombre de joueurs, les places et les pseudos se lisent par la commande de la 
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/console/players.rs::{read, Reader}`
+- Client (HRT-291) : `apps/desktop/src/services/players.ts::{playersShown, ageText}`, `composables/useOnlinePlayers.ts` (relue toutes les 30 s), `PlayersOnlineCard.vue`
 
 ## Vérification
+- Client : `components/molecules/playersOnline.test.ts`
 - `domain/console/players.rs::tests` (formes récente et ancienne, 0 joueur, nom Bedrock, nom hostile compté sans être rendu, nombres énormes refusés, réponse inconnue illisible, 100 noms au plus)
 
 ## Règles liées
@@ -24,3 +26,4 @@ Le nombre de joueurs, les places et les pseudos se lisent par la commande de la 
 
 ## Historique
 - 2026-11-18 : création (HRT-267, le lecteur ; la route est HRT-268).
+- 2026-11-23 : carte des joueurs côté client (HRT-291).

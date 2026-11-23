@@ -109,7 +109,8 @@ export class SimulatedConsole {
 
   describe(serverId: string, key: string): ConsoleOutcome {
     const found = this.services.find(serverId, key);
-    if (!found || found.origin !== "hearth") {
+    if (!found) return { kind: "refused", refusal: { kind: "service_not_found" } };
+    if (found.origin !== "hearth" && found.adopted === null) {
       return { kind: "refused", refusal: { kind: "service_not_found" } };
     }
     const view = this.views.get(this.slot(serverId, key));
