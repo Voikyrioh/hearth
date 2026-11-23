@@ -378,7 +378,11 @@ const commandNote = computed(() => {
         :gate="gate"
         :rights-reason-id="reasonId"
         :connected="connected"
+        :console-served="gameConsole"
+        :console-open="doors.console.value !== null"
         @dirty="modsDirty = $event"
+        @open-console="changeTab('console')"
+        @open-logs="changeTab('logs')"
         @add-server="emit('addServer')"
       />
     </div>

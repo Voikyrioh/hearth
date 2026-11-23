@@ -7,9 +7,14 @@ import Callout from "@/components/molecules/Callout.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import ModRow from "@/components/molecules/ModRow.vue";
 import ModsPendingBar from "@/components/molecules/ModsPendingBar.vue";
+import ModsApplyDialog from "@/components/organisms/ModsApplyDialog.vue";
 import ModsCheckList from "@/components/organisms/ModsCheckList.vue";
 import ModsDepositDialog from "@/components/organisms/ModsDepositDialog.vue";
+import ModsProgress from "@/components/organisms/ModsProgress.vue";
+import { useModsApply } from "@/composables/useModsApply";
 import { useModsDeposit } from "@/composables/useModsDeposit";
+import { useNow } from "@/composables/useNow";
+import { useOnlinePlayers } from "@/composables/useOnlinePlayers";
 import type { PendingAdd } from "@/composables/useServiceMods";
 import { useServiceMods } from "@/composables/useServiceMods";
 import { t } from "@/i18n";
@@ -25,6 +30,7 @@ import {
   subheadingOf,
   versionLine,
 } from "@/services/mods";
+import { changeRows } from "@/services/modsApply";
 import type { RightsGate } from "@/services/rights";
 import { canAct } from "@/services/rights";
 
@@ -41,11 +47,17 @@ const props = defineProps<{
   /** L'`id` de la raison du droit que le détail écrit déjà, une seule fois (BR-GRANT-014). */
   rightsReasonId: string;
   connected: boolean;
+  /** L'agent parle à la console de ce serveur : la carte des joueurs peut exister (HRT-291). */
+  consoleServed?: boolean;
+  /** L'onglet « Console » existe pour ce serveur : « Ouvrir la console » est proposé (HRT-269). */
+  consoleOpen?: boolean;
 }>();
 const emit = defineEmits<{
   /** Un lot non appliqué existe (ou n'existe plus) : le détail demande confirmation avant de quitter l'onglet. */
   dirty: [dirty: boolean];
   addServer: [];
+  openConsole: [];
+  openLogs: [];
 }>();
 
 const flow = useServiceMods(
@@ -59,7 +71,7 @@ const deposit = useModsDeposit(
   () => props.service.key,
 );
 /** L'écran montré : la liste, « Ajouter des mods » (dépôt), ou le contrôle des fichiers déposés. */
-const screen = ref<"list" | "deposit" | "check">("list");
+const screen = ref<"list" | "deposit" | "check" | "review" | "progress">("list");
 const canWrite = computed(() => canAct(props.gate));
 const room = computed(() => MAX_BATCH_ADDS - flow.adds.value.length);
 
@@ -70,6 +82,46 @@ watch(
     if (kind === "done") screen.value = "check";
   },
 );
+
+// Appliquer (HRT-263) : la vérification, puis le suivi de l'opération et son issue.
+const apply = useModsApply(
+  () => props.serverId,
+  () => props.service,
+  () => void flow.reload(),
+);
+const clock = useNow();
+const running = computed(
+  () => props.service.state === "running" || props.service.state === "restart_loop",
+);
+const players = useOnlinePlayers(
+  () => props.serverId,
+  () => (props.consoleServed === true && screen.value === "review" ? props.service.key : null),
+);
+const rows = computed(() =>
+  view.value
+    ? changeRows({ batch: flow.batch.value, adds: flow.adds.value, view: view.value })
+    : [],
+);
+
+function openReview() {
+  if (flow.changeCount.value === 0) return;
+  screen.value = "review";
+}
+
+/** L'agent a accepté le lot : le suivi prend la place, le lot est vidé (il est parti). */
+function launched() {
+  if (apply.launch.value === null && !apply.unknownResult.value) return;
+  if (apply.launch.value !== null) {
+    flow.clearAll();
+    deposit.reset();
+  }
+  screen.value = "progress";
+}
+
+function closeProgress() {
+  screen.value = "list";
+  void flow.reload();
+}
 
 function leaveDeposit() {
   screen.value = "list";
@@ -202,6 +254,32 @@ function keyOf(item: ModItem): string {
       @drop="deposit.dropChecked"
     />
 
+    <ModsApplyDialog
+      v-else-if="view && screen === 'review'"
+      :server-id="serverId"
+      :batch="flow.batch.value"
+      :rows="rows"
+      :running="running"
+      :apply="apply"
+      :players="players.state.value"
+      :players-refreshing="players.refreshing.value"
+      :now="clock"
+      :console-open="consoleOpen === true"
+      @back="screen = 'list'"
+      @refresh-players="players.refresh()"
+      @open-console="emit('openConsole')"
+      @launched="launched"
+    />
+
+    <ModsProgress
+      v-else-if="screen === 'progress'"
+      :server-id="serverId"
+      :apply="apply"
+      :view="view"
+      @close="closeProgress"
+      @logs="emit('openLogs')"
+    />
+
     <template v-else-if="view">
       <header class="mt__head">
         <div class="mt__heading">
@@ -242,7 +320,9 @@ function keyOf(item: ModItem): string {
       <ModsPendingBar
         v-if="flow.changeCount.value > 0"
         :count="flow.changeCount.value"
+        :blocked-reason="unread > 0 ? t('mods.bar.unread') : undefined"
         @cancel-all="cancelAll"
+        @review="openReview"
       />
 
       <Callout v-if="unread > 0" tone="info" data-mods-reading>

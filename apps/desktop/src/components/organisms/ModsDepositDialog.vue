@@ -221,7 +221,7 @@ function sizeOf(item: DepositItem): string | null {
 }
 
 .md__name {
-  flex: 1 1 12rem;
+  flex: 1 1 var(--backup-note-min);
   min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--fs-small);

@@ -58,6 +58,7 @@ export default defineConfig({
         "hrt96-transfers.spec.ts",
         "hrt125-pack.spec.ts",
         "hrt104-game.spec.ts",
+        "mods.spec.ts",
         "hrt102-catalogue.spec.ts",
         "ajouter-un-serveur-de-jeu.spec.ts",
         "boutons-une-ligne.spec.ts",

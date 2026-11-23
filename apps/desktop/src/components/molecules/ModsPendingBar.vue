@@ -49,7 +49,7 @@ const emit = defineEmits<{ cancelAll: []; review: [] }>();
 }
 
 .bar__text {
-  flex: 1 1 16rem;
+  flex: 1 1 var(--card-min);
   min-width: 0;
 }
 

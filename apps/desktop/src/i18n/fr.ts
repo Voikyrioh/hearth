@@ -1148,6 +1148,7 @@ export const fr = {
       text: "Rien n'est fait tant que vous n'avez pas appliqué.",
       cancelAll: "Tout annuler",
       apply: "Vérifier et appliquer",
+      unread: "Attendez la fin de la lecture des mods avant d'appliquer.",
     },
     help: "Désactiver laisse le fichier à sa place : le jeu ne le charge plus, vous le réactivez quand vous voulez. Retirer le met de côté dans « Mods retirés ». Les deux s'appliquent avec le redémarrage, comme un ajout.",
     warning:
@@ -1227,6 +1228,121 @@ export const fr = {
         "Ce mod fait partie du pack Modrinth : le serveur le remettrait à chaque démarrage.",
       sameVersion: "Ce mod est déjà installé dans cette version.",
       other: "Hearth refuse ce fichier.",
+    },
+    apply: {
+      title: "Vérifiez avant d'appliquer",
+      lead: "Minecraft ne charge pas un mod en cours de partie : le serveur doit redémarrer. Hearth s'en occupe et vous dit tout ce qui va se passer, dans l'ordre.",
+      changes: "Ce qui va changer",
+      order: "Dans cet ordre",
+      stopped:
+        "Le serveur est arrêté : il le reste. Hearth fait seulement la sauvegarde et la mise en place.",
+      add: "Ajout de {name}",
+      addDetail: "Nouveau mod.",
+      replace: "{name} {from} devient {to}",
+      replaceDetail: "L'ancien fichier est mis de côté, vous pourrez le remettre.",
+      retire: "Retrait de {name}",
+      retireDetail: "Le fichier est mis de côté dans le dossier « Mods retirés ».",
+      restore: "Remise de {name}",
+      restoreDetail: "Le fichier revient dans les mods du serveur.",
+      disable: "Désactivation de {name}",
+      disableDetail: "Le fichier reste en place, le jeu ne le charge plus.",
+      enable: "Réactivation de {name}",
+      enableDetail: "Le jeu charge de nouveau ce fichier.",
+      step: {
+        stop: "Arrêt du serveur",
+        save: "Sauvegarde du monde",
+        place: "Mise en place des mods",
+        start: "Redémarrage",
+      },
+      stepText: {
+        stop: "Le monde est enregistré avant l'arrêt. Les joueurs connectés sont déconnectés.",
+        stopUnknown:
+          "Le monde est enregistré avant l'arrêt. Les joueurs connectés seront déconnectés.",
+        save: "Une copie de tout le dossier du serveur, avant la moindre modification.",
+        placeOne: "Le changement ci-dessus.",
+        place: "Les {n} changements ci-dessus.",
+        start: "Le premier démarrage avec de nouveaux mods peut durer plusieurs minutes.",
+      },
+      kick: "Ils seront déconnectés à l'étape 1.",
+      kickConsole: "Ils seront déconnectés à l'étape 1. Prévenez-les depuis la console si besoin.",
+      durationTitle: "Durée et retour en arrière",
+      estimating: "Estimation de la sauvegarde",
+      duration: "La durée dépend de la taille du monde : la sauvegarde copie environ {size}.",
+      durationBare:
+        "La durée dépend de la taille du monde : la sauvegarde copie tout le dossier du serveur.",
+      revert:
+        "Si le serveur ne démarre pas avec ces mods, Hearth remet tout seul les mods d'avant et relance le serveur. Votre monde, lui, est protégé par la sauvegarde.",
+      noSpace:
+        "Il manque {missing} d'espace pour la sauvegarde. Rien n'est arrêté ni modifié : libérez de la place, puis revenez ici.",
+      confirm: "Confirmer",
+      passwordHelp:
+        "Le mot de passe est demandé à chaque fois : appliquer des mods change ce que le serveur exécute.",
+      backToList: "Revenir à la liste",
+      submit: "Appliquer et redémarrer",
+      submitStopped: "Appliquer",
+      unknown:
+        "Le résultat n'est pas connu : le lien est tombé avant la réponse. Hearth ne renvoie jamais un lot tout seul. Regardez l'état du serveur et son journal d'activité avant de réessayer.",
+      refused: {
+        batch:
+          "Le lot ne peut pas être appliqué : il compte 1 à 64 changements, dont 8 ajouts au plus, chaque fichier une seule fois.",
+        refused: "Un des fichiers déposés n'est plus accepté. Reprenez le contrôle des fichiers.",
+        fileMissing:
+          "Un des fichiers du lot n'est plus dans le bon dossier. Relisez la liste, puis recommencez.",
+        modrinth:
+          "Un mod du pack Modrinth ne se retire, ne se remplace et ne se désactive pas : le serveur le remettrait au démarrage.",
+        alreadyActive: "Un autre fichier actif porte déjà ce mod. Désactivez-le d'abord.",
+        nameTaken: "Le nom d'arrivée d'un des fichiers est déjà pris dans le dossier des mods.",
+        depositUnknown:
+          "Un des fichiers déposés n'est plus dans la zone d'attente du serveur. Déposez-le de nouveau.",
+        notApplicable: "Le moteur de ce serveur ne charge pas de mods.",
+        busy: "Une opération est déjà en cours sur ce serveur.",
+        other: "L'application du lot a été refusée.",
+      },
+    },
+    progress: {
+      title: "Mise en place des mods",
+      lead: "Étape {n} sur {total}. Vous pouvez quitter cette page : Hearth continue sur le serveur et le journal d'activité garde la trace.",
+      state: { done: "Terminé", running: "En cours", waiting: "En attente" },
+      cancel: "Annuler l'opération",
+      cancelNote:
+        "Annuler est possible jusqu'au début de la mise en place : les mods restent alors ceux d'avant.",
+      cancelTitle: "Annuler la mise en place des mods ?",
+      cancelSubmit: "Annuler l'opération",
+      cancelKeep: "Continuer l'opération",
+      cancelHelp:
+        "Les mods ne changent pas. Le serveur est relancé s'il tournait, et la sauvegarde déjà faite reste disponible.",
+    },
+    end: {
+      title: "Les mods sont en place, le serveur est reparti",
+      leadRunning: "Le serveur est reparti avec {n} mods activés.",
+      leadStopped: "Les mods sont en place. Le serveur est resté arrêté ({n} mods activés).",
+      changed: "Ce qui a changé",
+      backup:
+        "Sauvegarde faite avant : « {note} ». Elle reste dans l'onglet Sauvegardes tant que vous ne la supprimez pas.",
+      playersTitle: "Pensez à vos joueurs",
+      playersText:
+        "Pour se connecter, vos joueurs doivent avoir les mêmes mods que le serveur : le même moteur et la même version de Minecraft. Ce n'est pas le cas de tous les mods : certains ne servent que sur le serveur.",
+      playersList: "Voir ce que vos joueurs doivent installer",
+      close: "Fermer",
+    },
+    fail: {
+      title: "Le serveur n'a pas démarré avec ces mods",
+      reverted: "Le serveur n'a pas démarré avec ces mods. Hearth a remis les mods d'avant.",
+      failed:
+        "La mise en place a échoué. Hearth a défait ce qui avait été fait : les mods sont ceux d'avant.",
+      says: "Ce que dit le serveur",
+      inClear: "En clair : {sentence}",
+      backup: "Votre monde n'a pas été touché ; la sauvegarde « {note} » reste disponible.",
+      backupBare: "Votre monde n'a pas été touché ; la sauvegarde faite avant reste disponible.",
+      logs: "Voir le journal du serveur",
+    },
+    cancelled: {
+      title: "L'opération a été annulée",
+      text: "Les mods n'ont pas changé. Le serveur est relancé s'il tournait.",
+    },
+    attention: {
+      title: "L'état des mods est à vérifier",
+      text: "Hearth n'a pas pu finir la mise en place. Vérifiez le serveur sur la machine, puis répondez dans la carte de l'opération, en haut de cette page.",
     },
     leave: {
       title: "Quitter sans appliquer ?",

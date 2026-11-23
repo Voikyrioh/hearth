@@ -382,6 +382,11 @@ export class SimulatedMods {
     this.held.get(serverId)?.delete(opId);
   }
 
+  /** L'identifiant de l'opération de mods en cours la plus récente de ce serveur (de quoi la piloter). */
+  lastOperationId(serverId: string): string | undefined {
+    return [...(this.held.get(serverId)?.keys() ?? [])].at(-1);
+  }
+
   /** L'opération est une opération de mods en cours de ce serveur. */
   cancels(serverId: string, opId: string): boolean {
     return this.held.get(serverId)?.has(opId) ?? false;

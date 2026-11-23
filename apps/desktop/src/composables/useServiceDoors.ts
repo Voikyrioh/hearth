@@ -68,7 +68,7 @@ export function useServiceDoors(
   }
 
   watch(
-    () => [serverId(), key(), consoleServed()] as const,
+    [serverId, key, consoleServed],
     () => {
       // Un autre service : les portes de l'ancien ne se montrent jamais sous le nouveau.
       hasMods.value = false;
