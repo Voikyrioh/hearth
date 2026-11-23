@@ -987,6 +987,28 @@ fn a_rename_without_replacement_moves_the_file_keeps_its_inode_and_never_overwri
 }
 
 #[test]
+fn a_rename_inside_one_folder_returns_the_identity_read_on_the_target_after_the_move() {
+    let f = fixture();
+    f.root.make_dirs(&rel("mods"), perms(0o750)).unwrap();
+    f.root
+        .write_file(&rel("mods/a.jar"), b"jar-a", perms(0o644))
+        .unwrap();
+    let inode_before = std::fs::metadata(f.root_path.join("mods/a.jar"))
+        .unwrap()
+        .ino();
+    let moved = f
+        .root
+        .rename_no_replace(&rel("mods/a.jar"), &rel("mods/a.jar.disabled"))
+        .unwrap();
+    assert_eq!(moved.ino, inode_before);
+    assert_eq!(
+        f.root.identity_of(&rel("mods/a.jar.disabled")).unwrap(),
+        moved,
+        "l'identité rendue est celle de la cible"
+    );
+}
+
+#[test]
 fn a_rename_refuses_a_link_in_either_path_a_link_as_source_and_a_mount_point() {
     let f = fixture();
     f.root.make_dirs(&rel("mods"), perms(0o750)).unwrap();

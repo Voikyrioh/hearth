@@ -389,13 +389,25 @@ impl UnixRoot {
             RenameFlags::NOREPLACE,
         )
         .map_err(fs_error)?;
+        // Les dossiers sont comparés par identité, pas par numéro de descripteur : deux descripteurs ouverts sur le
+        // même dossier ont deux numéros.
+        let same_dir = match (fstat(&from_parent), fstat(&to_parent)) {
+            (Ok(a), Ok(b)) => (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino),
+            _ => false,
+        };
         fsync(&to_parent).map_err(fs_error)?;
-        if from_parent.as_raw_fd() != to_parent.as_raw_fd() {
+        if !same_dir {
             fsync(&from_parent).map_err(fs_error)?;
         }
+        // L'identité RENDUE est celle relue sur la cible APRÈS le renommage : si un autre fichier a pris la place
+        // entre le jugement et le geste, ce n'est pas celui que l'appelant croit avoir déplacé.
+        let after = statat(&to_parent, to_leaf, AtFlags::SYMLINK_NOFOLLOW).map_err(fs_error)?;
+        if (after.st_dev, after.st_ino) != (stat.st_dev, stat.st_ino) {
+            return Err(FsError::Blocked);
+        }
         Ok(FileId {
-            dev: u64::try_from(dev_of(&stat)).unwrap_or(u64::MAX),
-            ino: u64::from(stat.st_ino),
+            dev: u64::try_from(dev_of(&after)).unwrap_or(u64::MAX),
+            ino: u64::from(after.st_ino),
         })
     }
 
