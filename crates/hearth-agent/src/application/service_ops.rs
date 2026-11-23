@@ -589,6 +589,12 @@ impl ServiceOps {
             .await
     }
 
+    /// Écrit qu'UN mouvement d'un geste a été défait (le retour d'un lot, mouvement par mouvement) : plusieurs
+    /// lignes `undone` peuvent se suivre, la dernière sans mouvement clôt l'étape.
+    pub async fn undone_move(&self, id: &str, step: &str, undo: &UndoInfo) -> Result<u32, OpError> {
+        self.close_step(id, step, StepState::Undone, undo).await
+    }
+
     async fn close_step(
         &self,
         id: &str,
@@ -605,12 +611,13 @@ impl ServiceOps {
         }
         if destructive {
             let records = self.journal.steps(id).await?;
-            let expected = if state == StepState::Undone {
-                StepState::Done
-            } else {
-                StepState::Intent
+            let latest = latest_state(&records, &name);
+            let allowed = match state {
+                // Un retour mouvement par mouvement écrit plusieurs `undone` de suite.
+                StepState::Undone => matches!(latest, Some(StepState::Done | StepState::Undone)),
+                _ => latest == Some(StepState::Intent),
             };
-            if latest_state(&records, &name) != Some(expected) {
+            if !allowed {
                 return Err(OpError::OutOfOrder);
             }
         }

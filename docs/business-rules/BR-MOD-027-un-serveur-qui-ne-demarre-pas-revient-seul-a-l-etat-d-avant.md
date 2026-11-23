@@ -24,6 +24,7 @@ Après la mise en place, le service est relancé puis surveillé : succès = le 
 ## Vérification
 - `tests/mods_apply_https.rs` (conteneur sorti avant le signe, délai dépassé, erreur au milieu de `place`, `the_last_lines_of_the_game_and_the_plain_cause_are_kept_after_a_rollback`, `an_unrecognised_failure_keeps_the_lines_without_a_cause`, `a_return_that_does_not_come_up_either_is_interrupted_stops_the_game_and_relaunches_nothing`)
 - `crates/hearth-agent/src/domain/mods/failure.rs::tests`
+- `tests/mods_apply_https.rs::reverting_a_batch_whose_undo_was_cut_in_the_middle_finishes_the_return_and_closes_the_operation`
 
 ## Règles liées
 - BR-MOD-024, BR-MOD-025, BR-MOD-032, BR-EDIT-020
@@ -31,3 +32,4 @@ Après la mise en place, le service est relancé puis surveillé : succès = le 
 ## Historique
 - 2026-11-18 : complétée (HRT-259) : surveillance après le retour, arrêt voulu inscrit pendant le retour, queue de 20 lignes gardée 24 h et phrase en clair.
 - 2026-11-18 : création (HRT-258 pour l'erreur au milieu de `place`, HRT-259 pour le retour automatique).
+- 2026-11-23 : « Revenir à l'état d'avant » d'un lot « à vérifier » rejouable (un mouvement déjà revenu compte comme revenu, une ligne `undone` par mouvement) ; l'arrêt qui échoue ne déplace rien ; relance par le chemin commun avec surveillance ; une pose dont seule l'intention est au journal n'est jamais adoptée sans vérification (revue Stephen).

@@ -1632,6 +1632,41 @@ impl Backups {
         self.containers.of(key).await.unwrap_or_default()
     }
 
+    /// Un « travail » sans sauvegarde pour le retour d'un lot « à vérifier » (HRT-259) : il porte seulement ce que
+    /// l'arrêt voulu et la relance utilisent (conteneurs, compte). `stopped` : les conteneurs à relancer ensuite.
+    pub(crate) fn revert_job(
+        &self,
+        key: &ServiceKey,
+        op_id: &str,
+        name: &str,
+        account: &str,
+        containers: Vec<String>,
+    ) -> Option<Job> {
+        let backup = BackupId::parse(&self.ids.new_id())?;
+        let actor = Actor::new(
+            crate::domain::accounts::Username::parse(account).ok(),
+            crate::domain::audit::Origin::System,
+        );
+        Some(Job {
+            id: op_id.to_owned(),
+            key: key.clone(),
+            name: name.to_owned(),
+            actor,
+            backup,
+            mode: BackupMode::StopCopyStart,
+            containers: containers.clone(),
+            grace_s: 30,
+            folders: Vec::new(),
+            rules: IgnoreRules::default(),
+            image: String::new(),
+            note: None,
+            estimate_bytes: 0,
+            stopped: Mutex::new(containers),
+            forced_stop: AtomicBool::new(false),
+            mods_read: Mutex::new(None),
+        })
+    }
+
     /// Lit la liste des mods AVANT l'arrêt et la copie (HRT-293), comme une sauvegarde.
     pub(crate) async fn read_mods_for(&self, job: &Job) {
         self.read_mods(job).await;

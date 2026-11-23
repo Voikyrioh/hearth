@@ -202,6 +202,9 @@ impl ModsService {
 
     /// Le dossier géré qui porte les mods : le propriétaire et le point de montage, d'après la fiche.
     async fn fiche_perms(&self, key: &ServiceKey) -> Result<(Perms, Perms, ReadyRule), ModsError> {
+        if key.kind() != crate::domain::services::KeyKind::Hearth {
+            return Err(ModsError::Adopted);
+        }
         let body = self
             .specs
             .body(key)
@@ -545,7 +548,9 @@ impl ModsService {
                         ..UndoInfo::default()
                     };
                     if let Err(error) = deps.ops.done(&id, step::PLACE, &after).await {
-                        tracing::warn!(%error, "journal des mods : fin de mouvement non écrite");
+                        // Le journal ne garde que l'INTENTION de ce mouvement (inode 0) : l'identité n'est connue
+                        // qu'en mémoire. Un retour après un arrêt de l'agent ne l'adopte pas sans vérification.
+                        tracing::warn!(%error, "journal des mods : fin de mouvement non écrite, intention seule");
                     }
                 }
                 Err(()) => {
@@ -601,15 +606,31 @@ impl ModsService {
             exec.retired_dir.clone(),
         );
         let moves = done.to_vec();
-        let reverted = tokio::task::spawn_blocking(move || {
+        let outcome = tokio::task::spawn_blocking(move || {
             revert_blocking(fs.as_ref(), &key, &retired, &moves)
         })
         .await
-        .unwrap_or(false);
-        if reverted {
-            let _ = self.deps().ops.undone(exec.job.op_id(), step::PLACE).await;
+        .unwrap_or_default();
+        self.write_undone(exec.job.op_id(), &outcome).await;
+        outcome.all
+    }
+
+    /// Une ligne `undone` par mouvement revenu, puis celle qui clôt l'étape quand tout est revenu : un retour
+    /// interrompu laisse au journal ce qui reste à défaire.
+    async fn write_undone(&self, id: &str, outcome: &Reverted) {
+        let ops = &self.deps().ops;
+        for mv in &outcome.moves {
+            let info = UndoInfo {
+                moves: vec![mv.clone()],
+                ..UndoInfo::default()
+            };
+            if let Err(error) = ops.undone_move(id, step::PLACE, &info).await {
+                tracing::warn!(%error, "journal des mods : mouvement revenu non écrit");
+            }
         }
-        reverted
+        if outcome.all {
+            let _ = ops.undone(id, step::PLACE).await;
+        }
     }
 
     /// 5 et 6 : relance et surveillance du signe « prêt ».
@@ -650,22 +671,25 @@ impl ModsService {
     /// Le signe « prêt » dans les lignes écrites depuis la relance, avant le délai de la fiche ; sinon, le conteneur
     /// sorti ou le délai dépassé. Sans signe essayé sur la vraie image, le conteneur doit rester en marche un moment.
     async fn watch(&self, exec: &Exec) -> WatchEnd {
+        self.watch_service(&exec.key, &exec.job, &exec.rule).await
+    }
+
+    async fn watch_service(&self, key: &ServiceKey, job: &Job, rule: &ReadyRule) -> WatchEnd {
         let deps = self.deps();
-        let stopped = exec.job.stopped_containers();
+        let stopped = job.stopped_containers();
         let Some(container) = stopped.first().cloned() else {
             return WatchEnd::Ready;
         };
         let started = Instant::now();
-        let budget = Duration::from_secs(u64::from(exec.rule.timeout_s));
-        let has_sign = exec.rule.sign.is_some();
+        let budget = Duration::from_secs(u64::from(rule.timeout_s));
+        let has_sign = rule.sign.is_some();
         if has_sign {
-            deps.phases
-                .begin(&exec.key, &container, exec.rule.clone(), false);
+            deps.phases.begin(key, &container, rule.clone(), false);
         }
         loop {
             if has_sign
                 && matches!(
-                    deps.phases.refresh(&exec.key).await,
+                    deps.phases.refresh(key).await,
                     Some(GamePhase::Ready { .. })
                 )
             {
@@ -980,55 +1004,75 @@ fn summary_of(request: &ModsApplyRequest, actions: &[Action]) -> ModsSummary {
     summary
 }
 
+/// Ce qu'un retour a rendu : `all` quand tout est revenu, `moves` les mouvements revenus (à écrire au journal).
+#[derive(Debug, Default)]
+struct Reverted {
+    all: bool,
+    moves: Vec<FileMove>,
+}
+
+/// Le journal ne garde que l'intention de ce mouvement : l'inode n'y est pas.
+fn intent_only(mv: &FileMove) -> bool {
+    mv.ino == 0
+}
+
 /// Rejoue les mouvements à l'envers : l'inode est vérifié, rien n'est supprimé ni remplacé. Un fichier posé par
-/// l'opération part dans « Mods retirés ». `true` : tout est revenu.
+/// l'opération part dans « Mods retirés ». Rejouable : un mouvement déjà revenu compte comme revenu.
 fn revert_blocking(
     fs: &dyn SafeFs,
     key: &ServiceKey,
     retired_dir: &RelPath,
     moves: &[FileMove],
-) -> bool {
+) -> Reverted {
     let Ok(root) = fs.open_service_root(key) else {
-        return false;
+        return Reverted::default();
     };
-    let mut all = true;
+    let mut outcome = Reverted {
+        all: true,
+        moves: Vec::new(),
+    };
     for mv in moves.iter().rev() {
         let mut mv = mv.clone();
-        // Un mouvement dont seule l'INTENTION est au journal (l'agent s'est arrêté pendant ce geste) : si la cible est
-        // là, c'est lui qui l'a faite, son identité se lit maintenant ; sinon le geste n'a pas eu lieu.
-        if mv.ino == 0 {
-            match parse(&mv.to).map(|to| root.identify(&to)) {
-                Ok(Ok(found)) => {
+        let (Ok(to), from) = (parse(&mv.to), parse(&mv.from)) else {
+            outcome.all = false;
+            continue;
+        };
+        let from = match (mv.kind, from) {
+            (MoveKind::Placed, _) => None,
+            (_, Ok(from)) => Some(from),
+            (_, Err(_)) => {
+                outcome.all = false;
+                continue;
+            }
+        };
+        // Un mouvement dont seule l'INTENTION est au journal (l'agent s'est arrêté pendant ce geste, ou la ligne
+        // `done` n'a pas pu s'écrire). Un déplacement : la cible est celle de ce geste si, et seulement si, la
+        // source a disparu. Une pose : rien ne dit quel fichier c'est, rien n'est adopté, la main de l'admin reste.
+        if intent_only(&mv) {
+            let source = from.as_ref().map(|from| root.stat(from));
+            match (root.identify(&to), source) {
+                (Err(FsError::NotFound), _) => {
+                    // Le geste n'a pas eu lieu : rien à défaire.
+                    outcome.moves.push(mv);
+                    continue;
+                }
+                (Ok(found), Some(Err(FsError::NotFound))) => {
                     mv.dev = found.dev;
                     mv.ino = found.ino;
                 }
-                Ok(Err(FsError::NotFound)) => continue,
                 _ => {
-                    all = false;
+                    outcome.all = false;
                     continue;
                 }
             }
         }
-        let mv = &mv;
-        let (Ok(to), Ok(from)) = (parse(&mv.to), parse(&mv.from)) else {
-            if mv.kind != MoveKind::Placed {
-                all = false;
-                continue;
-            }
-            let Ok(to) = parse(&mv.to) else {
-                all = false;
-                continue;
-            };
-            if !revert_one(root.as_ref(), retired_dir, mv, &to, None) {
-                all = false;
-            }
-            continue;
-        };
-        if !revert_one(root.as_ref(), retired_dir, mv, &to, Some(&from)) {
-            all = false;
+        if revert_one(root.as_ref(), retired_dir, &mv, &to, from.as_ref()) {
+            outcome.moves.push(mv);
+        } else {
+            outcome.all = false;
         }
     }
-    all
+    outcome
 }
 
 fn revert_one(
@@ -1038,9 +1082,16 @@ fn revert_one(
     to: &RelPath,
     from: Option<&RelPath>,
 ) -> bool {
+    let wanted = FileId {
+        dev: mv.dev,
+        ino: mv.ino,
+    };
     // Le fichier est-il TOUJOURS celui que l'opération a déplacé ou posé ?
     match root.identify(to) {
-        Ok(found) if found.dev == mv.dev && found.ino == mv.ino => {}
+        Ok(found) if found == wanted => {}
+        // Plus rien à la cible : un retour interrompu a peut-être déjà rendu ce mouvement (le journal ne le dit pas
+        // toujours). C'est fait si le fichier de même identité est revenu à sa place, ou rangé dans « Mods retirés ».
+        Err(FsError::NotFound) => return already_reverted(root, retired_dir, mv, to, from, wanted),
         _ => return false,
     }
     let target = match (mv.kind, from) {
@@ -1066,34 +1117,55 @@ fn revert_one(
     root.rename_noreplace(to, &target).is_ok()
 }
 
+/// Le mouvement est-il déjà revenu ? `from` porte la même identité (déplacement), ou un nom de « Mods retirés »
+/// porte celle du fichier posé.
+fn already_reverted(
+    root: &dyn ServiceRoot,
+    retired_dir: &RelPath,
+    mv: &FileMove,
+    to: &RelPath,
+    from: Option<&RelPath>,
+    wanted: FileId,
+) -> bool {
+    if let (false, Some(from)) = (mv.kind == MoveKind::Placed, from) {
+        return root.identify(from).is_ok_and(|found| found == wanted);
+    }
+    let Some(name) = to.split_last().map(|(leaf, _)| leaf.to_owned()) else {
+        return false;
+    };
+    (1..=listing::MAX_RETIRED_SUFFIX)
+        .filter_map(|n| listing::retired_name(&name, n))
+        .filter_map(|candidate| retired_dir.child(&candidate).ok())
+        .any(|rel| root.identify(&rel).is_ok_and(|found| found == wanted))
+}
+
 /// Les mouvements du journal d'une opération, dans l'ordre : une ligne `done` (avec l'inode) remplace l'intention du
-/// même mouvement ; une opération dont `place` est déjà `undone` n'a plus rien à défaire.
+/// même mouvement ; une ligne `undone` qui porte un mouvement le retire (il est revenu), une ligne `undone` sans
+/// mouvement clôt l'étape : plus rien à défaire.
 fn moves_of(steps: &[StepRecord]) -> Vec<FileMove> {
     let mut ordered: Vec<&StepRecord> = steps
         .iter()
         .filter(|row| row.step.as_str() == step::PLACE)
         .collect();
     ordered.sort_by_key(|row| row.seq);
-    if ordered
-        .last()
-        .is_some_and(|row| row.state == StepState::Undone)
-    {
-        return Vec::new();
-    }
     let mut moves: Vec<FileMove> = Vec::new();
     for row in ordered {
-        if !matches!(row.state, StepState::Intent | StepState::Done) {
-            continue;
-        }
         for mv in &row.undo.moves {
             let same = |other: &FileMove| {
                 other.kind == mv.kind && other.from == mv.from && other.to == mv.to
             };
-            match moves.iter().position(same) {
-                Some(at) if row.state == StepState::Done => moves[at] = mv.clone(),
-                Some(_) => {}
-                None => moves.push(mv.clone()),
+            match (row.state, moves.iter().position(same)) {
+                (StepState::Undone, Some(at)) => {
+                    moves.remove(at);
+                }
+                (StepState::Undone, None) => {}
+                (StepState::Done, Some(at)) => moves[at] = mv.clone(),
+                (StepState::Intent, None) | (StepState::Done, None) => moves.push(mv.clone()),
+                _ => {}
             }
+        }
+        if row.state == StepState::Undone && row.undo.moves.is_empty() {
+            moves.clear();
         }
     }
     moves
@@ -1118,6 +1190,9 @@ impl ModsService {
             let Ok(Judged::Read(plan)) = self.plan_of(&record.service).await else {
                 return false;
             };
+            let Ok((_, _, rule)) = self.fiche_perms(&record.service).await else {
+                return false;
+            };
             let moves = moves_of(&snapshot.steps);
             let was_running = record
                 .plan
@@ -1129,29 +1204,49 @@ impl ModsService {
             } else {
                 Vec::new()
             };
-            // Rien n'est déplacé sous un jeu qui tourne.
-            for id in &containers {
-                let _ = deps.engine.stop(id, Duration::from_secs(30)).await;
+            let Some(job) = deps.backups.revert_job(
+                &record.service,
+                &record.id,
+                &record.service_name,
+                &record.account,
+                containers.clone(),
+            ) else {
+                return false;
+            };
+            // Rien n'est déplacé sous un jeu qui tourne : un arrêt qui échoue ne déplace rien (l'arrêt voulu est
+            // inscrit, comme pour le retour automatique).
+            if !containers.is_empty() && !deps.backups.stop_again_for_mods(&job).await {
+                return false;
             }
             let (fs, key, retired) = (
                 Arc::clone(&self.fs),
                 record.service.clone(),
                 plan.retired_dir.clone(),
             );
-            let done = tokio::task::spawn_blocking(move || {
+            let outcome = tokio::task::spawn_blocking(move || {
                 revert_blocking(fs.as_ref(), &key, &retired, &moves)
             })
             .await
-            .unwrap_or(false);
-            if !done {
+            .unwrap_or_default();
+            self.write_undone(&record.id, &outcome).await;
+            if !outcome.all {
                 return false;
             }
-            for id in &containers {
-                if deps.engine.start(id).await.is_err() {
-                    return false;
+            if containers.is_empty() {
+                return true;
+            }
+            // La relance et la surveillance de l'état d'avant, comme le retour automatique : un jeu qui ne revient
+            // pas est arrêté et rien n'est relancé seul.
+            if deps.backups.start_for_mods(&job).await.is_err() {
+                return false;
+            }
+            match self.watch_service(&record.service, &job, &rule).await {
+                WatchEnd::Ready => true,
+                WatchEnd::NotReady(_) => {
+                    let _ = deps.backups.stop_again_for_mods(&job).await;
+                    false
                 }
             }
-            true
         }
         .await;
         let (status, cause) = if reverted {

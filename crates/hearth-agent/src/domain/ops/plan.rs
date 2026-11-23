@@ -236,7 +236,7 @@ pub enum MoveKind {
 }
 
 /// Un mouvement de fichier, écrit au journal AVANT le geste (sans inode : il n'est pas encore connu pour un fichier
-/// posé) puis APRÈS (avec l'inode). Les chemins sont relatifs au dossier géré qui porte les mods (`data`), sans `..`.
+/// posé) puis APRÈS (avec l'inode). Les chemins sont relatifs à la RACINE DU SERVICE (`data/mods/x.jar`), sans `..`.
 /// L'inode sert au retour : un fichier remplacé entre-temps n'est jamais déplacé à sa place.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FileMove {

@@ -863,3 +863,124 @@ async fn a_return_that_does_not_come_up_either_is_interrupted_stops_the_game_and
             .unwrap();
     assert_eq!(intents, 1, "arrêt voulu inscrit");
 }
+
+// ---------------------------------------------------------------------------------------------
+// « Revenir à l'état d'avant » d'un lot coupé par le redémarrage de l'agent (HRT-259, revue Stephen)
+// ---------------------------------------------------------------------------------------------
+
+impl Bench {
+    /// Un second agent sur la même base, le même moteur et les mêmes dossiers : le redémarrage de l'agent.
+    async fn restarted(&self) -> Agent {
+        let mut parts = parts_supervised(
+            self.engine.clone(),
+            Arc::new(FakeSupervisor::new()),
+            fast_timings(),
+        );
+        parts.host_ports = Arc::new(FakeHostPorts::new());
+        parts.free_space = Arc::new(FakeFreeSpace::new());
+        parts.safe_fs = Some(self.safe_fs.clone());
+        parts.backups.files = Some(Arc::new(FakeBackupFiles::new()));
+        parts.catalog.include_preview = true;
+        parts.catalog.pack_deposits = Some(self.deposits.clone());
+        parts.catalog.service = Some(Arc::new(CatalogService::from_parts(
+            vec![self.fiche.clone()],
+            Vec::new(),
+            true,
+        )));
+        https::start_engined(&self.env, parts).await
+    }
+
+    async fn wait_step(&self, id: &str, wanted: &str) {
+        let started = Instant::now();
+        loop {
+            let reply = self
+                .agent
+                .request("GET", &format!("/operations/services/{id}"))
+                .token(&self.ada.token)
+                .send()
+                .await;
+            let operation: OperationView = serde_json::from_value(reply.body).unwrap();
+            if operation.step.as_deref() == Some(wanted) {
+                return;
+            }
+            assert!(started.elapsed() < Duration::from_secs(15), "{operation:?}");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn reverting_a_batch_whose_undo_was_cut_in_the_middle_finishes_the_return_and_closes_the_operation()
+ {
+    use hearth_agent::application::ports::SafeFs;
+    use hearth_agent::domain::files::RelPath;
+    let b = bench().await;
+    let server = b.install("mc", "fabric").await;
+    let old = fabric("old", "1.0.0");
+    let new = fabric("new", "1.0.0");
+    b.put(&server, "mods/old.jar", &old);
+    // Le jeu ne dit jamais « prêt » : le lot reste dans la surveillance, l'agent redémarre à ce moment.
+    b.engine.log_on_start(&server.name, "Loading...");
+    let reply = b
+        .apply(
+            &server,
+            json!({ "add": [b.deposit("D-NEW", &new)], "retire": ["old.jar"] }),
+        )
+        .await;
+    assert_eq!(reply.status, 202, "{}", reply.text);
+    let id = reply.body["operation_id"].as_str().unwrap().to_owned();
+    b.wait_step(&id, "watch").await;
+    let second = b.restarted().await;
+    // Avec les anciens mods, le jeu redit « prêt ».
+    b.engine.log_on_start(&server.name, READY);
+    // Le retour de l'agent d'avant avait déjà rendu le premier mouvement (l'ancien jar) avant d'être coupé.
+    let root = b.safe_fs.open_service_root(&server.key).expect("racine");
+    root.rename_noreplace(
+        &RelPath::parse("data/mods-retires/old.jar").unwrap(),
+        &RelPath::parse("data/mods/old.jar").unwrap(),
+    )
+    .expect("premier mouvement déjà revenu");
+    let reply = second
+        .confirmed(
+            &b.ada,
+            "POST",
+            &format!("/operations/services/{id}/decision"),
+            json!({ "choice": "revert" }),
+        )
+        .await
+        .send()
+        .await;
+    assert_eq!(reply.status, 200, "{}", reply.text);
+    let started = Instant::now();
+    loop {
+        let reply = second
+            .request("GET", &format!("/operations/services/{id}"))
+            .token(&b.ada.token)
+            .send()
+            .await;
+        let operation: OperationView = serde_json::from_value(reply.body).unwrap();
+        if operation.status == OperationStatus::RolledBack {
+            break;
+        }
+        assert!(
+            !matches!(operation.status, OperationStatus::Interrupted),
+            "le retour doit finir : {operation:?}"
+        );
+        assert!(started.elapsed() < Duration::from_secs(15), "{operation:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(b.content(&server, "mods/old.jar"), Some(old));
+    let paths = b.safe_fs.paths(&server.key);
+    assert!(
+        !paths
+            .iter()
+            .any(|p| p.starts_with("data/mods/") && p.contains("new")),
+        "{paths:?}"
+    );
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.starts_with("data/mods-retires/") && p.contains("new")),
+        "le fichier posé est rangé dans Mods retirés : {paths:?}"
+    );
+}
