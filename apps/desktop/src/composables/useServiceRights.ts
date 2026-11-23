@@ -60,6 +60,8 @@ export function useServiceRights() {
     serviceDelete: computed(() => rights.value?.rights?.serviceDelete ?? false),
     /** L'agent annonce `service-backups` : l'onglet « Sauvegardes » d'un service créé par Hearth peut exister (HRT-98). */
     serviceBackups: computed(() => rights.value?.rights?.serviceBackups ?? false),
+    /** L'agent annonce `game-console` : l'onglet « Console » et la carte des joueurs peuvent exister (HRT-269). */
+    gameConsole: computed(() => rights.value?.rights?.gameConsole ?? false),
     /** Le compte connecté, tel que l'agent le connaît (à valider avant tout affichage). */
     account: computed(() => rights.value?.rights?.account ?? ""),
     /** Relit le droit tout de suite (« Vérifier à nouveau » sous l'échec de lecture). */

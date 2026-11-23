@@ -152,6 +152,7 @@ describe("états du droit", () => {
         gameSettings: true,
         serviceDelete: true,
         serviceBackups: true,
+        gameConsole: true,
         account: hostile,
       });
     }, "forge");

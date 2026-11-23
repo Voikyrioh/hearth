@@ -33,6 +33,8 @@ pub struct ServiceRightsDto {
     pub service_delete: bool,
     /// L'agent annonce `service-backups` (HRT-97) : seul cas où l'onglet « Sauvegardes » peut exister (HRT-98).
     pub service_backups: bool,
+    /// L'agent annonce `game-console` (HRT-268) : seul cas où l'onglet « Console » et la carte des joueurs peuvent exister.
+    pub game_console: bool,
     pub account: String,
 }
 
@@ -44,6 +46,7 @@ impl From<hearth_link::ServiceRightsRead> for ServiceRightsDto {
             game_settings: read.game_settings,
             service_delete: read.service_delete,
             service_backups: read.service_backups,
+            game_console: read.game_console,
             account: read.account,
         }
     }

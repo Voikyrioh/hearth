@@ -37,6 +37,7 @@ fn read(known: bool, granted: bool, account: &str) -> ServiceRightsDto {
         game_settings: known,
         service_delete: known,
         service_backups: known,
+        game_console: known,
         account: account.to_owned(),
     }
     .into()

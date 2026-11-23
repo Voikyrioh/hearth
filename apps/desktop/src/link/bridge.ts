@@ -2,6 +2,7 @@ import type { EngineCapacity } from "@/resources";
 import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./agent-update";
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { Catalog, FicheInstallRequest, FicheLinkKind, FicheRead } from "./catalog";
+import type { ConsoleOutcome, ConsoleSendOutcome, PlayersOutcome } from "./console";
 import type {
   CancelOutcome,
   DeployCheck,
@@ -19,6 +20,14 @@ import type {
 } from "./gameSettings";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
+import type {
+  BackupModsOutcome,
+  ModsApplyOutcome,
+  ModsBatch,
+  ModsCheckOutcome,
+  ModsOutcome,
+  OperationTailOutcome,
+} from "./mods";
 import type { PackCheck } from "./packs";
 import type {
   AdminActKind,
@@ -461,6 +470,51 @@ export interface LinkBridge {
     settings: BackupSettings,
     adminPassword: string | null,
   ): Promise<BackupSettingsOutcome>;
+
+  // Les mods d'un serveur Minecraft (HRT-260, BR-MOD-020 à 036) : trois lectures (liste, contrôle des dépôts, liste d'une
+  // sauvegarde), le journal d'une opération, un acte confirmé (appliquer un lot, jamais couvert par l'élévation).
+
+  /** La liste des mods d'un service (`GET /services/{key}/mods`) : ouverte à tout compte. Un gros serveur se lit en plusieurs fois. */
+  readMods(serverId: string, key: string): Promise<ModsOutcome>;
+  /** Juge des dépôts de la zone d'attente contre les mods du service (`POST …/mods/check`) : une consultation. */
+  checkMods(serverId: string, key: string, deposits: string[]): Promise<ModsCheckOutcome>;
+  /**
+   * Applique un lot (`POST …/mods/apply`) : le mot de passe est exigé à chaque fois. L'agent répond « accepté » : l'issue
+   * arrive par le suivi des opérations. Jamais rejoué.
+   */
+  applyMods(
+    serverId: string,
+    key: string,
+    batch: ModsBatch,
+    adminPassword: string | null,
+  ): Promise<ModsApplyOutcome>;
+  /** La liste des mods d'une sauvegarde (`GET …/backups/{id}/mods`), avec la comparaison aux mods actuels si `compare`. */
+  readBackupMods(
+    serverId: string,
+    key: string,
+    backupId: string,
+    compare: boolean,
+  ): Promise<BackupModsOutcome>;
+  /** Les dernières lignes du journal d'une opération de service et la cause reconnue (BR-MOD-027). */
+  readOperationTail(serverId: string, operationId: string): Promise<OperationTailOutcome>;
+
+  // La console d'un serveur de jeu et les joueurs connectés (HRT-291, BR-CONSOLE-*) : deux lectures, un acte confirmé.
+
+  /** Ce que la console permet (`GET /services/{key}/console`) : rien n'est envoyé au jeu. */
+  describeConsole(serverId: string, key: string): Promise<ConsoleOutcome>;
+  /** Les joueurs connectés (`GET /services/{key}/players`) : ouverte à tout compte. */
+  readPlayers(serverId: string, key: string): Promise<PlayersOutcome>;
+  /**
+   * Envoie UNE commande (`POST …/console`) avec la classe que l'interface a jugée (1 libre, 2 sensible). Jamais rejouée :
+   * un résultat inconnu se lit dans le journal du serveur.
+   */
+  sendConsole(
+    serverId: string,
+    key: string,
+    command: string,
+    commandClass: 1 | 2,
+    adminPassword: string | null,
+  ): Promise<ConsoleSendOutcome>;
 
   // Envoyer un fichier dans la zone d'attente de l'agent (HRT-96, HRT-95, BR-FILES-019, BR-MOD-015). La coquille lit
   // le fichier local elle-même : la page ne reçoit qu'un chemin au départ et des nombres ensuite, jamais le contenu.

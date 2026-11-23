@@ -258,6 +258,8 @@ export interface ServiceRights {
   serviceDelete: boolean;
   /** L'agent annonce `service-backups` : l'onglet « Sauvegardes » d'un service créé par Hearth peut exister (HRT-98). */
   serviceBackups: boolean;
+  /** L'agent annonce `game-console` : l'onglet « Console » et la carte des joueurs peuvent exister (HRT-269, HRT-291). */
+  gameConsole: boolean;
   account: string;
 }
 
@@ -268,6 +270,7 @@ export function toServiceRights(dto: ServiceRightsDto): ServiceRights {
     gameSettings: dto.gameSettings,
     serviceDelete: dto.serviceDelete,
     serviceBackups: dto.serviceBackups,
+    gameConsole: dto.gameConsole,
     account: dto.account,
   };
 }

@@ -26,6 +26,8 @@ pub enum OperationKindDto {
     Backup,
     Restore,
     WorldImport,
+    /// Appliquer un lot de mods (HRT-258).
+    Mods,
     Unknown,
 }
 
@@ -42,6 +44,7 @@ impl From<OperationKind> for OperationKindDto {
             OperationKind::Backup => Self::Backup,
             OperationKind::Restore => Self::Restore,
             OperationKind::WorldImport => Self::WorldImport,
+            OperationKind::Mods => Self::Mods,
             OperationKind::Unknown => Self::Unknown,
         }
     }

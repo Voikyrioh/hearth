@@ -40,6 +40,14 @@ import {
   toFicheRead,
 } from "./catalog";
 import {
+  type ConsoleOutcome,
+  type ConsoleSendOutcome,
+  type PlayersOutcome,
+  toConsoleOutcome,
+  toConsoleSendOutcome,
+  toPlayersOutcome,
+} from "./console";
+import {
   type CancelOutcome,
   type DeployCheck,
   type DeployCheckInput,
@@ -78,6 +86,19 @@ import {
 import { agentIllustrationUrl, illustrationBase, steamHeaderUrl } from "./illustrations";
 import { type LogMessage, type LogReading, toLogMessage } from "./logs";
 import { type MachineEvent, toHistory, toMetrics, toView } from "./machine";
+import {
+  type BackupModsOutcome,
+  type ModsApplyOutcome,
+  type ModsBatch,
+  type ModsCheckOutcome,
+  type ModsOutcome,
+  type OperationTailOutcome,
+  toBackupModsOutcome,
+  toModsApplyOutcome,
+  toModsCheckOutcome,
+  toModsOutcome,
+  toOperationTailOutcome,
+} from "./mods";
 import { type PackCheck, toPackCheck } from "./packs";
 import {
   type AdminActKind,
@@ -715,6 +736,61 @@ export class TauriLinkBridge implements LinkBridge {
   ): Promise<DeleteOutcome> {
     return toDeleteOutcome(
       unwrap(await commands.deleteService(serverId, key, request, adminPassword)),
+    );
+  }
+
+  // Les mods d'un serveur Minecraft (HRT-260) et sa console (HRT-291).
+  async readMods(serverId: string, key: string): Promise<ModsOutcome> {
+    return toModsOutcome(unwrap(await commands.listMods(serverId, key)));
+  }
+
+  async checkMods(serverId: string, key: string, deposits: string[]): Promise<ModsCheckOutcome> {
+    return toModsCheckOutcome(unwrap(await commands.checkMods(serverId, key, deposits)));
+  }
+
+  async applyMods(
+    serverId: string,
+    key: string,
+    batch: ModsBatch,
+    adminPassword: string | null,
+  ): Promise<ModsApplyOutcome> {
+    return toModsApplyOutcome(
+      unwrap(await commands.applyMods(serverId, key, batch, adminPassword)),
+    );
+  }
+
+  async readBackupMods(
+    serverId: string,
+    key: string,
+    backupId: string,
+    compare: boolean,
+  ): Promise<BackupModsOutcome> {
+    return toBackupModsOutcome(
+      unwrap(await commands.readBackupMods(serverId, key, backupId, compare)),
+    );
+  }
+
+  async readOperationTail(serverId: string, operationId: string): Promise<OperationTailOutcome> {
+    return toOperationTailOutcome(unwrap(await commands.readOperationTail(serverId, operationId)));
+  }
+
+  async describeConsole(serverId: string, key: string): Promise<ConsoleOutcome> {
+    return toConsoleOutcome(unwrap(await commands.describeConsole(serverId, key)));
+  }
+
+  async readPlayers(serverId: string, key: string): Promise<PlayersOutcome> {
+    return toPlayersOutcome(unwrap(await commands.readPlayers(serverId, key)));
+  }
+
+  async sendConsole(
+    serverId: string,
+    key: string,
+    command: string,
+    commandClass: 1 | 2,
+    adminPassword: string | null,
+  ): Promise<ConsoleSendOutcome> {
+    return toConsoleSendOutcome(
+      unwrap(await commands.sendConsole(serverId, key, command, commandClass, adminPassword)),
     );
   }
 

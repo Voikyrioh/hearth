@@ -27,6 +27,7 @@ export const LABEL_KEYS: Record<OperationKind, MessageKey> = {
   backup: "serviceOps.label.backup",
   restore: "serviceOps.label.restore",
   world_import: "serviceOps.label.worldImport",
+  mods: "serviceOps.label.mods",
   unknown: "serviceOps.label.unknown",
 };
 
@@ -41,6 +42,7 @@ const SUBJECT_KEYS: Record<OperationKind, MessageKey> = {
   backup: "serviceOps.subject.backup",
   restore: "serviceOps.subject.restore",
   world_import: "serviceOps.subject.worldImport",
+  mods: "serviceOps.subject.mods",
   unknown: "serviceOps.subject.unknown",
 };
 
@@ -61,6 +63,7 @@ const STEP_KEYS: Record<string, MessageKey> = {
   erase: "serviceOps.steps.erase",
   remove_container: "serviceOps.steps.removeContainer",
   forget: "serviceOps.steps.forget",
+  place: "serviceOps.steps.place",
   save_world: "game.sequence.saveWorld",
 };
 

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-players"
+description = "Enables the read_players command without any pre-configured scope."
+commands.allow = ["read_players"]
+
+[[permission]]
+identifier = "deny-read-players"
+description = "Denies the read_players command without any pre-configured scope."
+commands.deny = ["read_players"]

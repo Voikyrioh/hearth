@@ -248,7 +248,7 @@ export interface FichePackGenre {
 
 /** Les voies de mods d'une fiche (BR-MOD-001) : une voie que ce client ne connaît pas n'est pas montrée. */
 export interface FicheMods {
-  ways: ("drop_files" | "drop_pack")[];
+  ways: ("drop_files" | "drop_pack" | "drop_jars")[];
   /** Les genres de pack que la fiche prend, quand elle offre le dépôt d'un pack. */
   packGenres: FichePackGenre[];
   filesHint: string | null;
@@ -334,7 +334,8 @@ function toSetting(dto: FicheSettingDto): FicheSetting {
 
 function toMods(dto: FicheModsDto): FicheMods {
   const ways = dto.ways.filter(
-    (way): way is "drop_files" | "drop_pack" => way === "drop_files" || way === "drop_pack",
+    (way): way is "drop_files" | "drop_pack" | "drop_jars" =>
+      way === "drop_files" || way === "drop_pack" || way === "drop_jars",
   );
   const genres = (dto.pack?.genres ?? []).filter(
     (genre): genre is FichePackGenre =>

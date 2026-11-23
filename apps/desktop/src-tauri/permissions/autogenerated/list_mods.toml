@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-mods"
+description = "Enables the list_mods command without any pre-configured scope."
+commands.allow = ["list_mods"]
+
+[[permission]]
+identifier = "deny-list-mods"
+description = "Denies the list_mods command without any pre-configured scope."
+commands.deny = ["list_mods"]

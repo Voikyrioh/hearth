@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-operation-tail"
+description = "Enables the read_operation_tail command without any pre-configured scope."
+commands.allow = ["read_operation_tail"]
+
+[[permission]]
+identifier = "deny-read-operation-tail"
+description = "Denies the read_operation_tail command without any pre-configured scope."
+commands.deny = ["read_operation_tail"]

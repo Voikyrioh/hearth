@@ -4,6 +4,7 @@ import type { AgentUpdateEvent, AgentUpdateOutcome, AgentUpdateView } from "./ag
 import type { AuditEntry, AuditExportResult, AuditFilter, AuditPage } from "./audit";
 import type { LinkBridge } from "./bridge";
 import type { Catalog, FicheInstallRequest, FicheLinkKind, FicheRead } from "./catalog";
+import type { ConsoleOutcome, ConsoleSendOutcome, PlayersOutcome } from "./console";
 import type {
   CancelOutcome,
   DeployCheck,
@@ -22,6 +23,15 @@ import type {
 import { agentIllustrationUrl, isSteamAppId } from "./illustrations";
 import type { LogMessage, LogReading } from "./logs";
 import type { MachineEvent } from "./machine";
+import {
+  type BackupModsOutcome,
+  MODS_APPLY_ACT_KIND,
+  type ModsApplyOutcome,
+  type ModsBatch,
+  type ModsCheckOutcome,
+  type ModsOutcome,
+  type OperationTailOutcome,
+} from "./mods";
 import type { PackCheck } from "./packs";
 import type {
   AdminActKind,
@@ -72,6 +82,7 @@ import { SimulatedAgentUpdates } from "./simulated-agent-update";
 import { SimulatedAudit } from "./simulated-audit";
 import { SimulatedBackups } from "./simulated-backups";
 import { SimulatedCatalog } from "./simulated-catalog";
+import { SimulatedConsole } from "./simulated-console";
 import { SimulatedDeletes } from "./simulated-delete";
 import { SimulatedDeploys } from "./simulated-deploy";
 import { SimulatedDevices } from "./simulated-devices";
@@ -79,6 +90,7 @@ import { SimulatedGameSettings } from "./simulated-game-settings";
 import { SimulatedGames } from "./simulated-games";
 import { SimulatedLogs } from "./simulated-logs";
 import { bareMachine, SimulatedMachine } from "./simulated-machine";
+import { SimulatedMods } from "./simulated-mods";
 import { SimulatedPacks } from "./simulated-packs";
 import { SimulatedReauth, simulatedPasswordNeed } from "./simulated-reauth";
 import { SimulatedSecurity } from "./simulated-security";
@@ -273,6 +285,10 @@ export class SimulatedLinkBridge implements LinkBridge {
   readonly deletes: SimulatedDeletes;
   /** Les sauvegardes d'un service (HRT-98) : l'agent simulé juge comme le vrai ; la suite est pilotée (`backups.seed`, `toStep`, `progress`, `succeed`, `fail`). */
   readonly backups: SimulatedBackups;
+  /** Les mods d'un serveur Minecraft (HRT-260) : l'agent simulé juge comme le vrai ; la suite est pilotée (`mods.seed`, `toStep`, `succeed`, `rollBack`). */
+  readonly mods: SimulatedMods;
+  /** La console d'un serveur de jeu et ses joueurs connectés (HRT-291) : l'agent simulé juge comme le vrai. */
+  readonly console: SimulatedConsole;
   /** Envoyer un fichier dans la zone d'attente (HRT-96) : l'agent simulé juge comme le vrai ; la suite est pilotée (`transfers.advance`, `interrupt`, `complete`, `refuse`). */
   readonly transfers = new SimulatedTransfers();
   /** Le Catalogue et l'installation depuis une fiche (HRT-102) : l'agent simulé propose Terraria (`catalog.addRich()` en ajoute une plus riche). */
@@ -321,6 +337,8 @@ export class SimulatedLinkBridge implements LinkBridge {
     );
     this.deletes = new SimulatedDeletes(this.services, this.serviceOps, this.deploys);
     this.backups = new SimulatedBackups(this.services, this.serviceOps);
+    this.mods = new SimulatedMods(this.services, this.serviceOps);
+    this.console = new SimulatedConsole(this.services, this.now);
     this.packs = new SimulatedPacks();
     this.catalog = new SimulatedCatalog(this.deploys, this.packs);
     this.worlds = new SimulatedWorlds((ficheId) => this.catalog.get(ficheId)?.worldImport != null);
@@ -735,6 +753,10 @@ export class SimulatedLinkBridge implements LinkBridge {
     if (this.backups.running(serverId).some((item) => item.operationId === opId)) {
       return this.backups.cancel(serverId, opId);
     }
+    // Une opération de mods s'annule jusqu'au début de la mise en place (BR-MOD-026).
+    if (this.mods.cancels(serverId, opId)) {
+      return this.mods.cancel(serverId, opId);
+    }
     return this.deploys.cancel(serverId, opId);
   }
 
@@ -851,6 +873,118 @@ export class SimulatedLinkBridge implements LinkBridge {
       return { kind: "unknown", opId };
     }
     return accept();
+  }
+
+  // --- Les mods d'un serveur Minecraft (HRT-260) et sa console (HRT-291) ---
+
+  private async connectedServer(serverId: string, call: string) {
+    const server = this.requireServer(serverId);
+    await this.delay();
+    if (this.events.get(serverId)?.state !== "connected") {
+      throw this.fail({ kind: "not_connected" });
+    }
+    this.calls.push(call);
+    return server;
+  }
+
+  async readMods(serverId: string, key: string): Promise<ModsOutcome> {
+    await this.connectedServer(serverId, "mods list");
+    if (this.mods.failList) throw this.fail({ kind: "unreachable" });
+    return this.mods.list(serverId, key);
+  }
+
+  async checkMods(serverId: string, key: string, deposits: string[]): Promise<ModsCheckOutcome> {
+    const server = await this.connectedServer(serverId, "mods check");
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    return this.mods.check(serverId, key, deposits);
+  }
+
+  async applyMods(
+    serverId: string,
+    key: string,
+    batch: ModsBatch,
+    adminPassword: string | null,
+  ): Promise<ModsApplyOutcome> {
+    const server = await this.connectedServer(serverId, "mods apply");
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    const confirmation = this.reauth.confirm(
+      serverId,
+      MODS_APPLY_ACT_KIND,
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") {
+      return { kind: "refused", refusal: { kind: "common", refusal: confirmation.refusal } };
+    }
+    const by = server.username ?? "marie";
+    const accept = () => this.mods.accept(serverId, key, batch, by);
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) accept();
+      this.publish(serverId, "reconnecting");
+      const opId = "sim-op-" + this.nextOperation++;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return accept();
+  }
+
+  async readBackupMods(
+    serverId: string,
+    key: string,
+    backupId: string,
+    compare: boolean,
+  ): Promise<BackupModsOutcome> {
+    await this.connectedServer(serverId, "backup mods");
+    return this.mods.backupMods(serverId, key, backupId, compare);
+  }
+
+  async readOperationTail(serverId: string, operationId: string): Promise<OperationTailOutcome> {
+    await this.connectedServer(serverId, "operation tail");
+    return this.mods.tail(operationId);
+  }
+
+  async describeConsole(serverId: string, key: string): Promise<ConsoleOutcome> {
+    await this.connectedServer(serverId, "console describe");
+    return this.console.describe(serverId, key);
+  }
+
+  async readPlayers(serverId: string, key: string): Promise<PlayersOutcome> {
+    await this.connectedServer(serverId, "players");
+    if (this.console.failPlayers) throw this.fail({ kind: "unreachable" });
+    return this.console.players(serverId, key);
+  }
+
+  async sendConsole(
+    serverId: string,
+    key: string,
+    command: string,
+    commandClass: 1 | 2,
+    adminPassword: string | null,
+  ): Promise<ConsoleSendOutcome> {
+    const server = await this.connectedServer(serverId, "console send");
+    if (!this.accounts.ownRights(server).granted)
+      throw this.fail({ kind: "missing_services_right" });
+    const confirmation = this.reauth.confirm(
+      serverId,
+      commandClass === 2 ? "console_command_sensitive" : "console_command_free",
+      server.role,
+      adminPassword,
+      this.own(serverId),
+    );
+    if (confirmation.kind === "refused") return confirmation;
+    if (this.actionMode === "cut") {
+      this.actionMode = "ok";
+      if (this.executeBeforeCut) this.console.send(serverId, key, command, commandClass);
+      this.publish(serverId, "reconnecting");
+      const opId = "sim-op-" + this.nextOperation++;
+      this.lastUnknownOpId = opId;
+      return { kind: "unknown", opId };
+    }
+    return this.console.send(serverId, key, command, commandClass);
   }
 
   // --- Les sauvegardes d'un service (HRT-98) ---

@@ -30,6 +30,7 @@ describe("lecture du droit", () => {
         gameSettings: true,
         serviceDelete: true,
         serviceBackups: true,
+        gameConsole: true,
         account: "marie",
       },
     });
@@ -74,6 +75,7 @@ describe("lecture du droit", () => {
         gameSettings: true,
         serviceDelete: true,
         serviceBackups: true,
+        gameConsole: true,
         account: "marie",
       }));
     const slow = store.load("forge");
@@ -84,6 +86,7 @@ describe("lecture du droit", () => {
       gameSettings: true,
       serviceDelete: true,
       serviceBackups: true,
+      gameConsole: true,
       account: "marie",
     });
     await slow;
@@ -125,6 +128,7 @@ describe("échec et lien coupé", () => {
         gameSettings: true,
         serviceDelete: true,
         serviceBackups: true,
+        gameConsole: true,
         account: "marie",
       },
     });
@@ -178,6 +182,7 @@ describe("changement de compte ou de session", () => {
       gameSettings: true,
       serviceDelete: true,
       serviceBackups: true,
+      gameConsole: true,
       account: "marie",
     });
     return { ...ctx, store };
@@ -206,6 +211,7 @@ describe("changement de compte ou de session", () => {
       gameSettings: true,
       serviceDelete: true,
       serviceBackups: true,
+      gameConsole: true,
       account: "paul",
     });
     const shown = JSON.stringify(seen);
@@ -238,6 +244,7 @@ describe("changement de compte ou de session", () => {
       gameSettings: true,
       serviceDelete: true,
       serviceBackups: true,
+      gameConsole: true,
       account: "marie",
     });
     await late;

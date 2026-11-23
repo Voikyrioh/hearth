@@ -1037,6 +1037,7 @@ export const fr = {
       backup: "Sauvegarde de {name}",
       restore: "Restauration de {name}",
       worldImport: "Reprise d'un monde dans {name}",
+      mods: "Changement des mods de {name}",
       unknown: "Opération sur {name}",
     },
     // Le sujet d'une phrase d'issue, avec le nom du service (genre neutre : « a réussi », « a échoué »).
@@ -1051,6 +1052,7 @@ export const fr = {
       backup: "La sauvegarde de {name}",
       restore: "La restauration de {name}",
       worldImport: "La reprise du monde de {name}",
+      mods: "Le changement des mods de {name}",
       unknown: "L'opération sur {name}",
     },
     // L'effacement des données d'un service : sans le droit de gérer les services, aucun chemin ni progression.
@@ -1075,6 +1077,7 @@ export const fr = {
       erase: "Effacement",
       removeContainer: "Suppression du service",
       forget: "Effacement de la configuration",
+      place: "Mise en place des mods",
     },
     status: {
       accepted: "L'opération attend son départ.",

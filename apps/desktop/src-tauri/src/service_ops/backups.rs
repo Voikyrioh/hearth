@@ -153,7 +153,7 @@ fn text(body: &Value, name: &str) -> Option<String> {
 
 /// Le refus d'un acte de sauvegarde, lu par son code. Le droit retiré entre-temps est un échec que l'interface lit à
 /// part (elle relit le droit et le dit).
-fn refusal(status: u16, body: &Value) -> Result<BackupRefusal, LinkFailure> {
+pub(super) fn refusal(status: u16, body: &Value) -> Result<BackupRefusal, LinkFailure> {
     match serde_json::from_value::<ErrorBody>(body.clone()) {
         Ok(parsed) => {
             if let Some(confirmation) = confirmation_of(&parsed)? {

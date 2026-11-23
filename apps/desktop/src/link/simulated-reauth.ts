@@ -77,6 +77,11 @@ export function simulatedCovers(kind: AdminActKind, role: Role | null): boolean 
     case "service_update":
     // Répondre à une opération n'est jamais couvert par l'élévation seule (agent d'avant la grille).
     case "operation_decide":
+    // Appliquer un lot de mods n'est JAMAIS couvert par l'élévation (BR-MOD-031) ; une commande sensible non plus.
+    case "mods_apply":
+    case "console_command_sensitive":
+    // Une commande libre de console est un acte de pilotage : seule la grille de confiance décide (BR-CONSOLE-005).
+    case "console_command_free":
       return false;
   }
 }
@@ -88,6 +93,7 @@ function isPiloting(kind: AdminActKind): boolean {
     case "service_stop":
     case "service_restart":
     case "operation_decide":
+    case "console_command_free":
       return true;
     case "account_create":
     case "account_role":
@@ -108,6 +114,8 @@ function isPiloting(kind: AdminActKind): boolean {
     case "backup_settings":
     case "service_update":
     case "file_write":
+    case "mods_apply":
+    case "console_command_sensitive":
       return false;
   }
 }
