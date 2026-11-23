@@ -167,3 +167,4 @@ Code changé, commit hash, stratégie (patch, refactoring).
 
 Pointeur code : `// FIX:{ULID}` au-dessus de la ligne corrigée.
 | [FIX-01M7Q1M71TKSBWVV0C0GTXWWXZ](./FIX-01M7Q1M71TKSBWVV0C0GTXWWXZ.md) | Un serveur Minecraft limité en mémoire était tué par le noyau : la JVM ne voyait pas la limite du conteneur (HRT-295) | 2026-11-18 |
+| [FIX-01M855R2F0XJ3KDBH325R1NR2R](./FIX-01M855R2F0XJ3KDBH325R1NR2R.md) | La lecture des chemins de l'hôte refusait au-delà de huit lectures simultanées : « racine des sauvegardes indisponible » à tort | 2026-11-23 |

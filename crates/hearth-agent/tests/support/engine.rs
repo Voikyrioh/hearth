@@ -66,7 +66,7 @@ pub fn parts_supervised(
         deploy: fast_deploy(),
         delete: fast_delete(),
         safe_fs: Some(Arc::new(super::fake_safe_fs::FakeSafeFs::new())),
-        host_paths: None,
+        host_paths: Some(Arc::new(super::fake_host::FakeHostPaths)),
         backups: hearth_agent::app::BackupParts {
             timings: fast_backup(),
             files: Some(Arc::new(super::fake_backup_files::FakeBackupFiles::new())),
