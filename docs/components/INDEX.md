@@ -218,3 +218,4 @@ Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,orga
 - [TransfersStrip](./TransfersStrip.md) : le panneau « Transferts », envois de fichiers vers la zone d'attente de l'agent (HRT-96)
 - [PlayersOnlineCard](./PlayersOnlineCard.md) : la carte « Joueurs connectés » d'un serveur de jeu (HRT-291)
 - [ModsTab](./ModsTab.md), [ModRow](./ModRow.md) : l'onglet « Mods » d'un serveur Minecraft et sa ligne (HRT-261, HRT-262)
+- [ModsDepositDialog](./ModsDepositDialog.md), [ModsCheckList](./ModsCheckList.md), [ModsPendingBar](./ModsPendingBar.md) : ajouter des mods, lire le contrôle, la barre du lot (HRT-262)

@@ -1134,6 +1134,9 @@ export const fr = {
       enable: "Sera réactivé au prochain redémarrage",
       retire: "Sera mis de côté au prochain redémarrage",
       restore: "Sera remis au prochain redémarrage",
+      add: "Sera ajouté au prochain redémarrage",
+      replace: "Remplacera {file} au prochain redémarrage",
+      replacedBy: "Sera remplacé par la version {version} au prochain redémarrage",
     },
     dependents: {
       one: "Le mod {name} a besoin de celui-ci.",
@@ -1149,6 +1152,82 @@ export const fr = {
     help: "Désactiver laisse le fichier à sa place : le jeu ne le charge plus, vous le réactivez quand vous voulez. Retirer le met de côté dans « Mods retirés ». Les deux s'appliquent avec le redémarrage, comme un ajout.",
     warning:
       "Un mod est un programme écrit par quelqu'un d'autre. Il tourne avec les droits du serveur de jeu. Hearth lit la fiche d'identité de chaque mod et ne le vérifie pas plus loin.",
+    deposit: {
+      back: "Retour à la liste des mods",
+      title: "Ajouter des mods",
+      lead: "Choisissez les fichiers de mods que vous avez téléchargés. Hearth les contrôle avant de toucher au serveur : rien n'est écrit tant que vous n'avez pas appliqué.",
+      zone: "Choisissez vos fichiers .jar, 8 au plus à la fois.",
+      choose: "Choisir des fichiers",
+      only: "Seuls les fichiers .jar sont acceptés.",
+      count: "{n} fichiers déposés",
+      countOne: "1 fichier déposé",
+      remove: "Retirer de la liste",
+      waiting: "En attente de votre confirmation",
+      sending: "Envoi en cours",
+      sendingPercent: "Envoi en cours, {percent} %",
+      sent: "Envoyé",
+      notJar: "{name} n'est pas un fichier .jar : il n'a pas été ajouté.",
+      tooMany: "Un lot compte 8 fichiers au plus : {name} n'a pas été ajouté.",
+      unreadable: "Hearth n'a pas pu lire {name} : il n'a pas été ajouté.",
+      needsGesture:
+        "Un envoi est interrompu ou a échoué : reprenez-le depuis le panneau Transferts, ou retirez le fichier de la liste.",
+      check: "Contrôler les fichiers",
+      checkNote: "Le contrôle commence quand tous les envois sont terminés.",
+      checkFailed: "Le contrôle n'a pas pu se faire. Réessayez dans un instant.",
+      depositGone:
+        "Un des fichiers n'est plus dans la zone d'attente du serveur. Retirez-le de la liste et déposez-le de nouveau.",
+      send: "Envoyer les fichiers",
+      sendTitle: "Envoyer les fichiers",
+      sendSubmit: "Envoyer",
+      sendLater: "Plus tard",
+      sendHelp:
+        "Hearth envoie {n} fichier(s) dans la zone d'attente du serveur. Rien n'est écrit dans les mods avant que vous appliquiez.",
+    },
+    checkTitle: {
+      lead: "Contrôle terminé : {parts}",
+      ready: "{n} fichiers prêts",
+      readyOne: "1 fichier prêt",
+      review: "{n} fichiers à revoir",
+      reviewOne: "1 fichier à revoir",
+    },
+    check: {
+      lead: "Hearth a comparé chaque mod au moteur de votre serveur ({loader}) et à sa version de Minecraft ({minecraft}). Rien n'a encore été modifié.",
+      replace: "Remplacer {old} {oldVersion} par la version {newVersion}",
+      depositMissing: "Déposer le mod manquant",
+      drop: "Retirer de la liste",
+      more: "Déposer d'autres fichiers",
+      continue: "Continuer avec {n} fichiers",
+      continueOne: "Continuer avec 1 fichier",
+      room: "Le lot peut encore recevoir {n} ajouts : décochez des remplacements ou retirez des fichiers.",
+    },
+    checkSentence: {
+      add: "Fait pour {loader} et Minecraft {minecraft}, comme votre serveur. Il sera ajouté.",
+      replace:
+        "Fait pour {loader} et Minecraft {minecraft}. Il existe déjà dans une autre version : cochez la case pour la remplacer, sinon ce fichier est laissé de côté.",
+      unverified:
+        "Hearth ne peut pas vérifier la version de Minecraft de ce mod. Il sera ajouté, et si le serveur ne démarre pas, Hearth remettra les mods d'avant.",
+      unverifiedReplace:
+        "Hearth ne peut pas vérifier la version de Minecraft de ce mod. Il existe déjà dans une autre version : cochez la case pour la remplacer, sinon ce fichier est laissé de côté.",
+      toComplete:
+        "Ce mod a besoin du mod {names}, qui n'est pas installé. Sans lui, le serveur risque de ne pas démarrer : dans ce cas, Hearth remettra les mods d'avant. Déposez aussi ce mod.",
+    },
+    refusal: {
+      unrecognized:
+        "Hearth ne lit pas la fiche d'identité de ce fichier : ce n'est pas un mod qu'il sait juger.",
+      archive: "Ce fichier n'est pas une archive que Hearth accepte de lire.",
+      tooLarge: "Ce fichier dépasse 256 Mio : Hearth ne le prend pas.",
+      loader:
+        "Ce fichier est fait pour {mod}. Votre serveur utilise {server}, qui ne sait pas le charger. Cherchez la version pour {server} de ce mod.",
+      minecraft:
+        "Ce mod n'est pas compatible avec Minecraft {minecraft}. Cherchez la version qui va avec votre serveur.",
+      duplicate:
+        "Deux fichiers de ce lot sont le même mod : aucun des deux n'est retenu. Gardez-en un seul.",
+      nameTaken: "Un fichier de ce nom existe déjà dans le dossier des mods.",
+      modrinth:
+        "Ce mod fait partie du pack Modrinth : le serveur le remettrait à chaque démarrage.",
+      sameVersion: "Ce mod est déjà installé dans cette version.",
+      other: "Hearth refuse ce fichier.",
+    },
     leave: {
       title: "Quitter sans appliquer ?",
       text: "Les changements préparés ne sont pas gardés : ils seront perdus si vous quittez l'onglet Mods.",

@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { computed, useId, watch } from "vue";
+import { computed, ref, useId, watch } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
+import HIcon from "@/components/atoms/HIcon.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import EmptyState from "@/components/molecules/EmptyState.vue";
 import ModRow from "@/components/molecules/ModRow.vue";
+import ModsPendingBar from "@/components/molecules/ModsPendingBar.vue";
+import ModsCheckList from "@/components/organisms/ModsCheckList.vue";
+import ModsDepositDialog from "@/components/organisms/ModsDepositDialog.vue";
+import { useModsDeposit } from "@/composables/useModsDeposit";
+import type { PendingAdd } from "@/composables/useServiceMods";
 import { useServiceMods } from "@/composables/useServiceMods";
 import { t } from "@/i18n";
-import type { ModItem, ServiceInfo } from "@/link";
+import { MAX_BATCH_ADDS, type ModItem, type ServiceInfo } from "@/link";
 import {
   bannerItems,
   blockingBanner,
@@ -20,6 +26,7 @@ import {
   versionLine,
 } from "@/services/mods";
 import type { RightsGate } from "@/services/rights";
+import { canAct } from "@/services/rights";
 
 // L'onglet « Mods » d'un serveur Minecraft installé par Hearth (HRT-261, HRT-262, BR-MOD-020 à 033, maquettes Main et
 // SansMods) : ce que le serveur a comme mods, s'ils vont avec lui, d'où ils viennent, et le lot de gestes que le compte
@@ -47,6 +54,63 @@ const flow = useServiceMods(
   () => props.connected,
 );
 const titleId = useId();
+const deposit = useModsDeposit(
+  () => props.serverId,
+  () => props.service.key,
+);
+/** L'écran montré : la liste, « Ajouter des mods » (dépôt), ou le contrôle des fichiers déposés. */
+const screen = ref<"list" | "deposit" | "check">("list");
+const canWrite = computed(() => canAct(props.gate));
+const room = computed(() => MAX_BATCH_ADDS - flow.adds.value.length);
+
+// Le contrôle s'ouvre dès que l'agent l'a rendu.
+watch(
+  () => deposit.check.value.kind,
+  (kind) => {
+    if (kind === "done") screen.value = "check";
+  },
+);
+
+function leaveDeposit() {
+  screen.value = "list";
+}
+
+function continueWith(entries: PendingAdd[]) {
+  flow.addEntries(entries);
+  deposit.reset();
+  screen.value = "list";
+}
+
+function cancelAll() {
+  flow.clearAll();
+  deposit.reset();
+}
+
+/** Le fichier d'un ajout est un mod « posé » : la ligne le montre comme un mod actif, jamais encore sur le serveur. */
+function itemOfAdd(add: PendingAdd): ModItem {
+  return {
+    file: add.targetFile,
+    rank: 0,
+    place: "active",
+    enabled: true,
+    origin: "hearth",
+    readableName: true,
+    identity: add.identity,
+    verdict: add.verdict ?? { code: "compatible", missing: [], neededBy: [] },
+  };
+}
+
+function labelOfAdd(add: PendingAdd): string {
+  return add.replace === null
+    ? t("mods.pending.add")
+    : t("mods.pending.replace", { file: add.replace });
+}
+
+function labelOfReplaced(item: ModItem): string | undefined {
+  const add = item.file === null ? undefined : flow.replacedBy.value.get(item.file);
+  if (!add) return undefined;
+  return t("mods.pending.replacedBy", { version: add.identity?.version ?? add.targetFile });
+}
 
 watch(
   () => flow.changeCount.value > 0,
@@ -71,6 +135,12 @@ function noteOf(item: ModItem): string | null {
     return dependentsNote(item, current, flow.pending.value);
   }
   return null;
+}
+
+function pendingOf(item: ModItem) {
+  if (item.file === null) return undefined;
+  if (flow.replacedBy.value.has(item.file)) return "replaced" as const;
+  return flow.pending.value.get(item.file);
 }
 
 function keyOf(item: ModItem): string {
@@ -111,6 +181,27 @@ function keyOf(item: ModItem): string {
       </template>
     </EmptyState>
 
+    <ModsDepositDialog
+      v-else-if="view && screen === 'deposit'"
+      :server-id="serverId"
+      :deposit="deposit"
+      :can-write="canWrite"
+      :connected="connected"
+      @back="leaveDeposit"
+    />
+
+    <ModsCheckList
+      v-else-if="view && screen === 'check' && deposit.check.value.kind === 'done'"
+      :files="deposit.check.value.files"
+      :game="view.game"
+      :name-of="deposit.nameOfDeposit"
+      :sha-of="deposit.shaOf"
+      :room="room"
+      @continue="continueWith"
+      @more="screen = 'deposit'"
+      @drop="deposit.dropChecked"
+    />
+
     <template v-else-if="view">
       <header class="mt__head">
         <div class="mt__heading">
@@ -118,6 +209,17 @@ function keyOf(item: ModItem): string {
           <p class="mt__sub" data-mods-sub>{{ subheadingOf(view) }}</p>
           <p class="mt__version" data-mods-version>{{ versionLine(view.game) }}</p>
         </div>
+        <HButton
+          variant="primary"
+          needs-link
+          :disabled="!canWrite"
+          :described-by="canWrite ? undefined : rightsReasonId"
+          data-mods-add
+          @click="screen = 'deposit'"
+        >
+          <HIcon name="plus" size="sm" />
+          {{ t("mods.add") }}
+        </HButton>
       </header>
 
       <Callout v-for="line in notes" :key="line" tone="info" data-mods-note>{{ line }}</Callout>
@@ -136,6 +238,12 @@ function keyOf(item: ModItem): string {
           {{ t("mods.banner.more", { n: banners.more }) }}
         </p>
       </section>
+
+      <ModsPendingBar
+        v-if="flow.changeCount.value > 0"
+        :count="flow.changeCount.value"
+        @cancel-all="cancelAll"
+      />
 
       <Callout v-if="unread > 0" tone="info" data-mods-reading>
         <strong>{{ t("mods.reading") }}</strong>
@@ -157,6 +265,21 @@ function keyOf(item: ModItem): string {
               <th scope="col" class="mt__right">{{ t("mods.table.action") }}</th>
             </tr>
           </thead>
+          <tbody v-if="flow.adds.value.length > 0" data-mods-adds>
+            <ModRow
+              v-for="add in flow.adds.value"
+              :key="add.deposit"
+              :item="itemOfAdd(add)"
+              :game="view.game"
+              :view="view"
+              :gate="gate"
+              :rights-reason-id="rightsReasonId"
+              pending="add"
+              :pending-label="labelOfAdd(add)"
+              :link-down="!connected"
+              @undo="flow.removeAdd(add.deposit)"
+            />
+          </tbody>
           <tbody>
             <ModRow
               v-for="item in active"
@@ -166,7 +289,8 @@ function keyOf(item: ModItem): string {
               :view="view"
               :gate="gate"
               :rights-reason-id="rightsReasonId"
-              :pending="item.file ? flow.pending.value.get(item.file) : undefined"
+              :pending="pendingOf(item)"
+              :pending-label="labelOfReplaced(item)"
               :note="noteOf(item)"
               :link-down="!connected"
               @toggle="flow.toggle(item)"

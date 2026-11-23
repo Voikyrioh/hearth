@@ -33,7 +33,10 @@ const props = defineProps<{
   gate: RightsGate;
   /** L'`id` de la raison du droit que le détail écrit déjà, une seule fois (BR-GRANT-014). */
   rightsReasonId: string;
-  pending?: Gesture;
+  /** `add` : un fichier déposé qui n'est pas encore sur le serveur ; `replaced` : l'ancien fichier d'un remplacement. */
+  pending?: Gesture | "add" | "replaced";
+  /** La phrase du geste préparé quand elle porte un nom ou une version (ajout, remplacement). */
+  pendingLabel?: string;
   /** Une phrase posée sous le nom : « Le mod X a besoin de celui-ci », ou le refus de réactiver. */
   note?: string | null;
   /** Le lien est coupé : aucun geste ne se prépare. */
@@ -53,7 +56,7 @@ const retired = computed(() => props.item.place === "retired");
 const pill = computed(() => statePill(props.item));
 const sentence = computed(() => verdictSentence(props.item, props.game, props.view));
 const gesture = computed(() => gestureGate(props.item, props.gate));
-const blocked = computed(() => !gesture.value.allowed || props.linkDown === true);
+const blocked = computed(() => !gesture.value.allowed || props.linkDown === true || fixed.value);
 const reason = computed(() => gesture.value.reason);
 const describedBy = computed(() => {
   if (gesture.value.rights) return props.rightsReasonId;
@@ -66,6 +69,7 @@ const switchOn = computed(() => {
   return props.item.enabled;
 });
 const switchPending = computed(() => props.pending === "disable" || props.pending === "enable");
+const fixed = computed(() => props.pending === "add" || props.pending === "replaced");
 const targetMinecraft = computed(() => {
   switch (props.item.verdict.code) {
     case "compatible":
@@ -88,7 +92,7 @@ const targetMinecraft = computed(() => {
       <div class="row__name">
         <strong class="row__title">{{ name }}</strong>
         <span v-if="file" class="row__file">{{ file }}</span>
-        <span v-if="pending" class="row__pending" data-mod-pending-text>{{ pendingText(pending) }}</span>
+        <span v-if="pending" class="row__pending" data-mod-pending-text>{{ pendingLabel ?? (pending === 'add' || pending === 'replaced' ? '' : pendingText(pending)) }}</span>
         <span v-if="sentence && !retired" class="row__sentence" data-mod-sentence>{{ sentence }}</span>
         <span v-if="note" class="row__note" data-mod-note>{{ note }}</span>
       </div>
@@ -108,7 +112,7 @@ const targetMinecraft = computed(() => {
     <td><span class="row__origin" data-mod-origin>{{ originLabel(item.origin) }}</span></td>
     <td class="row__switch">
       <HToggle
-        v-if="!retired"
+        v-if="!retired && pending !== 'add'"
         :model-value="switchOn"
         :disabled="blocked"
         :hint="reason ?? undefined"

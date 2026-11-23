@@ -14,6 +14,7 @@ maj: 2026-11-18
 « Retirer » déplace le fichier (`.jar` ou `.jar.disabled`) de `data/mods` dans `data/mods-retires` du même service, par un renommage SANS remplacement ; ce dossier n'est jamais lu par le jeu et fait partie des sauvegardes. Un nom déjà pris dans « Mods retirés » reçoit un numéro (`-2` à `-99`, le premier libre). Un fichier remplacé par un dépôt part de la même façon. Hearth ne vide jamais « Mods retirés ». « Remettre » est le geste inverse (un nom déjà pris dans `data/mods` refuse le lot : `MOD_NAME_TAKEN`). Un mod listé par le manifeste du pack Modrinth ne se retire, ne se remplace et ne se désactive pas (`MOD_IN_MODRINTH_PACK`) : le serveur le remettrait à chaque démarrage. Un nom absent du dossier visé : `MOD_FILE_MISSING`. Aucun geste du lot ne supprime un fichier.
 
 ## Application (code)
+- Client (HRT-262) : `apps/desktop/src/services/mods.ts::gestureGate`, `composables/useServiceMods.ts` (lot), `ModRow.vue`
 - `crates/hearth-agent/src/domain/mods/apply.rs::plan` (choix du nom libre, refus, ordre des gestes)
 - `crates/hearth-agent/src/application/ports/safe_fs.rs::ServiceRoot::rename_noreplace` (le seul geste de déplacement : `renameat2` `RENAME_NOREPLACE`, aucun lien suivi, aucun montage franchi)
 

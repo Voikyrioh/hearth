@@ -3,10 +3,13 @@ import { logUiError } from "@/errors/report";
 import {
   failureOf,
   getLinkBridge,
+  MAX_BATCH_ADDS,
+  type ModIdentity,
   type ModItem,
   type ModsBatch,
   type ModsReadRefusal,
   type ModsView,
+  type ModVerdict,
   type ServiceInfo,
 } from "@/link";
 import { enableConflict, type Gesture } from "@/services/mods";
@@ -17,6 +20,19 @@ export type ModsListState =
   | { kind: "ready"; view: ModsView }
   | { kind: "refused"; refusal: ModsReadRefusal }
   | { kind: "failed" };
+
+/** Un ajout contrôlé, prêt pour le lot : le dépôt, son empreinte, le nom que Hearth lui donnera et le fichier remplacé. */
+export interface PendingAdd {
+  deposit: string;
+  sha256: string;
+  identity: ModIdentity | null;
+  verdict: ModVerdict | null;
+  /** Le nom sous lequel Hearth le posera (choisi par Hearth, jamais le nom envoyé). */
+  targetFile: string;
+  /** Le fichier actif qu'il remplace (BR-MOD-023). */
+  replace: string | null;
+  replaceVersion: string | null;
+}
 
 /** Quand des jars ne sont pas encore lus, la liste est relue après ce délai (BR-MOD-020 : « Lecture des mods en cours »). */
 export const REREAD_MS = 3_000;
@@ -43,6 +59,9 @@ export function useServiceMods(
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const view = computed(() => (list.value.kind === "ready" ? list.value.view : null));
+
+  /** Les ajouts contrôlés du lot : 8 au plus (BR-MOD-022). */
+  const adds = ref<PendingAdd[]>([]);
 
   function stopTimer() {
     if (timer !== undefined) clearTimeout(timer);
@@ -150,18 +169,42 @@ export function useServiceMods(
     if (item.file !== null) set(item.file, null);
   }
 
+  /** Met des ajouts contrôlés dans le lot (un dépôt n'y entre qu'une fois). */
+  function addEntries(entries: readonly PendingAdd[]) {
+    const known = new Set(adds.value.map((add) => add.deposit));
+    const fresh = entries.filter((entry) => !known.has(entry.deposit));
+    adds.value = [...adds.value, ...fresh].slice(0, MAX_BATCH_ADDS);
+  }
+
+  function removeAdd(deposit: string) {
+    adds.value = adds.value.filter((add) => add.deposit !== deposit);
+  }
+
   function clearAll() {
     pending.value = new Map();
     refusedNote.value = new Map();
+    adds.value = [];
   }
 
   /** Les fichiers du lot par geste, tels que l'agent les reçoit (hors ajouts, qui viennent de HRT-262). */
   const batch = computed<ModsBatch>(() => {
     const out: ModsBatch = { add: [], retire: [], restore: [], disable: [], enable: [] };
     for (const [file, gesture] of pending.value) out[gesture].push(file);
+    out.add = adds.value.map((add) => ({
+      deposit: add.deposit,
+      sha256: add.sha256,
+      replace: add.replace,
+    }));
     return out;
   });
-  const changeCount = computed(() => pending.value.size);
+  const changeCount = computed(() => pending.value.size + adds.value.length);
+  /** Le fichier remplacé -> l'ajout qui le remplace (la ligne de l'ancien le dit). */
+  const replacedBy = computed(
+    () =>
+      new Map(
+        adds.value.flatMap((add) => (add.replace === null ? [] : [[add.replace, add] as const])),
+      ),
+  );
 
   return {
     list,
@@ -170,6 +213,10 @@ export function useServiceMods(
     reload: load,
     pending,
     refusedNote,
+    adds,
+    replacedBy,
+    addEntries,
+    removeAdd,
     batch,
     changeCount,
     toggle,

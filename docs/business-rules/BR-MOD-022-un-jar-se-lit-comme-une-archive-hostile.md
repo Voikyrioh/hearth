@@ -14,6 +14,7 @@ maj: 2026-11-18
 Le contrôle juge le jar ENTIER par la lecture d'archive hostile (bornes `jar_limits()` : 256 Mio le fichier, 1 Gio déballé, 65 536 entrées, ADR-0055), puis lit au plus `fabric.mod.json`, `quilt.mod.json`, `META-INF/neoforge.mods.toml`, `META-INF/mods.toml` et `META-INF/MANIFEST.MF`, 1 Mio chacun. Aucune archive contenue n'est ouverte, aucune classe chargée. Toute valeur lue passe une forme (identifiant `[a-z][a-z0-9_.-]{0,63}`, version `[A-Za-z0-9.+_-]{1,64}`, nom de 1 à 64 caractères sans contrôle ni caractère bidirectionnel) ; sinon elle est ignorée, jamais recopiée. `${file.jarVersion}` se résout par le manifeste, sinon la version est absente. Le fichier est posé sous le nom `{identifiant}-{version}.jar`, jamais sous le nom envoyé. (Parties « zone d'attente », « rejugement » et « refus au dépôt » : HRT-257, HRT-258.)
 
 ## Application (code)
+- Client (HRT-262) : `apps/desktop/src/composables/useModsDeposit.ts` (8 `.jar` au plus, empreinte locale, un transfert par fichier), `ModsDepositDialog.vue`
 - `crates/hearth-agent/src/domain/mods/jar.rs::{identify, IDENTITY_FILES, ModId::parse, ModVersion::parse}`
 - `crates/hearth-agent/src/domain/mods/listing.rs::{placed_name, is_safe_file_name}`
 - `crates/hearth-agent/src/application/pack_intake.rs::jar_limits`
