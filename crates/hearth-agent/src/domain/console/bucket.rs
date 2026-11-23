@@ -1,10 +1,10 @@
 //! Le débit d'une console (HRT-268, ADR-0067 D7, BR-CONSOLE-008) : un seau à jetons, 20 commandes par minute et par
-//! service, une rafale de 5. Du pur : le temps est donné en millisecondes par l'appelant, jamais lu ici.
+//! service, une rafale de 20 (la spec D7 : 20 commandes immédiates, la 21e refusée). Du pur : le temps est donné en millisecondes par l'appelant, jamais lu ici.
 
 /// Combien de commandes par minute.
 pub const PER_MINUTE: u32 = 20;
 /// La rafale permise.
-pub const BURST: u32 = 5;
+pub const BURST: u32 = 20;
 
 /// Un jeton revient toutes les `60 000 / PER_MINUTE` millisecondes.
 const REFILL_MS: u64 = 60_000 / PER_MINUTE as u64;
@@ -44,11 +44,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_burst_of_five_then_a_refusal_with_the_wait() {
+    fn a_burst_of_twenty_then_a_refusal_with_the_wait() {
         let mut bucket = TokenBucket::full(0);
         for _ in 0..BURST {
             assert_eq!(bucket.take(0), Ok(()));
         }
+        // La vingt et unième est refusée : le prochain jeton revient dans 3 secondes.
         assert_eq!(bucket.take(0), Err(3));
         // Un jeton revient au bout de 3 secondes.
         assert_eq!(bucket.take(2_999), Err(1));
@@ -73,7 +74,9 @@ mod tests {
             assert!(bucket.take(0).is_ok());
         }
         let after = 10 * 60_000;
-        let passed = (0..10).filter(|_| bucket.take(after).is_ok()).count();
+        let passed = (0..BURST * 2)
+            .filter(|_| bucket.take(after).is_ok())
+            .count();
         assert_eq!(passed, BURST as usize);
     }
 

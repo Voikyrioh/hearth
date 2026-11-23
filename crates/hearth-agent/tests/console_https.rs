@@ -362,7 +362,8 @@ async fn an_exclusive_operation_on_the_service_refuses_the_command() {
 #[tokio::test]
 async fn the_commands_are_limited_per_minute_and_the_wait_is_told() {
     let b = bench().await;
-    for _ in 0..5 {
+    // La rafale est de 20 commandes immédiates (spec D7) ; la vingt et unième est refusée sans partir.
+    for _ in 0..20 {
         assert_eq!(b.free("list").await.status, 200);
     }
     let limited = b.free("list").await;
@@ -374,7 +375,11 @@ async fn the_commands_are_limited_per_minute_and_the_wait_is_told() {
             .unwrap()
             >= 1
     );
-    assert_eq!(b.game.lines().len(), 5, "la sixième n'est pas partie");
+    assert_eq!(
+        b.game.lines().len(),
+        20,
+        "la vingt et unième n'est pas partie"
+    );
 }
 
 #[tokio::test]
