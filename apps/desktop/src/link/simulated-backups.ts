@@ -64,6 +64,7 @@ function emptyBackup(id: string, patch: Partial<BackupInfo>): BackupInfo {
     image: "ghcr.io/example/terraria:1.4.4",
     integrity: "verified",
     verifiedAt: "2026-11-13T21:07:00Z",
+    mods: null,
     ...patch,
   };
 }

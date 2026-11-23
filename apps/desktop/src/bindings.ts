@@ -930,6 +930,14 @@ export type BackupModsGameDto = {
 
 export type BackupModsOutcome = { kind: "ready"; view: BackupModsDto } | { kind: "refused"; refusal: ModsReadRefusal };
 
+/**  Le résumé joint à chaque sauvegarde de la liste. */
+export type BackupModsSummaryDto = {
+	state: string,
+	active: number,
+	disabled: number,
+	retired: number,
+};
+
 /**  De quoi bâtir la fenêtre de création. */
 export type BackupPreviewDto = {
 	name: string,
@@ -1012,6 +1020,8 @@ export type BackupViewDto = {
 	image: string,
 	integrity: BackupIntegrityDto,
 	verifiedAt: string | null,
+	/**  Le résumé de la liste des mods de cette sauvegarde (HRT-294) : absent pour un service sans mods. */
+	mods: BackupModsSummaryDto | null,
 };
 
 /**  La liste des sauvegardes : prête, ou refusée par son code. */

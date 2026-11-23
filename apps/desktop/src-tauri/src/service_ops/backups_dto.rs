@@ -207,6 +207,8 @@ pub struct BackupViewDto {
     pub image: String,
     pub integrity: BackupIntegrityDto,
     pub verified_at: Option<String>,
+    /// Le résumé de la liste des mods de cette sauvegarde (HRT-294) : absent pour un service sans mods.
+    pub mods: Option<super::mods_dto::BackupModsSummaryDto>,
 }
 
 impl From<&BackupView> for BackupViewDto {
@@ -226,6 +228,7 @@ impl From<&BackupView> for BackupViewDto {
             image: view.image.clone(),
             integrity: view.integrity.into(),
             verified_at: view.verified_at.clone(),
+            mods: view.mods.as_ref().map(Into::into),
         }
     }
 }

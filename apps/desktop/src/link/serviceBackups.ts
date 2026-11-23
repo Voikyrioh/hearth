@@ -7,6 +7,8 @@ import type {
   BackupSettingsOutcome as BoundSettingsOutcome,
   BackupVerifyOutcome as BoundVerifyOutcome,
 } from "@/bindings";
+import type { BackupModsSummary } from "./mods";
+import { toBackupModsState } from "./mods";
 import type { AdminActKind } from "./reauth";
 import type { OperationKind } from "./serviceOps";
 import type { EngineState, ServiceState } from "./services";
@@ -77,6 +79,8 @@ export interface BackupInfo {
   image: string;
   integrity: BackupIntegrity;
   verifiedAt: string | null;
+  /** Le résumé de la liste des mods de cette sauvegarde (BR-MOD-035) ; `null` : un serveur sans mods. */
+  mods: BackupModsSummary | null;
 }
 
 /** La liste des sauvegardes d'un service, l'espace pris, l'espace libre et les éléments ignorés. */
@@ -222,6 +226,14 @@ function toInfo(dto: BackupViewDto): BackupInfo {
     image: dto.image,
     integrity: dto.integrity,
     verifiedAt: dto.verifiedAt,
+    mods: dto.mods
+      ? {
+          state: toBackupModsState(dto.mods.state),
+          active: dto.mods.active,
+          disabled: dto.mods.disabled,
+          retired: dto.mods.retired,
+        }
+      : null,
   };
 }
 

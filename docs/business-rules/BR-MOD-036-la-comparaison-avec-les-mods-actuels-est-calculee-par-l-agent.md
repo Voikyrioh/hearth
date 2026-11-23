@@ -14,6 +14,7 @@ maj: 2026-11-18
 `GET /services/{key}/backups/{id}/mods?compare=current` met en regard la liste de la sauvegarde et les mods actuels (BR-MOD-020, avec son cache), mod par mod. Clé de comparaison : l'identifiant du mod, ou le nom du fichier sans `.disabled` pour un mod sans identité ; un nom illisible ne se compare pas. Genres : `added` (présent aujourd'hui, absent de la sauvegarde), `removed` (dans la sauvegarde, absent aujourd'hui ou mis dans « Mods retirés »), `version_changed` (versions des deux côtés), `enabled`, `disabled`. Un mod mis dans « Mods retirés » compte comme absent des deux côtés. Rien de changé : `same` vrai. Tant que la lecture actuelle a des jars non lus : `complete` faux et `unread` dit combien, le client relit. Lecture actuelle impossible (dossier bloqué) : la liste de la sauvegarde est rendue, `compare` absent. La comparaison ne modifie rien. Les changements préparés dans l'écran mais pas appliqués n'existent pas pour l'agent.
 
 ## Application (code)
+- Client (HRT-294) : `apps/desktop/src/composables/useBackupMods.ts` (comparaison de l'agent, relue tant que `complete` est faux), `BackupModsCompare.vue`
 - `crates/hearth-agent/src/domain/mods/backup_list.rs::compare`
 - `crates/hearth-agent/src/application/backups.rs::Backups::mods_of`
 

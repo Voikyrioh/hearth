@@ -14,6 +14,7 @@ maj: 2026-11-18
 `GET /services/{key}/backups` ajoute à chaque sauvegarde d'un service qui a des mods un champ `mods` : l'état de sa liste (`recorded`, `partial`, `unreadable`, `not_in_backup`, `not_recorded`) et les nombres de mods actifs, désactivés et retirés ; absent pour un service sans mods (donc compatible avec un client plus ancien). `GET /services/{key}/backups/{id}/mods` rend la liste complète. Les deux ne demandent que le droit de voir les sauvegardes du service (BR-BACKUP-001) et ne sont pas inscrites au journal d'activité (BR-BACKUP-032). Le résumé est lu dans `backup_mod_sets` par une requête, sans lire les entrées. La colonne, le détail et « Copier la liste » sont l'affaire du client (HRT-294).
 
 ## Application (code)
+- Client (HRT-294) : `apps/desktop/src/services/backupMods.ts::{columnText, copyOf}`, `BackupTable.vue` (colonne « Mods »), `BackupModsPanel.vue`
 - `crates/hearth-agent/src/application/backups.rs::{Backups::list, Backups::mods_of}`
 - `crates/hearth-agent/src/entrypoint/http/backups.rs::mods`
 

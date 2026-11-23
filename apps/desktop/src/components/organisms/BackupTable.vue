@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { ref, useId } from "vue";
+import { computed, ref, useId } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HMeter from "@/components/atoms/HMeter.vue";
 import HSpinner from "@/components/atoms/HSpinner.vue";
 import HTag from "@/components/atoms/HTag.vue";
+import BackupModsPanel from "@/components/molecules/BackupModsPanel.vue";
+import type { BackupModsEntry } from "@/composables/useBackupMods";
 import type { VerifyNote } from "@/composables/useServiceBackups";
 import { t } from "@/i18n";
 import type { BackupInfo } from "@/link";
 import { formatSize } from "@/serviceOps/messages";
+import { columnText } from "@/services/backupMods";
 import {
   accountOf,
   dataLine,
@@ -29,7 +32,7 @@ import {
 // de la sauvegarde, fichiers et éléments non archivés. « Vérifier » est une consultation dite dans la ligne ; « Supprimer »
 // ouvre la fenêtre de confirmation. « Restaurer » et « Télécharger » ne sont pas encore proposés (HRT-95, HRT-99).
 // Une sauvegarde corrompue ou disparue garde « Vérifier » et « Supprimer ».
-defineProps<{
+const props = defineProps<{
   backups: readonly BackupInfo[];
   verifying: ReadonlySet<string>;
   notes: ReadonlyMap<string, VerifyNote>;
@@ -37,16 +40,35 @@ defineProps<{
   canWrite: boolean;
   /** L'`id` de la raison du droit écrite ailleurs, une seule fois : les boutons désactivés la citent. */
   rightsReasonId: string;
+  /** La liste des mods de chaque sauvegarde déjà lue (HRT-294) ; sans elle, aucune ligne dépliée ne montre de mods. */
+  modsStates?: ReadonlyMap<string, BackupModsEntry>;
+  /** L'adresse que les joueurs utilisent, pour « Copier la liste » d'une sauvegarde. */
+  modsAddress?: string | null;
 }>();
-const emit = defineEmits<{ verify: [backup: BackupInfo]; remove: [backup: BackupInfo] }>();
+const emit = defineEmits<{
+  verify: [backup: BackupInfo];
+  remove: [backup: BackupInfo];
+  modsOpen: [backup: BackupInfo];
+  modsClose: [backup: BackupInfo];
+  modsCompare: [backup: BackupInfo];
+  modsHideCompare: [backup: BackupInfo];
+}>();
+
+/** La colonne « Mods » n'existe que pour un serveur à mods : l'agent joint un résumé à chacune de ses sauvegardes (BR-MOD-035). */
+const withMods = computed(() => props.backups.some((backup) => backup.mods !== null));
 
 const idBase = useId();
 const open = ref<ReadonlySet<string>>(new Set());
 
-function toggle(id: string): void {
+function toggle(backup: BackupInfo): void {
   const next = new Set(open.value);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
+  if (next.has(backup.id)) {
+    next.delete(backup.id);
+    if (backup.mods) emit("modsClose", backup);
+  } else {
+    next.add(backup.id);
+    if (backup.mods) emit("modsOpen", backup);
+  }
   open.value = next;
 }
 
@@ -88,6 +110,7 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
           <th scope="col" class="bk__num">{{ t("backups.colSize") }}</th>
           <th scope="col">{{ t("backups.colMode") }}</th>
           <th scope="col">{{ t("backups.colState") }}</th>
+          <th v-if="withMods" scope="col">{{ t("backups.colMods") }}</th>
           <th scope="col" class="bk__actions-head">{{ t("backups.colActions") }}</th>
         </tr>
       </thead>
@@ -107,7 +130,7 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
                 :aria-controls="`${idBase}-${backup.id}`"
                 :aria-label="t(open.has(backup.id) ? 'backups.expandHide' : 'backups.expand', { date: dateOf(backup.createdAt) })"
                 data-backup-toggle
-                @click="toggle(backup.id)"
+                @click="toggle(backup)"
               >
                 <HIcon :name="open.has(backup.id) ? 'chevron-down' : 'chevron-right'" size="sm" />
               </button>
@@ -140,6 +163,9 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
                 {{ noteText(notes.get(backup.id), backup.files) }}
               </span>
             </td>
+            <td v-if="withMods" class="bk__mods" data-backup-mods-column>
+              <span v-if="backup.mods" class="bk__mods-text">{{ columnText(backup.mods) }}</span>
+            </td>
             <td class="bk__actions">
               <HButton
                 variant="secondary"
@@ -169,7 +195,7 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
           </tr>
           <tr v-if="open.has(backup.id)" :id="`${idBase}-${backup.id}`" class="bk__more" data-backup-more>
             <td />
-            <td colspan="6">
+            <td :colspan="withMods ? 7 : 6">
               <dl class="bk__defs">
                 <div>
                   <dt>{{ t("backups.detailAccount") }}</dt>
@@ -192,6 +218,14 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
                   <dd>{{ backup.skipped }}</dd>
                 </div>
               </dl>
+              <BackupModsPanel
+                v-if="backup.mods"
+                :state="modsStates?.get(backup.id)"
+                :created-at="backup.createdAt"
+                :address="modsAddress ?? null"
+                @compare="emit('modsCompare', backup)"
+                @hide-compare="emit('modsHideCompare', backup)"
+              />
             </td>
           </tr>
         </template>
@@ -235,6 +269,10 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
 .bk__row:last-child td,
 .bk__more:last-child td {
   border-bottom: 0;
+}
+
+.bk__mods-text {
+  white-space: nowrap;
 }
 
 .bk__expand {

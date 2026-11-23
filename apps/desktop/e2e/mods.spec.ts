@@ -23,11 +23,13 @@ type Sim = {
   mods: {
     seed(serverId: string, key: string, view: Record<string, unknown>): void;
     willRead(file: string, deposit: { identity: Identity }): void;
+    seedBackupMods(serverId: string, key: string, id: string, mods: Record<string, unknown>): void;
     lastOperationId(serverId: string): string | undefined;
     toStep(serverId: string, id: string, step: string): void;
     succeed(serverId: string, id: string): void;
     rollBack(serverId: string, id: string, tail: Record<string, unknown>): void;
   };
+  backups: { seed(serverId: string, key: string, backups: Array<Record<string, unknown>>): void };
   transfers: { pickedMany: string[]; list(): Array<{ id: string }>; complete(id: string): void };
 };
 
@@ -44,7 +46,16 @@ async function open(page: Page) {
   await page.goto("/?nodev#/servers/forge/dashboard");
   await expect(page.locator(".nav__item").first()).toBeVisible();
   await sim(page, (s) => {
-    s.services.seed("forge", [{ key: "h_mc", name: "Prominence", origin: "hearth" }]);
+    s.services.seed("forge", [
+      {
+        key: "h_mc",
+        name: "Prominence",
+        origin: "hearth",
+        mounts: [
+          { kind: "folder", source: "/srv/hearth/data/mc", target: "/data", readOnly: false },
+        ],
+      },
+    ]);
     s.games.register("forge", "h_mc", { name: "Minecraft", fiche: "essai" });
     const fiche = s.catalog.addRich();
     fiche.mods?.ways.push("drop_jars");
@@ -163,4 +174,65 @@ test("un lot de dépôt : choisir, envoyer, contrôler, continuer", async ({ pag
   );
   await page.locator("[data-mods-check-continue]").click();
   await expect(page.locator("[data-mods-pending-bar]")).toContainText("1 changement prêt");
+});
+
+test("l'onglet Sauvegardes : la colonne Mods, la ligne dépliée, la comparaison avec les mods actuels", async ({
+  page,
+}) => {
+  await open(page);
+  await sim(page, (s) => {
+    s.backups.seed("forge", "h_mc", [
+      {
+        id: "01SIMBKAAAAAAA",
+        createdAt: "2026-11-17T20:00:00Z",
+        mods: { state: "recorded", active: 1, disabled: 0, retired: 0 },
+      },
+    ]);
+    s.mods.seedBackupMods("forge", "h_mc", "01SIMBKAAAAAAA", {
+      state: "recorded",
+      recordedAt: "2026-11-17T20:00:00Z",
+      game: { loader: "fabric", minecraft: "1.20.1" },
+      counts: { active: 1, disabled: 0, retired: 0, notListed: 0 },
+      mods: [
+        {
+          file: "lithium-0.11.1.jar",
+          rank: 0,
+          place: "active",
+          origin: "server_pack",
+          identity: {
+            id: "lithium",
+            name: "Lithium",
+            version: "0.11.1",
+            loader: "fabric",
+            minecraftDeclared: true,
+            environment: "both",
+          },
+        },
+      ],
+      compare: {
+        complete: true,
+        unread: 0,
+        same: false,
+        changes: [
+          {
+            kind: "version_changed",
+            id: "lithium",
+            name: "Lithium",
+            file: null,
+            backupVersion: "0.11.1",
+            currentVersion: "0.11.2",
+          },
+        ],
+      },
+    });
+  });
+  await page.locator("[data-tab='backups']").click();
+  const row = page.locator("[data-backup='01SIMBKAAAAAAA']");
+  await expect(row.locator("[data-backup-mods-column]")).toHaveText("1 actif");
+  await row.locator("[data-backup-toggle]").click();
+  await expect(page.locator("[data-backup-mods-engine]")).toContainText("Fabric, Minecraft 1.20.1");
+  await page.locator("[data-backup-mods-compare]").click();
+  await expect(page.locator("[data-backup-compare-group='version_changed']")).toContainText(
+    "Lithium : 0.11.1 dans la sauvegarde, 0.11.2 aujourd'hui",
+  );
 });

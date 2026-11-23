@@ -12,6 +12,7 @@ import BackupDialog from "@/components/organisms/BackupDialog.vue";
 import BackupTable from "@/components/organisms/BackupTable.vue";
 import DeleteBackupDialog from "@/components/organisms/DeleteBackupDialog.vue";
 import IgnoredItemsDialog from "@/components/organisms/IgnoredItemsDialog.vue";
+import { useBackupMods } from "@/composables/useBackupMods";
 import { useServiceBackups } from "@/composables/useServiceBackups";
 import { t } from "@/i18n";
 import type { BackupInfo, ServiceInfo } from "@/link";
@@ -56,6 +57,10 @@ const flow = useServiceBackups(
 );
 
 const reasonId = useId();
+const mods = useBackupMods(
+  () => props.serverId,
+  () => props.service.key,
+);
 const view = computed(() => (flow.list.value.kind === "ready" ? flow.list.value.view : null));
 const backups = computed<readonly BackupInfo[]>(() => view.value?.backups ?? []);
 const shownName = computed(() => safeText(props.service.name));
@@ -324,8 +329,14 @@ const resultLines = computed<ResultLine[]>(() => {
           :notes="flow.verifyNotes.value"
           :can-write="canWrite"
           :rights-reason-id="rightsReasonId"
+          :mods-states="mods.states.value"
+          :mods-address="mods.address.value"
           @verify="flow.verify($event)"
           @remove="flow.requestDelete($event)"
+          @mods-open="mods.open($event.id)"
+          @mods-close="mods.close($event.id)"
+          @mods-compare="mods.compare($event.id)"
+          @mods-hide-compare="mods.hideCompare($event.id)"
         />
       </template>
     </template>

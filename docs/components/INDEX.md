@@ -221,3 +221,4 @@ Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,orga
 - [ModsDepositDialog](./ModsDepositDialog.md), [ModsCheckList](./ModsCheckList.md), [ModsPendingBar](./ModsPendingBar.md) : ajouter des mods, lire le contrôle, la barre du lot (HRT-262)
 - [ModsApplyDialog](./ModsApplyDialog.md), [ModsProgress](./ModsProgress.md) : vérifier, suivre et finir l'application d'un lot de mods (HRT-263)
 - [ModsPlayersList](./ModsPlayersList.md) : la liste à copier pour les joueurs (HRT-264)
+- [BackupModsPanel](./BackupModsPanel.md), [BackupModsCompare](./BackupModsCompare.md) : les mods d'une sauvegarde et leur comparaison avec les mods actuels (HRT-294)
