@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { ConsoleView } from "@/link";
 
 /**
@@ -72,6 +73,17 @@ export function classifyLine(policy: ConsoleView["policy"], line: string): LineC
       title: sensitive.title,
       sentence: sensitive.sentence,
       player,
+    };
+  }
+  // Un verbe d'un autre espace de noms (`mod:commande`, hors `minecraft:`) est celui d'un mod : Hearth ne sait pas ce qu'il
+  // fait, le mot de passe est exigé (miroir de `hearth_proto::console::classify`, ADR-0067).
+  if (verb.includes(":")) {
+    return {
+      kind: "sensitive",
+      verb,
+      title: t("console.confirm.modTitle"),
+      sentence: t("console.confirm.modSentence"),
+      player: null,
     };
   }
   return { kind: "free" };

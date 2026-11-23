@@ -71,6 +71,41 @@ describe("la classe d'une commande", () => {
     expect(classifyLine({ refused: [], sensitive: [] }, "stop")).toEqual({ kind: "free" });
   });
 
+  it("un verbe à espace de noms (hors minecraft:) est sensible, comme dans hearth_proto::console::classify", () => {
+    // La même table que `the_verb_is_judged_lowercase_without_the_minecraft_prefix` côté Rust.
+    const rustPolicy = {
+      refused: [
+        { verb: "stop", reason: "use_hearth_stop" },
+        { verb: "reload", reason: "breaks_server" },
+      ],
+      sensitive: ["op", "save-off"].map((verb) => ({
+        verb,
+        title: "t",
+        sentence: "s",
+        target: "none" as const,
+      })),
+    };
+    const kindOf = (line: string) => classifyLine(rustPolicy, line).kind;
+    expect(kindOf("time set day")).toBe("free");
+    expect(kindOf("minecraft:op Bram")).toBe("sensitive");
+    expect(kindOf("coolmod:wipe all")).toBe("sensitive");
+    expect(kindOf("COOLMOD:Wipe all")).toBe("sensitive");
+    expect(kindOf("minecraft:list")).toBe("free");
+    expect(kindOf("OP Bram")).toBe("sensitive");
+    expect(kindOf("STOP")).toBe("refused");
+    expect(kindOf("minecraft:reload")).toBe("refused");
+    expect(kindOf("save-off")).toBe("sensitive");
+    expect(kindOf("say op")).toBe("free");
+    expect(kindOf("opx Bram")).toBe("free");
+    const judged = classifyLine(rustPolicy, "coolmod:wipe all");
+    expect(judged).toMatchObject({ kind: "sensitive", player: null });
+    if (judged.kind === "sensitive") {
+      expect(judged.title).not.toBe("");
+      expect(judged.sentence).not.toBe("");
+      expect(signedClass(judged)).toBe(2);
+    }
+  });
+
   it("le code signé : 1 libre, 2 sensible, rien pour une commande refusée", () => {
     expect(signedClass(classifyLine(policy, "list"))).toBe(1);
     expect(signedClass(classifyLine(policy, "op Bram"))).toBe(2);

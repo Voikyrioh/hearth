@@ -1526,6 +1526,9 @@ export const fr = {
     stopped: "Personne n'est connecté : le serveur est arrêté.",
     starting: "Le nombre de joueurs s'affiche quand le serveur est prêt.",
     unavailable: "Hearth n'a pas pu lire les joueurs connectés.",
+      modTitle: "Envoyer une commande d'un mod ?",
+      modSentence:
+        "Hearth ne sait pas ce que fait cette commande : elle vient d'un mod. Confirmez avec votre mot de passe pour l'envoyer au serveur.",
     writeToPlayers: "Écrire aux joueurs dans la console",
     openConsole: "Ouvrir la console",
   },
