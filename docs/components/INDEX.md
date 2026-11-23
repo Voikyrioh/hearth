@@ -220,3 +220,4 @@ Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,orga
 - [ModsTab](./ModsTab.md), [ModRow](./ModRow.md) : l'onglet « Mods » d'un serveur Minecraft et sa ligne (HRT-261, HRT-262)
 - [ModsDepositDialog](./ModsDepositDialog.md), [ModsCheckList](./ModsCheckList.md), [ModsPendingBar](./ModsPendingBar.md) : ajouter des mods, lire le contrôle, la barre du lot (HRT-262)
 - [ModsApplyDialog](./ModsApplyDialog.md), [ModsProgress](./ModsProgress.md) : vérifier, suivre et finir l'application d'un lot de mods (HRT-263)
+- [ModsPlayersList](./ModsPlayersList.md) : la liste à copier pour les joueurs (HRT-264)

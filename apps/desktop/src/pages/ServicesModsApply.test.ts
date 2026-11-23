@@ -268,3 +268,40 @@ describe("le suivi, la fin et l'échec", () => {
     ctx.wrapper.unmount();
   });
 });
+
+describe("ce que vos joueurs doivent installer", () => {
+  it("après une fin réussie : la liste des mods activés, « Aussi chez les joueurs » ou « Serveur seulement », et « Copier la liste »", async () => {
+    const written: string[] = [];
+    vi.stubGlobal("navigator", {
+      clipboard: { writeText: async (text: string) => void written.push(text) },
+    });
+    const ctx = await open((bridge) => {
+      const view = bridge.mods.viewOf("forge", "h_mc");
+      const spark = view?.mods.find((mod) => mod.file === "spark.jar");
+      if (spark?.identity) spark.identity.environment = "server";
+    });
+    await review(ctx);
+    await submit(ctx);
+    const { wrapper, bridge } = ctx;
+    const op = useServiceOpsStore().forService("forge", "h_mc")?.operation.id ?? "";
+    bridge.mods.toStep("forge", op, "place");
+    bridge.mods.succeed("forge", op);
+    await flushPromises();
+    await wrapper.get("[data-mods-end-list]").trigger("click");
+    await flushPromises();
+    const rows = wrapper.findAll("[data-mods-players-row]");
+    expect(rows.map((row) => row.attributes("data-audience"))).toEqual(["server"]);
+    expect(wrapper.get("[data-mods-players-table]").text()).toContain("Serveur seulement");
+    expect(wrapper.get("[data-mods-players-lead]").text()).toContain(
+      "Minecraft 1.20.1 avec Fabric",
+    );
+    expect(wrapper.text()).not.toContain("Obligatoire");
+    expect(wrapper.text()).not.toContain("Enregistrer la liste en fichier");
+    await wrapper.get("[data-mods-players-copy]").trigger("click");
+    await flushPromises();
+    expect(written).toHaveLength(1);
+    expect(wrapper.get("[data-mods-players-copy]").text()).toBe("Liste copiée");
+    wrapper.unmount();
+    vi.unstubAllGlobals();
+  });
+});

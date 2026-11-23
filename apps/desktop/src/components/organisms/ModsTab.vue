@@ -10,7 +10,9 @@ import ModsPendingBar from "@/components/molecules/ModsPendingBar.vue";
 import ModsApplyDialog from "@/components/organisms/ModsApplyDialog.vue";
 import ModsCheckList from "@/components/organisms/ModsCheckList.vue";
 import ModsDepositDialog from "@/components/organisms/ModsDepositDialog.vue";
+import ModsPlayersList from "@/components/organisms/ModsPlayersList.vue";
 import ModsProgress from "@/components/organisms/ModsProgress.vue";
+import { readGameOnce } from "@/composables/useGameView";
 import { useModsApply } from "@/composables/useModsApply";
 import { useModsDeposit } from "@/composables/useModsDeposit";
 import { useNow } from "@/composables/useNow";
@@ -19,6 +21,7 @@ import type { PendingAdd } from "@/composables/useServiceMods";
 import { useServiceMods } from "@/composables/useServiceMods";
 import { t } from "@/i18n";
 import { MAX_BATCH_ADDS, type ModItem, type ServiceInfo } from "@/link";
+import { addressesOf } from "@/services/game";
 import {
   bannerItems,
   blockingBanner,
@@ -33,6 +36,7 @@ import {
 import { changeRows } from "@/services/modsApply";
 import type { RightsGate } from "@/services/rights";
 import { canAct } from "@/services/rights";
+import { useServersStore } from "@/stores/servers";
 
 // L'onglet « Mods » d'un serveur Minecraft installé par Hearth (HRT-261, HRT-262, BR-MOD-020 à 033, maquettes Main et
 // SansMods) : ce que le serveur a comme mods, s'ils vont avec lui, d'où ils viennent, et le lot de gestes que le compte
@@ -71,7 +75,9 @@ const deposit = useModsDeposit(
   () => props.service.key,
 );
 /** L'écran montré : la liste, « Ajouter des mods » (dépôt), ou le contrôle des fichiers déposés. */
-const screen = ref<"list" | "deposit" | "check" | "review" | "progress">("list");
+const screen = ref<"list" | "deposit" | "check" | "review" | "progress" | "players">("list");
+/** L'adresse que les joueurs utilisent, lue quand « Ce que vos joueurs doivent installer » s'ouvre. */
+const address = ref<string | null>(null);
 const canWrite = computed(() => canAct(props.gate));
 const room = computed(() => MAX_BATCH_ADDS - flow.adds.value.length);
 
@@ -116,6 +122,25 @@ function launched() {
     deposit.reset();
   }
   screen.value = "progress";
+}
+
+/** « Voir ce que vos joueurs doivent installer » : l'issue est dite, la liste se relit, l'adresse se lit. */
+async function openPlayers() {
+  apply.dismiss();
+  screen.value = "players";
+  address.value = null;
+  void flow.reload();
+  const game = await readGameOnce(props.serverId, props.service.key);
+  if (game.kind !== "found") return;
+  const servers = useServersStore();
+  const addresses = addressesOf(
+    servers.byId(props.serverId)?.host ?? "",
+    game.view.ports,
+    game.view.publicAddress,
+    game.view.lanAddress,
+    game.view.detectedAddress,
+  );
+  address.value = addresses?.internet?.text ?? addresses?.lan ?? null;
 }
 
 function closeProgress() {
@@ -271,12 +296,20 @@ function keyOf(item: ModItem): string {
       @launched="launched"
     />
 
+    <ModsPlayersList
+      v-else-if="view && screen === 'players'"
+      :view="view"
+      :address="address"
+      @back="screen = 'list'"
+    />
+
     <ModsProgress
       v-else-if="screen === 'progress'"
       :server-id="serverId"
       :apply="apply"
       :view="view"
       @close="closeProgress"
+      @players="openPlayers"
       @logs="emit('openLogs')"
     />
 
