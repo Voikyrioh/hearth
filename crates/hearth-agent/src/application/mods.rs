@@ -43,7 +43,7 @@ use crate::domain::mods::game_info::{
 };
 use crate::domain::mods::jar::{self, Environment, IDENTITY_FILES, JarIdentity, JarLoader};
 use crate::domain::mods::listing;
-use crate::domain::mods::pack::{DescriptionError, DescriptionReader};
+use crate::domain::mods::pack::PrereadFiles;
 use crate::domain::mods::version_req::GameVersion;
 use crate::domain::services::ServiceKey;
 use crate::domain::services::deploy::{flatten_target, normalize_target};
@@ -65,6 +65,9 @@ pub enum ModsError {
     /// Pas un serveur de jeu créé depuis une fiche (inconnu, adopté, déployé à la main).
     #[error("ce n'est pas un serveur de jeu créé depuis une fiche")]
     NotAGameService,
+    /// Un service adopté (créé hors de Hearth) : même réponse que la console (`409 SERVICE_ADOPTED`).
+    #[error("service adopté")]
+    Adopted,
     /// `data/mods` ou `data/mods-retires` est un lien ou n'est pas un dossier.
     #[error("le dossier des mods est bloqué")]
     FolderBlocked,
@@ -257,6 +260,9 @@ impl ModsService {
 
     /// Ce que la description et la fiche disent du serveur : le plan de lecture, ou pourquoi il n'y en a pas.
     async fn plan_of(&self, key: &ServiceKey) -> Result<Judged, ModsError> {
+        if key.kind() != crate::domain::services::KeyKind::Hearth {
+            return Err(ModsError::Adopted);
+        }
         let Some(body) = self.specs.body(key).await? else {
             return Err(ModsError::NotAGameService);
         };
@@ -556,7 +562,7 @@ fn read_deposit(file: &mut Box<dyn DepositFile>) -> Deposit {
     else {
         return refused(false);
     };
-    let mut files = JarFiles(
+    let mut files = PrereadFiles(
         IDENTITY_FILES
             .into_iter()
             .zip(found)
@@ -861,18 +867,6 @@ enum JarRead {
     OutOfTime,
 }
 
-/// Les fichiers d'identité d'un jar, lus en une passe après le jugement de l'archive entière.
-struct JarFiles(Vec<(&'static str, Result<Vec<u8>, ()>)>);
-
-impl DescriptionReader for JarFiles {
-    fn read(&mut self, name: &str) -> Result<Vec<u8>, DescriptionError> {
-        match self.0.iter().find(|(known, _)| *known == name) {
-            Some((_, Ok(bytes))) => Ok(bytes.clone()),
-            _ => Err(DescriptionError::Unreadable),
-        }
-    }
-}
-
 fn read_jar(root: &dyn ServiceRoot, path: &RelPath, deadline: Instant) -> JarRead {
     let Ok(mut file) = root.open_read(path) else {
         return JarRead::Refused;
@@ -895,7 +889,7 @@ fn read_jar(root: &dyn ServiceRoot, path: &RelPath, deadline: Instant) -> JarRea
         Err(_) if out_of_time() => return JarRead::OutOfTime,
         Err(_) => return JarRead::Refused,
     };
-    let mut files = JarFiles(
+    let mut files = PrereadFiles(
         IDENTITY_FILES
             .into_iter()
             .zip(found)
@@ -1119,7 +1113,7 @@ impl ModsSnapshot for ModsService {
     async fn read(&self, key: &ServiceKey) -> ModsReading {
         let plan = match self.plan_of(key).await {
             Ok(Judged::Read(plan)) => plan,
-            Ok(Judged::Done(_)) | Err(ModsError::NotAGameService) => {
+            Ok(Judged::Done(_)) | Err(ModsError::NotAGameService | ModsError::Adopted) => {
                 return ModsReading::NotApplicable;
             }
             Err(_) => return ModsReading::Unreadable,

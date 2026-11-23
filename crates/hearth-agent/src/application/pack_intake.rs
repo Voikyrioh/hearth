@@ -12,9 +12,7 @@ use thiserror::Error;
 
 use super::ports::{DepositError, DepositFile, DepositId, PackDeposits};
 use crate::domain::archive::{self, ArchiveLimits, ArchiveRefusal, EntryKind, GIB, Inspection};
-use crate::domain::mods::pack::{
-    DescriptionError, DescriptionReader, PackEntry, PackRefusal, PackReport, judge_pack,
-};
+use crate::domain::mods::pack::{PackEntry, PackRefusal, PackReport, PrereadFiles, judge_pack};
 
 /// Taille maximale d'un pack (BR-MOD-008) : 4 Gio.
 pub const MAX_PACK_BYTES: u64 = 4 * GIB;
@@ -92,26 +90,15 @@ const DESCRIPTIONS: [&str; 5] = [
 
 /// Les descriptions du pack, lues TOUTES en une passe avant le jugement : l'empreinte de l'archive n'est revérifiée
 /// qu'une fois par jugement, pas une fois par fichier lu (HRT-225).
-struct Descriptions(Vec<(&'static str, Result<Vec<u8>, ArchiveRefusal>)>);
+type Descriptions = PrereadFiles<ArchiveRefusal>;
 
-impl Descriptions {
-    fn read_all(
-        file: &mut Box<dyn DepositFile>,
-        inspection: &Inspection,
-        limits: &ArchiveLimits,
-    ) -> Result<Self, ArchiveRefusal> {
-        let found = archive::read_many(file, inspection, &DESCRIPTIONS, limits, &|| false)?;
-        Ok(Self(DESCRIPTIONS.into_iter().zip(found).collect()))
-    }
-}
-
-impl DescriptionReader for Descriptions {
-    fn read(&mut self, name: &str) -> Result<Vec<u8>, DescriptionError> {
-        match self.0.iter().find(|(known, _)| *known == name) {
-            Some((_, Ok(bytes))) => Ok(bytes.clone()),
-            _ => Err(DescriptionError::Unreadable),
-        }
-    }
+fn read_all_descriptions(
+    file: &mut Box<dyn DepositFile>,
+    inspection: &Inspection,
+    limits: &ArchiveLimits,
+) -> Result<Descriptions, ArchiveRefusal> {
+    let found = archive::read_many(file, inspection, &DESCRIPTIONS, limits, &|| false)?;
+    Ok(PrereadFiles(DESCRIPTIONS.into_iter().zip(found).collect()))
 }
 
 impl PackIntake {
@@ -158,7 +145,7 @@ impl PackIntake {
             })
             .collect();
         let mut descriptions =
-            Descriptions::read_all(file, &inspection, &limits).map_err(PackError::Archive)?;
+            read_all_descriptions(file, &inspection, &limits).map_err(PackError::Archive)?;
         let report = judge_pack(&entries, &mut descriptions).map_err(PackError::Refused)?;
         let size = file_len(file)?;
         Ok(JudgedPack {

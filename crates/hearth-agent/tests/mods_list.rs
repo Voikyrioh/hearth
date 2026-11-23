@@ -396,6 +396,15 @@ async fn a_service_without_a_fiche_is_not_a_game_service() {
 }
 
 #[tokio::test]
+async fn an_adopted_service_is_refused_as_adopted_like_the_console() {
+    let b = bench(14, "fabric", Some("1.20.1")).await;
+    let adopted = hearth_agent::domain::services::ServiceKey::for_container(&"a".repeat(64))
+        .expect("clé d'un conteneur");
+    let result = b.service().list(&adopted).await;
+    assert!(matches!(result, Err(ModsError::Adopted)));
+}
+
+#[tokio::test]
 async fn an_exhausted_budget_reports_the_unread_jars_and_never_a_guess() {
     let b = bench(13, "fabric", Some("1.20.1")).await;
     for n in 0..5 {

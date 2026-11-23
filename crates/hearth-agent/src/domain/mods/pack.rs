@@ -147,6 +147,21 @@ pub trait DescriptionReader {
     fn read(&mut self, name: &str) -> Result<Vec<u8>, DescriptionError>;
 }
 
+/// Les fichiers de description d'une archive, lus TOUS en une passe avant le jugement (une lecture de l'archive, pas
+/// une par fichier) : un fichier absent ou illisible se lit comme `Unreadable`. Partagé par le jugement d'un pack et
+/// l'identité d'un jar.
+#[derive(Debug)]
+pub struct PrereadFiles<E>(pub Vec<(&'static str, Result<Vec<u8>, E>)>);
+
+impl<E> DescriptionReader for PrereadFiles<E> {
+    fn read(&mut self, name: &str) -> Result<Vec<u8>, DescriptionError> {
+        match self.0.iter().find(|(known, _)| *known == name) {
+            Some((_, Ok(bytes))) => Ok(bytes.clone()),
+            _ => Err(DescriptionError::Unreadable),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DescriptionError {
     /// Plus gros que 1 Mio, ou illisible : le pack est refusé sans autre détail.

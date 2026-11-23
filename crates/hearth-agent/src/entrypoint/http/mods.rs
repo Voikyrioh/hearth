@@ -27,6 +27,10 @@ fn mods_error(error: ModsError) -> ApiError {
             ErrorCode::NotAGameService,
             "Ce service n'est pas un serveur de jeu créé depuis une fiche : il n'a pas de mods.",
         ),
+        ModsError::Adopted => ApiError::new(
+            ErrorCode::ServiceAdopted,
+            "Hearth ne gère pas les mods d'un service créé hors de Hearth.",
+        ),
         ModsError::FolderBlocked => ApiError::new(
             ErrorCode::ModsFolderBlocked,
             "Le dossier des mods est un lien ou n'est pas un dossier : Hearth ne le lit pas.",
