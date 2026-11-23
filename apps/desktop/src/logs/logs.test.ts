@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Entry, LogBuffer, lineEntry, MAX_CHARS, MAX_LINES } from "./buffer";
+import { type Entry, exchangeEntry, LogBuffer, lineEntry, MAX_CHARS, MAX_LINES } from "./buffer";
 import { findMatches, segmentsOf } from "./search";
 import {
   charCount,
@@ -359,5 +359,40 @@ describe("avis : lecture fermée par la coquille et place refusée", () => {
     const gaveUp = endNotice({ ...base, end: { kind: "unreachable" } });
     expect(gaveUp?.text).toContain("ne reprend plus seule");
     expect(gaveUp?.retry).toBe("now");
+  });
+});
+
+describe("commandes envoyées d'ici, rangées dans le journal à leur heure (HRT-269)", () => {
+  const exchange = (command: string, reply: string | null) =>
+    exchangeEntry({
+      id: 1,
+      at: 1_700_000_000_000,
+      command,
+      outcome: reply === null ? "empty" : "answered",
+      reply,
+      sentence: null,
+      by: null,
+    });
+
+  it("l'échange est une entrée du tampon, entre les lignes, sans compter comme une ligne du serveur", () => {
+    const buffer = new LogBuffer();
+    buffer.append([line("avant"), exchange("list", "There are 2 players"), line("après")]);
+    expect(buffer.entries.map((entry) => entry.kind)).toEqual(["line", "exchange", "line"]);
+  });
+
+  it("la recherche trouve la commande et la réponse du jeu", () => {
+    const buffer = new LogBuffer();
+    buffer.append([line("rien"), exchange("whitelist add Bram", "Added Bram to the whitelist")]);
+    expect(findMatches(buffer.entries, "bram").indices).toEqual([1]);
+    expect(findMatches(buffer.entries, "whitelist").indices).toEqual([1]);
+    expect(findMatches(buffer.entries, "absent").indices).toEqual([]);
+  });
+
+  it("la hauteur estimée grandit avec les lignes de la réponse", () => {
+    const metrics: Metrics = { lineHeight: 20, columns: 80, padding: 2, marker: 32 };
+    const buffer = new LogBuffer();
+    buffer.append([exchange("list", null), exchange("list", "a\nb\nc")]);
+    const [short, long] = buffer.entries.map((entry) => estimateHeight(entry, metrics, 0));
+    expect((long ?? 0) - (short ?? 0)).toBe(60);
   });
 });

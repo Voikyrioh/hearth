@@ -3,7 +3,6 @@ import { computed, nextTick, ref } from "vue";
 import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
 import ConsoleCommandField from "@/components/molecules/ConsoleCommandField.vue";
-import ConsoleExchange from "@/components/molecules/ConsoleExchange.vue";
 import DashCard from "@/components/molecules/DashCard.vue";
 import PlayersOnlineCard from "@/components/molecules/PlayersOnlineCard.vue";
 import ConsoleSensitiveDialog from "@/components/organisms/ConsoleSensitiveDialog.vue";
@@ -14,10 +13,11 @@ import { useServiceConsole } from "@/composables/useServiceConsole";
 import { t } from "@/i18n";
 import type { ConsoleView, QuickCommand, ServiceInfo } from "@/link";
 import { canAct, type RightsGate } from "@/services/rights";
+import { useServiceLogsStore } from "@/stores/serviceLogs";
 
 // L'onglet « Console » d'un serveur de jeu dont l'agent parle à la console (HRT-269, BR-CONSOLE-002 à 010, maquettes
 // Console, ConsoleSensible, ConsoleEtats) : le journal du serveur en direct (la visionneuse existante, « Mettre en
-// pause »), les commandes envoyées d'ici et leurs réponses, le champ « Commande », les commandes rapides de la fiche, la
+// pause »), où les commandes envoyées d'ici et leurs réponses prennent leur place à leur heure, le champ « Commande », les commandes rapides de la fiche, la
 // carte des joueurs connectés et ce que Hearth surveille. Lire l'onglet demande le droit de lire le service ; écrire
 // demande le droit de gérer les services. Une commande refusée par la fiche n'est jamais envoyée ; une commande sensible
 // demande le mot de passe à chaque fois. Tenu par `useServiceConsole`.
@@ -33,11 +33,13 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ refresh: []; start: []; follow: [] }>();
 
+const logs = useServiceLogsStore();
 const console_ = useServiceConsole(
   () => props.serverId,
   () => props.service.key,
   () => props.view,
   () => emit("refresh"),
+  (entry) => logs.pushExchange(entry),
 );
 const clock = useNow();
 const players = useOnlinePlayers(
@@ -84,6 +86,7 @@ function refusalText(): string | undefined {
           :engine-ready="engineReady"
           :gone="gone"
           :deploying="service.state === 'deploying'"
+          quiet-empty
           />
         </div>
         <ConsoleCommandField
@@ -100,7 +103,6 @@ function refusalText(): string | undefined {
           @start="emit('start')"
           @follow="emit('follow')"
         />
-        <ConsoleExchange :entries="console_.exchanges.value" />
       </div>
 
       <aside class="ct__side">

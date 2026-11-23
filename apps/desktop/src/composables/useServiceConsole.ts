@@ -46,6 +46,8 @@ export function useServiceConsole(
   serviceKey: () => string,
   view: () => ConsoleView | null,
   refresh: () => void,
+  /** Reçoit chaque ligne de l'échange à son arrivée (l'onglet la range dans le journal, à son heure). */
+  onExchange?: (entry: Exchange) => void,
 ) {
   const action = useServerAction(serverId);
   const now = useNow();
@@ -84,8 +86,9 @@ export function useServiceConsole(
   );
 
   function push(entry: Omit<Exchange, "id" | "at">): void {
-    const next = [...exchanges.value, { id: nextId++, at: Date.now(), ...entry }];
-    exchanges.value = next.slice(-MAX_EXCHANGES);
+    const made: Exchange = { id: nextId++, at: Date.now(), ...entry };
+    exchanges.value = [...exchanges.value, made].slice(-MAX_EXCHANGES);
+    onExchange?.(made);
   }
 
   /** Envoie la commande (la classe est celle de l'écran ; l'agent la rejuge). Jamais rejoué. */

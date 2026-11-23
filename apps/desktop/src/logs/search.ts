@@ -10,6 +10,11 @@ export const MAX_MATCHES = 1_000;
 /** Longueur maximale de la requête. */
 export const MAX_QUERY = 200;
 
+/** Ce qu'on cherche dans une entrée : le texte d'une ligne, ou la commande et la réponse du jeu. */
+function searchable(entry: Extract<Entry, { kind: "line" | "exchange" }>): string {
+  return entry.kind === "line" ? entry.text : `${entry.command}\n${entry.reply ?? ""}`;
+}
+
 /** Les indices (dans le tampon) des lignes qui contiennent la requête, de la plus ancienne à la plus récente. */
 export function findMatches(
   entries: readonly Entry[],
@@ -20,8 +25,8 @@ export function findMatches(
   const indices: number[] = [];
   for (let i = 0; i < entries.length; i += 1) {
     const entry = entries[i];
-    if (entry?.kind !== "line") continue;
-    if (entry.text.toLowerCase().includes(needle)) {
+    if (entry?.kind !== "line" && entry?.kind !== "exchange") continue;
+    if (searchable(entry).toLowerCase().includes(needle)) {
       if (indices.length >= MAX_MATCHES) return { indices, more: true };
       indices.push(i);
     }

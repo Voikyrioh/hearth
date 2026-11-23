@@ -1,4 +1,5 @@
 import type { LogLine, LogSource } from "@/link";
+import type { Exchange } from "@/services/console";
 import { displayText } from "./text";
 
 /**
@@ -37,13 +38,43 @@ export type Entry =
       cut: number | null;
     }
   | { id: number; kind: "restart"; at: number | null; count: number }
-  | { id: number; kind: "gap"; gap: GapKind; count: number | null };
+  | { id: number; kind: "gap"; gap: GapKind; count: number | null }
+  | {
+      id: number;
+      kind: "exchange";
+      /** L'heure de l'envoi (ms). */
+      t: number;
+      command: string;
+      outcome: Exchange["outcome"];
+      reply: string | null;
+      sentence: string | null;
+    };
 
 /** Une entrée avant son numéro. */
 export type NewEntry =
   | { kind: "line"; t: number | null; source: LogSource; text: string; cut: number | null }
   | { kind: "restart"; at: number | null }
-  | { kind: "gap"; gap: GapKind; count: number | null };
+  | { kind: "gap"; gap: GapKind; count: number | null }
+  | {
+      kind: "exchange";
+      t: number;
+      command: string;
+      outcome: Exchange["outcome"];
+      reply: string | null;
+      sentence: string | null;
+    };
+
+/** Une commande envoyée d'ici et ce qui lui est arrivé, placée dans le journal à son heure (HRT-269). */
+export function exchangeEntry(exchange: Exchange): NewEntry {
+  return {
+    kind: "exchange",
+    t: exchange.at,
+    command: exchange.command,
+    outcome: exchange.outcome,
+    reply: exchange.reply,
+    sentence: exchange.sentence,
+  };
+}
 
 /** Une ligne reçue, rendue inoffensive. */
 export function lineEntry(line: LogLine): NewEntry {
@@ -83,6 +114,10 @@ export class LogBuffer {
       }
       if (item.kind === "line") {
         this.chars += item.text.length;
+        this.entries.push({ ...item, id: this.next++ });
+        continue;
+      }
+      if (item.kind === "exchange") {
         this.entries.push({ ...item, id: this.next++ });
         continue;
       }

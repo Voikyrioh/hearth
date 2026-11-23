@@ -210,7 +210,9 @@ describe("les états du champ", () => {
 
   it("sans le droit de gérer les services : lecture seule", async () => {
     const { wrapper } = await open(undefined, simConsoleView({ canWrite: false }));
-    expect(wrapper.get("[data-console-input]").attributes("placeholder")).toBe("Lecture seule.");
+    expect(wrapper.get("[data-console-input]").attributes("placeholder")).toBe(
+      "La console est en lecture seule.",
+    );
     expect(wrapper.get("[data-console-help]").text()).toContain(
       "demande le droit de gérer les services",
     );
@@ -266,6 +268,24 @@ describe("l'encart et la carte des joueurs", () => {
     expect(wrapper.get("[data-console-watch]").text()).toContain("« op »");
     expect(wrapper.get("[data-console-watch]").text()).toContain("jamais par la console");
     expect(wrapper.get("[data-players-count]").text()).toBe("2 sur 20 places");
+    wrapper.unmount();
+  });
+
+  it("la carte est relue toutes les 30 secondes dans l'onglet Console, sans quitter l'onglet", async () => {
+    const { wrapper, bridge } = await open();
+    expect(wrapper.get("[data-players-count]").text()).toBe("2 sur 20 places");
+    bridge.console.seedPlayers("forge", "h_mc", {
+      state: "ok",
+      online: 3,
+      max: 20,
+      names: ["Alice_42", "Bram", "Chloé_m"],
+      hiddenNames: 0,
+      moreNames: 0,
+      readAt: new Date().toISOString(),
+    });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flushPromises();
+    expect(wrapper.get("[data-players-count]").text()).toBe("3 sur 20 places");
     wrapper.unmount();
   });
 });

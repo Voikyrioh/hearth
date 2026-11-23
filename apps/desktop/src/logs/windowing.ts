@@ -12,6 +12,9 @@ export const OVERSCAN_LINES = 20;
 /** Distance du bas en dessous de laquelle la vue est « en bas » (BR-SLOG-005). */
 export const BOTTOM_PX = 24;
 
+/** Marge verticale d'une commande envoyée d'ici (cadre compris), avant la mesure. */
+export const EXCHANGE_PADDING_PX = 20;
+
 export interface Metrics {
   /** Hauteur d'une ligne de texte. */
   lineHeight: number;
@@ -33,6 +36,13 @@ export function linesFor(length: number, columns: number): number {
  * de texte en plus (suffixe « ligne tronquée », bouton de repli).
  */
 export function estimateHeight(entry: Entry, metrics: Metrics, shown: number, extra = 0): number {
+  if (entry.kind === "exchange") {
+    let rows = 1 + (entry.sentence === null ? 0 : linesFor(entry.sentence.length, metrics.columns));
+    if (entry.reply !== null) {
+      for (const part of entry.reply.split("\n")) rows += linesFor(part.length, metrics.columns);
+    }
+    return rows * metrics.lineHeight + EXCHANGE_PADDING_PX;
+  }
   if (entry.kind !== "line") return metrics.marker;
   return (linesFor(shown, metrics.columns) + extra) * metrics.lineHeight + metrics.padding * 2;
 }
