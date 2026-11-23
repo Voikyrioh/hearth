@@ -20,6 +20,7 @@ Au plus 20 commandes par minute et par serveur, tous comptes confondus (seau à 
 ## Vérification
 - `crates/hearth-agent/src/domain/console/bucket.rs::tests`
 - `crates/hearth-agent/tests/console_https.rs::the_commands_are_limited_per_minute_and_the_wait_is_told`
+- `crates/hearth-agent/tests/console_https.rs::a_burst_of_refused_verbs_is_limited_before_it_fills_the_journal`
 
 ## Règles liées
 - BR-CONSOLE-006, BR-CONSOLE-011
@@ -27,3 +28,4 @@ Au plus 20 commandes par minute et par serveur, tous comptes confondus (seau à 
 ## Historique
 - 2026-11-18 : création (HRT-268). Écart avec la spec « 21e commande de la minute » : la rafale de 5 de la conception technique (D7) s'applique, le test envoie donc une sixième commande immédiate.
 - 2026-11-23 : rafale portée de 5 à 20 (spec D7 : 20 commandes immédiates, la 21e refusée).
+- 2026-11-23 : un verbe refusé prend un jeton AVANT d'être journalisé : une rafale de refus ne remplit pas le journal d'activité.

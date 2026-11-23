@@ -314,6 +314,28 @@ async fn a_refused_verb_is_refused_even_with_a_prefix_or_capitals_and_is_journal
 }
 
 #[tokio::test]
+async fn a_burst_of_refused_verbs_is_limited_before_it_fills_the_journal() {
+    let b = bench().await;
+    // La rafale est de 20 : les refus passent par le débit comme les commandes.
+    for _ in 0..20 {
+        assert_eq!(b.free("stop").await.status, 422);
+    }
+    let journaled = b.journal().await.len();
+    assert!(journaled >= 1, "les refus de la rafale sont inscrits");
+    for _ in 0..10 {
+        let reply = b.free("stop").await;
+        assert_eq!(reply.status, 429, "{}", reply.text);
+        assert_eq!(code(&reply), "CONSOLE_RATE_LIMITED");
+    }
+    assert!(b.game.lines().is_empty());
+    assert_eq!(
+        b.journal().await.len(),
+        journaled,
+        "un refus freiné par le débit n'est pas inscrit"
+    );
+}
+
+#[tokio::test]
 async fn a_wrong_signed_class_is_refused_and_nothing_is_sent() {
     let b = bench().await;
     // « op » signé libre : l'agent le juge sensible.

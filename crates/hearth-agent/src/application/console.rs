@@ -401,6 +401,9 @@ impl ConsoleService {
             (target, outcome)
         };
         if let ConsoleClass::Refused(reason) = class {
+            // Un refus compte dans le débit AVANT d'être journalisé : une rafale de verbes refusés ne remplit pas le
+            // journal d'activité sans limite.
+            self.take_token(key)?;
             let (target, outcome) = record(
                 &class,
                 ConsoleIssue::Refused,
@@ -422,17 +425,7 @@ impl ConsoleService {
         let _shared = SharedGuard::take(&self.locks, key).ok_or(ConsoleRefusal::Busy)?;
         let per_service = self.state_of(key);
         let _one_at_a_time = per_service.exchange.lock().await;
-        {
-            let now = self.now_ms();
-            let mut bucket = per_service
-                .bucket
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            let bucket = bucket.get_or_insert_with(|| TokenBucket::full(now));
-            bucket
-                .take(now)
-                .map_err(|retry_after_s| ConsoleRefusal::RateLimited { retry_after_s })?;
-        }
+        self.take_token(key)?;
         let exchange = self
             .talk(
                 key,
@@ -488,6 +481,20 @@ impl ConsoleService {
                 Err(ConsoleRefusal::Unreachable)
             }
         }
+    }
+
+    /// Prend un jeton du débit du service (20 par minute) ; refuse avec l'attente quand le seau est vide.
+    fn take_token(&self, key: &ServiceKey) -> Result<(), ConsoleRefusal> {
+        let per_service = self.state_of(key);
+        let now = self.now_ms();
+        let mut bucket = per_service
+            .bucket
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let bucket = bucket.get_or_insert_with(|| TokenBucket::full(now));
+        bucket
+            .take(now)
+            .map_err(|retry_after_s| ConsoleRefusal::RateLimited { retry_after_s })
     }
 
     /// Un échange : adresse privée lue du conteneur du service, port de la fiche, secret descellé pour l'occasion.
