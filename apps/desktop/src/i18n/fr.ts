@@ -1007,6 +1007,155 @@ export const fr = {
   },
   // Le détail d'un service (HRT-63, BR-SVC-007 à 009, 016, 023, 027, 028). Textes de la spec `voir-les-services` et du
   // design du lot 1, mot pour mot ; les autres sont marqués « hors spec ».
+  // Les mods d'un serveur Minecraft installé (HRT-261 à HRT-264, BR-MOD-020 à 033).
+  mods: {
+    tab: "Mods",
+    loaderUnknown: "Moteur inconnu",
+    unreadableName: "Fichier au nom illisible n° {rank}",
+    and: "et",
+    heading: "{installed} mods installés, {enabled} activés",
+    headingOne: "1 mod installé, {enabled} activé",
+    headingNone: "Aucun mod installé",
+    subheadingNone: "Ce serveur n'a aucun mod.",
+    sub: {
+      compatible: "{n} compatibles avec {loader} et Minecraft {minecraft}",
+      compatibleOne: "1 compatible avec {loader} et Minecraft {minecraft}",
+      incompatible: "{n} incompatibles",
+      incompatibleOne: "{n} incompatible",
+      disabled: "{n} désactivés",
+      disabledOne: "{n} désactivé",
+      restart: "Les changements demandent un redémarrage du serveur.",
+    },
+    versionLine: "Version de Minecraft du serveur : {minecraft} ({source}).",
+    versionLineBare: "Version de Minecraft du serveur : {minecraft}.",
+    versionUnknown:
+      "Hearth ne connaît pas encore la version de Minecraft de ce serveur : démarrez-le une fois.",
+    versionSource: {
+      setting: "choisie pour ce serveur",
+      log: "lue dans le journal du serveur",
+      modrinth: "lue dans le pack Modrinth",
+    },
+    note: {
+      latest:
+        "Ce serveur prend la dernière version de Minecraft à chaque démarrage : elle peut changer au prochain démarrage et rendre des mods incompatibles.",
+      modrinth:
+        "Les mods du pack Modrinth reviennent à chaque démarrage : Hearth ne les retire pas.",
+    },
+    origin: {
+      serverPack: "Pack d'origine",
+      hearth: "Ajouté avec Hearth",
+      modrinthPack: "Pack Modrinth",
+      manual: "Ajouté à la main",
+      unknown: "Origine inconnue",
+    },
+    legend: {
+      serverPack: "installé par le pack choisi à l'installation.",
+      hearth: "déposé depuis cet onglet.",
+      modrinthPack: "remis par le pack à chaque démarrage.",
+      manual: "posé sur le serveur hors de Hearth.",
+    },
+    verdict: {
+      compatible: "Compatible",
+      unverified: "Non vérifié",
+      toComplete: "À compléter",
+      incompatible: "Incompatible",
+      duplicate: "Installé deux fois",
+      unrecognized: "Non reconnu",
+    },
+    state: { retired: "Retiré", disabled: "Désactivé" },
+    sentence: {
+      unverified: "Hearth ne sait pas si ce mod va avec la version de Minecraft de ce serveur.",
+      unverifiedServer:
+        "Hearth ne connaît pas encore la version de Minecraft de ce serveur : démarrez-le une fois.",
+      toCompleteOne: "Ce mod a besoin du mod {name}, qui n'est pas installé.",
+      toComplete: "Ce mod a besoin des mods {names}, qui ne sont pas installés.",
+      incompatibleLoader: "Ce mod n'est pas compatible avec {loader}.",
+      incompatibleMinecraft: "Ce mod n'est pas compatible avec Minecraft {minecraft}.",
+      duplicate: "Le mod {name} est installé deux fois : le jeu refuse de démarrer.",
+      unrecognized: "Hearth ne lit pas la fiche d'identité de ce fichier.",
+    },
+    banner: {
+      duplicate:
+        "Le mod {name} est installé deux fois et le serveur ne peut pas démarrer. Retirez ou désactivez l'un des deux fichiers.",
+      incompatibleLoader:
+        "{name} ne peut pas démarrer ici. Il n'est pas compatible avec {loader}. Désactivez-le ou retirez-le.",
+      incompatibleMinecraft:
+        "{name} ne peut pas démarrer ici. Il n'est pas compatible avec Minecraft {minecraft}. Désactivez-le ou retirez-le.",
+      more: "Et {n} autres mods dans le même cas.",
+    },
+    plugins: {
+      title: "Ce serveur utilise des plugins, pas des mods",
+      text: "Ce moteur charge des plugins. Hearth ne les gère pas pour l'instant : vous pouvez les déposer vous-même dans le dossier du serveur.",
+    },
+    noMods: {
+      title: "Ce serveur n'a pas de mods",
+      text: "Le jeu officiel ne charge aucun mod, et le moteur d'un serveur ne change pas après son installation. Pour jouer avec des mods, ajoutez un nouveau serveur Minecraft avec Fabric, Forge, NeoForge ou Quilt.",
+    },
+    noWay: {
+      title: "Hearth ne gère pas les mods de ce serveur",
+      text: "Ce jeu n'offre pas de voie pour ajouter des mods depuis Hearth.",
+    },
+    addServer: "Ajouter un serveur de jeu",
+    add: "Ajouter des mods",
+    reading: "Lecture des mods en cours",
+    readingText: "{n} mods ne sont pas encore lus. La liste se complète toute seule.",
+    readingTextOne: "1 mod n'est pas encore lu. La liste se complète toute seule.",
+    truncated: "Le dossier compte plus de 1 024 fichiers : les suivants ne sont pas listés.",
+    failed: "Hearth n'a pas pu lire les mods de ce serveur.",
+    retry: "Réessayer",
+    gone: "Ce service n'existe plus ou n'est pas un serveur de jeu créé par Hearth.",
+    folderBlocked:
+      "Le dossier des mods est un lien ou n'est pas un dossier : Hearth ne le lit pas.",
+    table: {
+      label: "Mods du serveur",
+      mod: "Mod",
+      version: "Version",
+      loader: "Moteur",
+      target: "Minecraft visé",
+      state: "État",
+      origin: "Origine",
+      enabled: "Activé",
+      action: "Action",
+      retired: "Mods retirés",
+    },
+    targetUnknown: "Non indiquée",
+    targetOther: "Autre version",
+    retire: "Retirer",
+    restore: "Remettre",
+    undo: "Annuler",
+    switchLabel: "{name} activé",
+    reason: {
+      unreadableName: "Le nom de ce fichier contient des caractères que Hearth ne manipule pas.",
+      modrinth: "Ce mod fait partie du pack Modrinth : le serveur le remet à chaque démarrage.",
+      alreadyActive: "Ce mod est déjà actif dans une autre version : désactivez-la d'abord.",
+    },
+    pending: {
+      disable: "Sera désactivé au prochain redémarrage",
+      enable: "Sera réactivé au prochain redémarrage",
+      retire: "Sera mis de côté au prochain redémarrage",
+      restore: "Sera remis au prochain redémarrage",
+    },
+    dependents: {
+      one: "Le mod {name} a besoin de celui-ci.",
+      many: "Les mods {names} ont besoin de celui-ci.",
+    },
+    bar: {
+      one: "1 changement prêt",
+      many: "{n} changements prêts",
+      text: "Rien n'est fait tant que vous n'avez pas appliqué.",
+      cancelAll: "Tout annuler",
+      apply: "Vérifier et appliquer",
+    },
+    help: "Désactiver laisse le fichier à sa place : le jeu ne le charge plus, vous le réactivez quand vous voulez. Retirer le met de côté dans « Mods retirés ». Les deux s'appliquent avec le redémarrage, comme un ajout.",
+    warning:
+      "Un mod est un programme écrit par quelqu'un d'autre. Il tourne avec les droits du serveur de jeu. Hearth lit la fiche d'identité de chaque mod et ne le vérifie pas plus loin.",
+    leave: {
+      title: "Quitter sans appliquer ?",
+      text: "Les changements préparés ne sont pas gardés : ils seront perdus si vous quittez l'onglet Mods.",
+      confirm: "Quitter sans appliquer",
+      stay: "Rester sur l'onglet",
+    },
+  },
   // Les joueurs connectés d'un serveur de jeu (HRT-291, BR-CONSOLE-011).
   players: {
     title: "Joueurs connectés",

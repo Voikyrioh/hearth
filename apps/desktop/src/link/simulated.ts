@@ -782,6 +782,14 @@ export class SimulatedLinkBridge implements LinkBridge {
     return this.transfers.pick();
   }
 
+  async pickDepositFiles(): Promise<string[]> {
+    return this.transfers.pickMany();
+  }
+
+  async fileSha256(path: string): Promise<string | null> {
+    return this.transfers.sha256(path);
+  }
+
   async startDeposit(
     serverId: string,
     path: string,
@@ -815,7 +823,10 @@ export class SimulatedLinkBridge implements LinkBridge {
     }
     const outcome = await this.transfers.start(serverId, path);
     // Ce que l'agent d'essai lira dans le fichier une fois livré (`packs.willRead`).
-    if (outcome.kind === "started") this.packs.attach(outcome.transfer.id);
+    if (outcome.kind === "started") {
+      this.packs.attach(outcome.transfer.id);
+      this.mods.attach(outcome.transfer.id, outcome.transfer.name);
+    }
     return outcome;
   }
 

@@ -8,6 +8,7 @@ import HSkeleton from "@/components/atoms/HSkeleton.vue";
 import HTabs from "@/components/atoms/HTabs.vue";
 import { formatDateTime } from "@/composables/format";
 import { useNow } from "@/composables/useNow";
+import { useServiceDoors } from "@/composables/useServiceDoors";
 import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
 import { backupsDoor } from "@/services/backups";
@@ -25,6 +26,7 @@ import {
   restartText,
 } from "@/services/detail";
 import { imageLabel, loopBand, portLabel, stateLine } from "@/services/format";
+import { mayBeGame } from "@/services/game";
 import { type Controls, controlsOf, type Gesture } from "@/services/lifecycle";
 import { busyText, pilotLock } from "@/services/pilot";
 import { canAct, type RightsGate } from "@/services/rights";
@@ -32,6 +34,7 @@ import type { ServiceTab } from "@/services/tabs";
 import { useServersStore } from "@/stores/servers";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import Callout from "../molecules/Callout.vue";
+import ConfirmDialog from "../molecules/ConfirmDialog.vue";
 import DashCard from "../molecules/DashCard.vue";
 import DeleteServiceCard from "../molecules/DeleteServiceCard.vue";
 import LifecycleButtons from "../molecules/LifecycleButtons.vue";
@@ -43,6 +46,7 @@ import EnvVarsSection from "./EnvVarsSection.vue";
 import GameCards from "./GameCards.vue";
 import GameSettingsTab from "./GameSettingsTab.vue";
 import LogViewer from "./LogViewer.vue";
+import ModsTab from "./ModsTab.vue";
 
 // Le détail d'un service (HRT-63, BR-SVC-007, 016, 023, 027, 028), à droite de la liste. Les données viennent de la
 // liste déjà chargée (aucune lecture à l'ouverture) ; seules les valeurs des variables se demandent, à part
@@ -81,6 +85,7 @@ const emit = defineEmits<{
   decide: [operation: TrackedOperation];
   gesture: [service: ServiceInfo, gesture: Gesture];
   delete: [service: ServiceInfo];
+  addServer: [];
 }>();
 
 const now = useNow();
@@ -159,11 +164,53 @@ const hasBackups = computed(
       .kind === "shown",
 );
 
+// Les onglets « Mods » et « Console » (HRT-261, HRT-269) : lus à l'ouverture pour un service créé par Hearth.
+const doors = useServiceDoors(
+  () => props.serverId,
+  () =>
+    props.connected && !gone.value && service.value !== null && mayBeGame(service.value)
+      ? service.value.key
+      : null,
+  () => props.gameConsole,
+  () => [service.value?.state ?? "", ongoing.value?.operation.kind ?? ""].join("|"),
+);
+const hasMods = computed(() => doors.hasMods.value && service.value !== null);
+
+// Un lot de mods non appliqué se perd en quittant l'onglet : la sortie demande confirmation (BR-MOD-025, HRT-262).
+const modsDirty = ref(false);
+const leaving = ref<{ kind: "tab"; tab: ServiceTab } | { kind: "back" } | null>(null);
+
+function changeTab(next: ServiceTab) {
+  if (props.tab === "mods" && next !== "mods" && modsDirty.value) {
+    leaving.value = { kind: "tab", tab: next };
+    return;
+  }
+  emit("update:tab", next);
+}
+
+function leaveDetail() {
+  if (props.tab === "mods" && modsDirty.value) {
+    leaving.value = { kind: "back" };
+    return;
+  }
+  emit("back");
+}
+
+function confirmLeave() {
+  const target = leaving.value;
+  leaving.value = null;
+  modsDirty.value = false;
+  if (target === null) return;
+  if (target.kind === "tab") emit("update:tab", target.tab);
+  else emit("back");
+}
+
 const tabs = computed(() => [
   { id: "detail" as const, label: t("serviceDetail.tabDetail") },
   ...(hasSettings.value
     ? [{ id: "settings" as const, label: t("serviceDetail.tabSettings") }]
     : []),
+  ...(hasMods.value ? [{ id: "mods" as const, label: t("mods.tab") }] : []),
   ...(hasBackups.value ? [{ id: "backups" as const, label: t("serviceDetail.tabBackups") }] : []),
   { id: "logs" as const, label: t("serviceDetail.tabLogs") },
 ]);
@@ -215,11 +262,11 @@ const commandNote = computed(() => {
     :aria-busy="opened.kind === 'waiting' ? 'true' : undefined"
     :data-gone="gone ? '' : undefined"
     data-service-detail
-    @keydown.esc="emit('back')"
+    @keydown.esc="leaveDetail()"
   >
     <!-- Reste en haut du volet au défilement : le nom, l'état et « Ce service n'existe plus. » ne sortent jamais de l'écran -->
     <div class="detail__pinned" data-detail-pinned>
-      <HButton variant="ghost" size="sm" data-detail-back @click="emit('back')">
+      <HButton variant="ghost" size="sm" data-detail-back @click="leaveDetail()">
         <HIcon name="arrow-left" size="sm" />
         {{ t("serviceDetail.back") }}
       </HButton>
@@ -290,7 +337,7 @@ const commandNote = computed(() => {
         :tabs="tabs"
         :label="t('serviceDetail.sections')"
         :id-base="idBase"
-        @update:model-value="emit('update:tab', $event)"
+        @update:model-value="changeTab($event)"
       />
     </header>
 
@@ -313,6 +360,39 @@ const commandNote = computed(() => {
         @restart="emit('gesture', service, 'restart')"
       />
     </div>
+
+    <!-- L'onglet Mods (HRT-261) : la liste, leur origine, le lot de gestes ; rien n'est écrit avant « Appliquer » -->
+    <div
+      v-if="service && tab === 'mods' && hasMods"
+      :id="`${idBase}-panel-mods`"
+      class="detail__mods"
+      role="tabpanel"
+      :aria-labelledby="`${idBase}-tab-mods`"
+      :aria-hidden="gone ? 'true' : undefined"
+      :inert="gone ? true : undefined"
+      data-detail-mods
+    >
+      <ModsTab
+        :server-id="serverId"
+        :service="service"
+        :gate="gate"
+        :rights-reason-id="reasonId"
+        :connected="connected"
+        @dirty="modsDirty = $event"
+        @add-server="emit('addServer')"
+      />
+    </div>
+
+    <ConfirmDialog
+      :open="leaving !== null"
+      :title="t('mods.leave.title')"
+      :message="t('mods.leave.text')"
+      :confirm-label="t('mods.leave.confirm')"
+      :cancel-label="t('mods.leave.stay')"
+      destructive
+      @confirm="confirmLeave"
+      @cancel="leaving = null"
+    />
 
     <!-- L'onglet Sauvegardes (HRT-98) : la liste, l'espace, les éléments ignorés ; l'opération qui court est la carte du haut -->
     <div
@@ -388,7 +468,7 @@ const commandNote = computed(() => {
         :gone="gone"
         :supported="gameSettings"
         :console-served="gameConsole"
-        @open-console="emit('update:tab', 'console')"
+        @open-console="changeTab('console')"
         @retry-rights="emit('retryRights')"
       />
 

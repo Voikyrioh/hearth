@@ -427,6 +427,17 @@ export const commands = {
 	path: string,
 } | null, LinkFailure>(__TAURI_INVOKE("pick_deposit_file")),
 	/**
+	 *  La boîte « Ouvrir » du système avec plusieurs fichiers (les mods d'un lot, HRT-262) : les chemins choisis, ou rien si
+	 *  le compte annule la boîte. Le contenu des fichiers ne passe jamais par la page.
+	 */
+	pickDepositFiles: () => typedError<DepositSourceDto[], LinkFailure>(__TAURI_INVOKE("pick_deposit_files")),
+	/**
+	 *  L'empreinte SHA-256 (hexadécimal, minuscules) d'un fichier local choisi par la boîte « Ouvrir » : l'agent la compare à
+	 *  celle qu'il lit dans la zone d'attente avant de poser un mod (BR-MOD-022). Lue par morceaux sur un fil bloquant ; un
+	 *  fichier illisible rend `None` (jamais une empreinte devinée).
+	 */
+	fileSha256: (source: DepositSourceDto) => typedError<string | null, LinkFailure>(__TAURI_INVOKE("file_sha256", { source })),
+	/**
 	 *  Ouvre un dépôt dans la zone d'attente de l'agent (`POST /deposits`, acte `FileWrite`) puis envoie le fichier en
 	 *  tâche de fond. `admin_password` : le mot de passe de confirmation selon l'état de l'élévation. Jamais rejoué : un
 	 *  lien tombé avant la réponse donne `Unknown`. Sans le droit « gérer les services » : `MissingServicesRight`.

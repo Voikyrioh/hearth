@@ -216,6 +216,11 @@ const barShown = computed(
     shown.value.kind !== "loading" &&
     !(opened.value && tab.value === "logs"),
 );
+/** « Ajouter un serveur de jeu » (onglet Mods d'un moteur sans mods) : le Catalogue. */
+function goCatalogue() {
+  if (server.value) void router.push({ name: "catalogue", params: { id: server.value.id } });
+}
+
 function openDeploy() {
   if (server.value) void router.push({ name: "services-add", params: { id: server.value.id } });
 }
@@ -584,6 +589,7 @@ async function openDocs() {
                 @decide="decide"
                 @gesture="lifecycle.request"
                 @delete="removal.request"
+                @add-server="goCatalogue"
               />
             </div>
           </div>

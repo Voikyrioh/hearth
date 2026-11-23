@@ -840,6 +840,14 @@ export class TauriLinkBridge implements LinkBridge {
   }
 
   // Envoyer un fichier dans la zone d'attente de l'agent (HRT-96) : la coquille lit le fichier local.
+  async pickDepositFiles(): Promise<string[]> {
+    return unwrap(await commands.pickDepositFiles()).map((source) => source.path);
+  }
+
+  async fileSha256(path: string): Promise<string | null> {
+    return unwrap(await commands.fileSha256({ path }));
+  }
+
   async pickDepositFile(): Promise<string | null> {
     return unwrap(await commands.pickDepositFile())?.path ?? null;
   }

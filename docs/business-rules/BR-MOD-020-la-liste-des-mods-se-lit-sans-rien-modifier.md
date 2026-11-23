@@ -21,6 +21,7 @@ maj: 2026-11-18
 - Aucun nom de fichier, aucune valeur lue dans un jar dans une trace ou une erreur.
 
 ## Application (code)
+- Client (HRT-261) : `apps/desktop/src/services/mods.ts` (phrases, comptes), `composables/useServiceMods.ts` (lecture, relecture tant que `unread`), `ModsTab.vue`
 - `crates/hearth-agent/src/application/mods.rs::{ModsService::list, gather, read_jar, assemble}`
 - `crates/hearth-agent/src/entrypoint/http/mods.rs::list`
 

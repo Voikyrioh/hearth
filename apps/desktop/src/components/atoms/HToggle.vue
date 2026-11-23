@@ -15,8 +15,10 @@ const props = withDefaults(
     busy?: boolean;
     needsLink?: NeedsLink;
     hint?: string;
+    /** L'`id` d'un texte écrit ailleurs qui dit pourquoi l'interrupteur est inactif (le droit, `ServiceRightReason`). */
+    describedBy?: string;
   }>(),
-  { disabled: false, busy: false, needsLink: undefined, hint: undefined },
+  { disabled: false, busy: false, needsLink: undefined, hint: undefined, describedBy: undefined },
 );
 
 const emit = defineEmits<{ "update:modelValue": [value: boolean] }>();
@@ -42,7 +44,7 @@ function onClick() {
         :aria-checked="modelValue"
         :aria-disabled="inert ? 'true' : undefined"
         :aria-busy="busy ? 'true' : undefined"
-        :aria-describedby="describedby"
+        :aria-describedby="[describedby, props.describedBy].filter(Boolean).join(' ') || undefined"
         @click="onClick"
       >
         <span class="toggle__knob" />

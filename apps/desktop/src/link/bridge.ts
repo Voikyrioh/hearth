@@ -524,6 +524,13 @@ export interface LinkBridge {
    * produit aucun message). Le contenu du fichier ne passe jamais par la page.
    */
   pickDepositFile(): Promise<string | null>;
+  /** La même boîte avec plusieurs fichiers (les mods d'un lot, HRT-262) : les chemins choisis, ou rien si le compte annule. */
+  pickDepositFiles(): Promise<string[]>;
+  /**
+   * L'empreinte SHA-256 (hexadécimal) du fichier local choisi : l'agent la compare à celle qu'il lit dans la zone
+   * d'attente avant de poser un mod (BR-MOD-022). `null` : fichier illisible, jamais une empreinte devinée.
+   */
+  fileSha256(path: string): Promise<string | null>;
   /**
    * Ouvre un dépôt dans la zone d'attente (`POST /deposits`, acte `FileWrite`, couvert par l'élévation de cinq
    * minutes : `adminPassword` selon `reauthPasswordNeed`, jamais gardé) puis envoie le fichier en tâche de fond :

@@ -91,6 +91,8 @@ const COMMANDS: &[&str] = &[
     "read_players",
     "send_console",
     "pick_deposit_file",
+    "pick_deposit_files",
+    "file_sha256",
     "start_deposit",
     "list_transfers",
     "resume_transfer",

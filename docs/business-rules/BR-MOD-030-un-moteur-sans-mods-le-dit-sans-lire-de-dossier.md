@@ -14,6 +14,7 @@ maj: 2026-11-18
 Vanilla : `applicable = no_mods`. Paper et Purpur : `plugins` (Hearth ne gère pas les greffons). Une fiche sans `[mods.jars]` ou un service sans variante : `no_way`. Dans ces trois cas la réponse ne contient aucun mod et l'agent n'ouvre ni ne liste aucun dossier du service. Le moteur d'un serveur ne change pas après l'installation.
 
 ## Application (code)
+- Client (HRT-261) : `apps/desktop/src/services/mods.ts::noModsText`, `ModsTab.vue`
 - `crates/hearth-agent/src/application/mods.rs::judge_applicable`
 
 ## Vérification

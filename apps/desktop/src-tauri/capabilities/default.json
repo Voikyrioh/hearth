@@ -92,6 +92,8 @@
     "allow-read-players",
     "allow-send-console",
     "allow-pick-deposit-file",
+    "allow-pick-deposit-files",
+    "allow-file-sha256",
     "allow-start-deposit",
     "allow-list-transfers",
     "allow-resume-transfer",

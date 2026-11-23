@@ -24,6 +24,19 @@ export function nameOf(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
+/** Une empreinte simulée de 64 caractères hexadécimaux, la même pour un même nom. */
+export function simSha256(name: string): string {
+  let hash = 2166136261;
+  let out = "";
+  for (let round = 0; out.length < 64; round += 1) {
+    for (const char of `${round}:${name}`) {
+      hash = Math.imul(hash ^ (char.codePointAt(0) ?? 0), 16777619) >>> 0;
+    }
+    out += hash.toString(16).padStart(8, "0");
+  }
+  return out.slice(0, 64);
+}
+
 export class SimulatedTransfers {
   private readonly held = new Map<string, Held>();
   private counter = 0;
@@ -33,6 +46,22 @@ export class SimulatedTransfers {
   fileSize = 600 * MIB;
   /** Le chemin que la boîte « Ouvrir » rend ; `null` : le compte annule la boîte. */
   picked: string | null = "C:\\Téléchargements\\Prominence_II_Server_Pack.zip";
+
+  /** Les chemins que la boîte « Ouvrir » à plusieurs fichiers rend ; vide : le compte annule la boîte. */
+  pickedMany: string[] = [];
+  /** Les chemins dont l'empreinte est « illisible » (`sha256` rend `null`). */
+  unreadable = new Set<string>();
+
+  pickMany(): string[] {
+    this.calls.push("pick many");
+    return [...this.pickedMany];
+  }
+
+  /** L'empreinte d'un fichier « local » : déterministe d'après son nom (les chemins sont faux), 64 caractères hexadécimaux. */
+  sha256(path: string): string | null {
+    this.calls.push(`sha256 ${path}`);
+    return this.unreadable.has(path) ? null : simSha256(nameOf(path));
+  }
 
   pick(): string | null {
     this.calls.push("pick");

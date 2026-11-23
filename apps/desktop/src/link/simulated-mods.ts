@@ -20,6 +20,7 @@ import type { BackupRefusal } from "./serviceBackups";
 import { toOperation } from "./serviceOps";
 import type { SimulatedServiceOps } from "./simulated-service-ops";
 import type { SimulatedServices } from "./simulated-services";
+import { simSha256 } from "./simulated-transfers";
 
 /**
  * Les mods d'un serveur Minecraft du pont SIMULÉ (navigateur de développement, Vitest, Playwright) : un petit agent qui
@@ -62,11 +63,12 @@ const EMPTY_GAME: ModsGame = {
   pack: "none",
 };
 
-export function simMod(patch: Partial<ModItem> & { file: string }): ModItem {
+export function simMod(patch: Partial<ModItem> = {}): ModItem {
   return {
+    file: null,
     rank: 0,
     place: "active",
-    enabled: !patch.file.endsWith(".disabled"),
+    enabled: !(patch.file ?? "").endsWith(".disabled"),
     origin: "manual",
     readableName: true,
     identity: null,
@@ -78,6 +80,7 @@ export function simMod(patch: Partial<ModItem> & { file: string }): ModItem {
 export class SimulatedMods {
   private readonly views = new Map<string, ModsView>();
   private readonly deposits = new Map<string, SimDeposit>();
+  private readonly expected = new Map<string, Omit<SimDeposit, "sha256"> & { sha256?: string }>();
   private readonly held = new Map<string, Map<string, Held>>();
   private readonly tails = new Map<string, OperationTail>();
   private readonly backupLists = new Map<string, BackupMods>();
@@ -112,7 +115,7 @@ export class SimulatedMods {
   seed(
     serverId: string,
     key: string,
-    view: Partial<ModsView> & { game?: Partial<ModsGame> },
+    view: Omit<Partial<ModsView>, "game"> & { game?: Partial<ModsGame> },
   ): void {
     this.views.set(this.slot(serverId, key), {
       applicable: view.applicable ?? "mods",
@@ -125,6 +128,18 @@ export class SimulatedMods {
 
   viewOf(serverId: string, key: string): ModsView | undefined {
     return this.views.get(this.slot(serverId, key));
+  }
+
+  /** Ce que l'agent d'essai lira dans le prochain fichier de ce nom envoyé (rattaché au dépôt que `startDeposit` ouvre). */
+  willRead(fileName: string, deposit: Omit<SimDeposit, "sha256"> & { sha256?: string }): void {
+    this.expected.set(fileName, deposit);
+  }
+
+  /** Un dépôt vient de s'ouvrir sous ce nom : l'agent d'essai le juge d'après ce qui a été annoncé. */
+  attach(depositId: string, fileName: string): void {
+    const expected = this.expected.get(fileName);
+    if (!expected) return;
+    this.deposits.set(depositId, { ...expected, sha256: expected.sha256 ?? simSha256(fileName) });
   }
 
   /** Pose un dépôt de la zone d'attente que le contrôle jugera. */

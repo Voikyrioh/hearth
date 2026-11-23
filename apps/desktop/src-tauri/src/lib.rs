@@ -156,6 +156,8 @@ pub fn specta_builder() -> Builder<tauri::Wry> {
             service_ops::commands::set_public_address,
             service_ops::commands::reveal_game_password,
             transfers::commands::pick_deposit_file,
+            transfers::commands::pick_deposit_files,
+            transfers::commands::file_sha256,
             transfers::commands::start_deposit,
             transfers::commands::list_transfers,
             transfers::commands::resume_transfer,

@@ -217,3 +217,4 @@ Fichiers de l'interface : `apps/desktop/src/` (`components/{atoms,molecules,orga
 - [GameCards](./GameCards.md), [GameAddressCard](./GameAddressCard.md), [GamePortsCard](./GamePortsCard.md), [GamePasswordCard](./GamePasswordCard.md), [GameStopCard](./GameStopCard.md), [GameSequenceDialog](./GameSequenceDialog.md) : un serveur de jeu au quotidien, quatre cartes du détail et la séquence d'un arrêt (HRT-104)
 - [TransfersStrip](./TransfersStrip.md) : le panneau « Transferts », envois de fichiers vers la zone d'attente de l'agent (HRT-96)
 - [PlayersOnlineCard](./PlayersOnlineCard.md) : la carte « Joueurs connectés » d'un serveur de jeu (HRT-291)
+- [ModsTab](./ModsTab.md), [ModRow](./ModRow.md) : l'onglet « Mods » d'un serveur Minecraft et sa ligne (HRT-261, HRT-262)
