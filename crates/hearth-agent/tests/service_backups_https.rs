@@ -23,12 +23,15 @@ use hearth_proto::api::backups::{
     BackupsView, VerifyResult,
 };
 use hearth_proto::api::deploy::DeployAccepted;
-use hearth_proto::api::service_ops::{OperationCause, OperationStatus, OperationView};
+use hearth_proto::api::service_ops::{
+    OperationCause, OperationStatus, OperationView, StepStateView,
+};
 use serde_json::{Value, json};
 use support::device::Actor;
 use support::engine::{fast_timings, parts_supervised};
 use support::fake_backup_files::FakeBackupFiles;
 use support::fake_engine::{Call, FakeEngine, PullScript};
+use support::fake_game_console::FakeGameConsole;
 use support::fake_host::{FakeFreeSpace, FakeHostPorts};
 use support::fake_safe_fs::FakeSafeFs;
 use support::fake_supervisor::FakeSupervisor;
@@ -449,6 +452,82 @@ async fn stopping_to_copy_stops_with_the_service_delay_copies_then_restarts_what
     assert_eq!(intents, 0);
     let view = b.list(service.key.as_str()).await;
     assert_eq!(view.backups[0].mode, BackupMode::StopCopyStart);
+    b.agent.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Enregistrer le monde par la console avant l'arrêt d'une copie à froid (HRT-292, BR-CONSOLE-012)
+// ---------------------------------------------------------------------------------------------
+
+/// Un banc dont le jeu parle par la console, et un serveur Minecraft en marche posé sans installation.
+async fn bench_minecraft() -> (Bench, Arc<FakeGameConsole>, ServiceKey) {
+    let game = FakeGameConsole::new();
+    let wired = game.clone();
+    let b = bench_with(move |parts| parts.catalog.console = Some(wired)).await;
+    game.watch_engine(b.engine.clone());
+    let key =
+        support::game::minecraft_console_service(&b.env, &b.engine, &b.agent.services(), 1).await;
+    b.safe_fs
+        .seed_file(&key, "data/world/level.dat", b"le monde");
+    (b, game, key)
+}
+
+fn state_of<'a>(operation: &'a OperationView, step: &str) -> Option<&'a StepStateView> {
+    operation
+        .steps
+        .iter()
+        .find(|s| s.step == step)
+        .map(|s| &s.state)
+}
+
+#[tokio::test]
+async fn a_running_minecraft_saves_by_the_console_before_the_stop_of_a_cold_copy() {
+    let (b, game, key) = bench_minecraft().await;
+    game.answer("save-all flush", "Saved the game");
+    let (_, operation) = b
+        .made(key.as_str(), json!({ "mode": "stop_copy_start" }))
+        .await;
+    assert_eq!(
+        steps(&operation),
+        ["console_save", "stop", "copy", "verify", "start"],
+        "{operation:?}"
+    );
+    assert_eq!(
+        state_of(&operation, "console_save"),
+        Some(&StepStateView::Done)
+    );
+    let received = game.received();
+    assert_eq!(received.len(), 1, "{received:?}");
+    assert_eq!(received[0].line, "save-all flush");
+    assert_eq!(received[0].stops_seen, 0, "la ligne part AVANT l'arrêt");
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_mute_game_never_prevents_the_cold_copy_from_succeeding() {
+    let (b, game, key) = bench_minecraft().await;
+    game.fail(
+        "save-all flush",
+        hearth_agent::application::ports::ConsoleError::NoAnswer,
+    );
+    let (_, operation) = b
+        .made(key.as_str(), json!({ "mode": "stop_copy_start" }))
+        .await;
+    assert_eq!(
+        state_of(&operation, "console_save"),
+        Some(&StepStateView::Failed)
+    );
+    assert_eq!(state_of(&operation, "copy"), Some(&StepStateView::Done));
+    assert_eq!(b.list(key.as_str()).await.backups.len(), 1);
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_hot_copy_never_asks_the_game_to_save() {
+    let (b, game, key) = bench_minecraft().await;
+    let (_, operation) = b.made(key.as_str(), json!({ "mode": "hot" })).await;
+    assert_eq!(state_of(&operation, "console_save"), None);
+    assert!(game.lines().is_empty());
     b.agent.shutdown().await;
 }
 

@@ -12,12 +12,17 @@ use hearth_agent::application::ports::{
 };
 use hearth_agent::domain::secret::Secret;
 
+use super::fake_engine::{Call, FakeEngine};
+
 /// Une ligne reçue par le faux jeu.
 #[derive(Debug, Clone)]
 pub struct Received {
     pub address: SocketAddr,
     pub password: String,
     pub line: String,
+    /// Combien d'ordres d'arrêt ou de redémarrage le moteur avait déjà reçus quand la ligne est arrivée (0 sans
+    /// `watch_engine`) : prouve qu'une ligne est partie AVANT l'arrêt (HRT-292).
+    pub stops_seen: usize,
 }
 
 enum Answer {
@@ -26,11 +31,32 @@ enum Answer {
     Fail(ConsoleError),
 }
 
+/// Début et fin (ou coupure) de chaque échange, en temps tokio.
+type Spans = Arc<Mutex<Vec<(tokio::time::Instant, Option<tokio::time::Instant>)>>>;
+
 pub struct FakeGameConsole {
     received: Mutex<Vec<Received>>,
     answers: Mutex<Vec<(String, Answer)>>,
     default: Mutex<String>,
     delay: Mutex<Duration>,
+    engine: Mutex<Option<Arc<FakeEngine>>>,
+    /// Pour chaque échange : son début et sa fin (ou sa coupure, quand l'appelant l'abandonne), en temps tokio.
+    spans: Spans,
+}
+
+/// Note la fin d'un échange, même abandonné en route (le futur est jeté par un délai).
+struct SpanEnd {
+    spans: Spans,
+    index: usize,
+}
+
+impl Drop for SpanEnd {
+    fn drop(&mut self) {
+        let mut spans = self.spans.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(span) = spans.get_mut(self.index) {
+            span.1 = Some(tokio::time::Instant::now());
+        }
+    }
 }
 
 impl FakeGameConsole {
@@ -40,6 +66,8 @@ impl FakeGameConsole {
             answers: Mutex::new(Vec::new()),
             default: Mutex::new("ok".to_owned()),
             delay: Mutex::new(Duration::ZERO),
+            engine: Mutex::new(None),
+            spans: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -76,6 +104,21 @@ impl FakeGameConsole {
         *self.delay.lock().unwrap_or_else(PoisonError::into_inner) = delay;
     }
 
+    /// Compte, à chaque ligne reçue, les arrêts déjà demandés au moteur.
+    pub fn watch_engine(&self, engine: Arc<FakeEngine>) {
+        *self.engine.lock().unwrap_or_else(PoisonError::into_inner) = Some(engine);
+    }
+
+    /// La durée de chaque échange commencé, de son début à sa fin ou à sa coupure ; `None` : encore en cours.
+    pub fn durations(&self) -> Vec<Option<Duration>> {
+        self.spans
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|(start, end)| end.map(|end| end - *start))
+            .collect()
+    }
+
     pub fn received(&self) -> Vec<Received> {
         self.received
             .lock()
@@ -97,6 +140,18 @@ impl GameConsole for FakeGameConsole {
         line: &str,
         _budget: ConsoleBudget,
     ) -> Result<ConsoleReply, ConsoleError> {
+        let stops_seen = self
+            .engine
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map_or(0, |engine| {
+                engine
+                    .calls()
+                    .iter()
+                    .filter(|call| matches!(call, Call::Stop(..) | Call::Restart(..)))
+                    .count()
+            });
         self.received
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -104,7 +159,16 @@ impl GameConsole for FakeGameConsole {
                 address,
                 password: secret.expose().to_owned(),
                 line: line.to_owned(),
+                stops_seen,
             });
+        let _span = {
+            let mut spans = self.spans.lock().unwrap_or_else(PoisonError::into_inner);
+            spans.push((tokio::time::Instant::now(), None));
+            SpanEnd {
+                spans: self.spans.clone(),
+                index: spans.len() - 1,
+            }
+        };
         let delay = *self.delay.lock().unwrap_or_else(PoisonError::into_inner);
         if !delay.is_zero() {
             tokio::time::sleep(delay).await;

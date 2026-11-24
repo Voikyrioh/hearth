@@ -16,13 +16,14 @@ use hearth_agent::domain::catalog::loading::model::Fiche;
 use hearth_agent::domain::catalog::{Origin, load};
 use hearth_agent::domain::services::{RunState, ServiceKey};
 use hearth_proto::api::deploy::DeployAccepted;
-use hearth_proto::api::service_ops::{OperationStatus, OperationView};
+use hearth_proto::api::service_ops::{OperationStatus, OperationView, StepStateView};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use support::device::Actor;
 use support::engine::{fast_timings, parts_supervised};
 use support::fake_backup_files::FakeBackupFiles;
 use support::fake_engine::{Call, FakeEngine, PullScript};
+use support::fake_game_console::FakeGameConsole;
 use support::fake_host::{FakeFreeSpace, FakeHostPorts};
 use support::fake_pack_deposits::FakePackDeposits;
 use support::fake_safe_fs::FakeSafeFs;
@@ -104,6 +105,10 @@ struct Bench {
     engine: Arc<FakeEngine>,
     safe_fs: Arc<FakeSafeFs>,
     deposits: Arc<FakePackDeposits>,
+    /// Le jeu qui parle par la console (HRT-292) : rien n'en part tant qu'il n'a pas dit « prêt ».
+    game: Arc<FakeGameConsole>,
+    /// Le prochain serveur installé dit « prêt » dès son installation (sinon : en démarrage).
+    ready_at_install: std::sync::atomic::AtomicBool,
     agent: Agent,
     fiche: Fiche,
     ada: Actor,
@@ -133,6 +138,9 @@ async fn bench() -> Bench {
     parts.free_space = Arc::new(FakeFreeSpace::new());
     parts.safe_fs = Some(safe_fs.clone());
     parts.backups.files = Some(Arc::new(FakeBackupFiles::new()));
+    let game = FakeGameConsole::new();
+    game.watch_engine(engine.clone());
+    parts.catalog.console = Some(game.clone());
     parts.catalog.include_preview = true;
     parts.catalog.pack_deposits = Some(deposits.clone());
     parts.catalog.service = Some(Arc::new(CatalogService::from_parts(
@@ -149,6 +157,8 @@ async fn bench() -> Bench {
         engine,
         safe_fs,
         deposits,
+        game,
+        ready_at_install: std::sync::atomic::AtomicBool::new(false),
         agent,
         fiche,
         ada,
@@ -215,7 +225,11 @@ impl Bench {
         };
         self.engine.publish_image(&image, PullScript::two_layers());
         // Sans le signe « prêt » : les lignes d'un démarrage ne comptent pas pour le suivant (les horloges du banc diffèrent).
-        self.engine.log_on_start(name, "Loading...");
+        let ready = self
+            .ready_at_install
+            .load(std::sync::atomic::Ordering::SeqCst);
+        self.engine
+            .log_on_start(name, if ready { READY } else { "Loading..." });
         let body = json!({
             "name": name,
             "resources": { "cpu_millis": 2000, "memory_bytes": 4 * GIB },
@@ -247,6 +261,8 @@ impl Bench {
             .into_iter()
             .last()
             .expect("conteneur");
+        self.engine
+            .set_private_address(&container, Some(std::net::Ipv4Addr::new(172, 17, 0, 9)));
         Server {
             key: ServiceKey::parse(&accepted.service_key).unwrap(),
             container,
@@ -385,9 +401,19 @@ async fn a_running_server_is_stopped_saved_changed_restarted_and_watched_and_not
         "{operation:?}"
     );
     assert_eq!(operation.cause, None);
+    // La fiche Minecraft déclare `before_stop` : l'enregistrement par la console (HRT-292, BR-CONSOLE-012) précède l'arrêt,
+    // confirmé ou non, sans jamais le retenir.
     assert_eq!(
         steps(&operation),
-        ["stop", "copy", "verify", "place", "start", "watch"]
+        [
+            "console_save",
+            "stop",
+            "copy",
+            "verify",
+            "place",
+            "start",
+            "watch"
+        ]
     );
     // Le service a été arrêté puis relancé, une fois chacun.
     let calls = b.engine.calls();
@@ -469,6 +495,99 @@ async fn a_running_server_is_stopped_saved_changed_restarted_and_watched_and_not
     assert_eq!(origin_of("lithium-0.11.2.jar"), "hearth");
     assert_eq!(origin_of("carpet-1.4.112.jar.disabled"), "manual");
     assert_eq!(server.name, "mc");
+}
+
+/// HRT-292, BR-CONSOLE-012 : un jeu prêt enregistre son monde par la console AVANT l'arrêt du lot ; muet, il ne retient rien.
+async fn applied_on_a_ready_server(b: &Bench) -> (Server, OperationView) {
+    b.ready_at_install
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let server = b.install("mc", "fabric").await;
+    b.put(
+        &server,
+        "mods/lithium-0.11.1.jar",
+        &fabric("lithium", "0.11.1"),
+    );
+    b.engine.log_on_start(&server.name, READY);
+    let sodium = fabric("sodium", "0.5.3");
+    let (_, operation) = b
+        .applied(&server, json!({ "add": [b.deposit("D-SODIUM", &sodium)] }))
+        .await;
+    (server, operation)
+}
+
+fn state_of<'a>(operation: &'a OperationView, step: &str) -> Option<&'a StepStateView> {
+    operation
+        .steps
+        .iter()
+        .find(|s| s.step == step)
+        .map(|s| &s.state)
+}
+
+#[tokio::test]
+async fn a_ready_game_saves_by_the_console_before_the_stop_and_the_step_is_done() {
+    let b = bench().await;
+    b.game.answer("save-all flush", "Saved the game");
+    let (server, operation) = applied_on_a_ready_server(&b).await;
+    assert_eq!(
+        operation.status,
+        OperationStatus::Succeeded,
+        "{operation:?}"
+    );
+    assert_eq!(steps(&operation).first(), Some(&"console_save"));
+    assert_eq!(
+        state_of(&operation, "console_save"),
+        Some(&StepStateView::Done),
+        "{operation:?}"
+    );
+    let received = b.game.received();
+    assert_eq!(received.len(), 1, "{received:?}");
+    assert_eq!(received[0].line, "save-all flush");
+    // La ligne est partie AVANT l'ordre d'arrêt du lot (l'installation n'en compte aucun).
+    assert_eq!(received[0].stops_seen, 0);
+    assert!(b.content(&server, "mods/sodium-0.5.3.jar").is_some());
+}
+
+#[tokio::test]
+async fn a_mute_game_goes_all_the_way_through_the_lot() {
+    let b = bench().await;
+    b.game.fail(
+        "save-all flush",
+        hearth_agent::application::ports::ConsoleError::NoAnswer,
+    );
+    let (server, operation) = applied_on_a_ready_server(&b).await;
+    assert_eq!(
+        operation.status,
+        OperationStatus::Succeeded,
+        "{operation:?}"
+    );
+    assert_eq!(
+        state_of(&operation, "console_save"),
+        Some(&StepStateView::Failed)
+    );
+    assert_eq!(state_of(&operation, "place"), Some(&StepStateView::Done));
+    assert!(b.content(&server, "mods/sodium-0.5.3.jar").is_some());
+}
+
+#[tokio::test]
+async fn a_game_still_starting_is_not_asked_to_save() {
+    let b = bench().await;
+    let server = b.install("mc", "fabric").await;
+    b.put(
+        &server,
+        "mods/lithium-0.11.1.jar",
+        &fabric("lithium", "0.11.1"),
+    );
+    b.engine.log_on_start(&server.name, READY);
+    let sodium = fabric("sodium", "0.5.3");
+    let (_, operation) = b
+        .applied(&server, json!({ "add": [b.deposit("D-SODIUM", &sodium)] }))
+        .await;
+    assert_eq!(operation.status, OperationStatus::Succeeded);
+    assert_eq!(
+        state_of(&operation, "console_save"),
+        Some(&StepStateView::Failed)
+    );
+    assert!(b.game.lines().is_empty());
 }
 
 #[tokio::test]

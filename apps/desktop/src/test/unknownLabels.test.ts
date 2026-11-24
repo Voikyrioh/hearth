@@ -164,6 +164,7 @@ const SAYS: Record<string, (value: string) => void> = {
       graceSeconds: 10,
       worldSaved: value as WorldSaved,
       sequenceTested: false,
+      consoleSave: false,
     });
     expect(lines[0], value).toBeTruthy();
     expect(lines[0]).not.toMatch(/^fiche\./);

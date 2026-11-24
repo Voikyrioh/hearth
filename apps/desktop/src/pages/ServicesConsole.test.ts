@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SimulatedLinkBridge } from "@/link";
 import { simConsoleView } from "@/link/simulated-console";
 import Services from "@/pages/Services.vue";
+import { useModsReviewReturnStore } from "@/stores/modsReviewReturn";
 import { useServersStore } from "@/stores/servers";
 import { useServiceOpsStore } from "@/stores/serviceOps";
 import { useServiceRightsStore } from "@/stores/serviceRights";
@@ -24,8 +25,14 @@ afterEach(() => {
   useServiceRightsStore().reset();
 });
 
-async function open(setup?: (bridge: SimulatedLinkBridge) => void, view = simConsoleView()) {
+async function open(
+  setup?: (bridge: SimulatedLinkBridge) => void,
+  view = simConsoleView(),
+  cameFromReview = false,
+) {
   const ctx = await mountContext();
+  // Le magasin appartient au Pinia de ce montage : la venue depuis « Vérifiez avant d'appliquer » s'y inscrit.
+  if (cameFromReview) useModsReviewReturnStore().mark("forge", "h_mc");
   ctx.bridge.services.seed("forge", [
     { key: "h_mc", name: "Prominence", origin: "hearth" },
     { key: "h_plain", name: "Terraria", origin: "hearth" },
@@ -286,6 +293,42 @@ describe("l'encart et la carte des joueurs", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     await flushPromises();
     expect(wrapper.get("[data-players-count]").text()).toBe("3 sur 20 places");
+    wrapper.unmount();
+  });
+});
+
+describe("la console après la troisième revue de Nora", () => {
+  it("une commande refusée par la fiche dit pourquoi sous le champ, avant l'envoi (jamais un blocage muet)", async () => {
+    const { wrapper, bridge } = await open();
+    await type(wrapper, "stop");
+    expect(wrapper.get("[data-console-help]").text()).toContain("Commande non envoyée");
+    expect(wrapper.get("[data-console-help]").text()).toContain("« Arrêter »");
+    expect(bridge.console.received).toHaveLength(0);
+    wrapper.unmount();
+  });
+
+  it("une fiche sans commande rapide ne laisse pas une carte vide : la phrase dit quoi faire", async () => {
+    const view = simConsoleView();
+    const { wrapper } = await open(undefined, { ...view, quick: [] });
+    expect(wrapper.get("[data-console-quick]").text()).toContain(
+      "ne propose pas de commande rapide",
+    );
+    wrapper.unmount();
+  });
+
+  it("ouverte depuis « Vérifiez avant d'appliquer », la console propose le retour vers le lot", async () => {
+    const { wrapper } = await open(undefined, simConsoleView(), true);
+    const back = wrapper.get("[data-console-back-review]");
+    expect(back.text()).toContain("Vérifiez avant d'appliquer");
+    await back.trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-console-tab]").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("sans être venue du lot, la console n'affiche pas ce lien", async () => {
+    const { wrapper } = await open();
+    expect(wrapper.find("[data-console-back-review]").exists()).toBe(false);
     wrapper.unmount();
   });
 });

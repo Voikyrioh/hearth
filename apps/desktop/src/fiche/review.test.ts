@@ -42,7 +42,12 @@ describe("whatWillHappen", () => {
     ).toBe(true);
     // Une fiche dont la suite d'arrêt n'est pas essayée ne promet jamais « Hearth demandera au jeu d'enregistrer ».
     const untested = structuredClone(detail);
-    untested.stop = { graceSeconds: 10, worldSaved: "by_sequence", sequenceTested: false };
+    untested.stop = {
+      graceSeconds: 10,
+      worldSaved: "by_sequence",
+      sequenceTested: false,
+      consoleSave: false,
+    };
     expect(whatWillHappenNote(untested)).not.toContain("demandera");
     expect(whatWillHappenNote(untested)).toContain("ne peut pas encore");
   });

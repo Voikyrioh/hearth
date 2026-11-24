@@ -619,14 +619,25 @@ describe("l'image et l'arrêt du jeu", () => {
       graceSeconds: 10,
       worldSaved: "by_sequence",
       sequenceTested: false,
+      consoleSave: false,
     });
     expect(untested[0]).toContain("Hearth ne peut pas encore lui demander");
     expect(untested[1]).toContain("10 secondes");
     expect(
-      stopTexts({ graceSeconds: 30, worldSaved: "by_sequence", sequenceTested: true })[0],
+      stopTexts({
+        graceSeconds: 30,
+        worldSaved: "by_sequence",
+        sequenceTested: true,
+        consoleSave: false,
+      })[0],
     ).toContain("Hearth lui demande de l'enregistrer");
     expect(
-      stopTexts({ graceSeconds: 30, worldSaved: "by_image_on_signal", sequenceTested: true })[0],
+      stopTexts({
+        graceSeconds: 30,
+        worldSaved: "by_image_on_signal",
+        sequenceTested: true,
+        consoleSave: false,
+      })[0],
     ).toContain("jusqu'à 30 secondes");
   });
 });

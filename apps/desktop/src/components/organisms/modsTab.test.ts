@@ -105,7 +105,7 @@ describe("la liste", () => {
     expect(say("c.jar")).toBe("Ce mod a besoin du mod Balm, qui n'est pas installé.");
     expect(say("d.jar")).toContain("Hearth ne sait pas");
     expect(say("e.jar")).toBe("Hearth ne lit pas la fiche d'identité de ce fichier.");
-    expect(rowOf(wrapper, "a.jar").find("[data-mod-state]").text()).toBe("Incompatible");
+    expect(rowOf(wrapper, "a.jar").find("[data-mod-state]").text()).toBe("Pas compatible");
     expect(rowOf(wrapper, "c.jar").find("[data-mod-state]").text()).toBe("À compléter");
     expect(rowOf(wrapper, "e.jar").find("[data-mod-state]").text()).toBe("Non reconnu");
     expect(wrapper.text()).not.toMatch(/1\.21|\[1\./);

@@ -9,8 +9,10 @@ mod support;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use hearth_agent::application::game_phase::GamePhases;
 use hearth_agent::application::ports::ConsoleError;
 use hearth_agent::domain::accounts::Role;
+use hearth_agent::domain::catalog::readiness::ReadyRule;
 use hearth_agent::domain::ops::OpKind;
 use hearth_agent::domain::services::{RunState, ServiceKey};
 use serde_json::{Value, json};
@@ -35,9 +37,16 @@ struct Bench {
 }
 
 async fn bench() -> Bench {
+    bench_with(false).await
+}
+
+/// `starting` : l'agent a vu le jeu se lancer et n'a pas encore vu son signe « prêt » (phase « démarrage »).
+async fn bench_with(starting: bool) -> Bench {
     let env = env().await;
     let engine = Arc::new(FakeEngine::new());
     let game = FakeGameConsole::new();
+    game.watch_engine(engine.clone());
+    let phases = GamePhases::new(engine.clone(), env.clock.clone());
     let mut parts = parts_supervised(
         engine.clone(),
         Arc::new(FakeSupervisor::new()),
@@ -45,6 +54,7 @@ async fn bench() -> Bench {
     );
     parts.catalog.console = Some(game.clone());
     parts.catalog.include_preview = true;
+    parts.catalog.phases = Some(phases.clone());
     let agent = https::start_engined(&env, parts).await;
     let ada = agent.actor(&env, "ada", Role::Admin).await;
     let lucas = agent.actor(&env, "lucas", Role::ReadOnly).await;
@@ -55,6 +65,18 @@ async fn bench() -> Bench {
         .into_iter()
         .last()
         .expect("conteneur");
+    if starting {
+        phases.begin(
+            &key,
+            &container,
+            ReadyRule {
+                sign: Some("Done".to_owned()),
+                long_first_start: false,
+                timeout_s: 600,
+            },
+            false,
+        );
+    }
     Bench {
         env,
         engine,
@@ -588,4 +610,258 @@ async fn an_unreachable_console_makes_the_players_unavailable() {
     b.game.fail("list", ConsoleError::Unreachable);
     let view = b.players().await;
     assert_eq!(view["state"], "unavailable");
+}
+
+// -------------------------------------------------------------------------------------------------------------
+// Enregistrer le monde avant un arrêt demandé par Hearth (HRT-292, BR-CONSOLE-012, BR-JEU-032)
+// -------------------------------------------------------------------------------------------------------------
+
+impl Bench {
+    /// Demande l'arrêt du service et attend que l'opération soit close : son statut et les lignes de son journal.
+    async fn stop_and_wait(&self) -> (String, Vec<(String, String)>) {
+        self.gesture_and_wait("stop").await
+    }
+
+    async fn gesture_and_wait(&self, verb: &str) -> (String, Vec<(String, String)>) {
+        let reply = self
+            .agent
+            .confirmed(
+                &self.ada,
+                "POST",
+                &format!("/services/{}/{verb}", self.key),
+                json!({}),
+            )
+            .await
+            .send()
+            .await;
+        assert_eq!(reply.status, 202, "{}", reply.text);
+        let id = reply.body["action_id"].as_str().expect("action").to_owned();
+        let ops = self.agent.ops();
+        for _ in 0..200 {
+            let snapshot = ops.snapshot(&id).await.expect("lecture").expect("op");
+            if snapshot.record.status.is_terminal() {
+                let steps = snapshot
+                    .steps
+                    .iter()
+                    .map(|row| (row.step.as_str().to_owned(), format!("{:?}", row.state)))
+                    .collect();
+                return (format!("{:?}", snapshot.record.status), steps);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        panic!("le geste ne se termine pas");
+    }
+
+    fn save_lines(&self) -> usize {
+        self.game
+            .lines()
+            .iter()
+            .filter(|line| line.as_str() == "save-all flush")
+            .count()
+    }
+}
+
+#[tokio::test]
+async fn a_game_that_answers_saved_the_game_is_confirmed_then_stopped_as_before() {
+    let b = bench().await;
+    b.game.answer("save-all flush", "Saved the game");
+    let (status, steps) = b.stop_and_wait().await;
+    assert_eq!(status, "Succeeded");
+    assert_eq!(b.save_lines(), 1);
+    assert!(
+        steps.contains(&("console_save".to_owned(), "Intent".to_owned()))
+            && steps.contains(&("console_save".to_owned(), "Done".to_owned())),
+        "{steps:?}"
+    );
+    let stops = b
+        .engine
+        .calls()
+        .iter()
+        .filter(|call| matches!(call, support::fake_engine::Call::Stop(..)))
+        .count();
+    assert_eq!(stops, 1, "l'arrêt existant a eu lieu");
+}
+
+#[tokio::test]
+async fn a_mute_game_or_an_unreachable_console_never_holds_the_stop_back() {
+    for failure in [ConsoleError::NoAnswer, ConsoleError::Unreachable] {
+        let b = bench().await;
+        b.game.fail("save-all flush", failure);
+        let (status, steps) = b.stop_and_wait().await;
+        assert_eq!(status, "Succeeded", "{failure:?}: l'arrêt continue");
+        assert!(
+            steps.contains(&("console_save".to_owned(), "Failed".to_owned())),
+            "{failure:?}: {steps:?}"
+        );
+        assert!(!steps.contains(&("console_save".to_owned(), "Done".to_owned())));
+    }
+}
+
+#[tokio::test]
+async fn a_reply_without_the_expected_sign_is_not_confirmed_and_the_stop_goes_on() {
+    let b = bench().await;
+    b.game.answer("save-all flush", "Something else");
+    let (status, steps) = b.stop_and_wait().await;
+    assert_eq!(status, "Succeeded");
+    assert!(
+        steps.contains(&("console_save".to_owned(), "Failed".to_owned())),
+        "{steps:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_stopped_server_gets_no_save_and_its_operation_has_no_such_step() {
+    let b = bench().await;
+    b.stop_container().await;
+    // Rien ne tourne : l'état refuse déjà l'arrêt, aucune ligne n'est partie vers la console.
+    let reply = b
+        .agent
+        .confirmed(
+            &b.ada,
+            "POST",
+            &format!("/services/{}/stop", b.key),
+            json!({}),
+        )
+        .await
+        .send()
+        .await;
+    assert_ne!(reply.status, 202, "{}", reply.text);
+    assert_eq!(b.save_lines(), 0);
+}
+
+fn position(steps: &[(String, String)], step: &str, state: &str) -> usize {
+    steps
+        .iter()
+        .position(|(name, kind)| name == step && kind == state)
+        .unwrap_or_else(|| panic!("{step}/{state} absent : {steps:?}"))
+}
+
+#[tokio::test]
+async fn the_save_line_leaves_before_the_stop_order_and_the_step_is_done_before_the_stop_begins() {
+    let b = bench().await;
+    b.game.answer("save-all flush", "Saved the game");
+    let (status, steps) = b.stop_and_wait().await;
+    assert_eq!(status, "Succeeded");
+    let received = b.game.received();
+    assert_eq!(received.len(), 1, "{received:?}");
+    assert_eq!(
+        received[0].stops_seen, 0,
+        "la ligne est partie avant l'ordre d'arrêt"
+    );
+    assert!(
+        position(&steps, "console_save", "Done") < position(&steps, "stop", "Intent"),
+        "{steps:?}"
+    );
+}
+
+#[tokio::test]
+async fn restarting_saves_the_world_first_like_stopping() {
+    let b = bench().await;
+    b.game.answer("save-all flush", "Saved the game");
+    let (status, steps) = b.gesture_and_wait("restart").await;
+    assert_eq!(status, "Succeeded", "{steps:?}");
+    assert_eq!(b.save_lines(), 1);
+    assert_eq!(b.game.received()[0].stops_seen, 0);
+    assert!(steps.contains(&("console_save".to_owned(), "Done".to_owned())));
+    assert!(
+        b.engine
+            .calls()
+            .iter()
+            .any(|call| matches!(call, support::fake_engine::Call::Restart(..)))
+    );
+}
+
+#[tokio::test]
+async fn a_game_still_starting_is_not_asked_to_save_and_the_stop_goes_on() {
+    let b = bench_with(true).await;
+    let (status, steps) = b.stop_and_wait().await;
+    assert_eq!(status, "Succeeded", "{steps:?}");
+    assert!(
+        steps.contains(&("console_save".to_owned(), "Failed".to_owned())),
+        "{steps:?}"
+    );
+    assert!(
+        b.game.lines().is_empty(),
+        "aucun échange avec un jeu pas prêt"
+    );
+}
+
+#[tokio::test]
+async fn the_save_ignores_the_console_rate_limit_and_never_enters_the_activity_journal() {
+    let b = bench().await;
+    // Le débit de la console (rafale de 20) est épuisé par des commandes refusées.
+    for _ in 0..20 {
+        assert_eq!(b.free("stop").await.status, 422);
+    }
+    assert_eq!(b.free("stop").await.status, 429);
+    let before = b.journal().await.len();
+    b.game.answer("save-all flush", "Saved the game");
+    let (status, steps) = b.stop_and_wait().await;
+    assert_eq!(status, "Succeeded");
+    assert_eq!(
+        b.save_lines(),
+        1,
+        "l'enregistrement part malgré le débit épuisé"
+    );
+    assert!(steps.contains(&("console_save".to_owned(), "Done".to_owned())));
+    assert_eq!(
+        b.journal().await.len(),
+        before,
+        "l'enregistrement n'écrit aucune entrée `service.console`"
+    );
+}
+
+/// Un jeu qui ne répond jamais ne retient pas l'arrêt au-delà du délai de la fiche (60 s) + 5 s (BR-CONSOLE-012). Le
+/// temps est virtuel une fois la demande acceptée.
+#[tokio::test]
+async fn a_game_that_never_answers_holds_the_stop_back_at_most_the_delay_plus_five_seconds() {
+    let b = bench().await;
+    b.game.delay(std::time::Duration::from_secs(24 * 3600));
+    let reply = b
+        .agent
+        .confirmed(
+            &b.ada,
+            "POST",
+            &format!("/services/{}/stop", b.key),
+            json!({}),
+        )
+        .await
+        .send()
+        .await;
+    assert_eq!(reply.status, 202, "{}", reply.text);
+    let id = reply.body["action_id"].as_str().expect("action").to_owned();
+    tokio::time::pause();
+    let started = tokio::time::Instant::now();
+    let ops = b.agent.ops();
+    // L'étape se clôt (en échec) ; l'arrêt suit son cours ordinaire ensuite.
+    loop {
+        let snapshot = ops.snapshot(&id).await.expect("lecture").expect("op");
+        if snapshot.steps.iter().any(|row| {
+            row.step.as_str() == "console_save" && format!("{:?}", row.state) == "Failed"
+        }) {
+            break;
+        }
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(300),
+            "l'arrêt est retenu par un jeu muet"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    // L'échange pendu est abandonné au délai de la fiche (60 s) + la marge (5 s), pas une seconde de plus.
+    let durations = b.game.durations();
+    assert_eq!(durations.len(), 1, "{durations:?}");
+    let cut = durations[0].expect("l'échange est abandonné");
+    assert!(
+        cut >= std::time::Duration::from_secs(60) && cut <= std::time::Duration::from_secs(65),
+        "{cut:?}"
+    );
+    let snapshot = loop {
+        let snapshot = ops.snapshot(&id).await.expect("lecture").expect("op");
+        if snapshot.record.status.is_terminal() {
+            break snapshot;
+        }
+        assert!(started.elapsed() < std::time::Duration::from_secs(600));
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    };
+    assert_eq!(format!("{:?}", snapshot.record.status), "Succeeded");
 }

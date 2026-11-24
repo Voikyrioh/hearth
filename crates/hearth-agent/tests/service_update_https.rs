@@ -25,6 +25,7 @@ use serde_json::{Value, json};
 use support::device::Actor;
 use support::engine::{fast_timings, parts_supervised};
 use support::fake_engine::{Call, FakeEngine, PullScript};
+use support::fake_game_console::FakeGameConsole;
 use support::fake_host::{FakeFreeSpace, FakeHostPorts};
 use support::fake_safe_fs::FakeSafeFs;
 use support::fake_supervisor::FakeSupervisor;
@@ -52,6 +53,10 @@ struct Bench {
 }
 
 async fn bench() -> Bench {
+    bench_with(|_| {}).await
+}
+
+async fn bench_with(change: impl FnOnce(&mut hearth_agent::app::EngineParts)) -> Bench {
     let env = env().await;
     let engine = Arc::new(FakeEngine::new());
     engine.set_info(Some(EngineInfo {
@@ -67,6 +72,7 @@ async fn bench() -> Bench {
     parts.host_ports = Arc::new(FakeHostPorts::new());
     parts.free_space = Arc::new(FakeFreeSpace::new());
     parts.safe_fs = Some(Arc::new(FakeSafeFs::new()));
+    change(&mut parts);
     let agent = https::start_engined(&env, parts).await;
     let ada = agent.actor(&env, "ada", Role::Admin).await;
     let lucas = agent.actor(&env, "lucas", Role::ReadOnly).await;
@@ -321,6 +327,78 @@ async fn reading_the_description_never_shows_a_value_nor_the_command() {
         .await;
     assert_eq!(unknown.status, 404);
     assert_eq!(unknown.body["error"]["code"], "SERVICE_NOT_FOUND");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Enregistrer le monde par la console avant l'arrêt de l'ancien conteneur (HRT-292, BR-CONSOLE-012)
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn recreating_a_running_game_saves_by_the_console_before_the_old_one_is_stopped() {
+    let game = FakeGameConsole::new();
+    let wired = game.clone();
+    let b = bench_with(move |parts| parts.catalog.console = Some(wired)).await;
+    game.watch_engine(b.engine.clone());
+    let key =
+        support::game::minecraft_console_service(&b.env, &b.engine, &b.agent.services(), 1).await;
+    b.engine
+        .publish_image("itzg/minecraft-server:java21", PullScript::two_layers());
+    game.answer("save-all flush", "Saved the game");
+    let operation_id = b
+        .accepted(
+            key.as_str(),
+            json!({ "base_rev": 1, "seen_drift": "modified_outside" }),
+        )
+        .await;
+    let operation = b.finished(&operation_id).await;
+    assert_eq!(
+        operation.status,
+        OperationStatus::Succeeded,
+        "{operation:?}"
+    );
+    let names = names_of(&operation);
+    let save = names.iter().position(|n| n == "console_save").unwrap();
+    let stop_old = names.iter().position(|n| n == "stop_old").unwrap();
+    assert!(save < stop_old, "{names:?}");
+    assert_eq!(game.lines(), ["save-all flush"]);
+    assert_eq!(
+        game.received()[0].stops_seen,
+        0,
+        "avant l'arrêt de l'ancien"
+    );
+}
+
+#[tokio::test]
+async fn recreating_a_stopped_game_has_no_console_save_step() {
+    let game = FakeGameConsole::new();
+    let wired = game.clone();
+    let b = bench_with(move |parts| parts.catalog.console = Some(wired)).await;
+    let key =
+        support::game::minecraft_console_service(&b.env, &b.engine, &b.agent.services(), 1).await;
+    b.engine
+        .publish_image("itzg/minecraft-server:java21", PullScript::two_layers());
+    let container = b.engine.container_ids().into_iter().last().unwrap();
+    b.engine
+        .update(&container, |o| o.run_state = RunState::Exited);
+    b.resync().await;
+    let operation_id = b
+        .accepted(
+            key.as_str(),
+            json!({ "base_rev": 1, "seen_drift": "modified_outside" }),
+        )
+        .await;
+    let operation = b.finished(&operation_id).await;
+    assert_eq!(
+        operation.status,
+        OperationStatus::Succeeded,
+        "{operation:?}"
+    );
+    assert!(
+        !names_of(&operation).iter().any(|n| n == "console_save"),
+        "{:?}",
+        names_of(&operation)
+    );
+    assert!(game.lines().is_empty());
 }
 
 #[tokio::test]

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { fr } from "@/i18n/fr";
 import {
   classifyLine,
   normalizeLine,
@@ -100,8 +101,8 @@ describe("la classe d'une commande", () => {
     const judged = classifyLine(rustPolicy, "coolmod:wipe all");
     expect(judged).toMatchObject({ kind: "sensitive", player: null });
     if (judged.kind === "sensitive") {
-      expect(typeof judged.title === "string" && judged.title.length > 0).toBe(true);
-      expect(typeof judged.sentence === "string" && judged.sentence.length > 0).toBe(true);
+      expect(judged.title).toBe(fr.console.confirm.modTitle);
+      expect(judged.sentence).toBe(fr.console.confirm.modSentence);
       expect(signedClass(judged)).toBe(2);
     }
   });
