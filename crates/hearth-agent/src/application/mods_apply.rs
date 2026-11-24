@@ -320,6 +320,12 @@ impl ModsService {
         let op_plan = op_plan(running).map_err(|error| {
             ApplyError::Mods(ModsError::Storage(format!("plan de l'opération : {error}")))
         })?;
+        // HRT-292 : un jeu qui tourne enregistre son monde par la console avant l'arrêt de l'opération.
+        let op_plan = if running {
+            deps.ops.plan_before_stop(key, op_plan).await
+        } else {
+            op_plan
+        };
         let job = deps
             .backups
             .accept_for_mods(key, prepared, actor, op_key, op_plan)
@@ -413,6 +419,7 @@ impl ModsService {
         deps.backups.read_mods_for(&exec.job).await;
         // 1. Arrêt, seulement si le service tournait.
         if exec.running {
+            deps.ops.console_save(&id, &exec.key).await;
             if deps
                 .ops
                 .intent(&id, step::STOP, &UndoInfo::default())

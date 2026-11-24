@@ -600,4 +600,108 @@ mod tests {
         let delete = recover(OpKind::Delete, &plan, &[], Observed::Unreadable);
         assert_eq!(delete.cause, Cause::NotExecuted);
     }
+
+    /// HRT-292, BR-CONSOLE-012 : l'enregistrement avant l'arrêt n'est jamais rejoué, quelle que soit la ligne où
+    /// l'opération a été coupée.
+    #[test]
+    fn a_cut_console_save_is_interrupted_and_never_replayed() {
+        let plan = OpPlan::new(
+            vec![
+                PlannedStep {
+                    name: name("console_save"),
+                    destructive: false,
+                },
+                PlannedStep {
+                    name: name("stop"),
+                    destructive: false,
+                },
+            ],
+            None,
+        )
+        .unwrap();
+        for rows in [
+            vec![row(1, "console_save", Intent)],
+            vec![row(1, "console_save", Done)],
+            vec![row(1, "console_save", Failed)],
+        ] {
+            let recovery = recover(OpKind::Stop, &plan, &rows, Observed::Unreadable);
+            assert_eq!(recovery.status, OpStatus::Interrupted);
+            assert!(!recovery.keeps_lock);
+            assert!(recovery.choices.is_empty());
+        }
+    }
+
+    /// HRT-292, BR-CONSOLE-012 : une étape `console_save` close en échec (jeu muet) ne change pas la reprise d'un lot de
+    /// mods ni d'une sauvegarde à froid, ligne par ligne, qu'une étape destructive soit close ou non.
+    #[test]
+    fn a_failed_console_save_changes_no_classification_of_a_mods_or_backup_operation() {
+        use hearth_proto::api::backups::BackupMode;
+        let backup = crate::domain::ops::backup::op_plan(BackupMode::StopCopyStart).unwrap();
+        type Cut<'a> = Vec<(&'a str, StepState)>;
+        let cases: Vec<(OpKind, OpPlan, Cut)> = vec![
+            (
+                OpKind::Mods,
+                mods_plan(),
+                vec![
+                    ("stop", Done),
+                    ("copy", Done),
+                    ("verify", Done),
+                    ("place", Intent),
+                ],
+            ),
+            (
+                OpKind::Mods,
+                mods_plan(),
+                vec![
+                    ("stop", Done),
+                    ("copy", Done),
+                    ("verify", Done),
+                    ("place", Done),
+                ],
+            ),
+            (OpKind::Mods, mods_plan(), vec![("stop", Intent)]),
+            (
+                OpKind::Backup,
+                backup.clone(),
+                vec![("stop", Done), ("copy", Intent)],
+            ),
+            (
+                OpKind::Backup,
+                backup,
+                vec![
+                    ("stop", Done),
+                    ("copy", Done),
+                    ("verify", Done),
+                    ("start", Intent),
+                ],
+            ),
+        ];
+        for (kind, plan, steps) in cases {
+            let with_save = plan.clone().with_console_save().unwrap();
+            let bare: Vec<StepRecord> = steps
+                .iter()
+                .zip(1..)
+                .map(|((step, state), seq)| row(seq, step, *state))
+                .collect();
+            let mut saved = vec![row(1, "console_save", Failed)];
+            saved.extend(
+                steps
+                    .iter()
+                    .zip(2..)
+                    .map(|((step, state), seq)| row(seq, step, *state)),
+            );
+            for observed in [
+                Observed::Coherent(ConfigSide::Before),
+                Observed::Coherent(ConfigSide::After),
+                Observed::Ambiguous,
+                Observed::Unreadable,
+            ] {
+                assert_eq!(
+                    recover(kind, &with_save, &saved, observed),
+                    recover(kind, &plan, &bare, observed),
+                    "{kind:?} {steps:?} {observed:?}"
+                );
+            }
+        }
+    }
 }

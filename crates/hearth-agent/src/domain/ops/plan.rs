@@ -14,6 +14,10 @@ use time::OffsetDateTime;
 
 /// Nombre maximal d'étapes d'un plan.
 pub const MAX_STEPS: usize = 32;
+/// L'étape qui précède un arrêt demandé par Hearth quand la fiche déclare `[remote_console.use.before_stop]`
+/// (HRT-292, BR-CONSOLE-012) : jamais destructive, jamais rejouée par `recover`. Terminée (`done`) = enregistrement
+/// confirmé ; en échec (`failed`) = enregistrement non confirmé, l'arrêt continue.
+pub const CONSOLE_SAVE: &str = "console_save";
 /// Longueur maximale du nom d'une étape.
 pub const MAX_STEP_CHARS: usize = 40;
 /// Nombre maximal d'objets créés nommés par une ligne du journal.
@@ -109,6 +113,20 @@ impl OpPlan {
 
     pub fn steps(&self) -> &[PlannedStep] {
         &self.steps
+    }
+
+    /// Ce plan, avec l'étape non destructive `console_save` EN TÊTE (HRT-292). Déjà présente : rien ne change.
+    pub fn with_console_save(self) -> Result<Self, PlanError> {
+        let name = StepName::parse(CONSOLE_SAVE).ok_or(PlanError::StepName)?;
+        if self.step(&name).is_some() {
+            return Ok(self);
+        }
+        let mut steps = vec![PlannedStep {
+            name,
+            destructive: false,
+        }];
+        steps.extend(self.steps);
+        Self::new(steps, self.no_return)
     }
 
     pub fn no_return(&self) -> Option<&StepName> {
@@ -330,6 +348,27 @@ mod tests {
             name: name(text),
             destructive,
         }
+    }
+
+    #[test]
+    fn the_console_save_step_is_first_never_destructive_and_added_once() {
+        let plan = OpPlan::new(
+            vec![
+                step("stop", false),
+                step("copy", false),
+                step("place", true),
+            ],
+            Some(name("place")),
+        )
+        .unwrap()
+        .with_console_save()
+        .unwrap();
+        let names: Vec<_> = plan.steps().iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["console_save", "stop", "copy", "place"]);
+        assert!(!plan.step(&name(CONSOLE_SAVE)).unwrap().destructive);
+        assert_eq!(plan.no_return().map(StepName::as_str), Some("place"));
+        let twice = plan.clone().with_console_save().unwrap();
+        assert_eq!(twice, plan);
     }
 
     #[test]

@@ -12,6 +12,7 @@ mod audit_sink;
 mod backup_archive;
 mod backup_files;
 mod backup_repo;
+mod before_stop_save;
 mod boot_info;
 mod clock;
 mod container_engine;
@@ -77,6 +78,7 @@ pub use backup_files::{
 pub use backup_repo::{
     BackupRepo, BackupRow, ModsRecord, ModsSummaryRow, NewBackup, Published, Publishing,
 };
+pub use before_stop_save::BeforeStopSave;
 pub use boot_info::BootInfo;
 pub use clock::Clock;
 pub use container_engine::{

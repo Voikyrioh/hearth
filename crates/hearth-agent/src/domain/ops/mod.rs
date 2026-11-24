@@ -49,8 +49,8 @@ pub use lifecycle::{
 pub use locks::{Holder, LockMode, LockTable, ReadKind, Refusal};
 pub use observe::{Presence, observed_from_presence};
 pub use plan::{
-    CreatedObject, FileMove, MAX_STEPS, MoveKind, ObjectKind, ObjectRoot, OpPlan, PlanError,
-    PlannedStep, StepName, StepRecord, StepState, UndoInfo, latest_state,
+    CONSOLE_SAVE, CreatedObject, FileMove, MAX_STEPS, MoveKind, ObjectKind, ObjectRoot, OpPlan,
+    PlanError, PlannedStep, StepName, StepRecord, StepState, UndoInfo, latest_state,
 };
 pub use recover::{
     ConfigSide, Observed, Recovery, cleanup_on_cancel, recover, recover_unreadable_journal,

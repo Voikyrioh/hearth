@@ -13,6 +13,8 @@ maj: 2026-10-24
 ## Règle
 L'entrée de l'arrêt ou du redémarrage (BR-LIFE-018) ajoute à la cible, en texte fixe : « monde enregistré » (signe vu), « enregistrement non confirmé » (ordres partis, rien ne le prouve), « enregistrement impossible » (ordre impossible, puis « Arrêter quand même »), « non nécessaire (le jeu enregistre lui-même) », « arrêt malgré tout » (signe obligatoire non vu, puis « Arrêter quand même »), et « arrêt forcé » s'il l'a été. Le choix du compte (« poursuivre », « annuler ») est inscrit par la route de décision (BR-OPS-003). Jamais le texte d'un ordre.
 
+Quand la fiche déclare `[remote_console.use.before_stop]` (BR-CONSOLE-012), le journal de l'opération de l'arrêt porte aussi l'étape `console_save` : `done` = enregistrement par la console confirmé, `failed` = non confirmé (l'arrêt a continué). Cette étape ne change ni la mention ci-dessus ni le déroulé de l'arrêt.
+
 ## Application (code)
 - `crates/hearth-agent/src/domain/audit/event.rs::{LifecycleNote, SaveMention}`
 - `crates/hearth-agent/src/application/service_lifecycle.rs::ServiceLifecycle::draft`
@@ -26,7 +28,8 @@ L'entrée de l'arrêt ou du redémarrage (BR-LIFE-018) ajoute à la cible, en te
 - Une décision « Annuler » ou expirée n'écrit pas d'entrée d'arrêt : le service n'a pas été arrêté.
 
 ## Règles liées
-- BR-JEU-006, BR-JEU-016, BR-LIFE-018
+- BR-JEU-006, BR-JEU-016, BR-LIFE-018, BR-CONSOLE-012
 
 ## Historique
+- 2026-11-24 — complétée : étape `console_save` du journal de l'opération (HRT-292, BR-CONSOLE-012).
 - 2026-10-24 — création (HRT-103, côté agent).

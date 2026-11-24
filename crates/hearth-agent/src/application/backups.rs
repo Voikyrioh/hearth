@@ -1405,6 +1405,12 @@ impl Backups {
         };
         let plan =
             op_plan(mode).map_err(|error| named(BackupError::Internal(error.to_string())))?;
+        // HRT-292 : avant l'arrêt de la sauvegarde avec arrêt, le monde est enregistré par la console si la fiche le déclare.
+        let plan = if mode == BackupMode::StopCopyStart {
+            self.ops.plan_before_stop(key, plan).await
+        } else {
+            plan
+        };
         let account = account_of(&actor);
         let op = self
             .ops
@@ -1794,6 +1800,7 @@ impl Backups {
         self.read_mods(job).await;
         // 1. Arrêt, seulement dans ce mode.
         if job.mode == BackupMode::StopCopyStart {
+            self.ops.console_save(&job.id, &job.key).await;
             if let Err(finish) = self.begin(job, step::STOP, &UndoInfo::default()).await {
                 return Some(finish);
             }

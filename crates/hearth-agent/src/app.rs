@@ -1254,6 +1254,10 @@ pub async fn start_engined(
         services.audit_sink.clone(),
         adapters.clock.clone(),
     );
+    // Avant tout arrêt demandé par Hearth, le monde est enregistré par la console si la fiche le déclare (HRT-292).
+    let weak_console: std::sync::Weak<dyn crate::application::ports::BeforeStopSave> =
+        Arc::downgrade(&console) as _;
+    foundations.ops.set_before_stop_save(weak_console);
     deployments.set_pack_intake(Arc::new(PackIntake::new(pack_deposits)));
     deployments.set_mod_origins(Arc::new(
         crate::infrastructure::sqlite::SqliteModOrigins::new(database.pool().clone()),

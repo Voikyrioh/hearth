@@ -193,3 +193,43 @@ fn use_is_refused_on_a_protocol_hearth_does_not_speak() {
         .contains("source_rcon")
     );
 }
+
+#[test]
+fn hearth_saves_by_the_console_only_when_the_fiche_says_so_with_a_protocol_and_a_port_it_knows() {
+    use super::stop_plan::saves_by_console_before_stop;
+    let minecraft = load_fiche(FICHE).expect("fiche");
+    assert!(saves_by_console_before_stop(&minecraft));
+    // Sans commande « avant l'arrêt » : la console existe, mais Hearth n'y enregistre rien.
+    let cut = FICHE
+        .split(
+            "
+[remote_console.use.before_stop]",
+        )
+        .next()
+        .unwrap();
+    let after = FICHE.split("[[agreement]]").nth(1).unwrap();
+    let without = load_fiche(&format!(
+        "{cut}
+[[agreement]]{after}"
+    ))
+    .expect("sans before_stop");
+    assert!(!saves_by_console_before_stop(&without));
+    // Sans bloc `use`, ou sans console du tout.
+    let cut = FICHE
+        .split(
+            "
+[remote_console.use]",
+        )
+        .next()
+        .unwrap();
+    let after = FICHE.split("[[agreement]]").nth(1).unwrap();
+    let no_use = load_fiche(&format!(
+        "{cut}
+[[agreement]]{after}"
+    ))
+    .expect("sans use");
+    assert!(!saves_by_console_before_stop(&no_use));
+    let (fiches, _) = load_all();
+    let terraria = fiches.into_iter().find(|f| f.id() == "terraria").unwrap();
+    assert!(!saves_by_console_before_stop(&terraria));
+}

@@ -734,6 +734,12 @@ impl ServiceUpdates {
             op_plan(shape)
         }
         .map_err(|error| named(UpdateError::Internal(error.to_string())))?;
+        // HRT-292 : un jeu qui tourne enregistre son monde par la console avant l'arrêt de l'ancien conteneur.
+        let plan = if !settings_only && shape.had_container && shape.was_running {
+            self.ops.plan_before_stop(key, plan).await
+        } else {
+            plan
+        };
         let old_managed: Vec<&str> = subject
             .body
             .mounts
@@ -949,6 +955,7 @@ impl ServiceUpdates {
         let was_running = job.shape.was_running;
         if job.shape.had_container {
             if was_running {
+                self.ops.console_save(&job.id, &job.key).await;
                 if let Err(finish) = self.begin(job, step::STOP_OLD).await {
                     return finish;
                 }

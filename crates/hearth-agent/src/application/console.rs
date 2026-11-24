@@ -28,10 +28,14 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
+use async_trait::async_trait;
+
 use super::catalog::CatalogService;
 use super::game_phase::GamePhases;
 use super::game_settings::GameSettings;
-use super::ports::{AuditSink, Clock, ConsoleBudget, ConsoleError, ContainerEngine, GameConsole};
+use super::ports::{
+    AuditSink, BeforeStopSave, Clock, ConsoleBudget, ConsoleError, ContainerEngine, GameConsole,
+};
 use super::service_ops::{OpLocks, ServiceOps};
 use super::service_specs::ServiceSpecs;
 use super::services::{Driver, ServicesRegistry};
@@ -42,6 +46,7 @@ use crate::domain::catalog::loading::schema::fiche::{
     RemoteConsoleProtocol, RemoteConsoleUse, SensitiveTarget,
 };
 use crate::domain::catalog::readiness::GamePhase;
+use crate::domain::catalog::stop_plan::saves_by_console_before_stop;
 use crate::domain::console::bucket::{PER_MINUTE, TokenBucket};
 use crate::domain::console::players::{self, Reader};
 use crate::domain::services::{KeyKind, ServiceKey, ServiceStateKind};
@@ -618,6 +623,63 @@ impl ConsoleService {
         tracing::debug!(state = ?view.state, "console.players");
         *cache = Some((Instant::now(), view.clone()));
         Ok(view)
+    }
+}
+
+/// Marge au-delà du délai de la fiche : l'enregistrement avant l'arrêt ne retient jamais l'arrêt plus longtemps
+/// (HRT-292, BR-CONSOLE-012).
+const SAVE_MARGIN: Duration = Duration::from_secs(5);
+
+#[async_trait]
+impl BeforeStopSave for ConsoleService {
+    /// La même fonction de domaine que la vue de la fiche (`saves_by_console_before_stop`) : fiche déclarée, protocole
+    /// parlé, port résolu.
+    async fn declares(&self, key: &ServiceKey) -> bool {
+        if key.kind() != KeyKind::Hearth {
+            return false;
+        }
+        let Ok(Some(body)) = self.specs.body(key).await else {
+            return false;
+        };
+        let Some(spec_fiche) = &body.fiche else {
+            return false;
+        };
+        self.catalog
+            .fiche(&spec_fiche.id)
+            .is_some_and(saves_by_console_before_stop)
+    }
+
+    /// BR-CONSOLE-012 : la commande de la fiche, la réponse attendue, le délai de la fiche. L'opération qui arrête le
+    /// service tient déjà son verrou : le verrou partagé de la console n'est pas pris (un échange à la fois), hors
+    /// débit, hors journal d'activité. Rien du jeu n'est gardé. La préparation (« le jeu est-il prêt ? ») et
+    /// l'échange tiennent sous UN SEUL délai : rien ne retient l'arrêt au-delà du délai de la fiche + la marge.
+    async fn save(&self, key: &ServiceKey) -> bool {
+        let Ok(Standing::Available(resolved)) = self.standing(key).await else {
+            return false;
+        };
+        let Some(before) = resolved.usage.before_stop.as_ref() else {
+            return false;
+        };
+        let budget = Duration::from_secs(u64::from(before.timeout_s)) + SAVE_MARGIN;
+        let work = async {
+            let Readiness::Ready { container } = self.readiness(key).await else {
+                return false;
+            };
+            let per_service = self.state_of(key);
+            let _one_at_a_time = per_service.exchange.lock().await;
+            matches!(
+                self.talk(
+                    key,
+                    &container,
+                    &resolved,
+                    &before.command,
+                    before.timeout_s,
+                )
+                .await,
+                Ok(Exchange::Replied { text, .. }) if text.contains(before.expect.as_str())
+            )
+        };
+        tokio::time::timeout(budget, work).await.unwrap_or(false)
     }
 }
 

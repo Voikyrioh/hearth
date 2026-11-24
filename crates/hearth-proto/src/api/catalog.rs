@@ -345,6 +345,10 @@ pub struct StopView {
     /// La suite d'étapes a été essayée sur la vraie image ; sinon Hearth ne l'envoie pas.
     #[serde(default)]
     pub sequence_tested: bool,
+    /// Hearth enregistre le monde par la console du jeu avant de l'arrêter (HRT-292, BR-CONSOLE-012). Absent des
+    /// agents plus anciens : « non ».
+    #[serde(default)]
+    pub console_save: bool,
 }
 
 /// Un réglage que la fiche pose sans que l'utilisateur l'ait choisi (BR-JEU-039).

@@ -399,6 +399,12 @@ impl ServiceLifecycle {
             None => gesture.plan(),
         }
         .map_err(|error| LifecycleError::Internal(error.to_string()))?;
+        // HRT-292 : un jeu en marche dont la fiche déclare `before_stop` enregistre son monde par la console d'abord.
+        let plan = if game.is_some() && target.state == ServiceStateKind::Running {
+            self.ops.plan_before_stop(key, plan).await
+        } else {
+            plan
+        };
         let account = actor
             .account
             .as_ref()
@@ -483,6 +489,10 @@ impl ServiceLifecycle {
                 registry: &self.registry,
                 key: job.target.key.clone(),
             };
+            // HRT-292 : avant tout arrêt d'un jeu, jamais bloquant ; sans l'étape au plan, rien ne se passe.
+            if job.game.is_some() && job.gesture != Gesture::Start {
+                self.ops.console_save(&job.id, &job.target.key).await;
+            }
             let finish = match (&job.game, job.gesture) {
                 // Un serveur de jeu dont la fiche déclare une suite (ou qui demande une décision) : HRT-103.
                 (Some(GameStopKind::Steps(plan)), Gesture::Stop | Gesture::Restart) => {

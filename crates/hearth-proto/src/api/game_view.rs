@@ -73,6 +73,7 @@ mod tests {
                 grace_s: 30,
                 world_saved: WorldSavedView::BySequence,
                 sequence_tested: false,
+                console_save: false,
             },
             ports: vec![GamePort {
                 host_port: 7777,
