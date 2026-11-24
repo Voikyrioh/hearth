@@ -1,5 +1,14 @@
+<script lang="ts">
+/**
+ * Les services dont l'écran « Vérifiez avant d'appliquer » a ouvert la console : en revenant sur l'onglet Mods, le lot
+ * reparaît sur cet écran (pas sur la liste), puisque c'est de là qu'on est parti. Tenu hors du composant, qui est détruit
+ * au changement d'onglet.
+ */
+const cameFromReview = new Set<string>();
+</script>
+
 <script setup lang="ts">
-import { computed, nextTick, ref, useId, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
@@ -22,7 +31,7 @@ import type { PendingAdd } from "@/composables/useServiceMods";
 import { useServiceMods } from "@/composables/useServiceMods";
 import { t } from "@/i18n";
 import { MAX_BATCH_ADDS, type ModItem, type ServiceInfo } from "@/link";
-import { addressesOf } from "@/services/game";
+import { addressesOf, type StopWay } from "@/services/game";
 import {
   bannerItems,
   blockersAfter,
@@ -58,6 +67,8 @@ const props = defineProps<{
   consoleServed?: boolean;
   /** L'onglet « Console » existe pour ce serveur : « Ouvrir la console » est proposé (HRT-269). */
   consoleOpen?: boolean;
+  /** Comment la fiche dit que le jeu enregistre son monde à l'arrêt (une seule lecture pour tous les écrans) ; `null` : pas lue. */
+  stopWay?: StopWay | null;
 }>();
 const emit = defineEmits<{
   addServer: [];
@@ -79,7 +90,11 @@ const deposit = useModsDeposit(
   () => props.service.key,
 );
 /** L'écran montré : la liste, « Ajouter des mods » (dépôt), ou le contrôle des fichiers déposés. */
-const screen = ref<"list" | "deposit" | "check" | "review" | "progress" | "players">("list");
+const screen = ref<"list" | "deposit" | "check" | "review" | "progress" | "players">(
+  cameFromReview.delete(`${props.serverId}/${props.service.key}`) && flow.changeCount.value > 0
+    ? "review"
+    : "list",
+);
 /** L'adresse que les joueurs utilisent, lue quand « Ce que vos joueurs doivent installer » s'ouvre. */
 const address = ref<string | null>(null);
 const canWrite = computed(() => canAct(props.gate));
@@ -168,6 +183,11 @@ async function openPlayers() {
   address.value = addresses?.internet?.text ?? addresses?.lan ?? null;
 }
 
+function openConsoleFromReview() {
+  cameFromReview.add(`${props.serverId}/${props.service.key}`);
+  emit("openConsole");
+}
+
 function closeProgress() {
   screen.value = "list";
   void flow.reload();
@@ -215,6 +235,45 @@ function labelOfReplaced(item: ModItem): string | undefined {
 }
 
 const view = flow.view;
+
+// Les colonnes se replient selon la largeur de la carte (pas celle de la fenêtre) : au-dessous de 860 px le moteur et la
+// version visée cèdent la place, au-dessous de 760 px l'origine passe sous le nom. Chaque cellule est retirée avec sa
+// colonne : la grille reste juste et le nom garde le reste de la largeur.
+const tableWrap = ref<HTMLElement | null>(null);
+const cardWidth = ref(1000);
+const showWide = computed(() => cardWidth.value >= 860);
+const showOrigin = computed(() => cardWidth.value >= 760);
+const columns = computed(() => 8 - (showWide.value ? 0 : 2) - (showOrigin.value ? 0 : 1));
+let observer: ResizeObserver | null = null;
+watch(tableWrap, (el) => {
+  observer?.disconnect();
+  observer = null;
+  if (!el || typeof ResizeObserver === "undefined") return;
+  // Le changement de colonnes est posé à l'image suivante : relayouter dans le rappel ferait boucler l'observateur.
+  observer = new ResizeObserver(([entry]) => {
+    const width = entry?.contentRect.width;
+    if (width !== undefined) requestAnimationFrame(() => (cardWidth.value = width));
+  });
+  observer.observe(el);
+});
+onBeforeUnmount(() => observer?.disconnect());
+
+// La barre du lot colle sous l'en-tête collant du détail (nom et onglets) : sa hauteur est lue et donnée à la barre
+// (`--mods-pinned-h`), qui colle en haut quand on a dépassé sa place et en bas quand elle est plus bas que l'écran.
+let pinnedObserver: ResizeObserver | null = null;
+onMounted(() => {
+  const pinned = root.value
+    ?.closest("[data-service-detail]")
+    ?.querySelector("[data-detail-pinned]");
+  if (!pinned || typeof ResizeObserver === "undefined") return;
+  const place = () =>
+    root.value?.style.setProperty("--mods-pinned-h", `${pinned.getBoundingClientRect().height}px`);
+  place();
+  pinnedObserver = new ResizeObserver(place);
+  pinnedObserver.observe(pinned);
+});
+onBeforeUnmount(() => pinnedObserver?.disconnect());
+
 watch(
   () => view.value?.game,
   (game) => emit("engine", game ? engineLine(game) : null),
@@ -316,10 +375,11 @@ function keyOf(item: ModItem): string {
       :players-refreshing="players.refreshing.value"
       :now="clock"
       :console-open="consoleOpen === true"
+      :stop-way="stopWay ?? null"
       :blockers="blockers"
       @back="screen = 'list'"
       @refresh-players="players.refresh()"
-      @open-console="emit('openConsole')"
+      @open-console="openConsoleFromReview"
       @launched="launched"
     />
 
@@ -336,6 +396,7 @@ function keyOf(item: ModItem): string {
       :apply="apply"
       :view="view"
       :running="running"
+      :stop-way="stopWay ?? null"
       @close="closeProgress"
       @players="openPlayers"
       @logs="emit('openLogs')"
@@ -393,15 +454,15 @@ function keyOf(item: ModItem): string {
       </Callout>
       <Callout v-if="view.truncated" tone="warn" data-mods-truncated>{{ t("mods.truncated") }}</Callout>
 
-      <div class="mt__table-wrap">
+      <div ref="tableWrap" class="mt__table-wrap">
         <table class="mt__table" :aria-labelledby="titleId" data-mods-table>
           <colgroup>
-            <col class="mt__c-mod" />
+            <col />
             <col class="mt__c-version" />
-            <col class="mt__c-loader" />
-            <col class="mt__c-target" />
+            <col v-if="showWide" class="mt__c-loader" />
+            <col v-if="showWide" class="mt__c-target" />
             <col class="mt__c-state" />
-            <col class="mt__c-origin" />
+            <col v-if="showOrigin" class="mt__c-origin" />
             <col class="mt__c-enabled" />
             <col class="mt__c-action" />
           </colgroup>
@@ -409,10 +470,10 @@ function keyOf(item: ModItem): string {
             <tr>
               <th scope="col">{{ t("mods.table.mod") }}</th>
               <th scope="col">{{ t("mods.table.version") }}</th>
-              <th scope="col" class="mt__wide">{{ t("mods.table.loader") }}</th>
-              <th scope="col" class="mt__wide">{{ t("mods.table.target") }}</th>
+              <th v-if="showWide" scope="col">{{ t("mods.table.loader") }}</th>
+              <th v-if="showWide" scope="col">{{ t("mods.table.target") }}</th>
               <th scope="col">{{ t("mods.table.state") }}</th>
-              <th scope="col">{{ t("mods.table.origin") }}</th>
+              <th v-if="showOrigin" scope="col">{{ t("mods.table.origin") }}</th>
               <th scope="col" class="mt__center">{{ t("mods.table.enabled") }}</th>
               <th scope="col" class="mt__right">{{ t("mods.table.action") }}</th>
             </tr>
@@ -420,6 +481,8 @@ function keyOf(item: ModItem): string {
           <tbody v-if="flow.adds.value.length > 0" data-mods-adds>
             <ModRow
               v-for="add in flow.adds.value"
+              :wide="showWide"
+              :origin-column="showOrigin"
               :key="add.deposit"
               :item="itemOfAdd(add)"
               :game="view.game"
@@ -435,6 +498,8 @@ function keyOf(item: ModItem): string {
           <tbody>
             <ModRow
               v-for="item in active"
+              :wide="showWide"
+              :origin-column="showOrigin"
               :key="keyOf(item)"
               :item="item"
               :game="view.game"
@@ -452,10 +517,12 @@ function keyOf(item: ModItem): string {
           </tbody>
           <tbody v-if="retired.length > 0" data-mods-retired>
             <tr class="mt__group">
-              <th scope="rowgroup" colspan="8">{{ t("mods.table.retired") }}</th>
+              <th scope="rowgroup" :colspan="columns">{{ t("mods.table.retired") }}</th>
             </tr>
             <ModRow
               v-for="item in retired"
+              :wide="showWide"
+              :origin-column="showOrigin"
               :key="keyOf(item)"
               :item="item"
               :game="view.game"
@@ -538,7 +605,6 @@ function keyOf(item: ModItem): string {
 
 
 .mt__table-wrap {
-  container: mtw / inline-size;
   overflow-x: auto;
   border-radius: var(--radius-card);
   background: var(--card);
@@ -580,20 +646,8 @@ function keyOf(item: ModItem): string {
   width: var(--mods-col-action);
 }
 
-/* Étroit (1100 px de fenêtre) : le moteur et la version visée cèdent la place, l'état dit déjà ce qui ne va pas. */
-@container mtw (max-width: 859px) {
-  .mt__c-loader,
-  .mt__c-target {
-    display: none;
-  }
-
-  .mt__table .mt__wide,
-  .mt__table :deep(.row__wide) {
-    display: none;
-  }
-}
-
 .mt__table th {
+  overflow-wrap: anywhere;
   padding: var(--space-2) var(--space-3);
   color: var(--tx-secondary);
   font-size: var(--fs-small);

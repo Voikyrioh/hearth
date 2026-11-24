@@ -122,6 +122,19 @@ export class SimulatedBackups {
     );
   }
 
+  /** La sauvegarde que l'agent fait avant un lot de mods : elle rejoint la liste du service, sous le nom que l'opération rend. */
+  addModsBackup(serverId: string, key: string, id: string, note: string): void {
+    const created = new Date().toISOString();
+    const slot = this.slot(serverId, key);
+    const entry = emptyBackup(id, {
+      createdAt: created,
+      note,
+      integrity: "verified",
+      verifiedAt: created,
+    });
+    this.lists.set(slot, [entry, ...(this.lists.get(slot) ?? [])]);
+  }
+
   setPreview(serverId: string, key: string, preview: Partial<BackupPreview>): void {
     this.previews.set(this.slot(serverId, key), preview);
   }

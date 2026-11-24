@@ -28,6 +28,8 @@ const props = withDefaults(
     wide?: boolean;
     /** Pourquoi le bouton d'envoi est inactif, écrit à côté de lui (revue UX 2026-10-24, constat 13) ; `undefined` : rien à dire. */
     submitReason?: string;
+    /** La raison est déjà dite à l'écran (le champ du mot de passe l'écrit) : elle ne reste que pour les lecteurs d'écran. */
+    quietReason?: boolean;
   }>(),
   {
     submitLabel: undefined,
@@ -39,6 +41,7 @@ const props = withDefaults(
     hideSubmit: false,
     wide: false,
     submitReason: undefined,
+    quietReason: false,
   },
 );
 
@@ -117,7 +120,7 @@ function onNativeClose() {
         <div class="dialog__actions">
           <!-- `actions` remplace les deux boutons par défaut (une progression n'a ni envoi ni annulation à elle). -->
           <slot name="actions">
-            <p v-if="submitReason && !canSubmit" :id="reasonId" class="dialog__reason" data-dialog-reason>
+            <p v-if="submitReason && !canSubmit" :id="reasonId" :class="['dialog__reason', { 'sr-only': quietReason }]" data-dialog-reason>
               {{ submitReason }}
             </p>
             <HButton variant="secondary" :disabled="busy" @click="cancel">

@@ -7,3 +7,5 @@ La table des sauvegardes, de la plus récente à la plus ancienne (BR-BACKUP-012
 - Props : `backups`, `verifying`, `notes`, `canWrite`, `rightsReasonId`
 - Événements : `verify`, `remove`
 - Notes : sous 860 px de zone, le mode passe sous la date et les boutons s'empilent (rien n'est coupé ni caché) ; notes en `overflow-wrap: break-word`. Tests `pages/ServicesBackups.test.ts`.
+
+Sans défilement horizontal dès 1024 px : Vérifier et Supprimer toujours visibles ; la ligne dépliée et la comparaison restent dans la carte.

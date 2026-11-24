@@ -1,7 +1,8 @@
 import { onBeforeUnmount, ref, watch } from "vue";
 import { readGameOnce } from "@/composables/useGameView";
 import { logUiError } from "@/errors/report";
-import { type ConsoleView, failureOf, getLinkBridge } from "@/link";
+import { type ConsoleView, failureOf, getLinkBridge, type ModsGame } from "@/link";
+import { type StopWay, stopWayOf } from "@/services/game";
 
 /**
  * Les portes des onglets « Mods » et « Console » d'un serveur de jeu (HRT-261, HRT-269, BR-MOD-001, BR-CONSOLE-002) :
@@ -24,12 +25,17 @@ export function useServiceDoors(
   refreshOn: () => string,
 ) {
   const hasMods = ref(false);
+  /** Ce que l'on sait du moteur (Minecraft Java, Fabric, version) : lu avec la porte « Mods », pour l'en-tête de tout onglet. */
+  const game = ref<ModsGame | null>(null);
+  /** Comment ce jeu enregistre son monde à l'arrêt, d'après sa fiche : la source unique des phrases sur l'enregistrement. */
+  const stopWay = ref<StopWay | null>(null);
   const console = ref<ConsoleView | null>(null);
   let ticket = 0;
 
   async function loadMods(target: string, mine: number): Promise<void> {
     const game = await readGameOnce(serverId(), target);
     if (mine !== ticket) return;
+    stopWay.value = game.kind === "found" ? stopWayOf(game.view) : null;
     if (game.kind !== "found") {
       hasMods.value = false;
       return;
@@ -38,8 +44,20 @@ export function useServiceDoors(
       const read = await getLinkBridge().readFiche(serverId(), game.view.fiche);
       if (mine !== ticket) return;
       hasMods.value = read.kind === "found" && read.fiche.mods?.ways.includes("drop_jars") === true;
+      if (hasMods.value) await loadGame(target, mine);
     } catch (error) {
       if (!failureOf(error)) logUiError(error, "serviceDoors:fiche");
+    }
+  }
+
+  /** Le moteur du service, lu dès l'ouverture (jamais par l'onglet « Mods » seul) : une lecture qui échoue n'invente rien. */
+  async function loadGame(target: string, mine: number): Promise<void> {
+    try {
+      const outcome = await getLinkBridge().readMods(serverId(), target);
+      if (mine !== ticket) return;
+      game.value = outcome.kind === "ready" ? outcome.view.game : null;
+    } catch (error) {
+      if (!failureOf(error)) logUiError(error, "serviceDoors:game");
     }
   }
 
@@ -58,6 +76,8 @@ export function useServiceDoors(
     const mine = ++ticket;
     if (target === null) {
       hasMods.value = false;
+      game.value = null;
+      stopWay.value = null;
       console.value = null;
       return;
     }
@@ -72,6 +92,8 @@ export function useServiceDoors(
     () => {
       // Un autre service : les portes de l'ancien ne se montrent jamais sous le nouveau.
       hasMods.value = false;
+      game.value = null;
+      stopWay.value = null;
       console.value = null;
       void load();
     },
@@ -84,5 +106,5 @@ export function useServiceDoors(
     ticket += 1;
   });
 
-  return { hasMods, console, reload: load };
+  return { hasMods, game, stopWay, console, reload: load };
 }

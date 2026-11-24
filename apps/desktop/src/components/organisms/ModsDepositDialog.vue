@@ -42,7 +42,7 @@ onBeforeUnmount(() => {
 function statusOf(item: DepositItem): string {
   if (item.refused !== null) return item.refused;
   const transfer = props.deposit.transferOf(item);
-  if (!transfer) return t("mods.deposit.waiting");
+  if (!transfer) return item.sent === true ? t("mods.deposit.sent") : t("mods.deposit.waiting");
   if (transfer.status === "sending") {
     const ratio = ratioOf(transfer);
     return ratio === null
@@ -62,6 +62,17 @@ const stuckNames = computed(() =>
     .map((item) => item.name),
 );
 
+/** « chunky.jar n'est plus dans la zone d'attente » : le fichier est nommé quand on sait lequel. */
+function goneText(names: string[]): string {
+  if (names.length === 0) return t("mods.deposit.depositGone");
+  return t(
+    names.length === 1 ? "mods.deposit.depositGoneNamed" : "mods.deposit.depositGoneNamedMany",
+    {
+      names: names.join(", "),
+    },
+  );
+}
+
 function sizeOf(item: DepositItem): string | null {
   const transfer = props.deposit.transferOf(item);
   return transfer ? formatSize(transfer.size) : null;
@@ -78,9 +89,11 @@ function sizeOf(item: DepositItem): string | null {
     <p class="md__lead">{{ t("mods.deposit.lead") }}</p>
 
     <div class="md__zone" data-mods-deposit-zone>
+      <HIcon name="upload" class="md__zone-icon" />
       <p class="md__zone-text">{{ t("mods.deposit.zone") }}</p>
+      <p class="md__hint">{{ t("mods.deposit.zoneOr") }}</p>
       <HButton
-        variant="primary"
+        variant="secondary"
         needs-link
         :disabled="!canWrite"
         :busy="deposit.picking.value"
@@ -126,7 +139,7 @@ function sizeOf(item: DepositItem): string | null {
     >
       {{
         deposit.check.value.refusal.kind === "deposit_unknown"
-          ? t("mods.deposit.depositGone")
+          ? goneText(deposit.check.value.gone ?? [])
           : deposit.check.value.refusal.kind === "not_applicable"
             ? t("mods.noMods.title")
             : t("mods.gone")
@@ -208,13 +221,23 @@ function sizeOf(item: DepositItem): string | null {
   font-size: var(--fs-small);
 }
 
+.md__zone-icon {
+  color: var(--ac);
+}
+
+.md__zone-text {
+  color: var(--tx);
+  font-size: var(--fs-lead);
+  font-weight: var(--fw-semibold);
+}
+
 .md__zone {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-6) var(--space-5);
-  border: var(--border-width) dashed var(--bd);
+  border: var(--border-width) dashed var(--tx-faint);
   border-radius: var(--radius-card);
   background: var(--card);
 }

@@ -65,8 +65,10 @@ const icon = computed(() => {
   background: var(--crit-tint);
 }
 
+/* Une réussite se voit : fond vert profond et liseré vert (maquette Fin), pas un gris à peine teinté. */
 .callout--ok {
-  background: var(--ok-tint);
+  border: var(--border-width) solid color-mix(in srgb, var(--ok) 45%, transparent);
+  background: color-mix(in srgb, var(--ok) 16%, var(--bg));
 }
 
 .callout__icon {

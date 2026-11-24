@@ -42,7 +42,7 @@ describe("le panneau", () => {
     const wrapper = strip([item()]);
     expect(wrapper.find("[data-transfer-name]").text()).toBe("pack.zip");
     expect(wrapper.find("[data-transfer-status]").text()).toBe("Envoi en cours.");
-    expect(wrapper.find("[data-transfer-progress]").text()).toBe("150 Mio sur 600 Mio");
+    expect(wrapper.find("[data-transfer-progress]").text()).toBe("150 Mo sur 600 Mo");
     expect(wrapper.find("[data-transfer-cancel]").exists()).toBe(true);
     expect(wrapper.find("[data-transfer-resume]").exists()).toBe(false);
     expect(wrapper.find("[data-transfer-dismiss]").exists()).toBe(false);
@@ -76,7 +76,7 @@ describe("le panneau", () => {
       }),
     ]);
     expect(wrapper.find("[data-transfer-status]").text()).toBe(
-      "Il manque 3 Gio sur le disque pour écrire ce fichier. Il resterait 512 Mio de libre.",
+      "Il manque 3 Go sur le disque pour écrire ce fichier. Il resterait 512 Mo de libre.",
     );
     expect(wrapper.find("[data-transfer-resume]").exists()).toBe(true);
   });

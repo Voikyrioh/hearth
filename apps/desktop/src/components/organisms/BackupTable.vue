@@ -51,7 +51,6 @@ const emit = defineEmits<{
   modsOpen: [backup: BackupInfo];
   modsClose: [backup: BackupInfo];
   modsCompare: [backup: BackupInfo];
-  modsHideCompare: [backup: BackupInfo];
 }>();
 
 /** La colonne « Mods » n'existe que pour un serveur à mods : l'agent joint un résumé à chacune de ses sauvegardes (BR-MOD-035). */
@@ -227,7 +226,6 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
                 :created-at="backup.createdAt"
                 :address="modsAddress ?? null"
                 @compare="emit('modsCompare', backup)"
-                @hide-compare="emit('modsHideCompare', backup)"
               />
             </td>
           </tr>
@@ -264,7 +262,7 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
 }
 
 .bk__table td {
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-2);
   border-bottom: var(--border-width) solid var(--bd);
   vertical-align: top;
   min-width: 0;
@@ -275,8 +273,9 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
   border-bottom: 0;
 }
 
+/* Le résumé des mods passe à la ligne : la liste ne déborde jamais de sa carte. */
 .bk__mods-text {
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .bk__expand {
@@ -343,6 +342,9 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
 
 .bk__num {
   text-align: right;
+}
+
+.bk__num [data-backup-size] {
   white-space: nowrap;
 }
 
@@ -417,11 +419,11 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
 
   .bk__date,
   .bk__state {
-    min-width: var(--backup-date-narrow);
+    min-width: 0;
   }
 
   .bk__note {
-    min-width: var(--backup-note-narrow);
+    min-width: 0;
   }
 
   .bk__buttons {

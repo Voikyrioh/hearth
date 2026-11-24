@@ -734,7 +734,8 @@ export function demoPublished(): FicheDetail[] {
       memory: { min: 2 * GIB, recommended: 4 * GIB, evidence: { kind: "measured" } },
       disk: 1_497_623_985,
       readyTimeoutSeconds: 3600,
-      stop: { graceSeconds: 60, worldSaved: "by_sequence", sequenceTested: true },
+      // Comme la vraie fiche (`catalog/minecraft/fiche.toml`) : l'image enregistre le monde sur le signal d'arrêt, 210 s de délai.
+      stop: { graceSeconds: 210, worldSaved: "by_image_on_signal", sequenceTested: false },
       illustration: true,
       // Le moteur du serveur se choisit à l'installation, comme dans la vraie fiche (une variante par moteur).
       variants: [

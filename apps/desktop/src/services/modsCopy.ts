@@ -58,9 +58,14 @@ export function toInstall(entries: readonly CopyEntry[]): CopyEntry[] {
   );
 }
 
-/** Un mod ne se donne pas aux joueurs quand le serveur lui-même ne peut pas le charger (incompatible, doublon). */
+/**
+ * Un mod ne se donne pas aux joueurs quand le serveur lui-même ne peut pas le charger : incompatible, doublon, ou dépendance
+ * absente (« à compléter » : le serveur ne démarre pas avec lui, un joueur ne pourrait pas s'y connecter).
+ */
 export function loadsOnServer(code: string): boolean {
-  return !["incompatible_loader", "incompatible_minecraft", "duplicate"].includes(code);
+  return !["incompatible_loader", "incompatible_minecraft", "duplicate", "to_complete"].includes(
+    code,
+  );
 }
 
 /**

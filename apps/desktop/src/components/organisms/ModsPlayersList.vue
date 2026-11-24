@@ -2,10 +2,11 @@
 import { computed } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
+import Callout from "@/components/molecules/Callout.vue";
 import { useCopyText } from "@/composables/useCopyText";
 import { t } from "@/i18n";
 import type { ModsView } from "@/link";
-import { loaderName, modName } from "@/services/mods";
+import { blockingBanner, loaderName, modName } from "@/services/mods";
 import { audienceOf, audienceReason, copyText, entryOf, loadsOnServer } from "@/services/modsCopy";
 
 // « Ce que vos joueurs doivent installer » (HRT-264, BR-MOD-029, maquette Joueurs) : chaque mod ACTIVÉ, « Aussi chez les
@@ -29,6 +30,18 @@ const mods = computed(() =>
       mod.identity !== null &&
       loadsOnServer(mod.verdict.code),
   ),
+);
+/** Les mods activés que le serveur ne peut pas démarrer faute d'un mod dont ils ont besoin : dits ici, jamais donnés. */
+const unlisted = computed(() =>
+  props.view.mods
+    .filter(
+      (mod) =>
+        mod.place === "active" &&
+        mod.enabled &&
+        mod.identity !== null &&
+        mod.verdict.code === "to_complete",
+    )
+    .map((mod) => blockingBanner(mod, props.view.game, props.view)),
 );
 /** Les mods qui vont chez les joueurs : ceux qui le disent (ou se taisent), et ce dont ils ont besoin. */
 const withPlayers = computed(() => {
@@ -91,6 +104,12 @@ const text = computed(() =>
     <p v-if="address" class="mpl__address" data-mods-players-address>
       {{ t("mods.players.address", { address }) }}
     </p>
+    <Callout v-if="unlisted.length > 0" tone="warn" data-mods-players-unlisted>
+      {{ t("mods.players.unlisted") }}
+      <ul class="mpl__unlisted">
+        <li v-for="line in unlisted" :key="line">{{ line }}</li>
+      </ul>
+    </Callout>
     <div class="mpl__wrap">
       <table class="mpl__table" data-mods-players-table>
         <thead>
@@ -130,6 +149,11 @@ const text = computed(() =>
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
+}
+
+.mpl__unlisted {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-5);
 }
 
 .mpl__back {

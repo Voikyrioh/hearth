@@ -7,3 +7,5 @@ Le suivi d'un lot de mods et son issue (HRT-263, BR-MOD-025 à 027, maquettes Su
 - Props : `serverId`, `apply`, `view`
 - Événements : `close`, `players`, `logs`
 - Notes : tests `pages/ServicesModsApply.test.ts`, e2e `e2e/mods.spec.ts`.
+
+Étapes terminées : coche verte et mot « Terminé ». L'étape 1 redit la fiche (`stopWay`), comme la carte « Arrêt du jeu », la fenêtre « Arrêter » et le refus de `stop` de la console.

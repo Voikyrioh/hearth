@@ -337,7 +337,6 @@ const resultLines = computed<ResultLine[]>(() => {
           @mods-open="mods.open($event.id)"
           @mods-close="mods.close($event.id)"
           @mods-compare="mods.compare($event.id)"
-          @mods-hide-compare="mods.hideCompare($event.id)"
         />
         <ul v-if="backups.some((backup) => backup.mods)" class="bt__legend" data-backups-mods-legend>
           <li v-for="entry in MODS_LEGEND" :key="entry.term">

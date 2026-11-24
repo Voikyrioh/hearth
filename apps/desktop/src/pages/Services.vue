@@ -216,8 +216,10 @@ const barShown = computed(
     shown.value.kind !== "loading" &&
     !openedAside.value,
 );
-/** Un service ouvert sur un autre onglet que la vue d'ensemble prend toute la page : ni moteur, ni opérations, ni « Ajouter ». */
-const openedAside = computed(() => opened.value !== null && tab.value !== "detail");
+/** Un service ouvert, sur n'importe quel onglet, prend toute la page : ni liste, ni moteur, ni opérations, ni « Ajouter ». */
+const openedAside = computed(() => opened.value !== null);
+/** Les opérations en cours restent dites sur la vue d'ensemble d'un service ouvert (leur « Répondre » est là), pas ailleurs. */
+const operationsShown = computed(() => !openedAside.value || tab.value === "detail");
 /** « Ajouter un serveur de jeu » (onglet Mods d'un moteur sans mods) : le Catalogue. */
 function goCatalogue() {
   if (server.value) void router.push({ name: "catalogue", params: { id: server.value.id } });
@@ -453,7 +455,7 @@ async function openDocs() {
 
       <!-- Les opérations en cours : visibles de tous les comptes (BR-SVC-029) -->
       <OperationsStrip
-        v-if="!openedAside"
+        v-if="operationsShown"
         :operations="running"
         :launched-by="launchedByOf"
         :allowed="rights.canAct.value"
@@ -768,21 +770,13 @@ async function openDocs() {
   opacity: var(--opacity-stale);
 }
 
-/* Les réglages passent le détail en pleine largeur, comme les journaux, sans en fixer la hauteur (design 16.1). */
-.svc__work--settings .svc__list {
+/* Un service ouvert passe le détail en pleine largeur, sur tous les onglets (vue d'ensemble, réglages, mods, console,
+   sauvegardes) : même en-tête, même largeur. « Retour à la liste » ramène la liste (design 16.1, HRT-98). */
+.svc__work--open .svc__list {
   display: none;
 }
 
-/* Les sauvegardes aussi : la table a besoin de la largeur (HRT-98). */
-.svc__work--backups .svc__list,
-.svc__work--mods .svc__list,
-.svc__work--console .svc__list {
-  display: none;
-}
-
-.svc__work--backups .svc__detail,
-.svc__work--mods .svc__detail,
-.svc__work--console .svc__detail {
+.svc__work--open .svc__detail {
   max-width: none;
 }
 

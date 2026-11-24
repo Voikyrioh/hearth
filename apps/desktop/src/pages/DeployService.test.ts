@@ -184,7 +184,8 @@ describe("le bouton de la section Services (BR-DEPLOY-001, BR-GRANT-014)", () =>
     expect(wrapper.find("[data-deploy-open]").exists()).toBe(true);
     await wrapper.get('[data-row][data-key="h_db"]').trigger("click");
     await flushPromises();
-    expect(wrapper.find("[data-deploy-open]").exists()).toBe(true);
+    // Un service ouvert prend toute la page, sur tous les onglets : le bouton cède sa place dès l'ouverture.
+    expect(wrapper.find("[data-deploy-open]").exists()).toBe(false);
     await wrapper.get('[data-tab="logs"]').trigger("click");
     await settle();
     expect(wrapper.find("[data-deploy-open]").exists()).toBe(false);

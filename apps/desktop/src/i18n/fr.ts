@@ -1175,9 +1175,10 @@ export const fr = {
       back: "Retour à la liste des mods",
       title: "Ajouter des mods",
       lead: "Choisissez les fichiers de mods que vous avez téléchargés. Hearth les contrôle avant de toucher au serveur : rien n'est écrit tant que vous n'avez pas appliqué.",
-      zone: "Glissez vos fichiers .jar ici, ou choisissez-les : 8 au plus à la fois.",
+      zone: "Glissez vos fichiers .jar ici",
+      zoneOr: "ou",
       choose: "Choisir des fichiers",
-      only: "Seuls les fichiers .jar sont acceptés.",
+      only: "Seuls les fichiers .jar sont acceptés. Vous pouvez en déposer 8 à la fois au plus.",
       count: "{n} fichiers déposés",
       countOne: "1 fichier déposé",
       remove: "Retirer de la liste",
@@ -1195,6 +1196,10 @@ export const fr = {
       checkFailed: "Le contrôle n'a pas pu se faire. Réessayez dans un instant.",
       depositGone:
         "Un des fichiers n'est plus dans la zone d'attente du serveur. Retirez-le de la liste et déposez-le de nouveau.",
+      depositGoneNamed:
+        "{names} n'est plus dans la zone d'attente du serveur. Retirez-le de la liste et déposez-le de nouveau.",
+      depositGoneNamedMany:
+        "{names} ne sont plus dans la zone d'attente du serveur. Retirez-les de la liste et déposez-les de nouveau.",
       send: "Envoyer les fichiers",
       sendTitle: "Envoyer les fichiers",
       sendSubmit: "Envoyer",
@@ -1238,7 +1243,7 @@ export const fr = {
       unrecognized:
         "Hearth ne lit pas la fiche d'identité de ce fichier : ce n'est pas un mod qu'il sait juger.",
       archive: "Ce fichier n'est pas une archive que Hearth accepte de lire.",
-      tooLarge: "Ce fichier dépasse 256 Mio : Hearth ne le prend pas.",
+      tooLarge: "Ce fichier dépasse 256 Mo : Hearth ne le prend pas.",
       loader:
         "Ce fichier est fait pour {mod}. Votre serveur utilise {server}, qui ne sait pas le charger. Cherchez la version pour {server} de ce mod.",
       minecraft:
@@ -1281,6 +1286,14 @@ export const fr = {
         stop: "Hearth demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Les joueurs connectés sont déconnectés.",
         stopUnknown:
           "Hearth demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Les joueurs connectés seront déconnectés.",
+        stopNoSave:
+          "Hearth demande au serveur de s'arrêter. Ce jeu n'enregistre pas son monde en s'arrêtant, et Hearth ne peut pas encore lui demander de l'enregistrer pour cette opération : ce qui est arrivé depuis son dernier enregistrement automatique peut être perdu. Les joueurs connectés sont déconnectés.",
+        stopNoSaveUnknown:
+          "Hearth demande au serveur de s'arrêter. Ce jeu n'enregistre pas son monde en s'arrêtant, et Hearth ne peut pas encore lui demander de l'enregistrer pour cette opération : ce qui est arrivé depuis son dernier enregistrement automatique peut être perdu. Les joueurs connectés seront déconnectés.",
+        stopPlain:
+          "Hearth demande au serveur de s'arrêter. Les joueurs connectés sont déconnectés.",
+        stopPlainUnknown:
+          "Hearth demande au serveur de s'arrêter. Les joueurs connectés seront déconnectés.",
         save: "Une copie de tout le dossier du serveur, avant la moindre modification.",
         placeOne: "Le changement ci-dessus.",
         place: "Les {n} changements ci-dessus.",
@@ -1414,6 +1427,8 @@ export const fr = {
         client: "Le mod dit qu'il se charge chez le joueur.",
         unknown: "Le mod ne dit rien : en cas de doute, installez-le chez le joueur.",
       },
+      unlisted:
+        "Ces mods ne figurent pas dans la liste : le serveur ne peut pas les démarrer, vos joueurs ne pourraient pas se connecter avec eux.",
       note: "Hearth lit l'indication « environnement » que chaque mod donne sur lui-même. Il ne peut pas savoir ce qui est vraiment obligatoire : en cas de doute, installez le mod chez le joueur.",
       soonTitle: "Un dossier prêt à copier chez le joueur",
       soon: "Hearth pourra bientôt préparer un seul fichier .zip avec les mods à installer chez eux. Cette version donne la liste.",
@@ -1468,6 +1483,12 @@ export const fr = {
     },
     refused: {
       stop: "Commande non envoyée. Pour arrêter le serveur, utilisez le bouton « Arrêter » : le jeu enregistre alors son monde, et le serveur ne repart pas tout seul.",
+      stopSequence:
+        "Commande non envoyée. Pour arrêter le serveur, utilisez le bouton « Arrêter » : Hearth demande alors au jeu d'enregistrer son monde, et le serveur ne repart pas tout seul.",
+      stopAsk:
+        "Commande non envoyée. Pour arrêter le serveur, utilisez le bouton « Arrêter » : ce jeu n'enregistre pas son monde en s'arrêtant et Hearth ne peut pas encore le lui demander, vous choisirez alors d'arrêter quand même ou d'annuler. Le serveur ne repart pas tout seul.",
+      stopPlain:
+        "Commande non envoyée. Pour arrêter le serveur, utilisez le bouton « Arrêter » de Hearth : le serveur ne repart pas tout seul.",
       restart:
         "Commande non envoyée. Pour redémarrer le serveur, utilisez le bouton « Redémarrer » de Hearth.",
       breaks:
@@ -1505,6 +1526,9 @@ export const fr = {
       send: "Envoyer la commande",
       cancel: "Annuler",
       eachTime: "Demandé à chaque commande de ce genre, même si vous venez de le taper.",
+      modTitle: "Envoyer une commande d'un mod ?",
+      modSentence:
+        "Hearth ne sait pas ce que fait cette commande : elle vient d'un mod. Confirmez avec votre mot de passe pour l'envoyer au serveur.",
       trust:
         "Votre mot de passe est demandé pour cette commande, comme pour démarrer ou arrêter le serveur.",
     },
@@ -1526,9 +1550,6 @@ export const fr = {
     stopped: "Personne n'est connecté : le serveur est arrêté.",
     starting: "Le nombre de joueurs s'affiche quand le serveur est prêt.",
     unavailable: "Hearth n'a pas pu lire les joueurs connectés.",
-      modTitle: "Envoyer une commande d'un mod ?",
-      modSentence:
-        "Hearth ne sait pas ce que fait cette commande : elle vient d'un mod. Confirmez avec votre mot de passe pour l'envoyer au serveur.",
     writeToPlayers: "Écrire aux joueurs dans la console",
     openConsole: "Ouvrir la console",
   },
@@ -3622,7 +3643,7 @@ export const fr = {
     announceInterrupted: "L'envoi de {name} est interrompu.",
     announceNoSpace:
       "{name} n'a pas pu être envoyé : le serveur manque de place. Libérez de la place, puis réessayez.",
-    units: { byte: "o", kib: "Kio", mib: "Mio", gib: "Gio" },
+    units: { byte: "o", kib: "Ko", mib: "Mo", gib: "Go" },
     status: {
       sending: "Envoi en cours.",
       interrupted: "Envoi interrompu. Reprenez l'envoi quand le lien est revenu.",

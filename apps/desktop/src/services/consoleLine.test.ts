@@ -100,8 +100,8 @@ describe("la classe d'une commande", () => {
     const judged = classifyLine(rustPolicy, "coolmod:wipe all");
     expect(judged).toMatchObject({ kind: "sensitive", player: null });
     if (judged.kind === "sensitive") {
-      expect(judged.title).not.toBe("");
-      expect(judged.sentence).not.toBe("");
+      expect(typeof judged.title === "string" && judged.title.length > 0).toBe(true);
+      expect(typeof judged.sentence === "string" && judged.sentence.length > 0).toBe(true);
       expect(signedClass(judged)).toBe(2);
     }
   });

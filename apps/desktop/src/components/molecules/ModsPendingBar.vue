@@ -42,9 +42,11 @@ const emit = defineEmits<{ cancelAll: []; review: [] }>();
 </template>
 
 <style scoped>
-/* Colle au bas de la zone qui défile : le lot et « Vérifier et appliquer » restent à portée sur une longue liste. */
+/* Colle à la zone qui défile : sous l'en-tête collant quand on a dépassé sa place, en bas quand elle est plus bas que
+   l'écran. Le lot et « Vérifier et appliquer » restent à portée sur une longue liste. */
 .bar {
   position: sticky;
+  top: calc(var(--mods-pinned-h) + var(--space-2));
   bottom: var(--space-3);
   z-index: var(--z-raised);
   box-shadow: var(--card-edge);

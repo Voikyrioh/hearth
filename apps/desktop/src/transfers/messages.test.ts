@@ -34,15 +34,15 @@ describe("les tailles", () => {
   it("se disent en octets binaires, avec une décimale seulement sous 10", () => {
     expect(formatSize(0)).toBe("0 o");
     expect(formatSize(900)).toBe("900 o");
-    expect(formatSize(2048)).toBe("2 Kio");
-    expect(formatSize(600 * MIB)).toBe("600 Mio");
-    expect(formatSize(1.5 * GIB)).toBe("1,5 Gio");
-    expect(formatSize(12.4 * GIB)).toBe("12 Gio");
+    expect(formatSize(2048)).toBe("2 Ko");
+    expect(formatSize(600 * MIB)).toBe("600 Mo");
+    expect(formatSize(1.5 * GIB)).toBe("1,5 Go");
+    expect(formatSize(12.4 * GIB)).toBe("12 Go");
     expect(formatSize(-5)).toBe("0 o");
   });
 
   it("la progression est dite en octets et la part reste entre 0 et 1", () => {
-    expect(progressText(transfer())).toBe("150 Mio sur 600 Mio");
+    expect(progressText(transfer())).toBe("150 Mo sur 600 Mo");
     expect(ratioOf(transfer())).toBe(0.25);
     expect(ratioOf(transfer({ sent: 900 * MIB }))).toBe(1);
     expect(ratioOf(transfer({ size: 0 }))).toBeNull();
@@ -93,7 +93,7 @@ describe("les phrases", () => {
           refusal: { kind: "no_space", missing: 3 * GIB, remaining: 512 * MIB },
         }),
       ),
-    ).toBe("Il manque 3 Gio sur le disque pour écrire ce fichier. Il resterait 512 Mio de libre.");
+    ).toBe("Il manque 3 Go sur le disque pour écrire ce fichier. Il resterait 512 Mo de libre.");
   });
 
   it("chaque refus a sa phrase, sans tiret cadratin et sans code brut", () => {
@@ -118,7 +118,7 @@ describe("les phrases", () => {
     expect(depositRefusalText({ kind: "too_many_attempts", waitS: 59.2 })).toContain("60 secondes");
     expect(depositRefusalText({ kind: "name_invalid" })).toContain("nom de ce fichier");
     expect(depositRefusalText({ kind: "no_space", missing: GIB, remaining: 0 })).toContain(
-      "Il manque 1 Gio",
+      "Il manque 1 Go",
     );
     for (const kind of [
       "password_required",

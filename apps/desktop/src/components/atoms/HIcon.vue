@@ -28,6 +28,7 @@ const ICONS = {
   "chevron-down": ["m6 9 6 6 6-6"],
   "chevron-right": ["m9 6 6 6-6 6"],
   "arrow-up": ["M12 19V5", "m5 12 7-7 7 7"],
+  upload: ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "m17 8-5-5-5 5", "M12 3v12"],
   download: ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "m7 10 5 5 5-5", "M12 15V3"],
   // Services (HRT-62) : états d'un service et du moteur, copie.
   play: ["M7 4v16l13-8z"],

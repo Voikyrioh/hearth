@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
+import HIcon from "@/components/atoms/HIcon.vue";
 import HMeter from "@/components/atoms/HMeter.vue";
 import Callout from "@/components/molecules/Callout.vue";
 import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
@@ -9,6 +10,7 @@ import type { useModsApply } from "@/composables/useModsApply";
 import { t } from "@/i18n";
 import type { ModsView } from "@/link";
 import { dateOf } from "@/services/backups";
+import type { StopWay } from "@/services/game";
 import { countsOf } from "@/services/mods";
 import { placeSummary, stepStates, stepsFor, stepText, stepTitle } from "@/services/modsApply";
 
@@ -24,6 +26,8 @@ const props = defineProps<{
   view: ModsView | null;
   /** Le serveur tourne maintenant : il est reparti avec les mods d'avant (ou jamais arrêté). */
   running?: boolean;
+  /** Comment la fiche dit que le jeu enregistre son monde à l'arrêt (étape 1) ; `null` : pas lue. */
+  stopWay?: StopWay | null;
 }>();
 const emit = defineEmits<{ close: []; players: []; logs: [] }>();
 
@@ -94,9 +98,12 @@ function close() {
         <li v-for="item in states" :key="item.step" :class="['mp__step', `mp__step--${item.state}`]" data-mods-progress-step :data-state="item.state">
           <span class="mp__step-text">
             <strong>{{ stepTitle(item.step) }}</strong>
-            <span class="mp__detail">{{ item.step === "place" ? placeSummary(launch.rows) : stepText(item.step, launch.count, true) }}</span>
+            <span class="mp__detail">{{ item.step === "place" ? placeSummary(launch.rows) : stepText(item.step, launch.count, true, stopWay) }}</span>
           </span>
-          <span class="mp__state">{{ stateText(item.state) }}</span>
+          <span :class="['mp__state', `mp__state--${item.state}`]">
+            <HIcon v-if="item.state === 'done'" name="check" size="sm" />
+            {{ stateText(item.state) }}
+          </span>
         </li>
       </ol>
       <div class="mp__bar">
@@ -263,9 +270,17 @@ function close() {
 }
 
 .mp__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   color: var(--tx-secondary);
   font-size: var(--fs-small);
   white-space: nowrap;
+}
+
+/* Une étape terminée porte une coche verte : le mot « Terminé » et l'icône, jamais la couleur seule. */
+.mp__state--done {
+  color: var(--ok);
 }
 
 .mp__block {

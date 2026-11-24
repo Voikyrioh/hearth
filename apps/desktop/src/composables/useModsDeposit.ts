@@ -25,6 +25,8 @@ export interface DepositItem {
   deposit: string | null;
   /** Pourquoi ce fichier n'est pas parti (phrase), quand c'est le cas. */
   refused: string | null;
+  /** Le fichier est arrivé et a passé le contrôle : sa ligne de la carte « Transferts » est retirée, il reste « Envoyé ». */
+  sent?: boolean;
 }
 
 /** Ce que le contrôle a donné. */
@@ -32,7 +34,11 @@ export type CheckState =
   | { kind: "idle" }
   | { kind: "checking" }
   | { kind: "done"; files: ModCheckFile[] }
-  | { kind: "refused"; refusal: ModsReadRefusal }
+  | {
+      kind: "refused";
+      refusal: ModsReadRefusal /** Les fichiers qui ne sont plus dans la zone d'attente (noms sur le poste). */;
+      gone?: string[];
+    }
   | { kind: "failed" };
 
 /**
@@ -69,7 +75,7 @@ export function useModsDeposit(serverId: () => string, key: () => string) {
   const allSent = computed(
     () =>
       accepted.value.length > 0 &&
-      accepted.value.every((item) => transferOf(item)?.status === "done"),
+      accepted.value.every((item) => item.sent === true || transferOf(item)?.status === "done"),
   );
   /** Un envoi a échoué, a été annulé ou attend un geste : le contrôle attend. */
   const needsGesture = computed(() =>
@@ -125,6 +131,8 @@ export function useModsDeposit(serverId: () => string, key: () => string) {
       items.value = [...items.value, ...added];
       check.value = { kind: "idle" };
       if (added.some((item) => item.refused === null)) {
+        // L'élévation a pu s'ouvrir (ou se fermer) depuis la dernière lecture : on relit avant de décider.
+        await reauth.load();
         const direct =
           reauth.supported.value && !reauth.keyMissing.value && !reauth.needsPassword.value;
         // Un refus ou un lien tombé : la fenêtre s'ouvre, elle dit pourquoi et redemande ce qu'il faut.
@@ -175,9 +183,46 @@ export function useModsDeposit(serverId: () => string, key: () => string) {
         outcome.kind === "ready"
           ? { kind: "done", files: outcome.files }
           : { kind: "refused", refusal: outcome.refusal };
+      if (outcome.kind === "ready") await settleTransfers(ids);
+      else if (outcome.refusal.kind === "deposit_unknown") {
+        check.value = {
+          ...check.value,
+          kind: "refused",
+          refusal: outcome.refusal,
+          gone: await namesGone(ids),
+        };
+      }
     } catch (error) {
       if (!failureOf(error)) logUiError(error, "modsDeposit:check");
       check.value = { kind: "failed" };
+    }
+  }
+
+  /** Quels fichiers ont quitté la zone d'attente : l'agent ne le dit pas, on le lui demande fichier par fichier. */
+  async function namesGone(ids: string[]): Promise<string[]> {
+    if (ids.length === 1) return [nameOfDeposit(ids[0] ?? "")];
+    const gone: string[] = [];
+    for (const id of ids) {
+      try {
+        const one = await getLinkBridge().checkMods(serverId(), key(), [id]);
+        if (one.kind === "refused" && one.refusal.kind === "deposit_unknown")
+          gone.push(nameOfDeposit(id));
+      } catch {
+        // Un échec n'invente rien : le fichier n'est simplement pas nommé.
+      }
+    }
+    return gone;
+  }
+
+  /** Le contrôle est fait : l'envoi est fini et n'a plus rien à dire, la carte « Transferts » le retire (sur tous les onglets). */
+  async function settleTransfers(ids: string[]): Promise<void> {
+    for (const item of items.value) {
+      if (item.deposit !== null && ids.includes(item.deposit)) item.sent = true;
+    }
+    items.value = [...items.value];
+    for (const id of ids) {
+      const transfer = transfers.of(serverId()).find((other) => other.id === id);
+      if (transfer?.status === "done") await transfers.dismiss(id);
     }
   }
 

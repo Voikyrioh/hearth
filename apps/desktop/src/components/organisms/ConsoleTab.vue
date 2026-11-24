@@ -12,6 +12,7 @@ import { useOnlinePlayers } from "@/composables/useOnlinePlayers";
 import { useServiceConsole } from "@/composables/useServiceConsole";
 import { t } from "@/i18n";
 import type { ConsoleView, QuickCommand, ServiceInfo } from "@/link";
+import type { StopWay } from "@/services/game";
 import { canAct, type RightsGate } from "@/services/rights";
 import { useServiceLogsStore } from "@/stores/serviceLogs";
 
@@ -30,6 +31,8 @@ const props = defineProps<{
   engineReady: boolean;
   gone: boolean;
   lastContactAt: number | null;
+  /** Comment la fiche dit que le jeu enregistre son monde à l'arrêt ; `null` : pas lue. */
+  stopWay?: StopWay | null;
 }>();
 const emit = defineEmits<{ refresh: []; start: []; follow: [] }>();
 
@@ -40,6 +43,7 @@ const console_ = useServiceConsole(
   () => props.view,
   () => emit("refresh"),
   (entry) => logs.pushExchange(entry),
+  () => props.stopWay ?? null,
 );
 const clock = useNow();
 const players = useOnlinePlayers(

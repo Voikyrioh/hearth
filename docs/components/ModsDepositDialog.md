@@ -8,3 +8,5 @@ Organisme · `apps/desktop/src/components/organisms/ModsDepositDialog.vue`
 - Événements : `back`
 - Notes : écart à la maquette : pas de glisser-déposer (la coquille ne le relaie pas encore), la zone dit « Choisissez vos fichiers ». Tests `pages/ServicesModsBatch.test.ts`.
 - Notes (revue Nora 022) : l'envoi part sans fenêtre quand l'acte `file_write` ne demande pas de mot de passe ; les fichiers glissés sur la fenêtre (`bridge.onFilesDropped`, événement `tauri://drag-drop`) suivent les mêmes règles que la boîte « Ouvrir ».
+
+Zone de dépôt de la maquette (pointillé lisible, icône d'envoi, « Glissez vos fichiers .jar ici »). L'envoi part dès le choix quand l'élévation est active (l'état de confirmation est relu avant de décider). Une fois le contrôle fait, la ligne de la carte « Transferts » est retirée. Un fichier qui a quitté la zone d'attente est nommé.

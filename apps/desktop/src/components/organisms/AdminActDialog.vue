@@ -85,6 +85,7 @@ const shownTitle = computed(() => act.shownTitle(props.title));
     :hide-submit="act.blocked.value"
     :can-submit="act.canSend.value"
     :submit-reason="act.needPasswordReason.value"
+    quiet-reason
     :busy="act.sending.value"
     :error="act.error.value"
     :destructive="destructive"

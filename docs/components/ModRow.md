@@ -7,3 +7,5 @@ Une ligne de la liste des mods (HRT-261, HRT-262, maquette Main) : nom et fichie
 - Props : `item`, `game`, `view`, `gate`, `rightsReasonId`, `pending`, `note`, `linkDown`
 - Événements : `toggle`, `retire`, `restore`, `undo`
 - Notes : aucun geste ne part d'ici ; la ligne émet, le lot est tenu par `useServiceMods`.
+
+Noms de fichier lisibles en entier (retour à la ligne, jamais d'ellipse) ; `wide` et `originColumn` retirent les cellules des colonnes repliées par l'onglet.

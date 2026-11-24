@@ -10,6 +10,7 @@ import type {
 } from "@/link";
 import { formatSize } from "@/serviceOps/messages";
 import { refusalText as backupRefusalText } from "@/services/backups";
+import type { StopWay } from "@/services/game";
 import { modName } from "@/services/mods";
 
 /**
@@ -160,10 +161,25 @@ export function placeSummary(rows: readonly ChangeRow[]): string {
   return retired ? t("mods.summary.withRetired", { text }) : t("mods.summary.plain", { text });
 }
 
-export function stepText(step: StepId, count: number, playersKnown: boolean): string {
+/**
+ * Le texte d'une étape. L'étape 1 redit la fiche (`stop.worldSaved`, via `stopWay`) comme la carte « Arrêt du jeu » et la
+ * fenêtre « Arrêter » : l'agent ne lance pas la suite d'enregistrement avant l'arrêt d'un lot de mods (HRT-292), donc seul
+ * un jeu qui enregistre son monde à l'arrêt par lui-même (`image`) l'affirme ; pour un autre, la phrase dit que Hearth ne
+ * peut pas encore le lui demander ici. Fiche pas lue : aucune affirmation.
+ */
+export function stepText(
+  step: StepId,
+  count: number,
+  playersKnown: boolean,
+  way: StopWay | null = null,
+): string {
   switch (step) {
-    case "stop":
-      return playersKnown ? t("mods.apply.stepText.stop") : t("mods.apply.stepText.stopUnknown");
+    case "stop": {
+      const kicked = playersKnown ? "" : "Unknown";
+      if (way === "image") return t(`mods.apply.stepText.stop${kicked}` as MessageKey);
+      if (way === null) return t(`mods.apply.stepText.stopPlain${kicked}` as MessageKey);
+      return t(`mods.apply.stepText.stopNoSave${kicked}` as MessageKey);
+    }
     case "save":
       return t("mods.apply.stepText.save");
     case "place":

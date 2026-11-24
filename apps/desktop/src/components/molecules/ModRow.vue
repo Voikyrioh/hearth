@@ -41,6 +41,10 @@ const props = defineProps<{
   note?: string | null;
   /** Le lien est coupé : aucun geste ne se prépare. */
   linkDown?: boolean;
+  /** Les colonnes « Moteur » et « Minecraft visé » existent (carte assez large). */
+  wide?: boolean;
+  /** La colonne « Origine » existe ; sinon l'origine se lit sous le nom. */
+  originColumn?: boolean;
 }>();
 const emit = defineEmits<{
   toggle: [];
@@ -92,14 +96,15 @@ const targetMinecraft = computed(() => {
       <div class="row__name">
         <strong class="row__title">{{ name }}</strong>
         <span v-if="file" class="row__file" :title="file">{{ file }}</span>
+        <span v-if="originColumn === false" class="row__origin row__origin--inline" data-mod-origin-inline>{{ originLabel(item.origin) }}</span>
         <span v-if="pending" class="row__pending" data-mod-pending-text>{{ pendingLabel ?? (pending === 'add' || pending === 'replaced' ? '' : pendingText(pending)) }}</span>
         <span v-if="sentence && !retired" class="row__sentence" data-mod-sentence>{{ sentence }}</span>
         <span v-if="note" class="row__note" data-mod-note>{{ note }}</span>
       </div>
     </td>
     <td class="row__mono">{{ item.identity?.version ?? "" }}</td>
-    <td class="row__wide">{{ item.identity ? loaderName(item.identity.loader) : "" }}</td>
-    <td class="row__wide row__mono row__target">{{ item.identity ? targetMinecraft : "" }}</td>
+    <td v-if="wide !== false" class="row__wide">{{ item.identity ? loaderName(item.identity.loader) : "" }}</td>
+    <td v-if="wide !== false" class="row__wide row__mono row__target">{{ item.identity ? targetMinecraft : "" }}</td>
     <td>
       <HTag :tone="pill.tone === 'neutral' ? 'neutral' : pill.tone" data-mod-state>
         <HIcon
@@ -109,7 +114,7 @@ const targetMinecraft = computed(() => {
         {{ pill.label }}
       </HTag>
     </td>
-    <td><span class="row__origin" data-mod-origin>{{ originLabel(item.origin) }}</span></td>
+    <td v-if="originColumn !== false"><span class="row__origin" data-mod-origin>{{ originLabel(item.origin) }}</span></td>
     <td class="row__switch">
       <HToggle
         v-if="!retired && pending !== 'add'"
@@ -184,13 +189,12 @@ const targetMinecraft = computed(() => {
   font-weight: var(--fw-semibold);
 }
 
+/* Le nom du fichier se lit en entier, sur plusieurs lignes au besoin (jamais coupé par des points de suspension). */
 .row__file {
   color: var(--tx-faint);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .row__pending {
@@ -225,6 +229,11 @@ const targetMinecraft = computed(() => {
   color: var(--tx-secondary);
   font-size: var(--fs-small);
   white-space: nowrap;
+}
+
+.row__origin--inline {
+  align-self: flex-start;
+  margin-top: var(--space-1);
 }
 
 .row :deep(.tag) {

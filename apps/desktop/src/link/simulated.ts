@@ -943,7 +943,19 @@ export class SimulatedLinkBridge implements LinkBridge {
       return { kind: "refused", refusal: { kind: "common", refusal: confirmation.refusal } };
     }
     const by = server.username ?? "marie";
-    const accept = () => this.mods.accept(serverId, key, batch, by);
+    const accept = () => {
+      const outcome = this.mods.accept(serverId, key, batch, by);
+      // La sauvegarde faite avant le lot existe pour de bon : l'écran de fin la nomme et l'onglet Sauvegardes la liste.
+      if (outcome.kind === "accepted") {
+        this.backups.addModsBackup(
+          serverId,
+          key,
+          outcome.backupId,
+          `Avant mods, ${new Date().toLocaleDateString("fr-FR")}`,
+        );
+      }
+      return outcome;
+    };
     if (this.actionMode === "cut") {
       this.actionMode = "ok";
       if (this.executeBeforeCut) accept();

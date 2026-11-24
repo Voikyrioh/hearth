@@ -59,6 +59,7 @@ export default defineConfig({
         "hrt125-pack.spec.ts",
         "hrt104-game.spec.ts",
         "mods.spec.ts",
+        "mods-layout.spec.ts",
         "console.spec.ts",
         "hrt102-catalogue.spec.ts",
         "ajouter-un-serveur-de-jeu.spec.ts",

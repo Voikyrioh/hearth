@@ -2,6 +2,7 @@ import { safeText } from "@/audit/text";
 import { type MessageKey, t } from "@/i18n";
 import type { ConsoleRefusal, ConsoleReply, ConsoleView } from "@/link";
 import type { LineError } from "@/services/consoleLine";
+import type { StopWay } from "@/services/game";
 
 /**
  * La console d'un serveur de jeu (HRT-269, `BR-CONSOLE-002` à `010`) : des fonctions pures, sans E/S. Aucun texte ne vient
@@ -74,7 +75,14 @@ const REFUSED_KEYS: Record<string, MessageKey> = {
 };
 
 /** La phrase d'une commande refusée par la fiche : elle dit quoi faire à la place (BR-CONSOLE-004). */
-export function refusedSentence(reason: string | null): string {
+export function refusedSentence(reason: string | null, way: StopWay | null = null): string {
+  // Le refus de `stop` redit ce que la fiche dit de l'enregistrement du monde (même source que la carte « Arrêt du jeu »).
+  if (reason === "use_hearth_stop") {
+    if (way === "image") return t("console.refused.stop");
+    if (way === "sequence") return t("console.refused.stopSequence");
+    if (way === "ask") return t("console.refused.stopAsk");
+    return t("console.refused.stopPlain");
+  }
   return t(REFUSED_KEYS[reason ?? ""] ?? "console.refused.other");
 }
 
@@ -128,12 +136,12 @@ export function replyExchange(
 }
 
 /** La phrase d'un refus de l'agent sur une commande (hors confirmation, dite sous le champ du mot de passe). */
-export function refusalSentence(refusal: ConsoleRefusal): string {
+export function refusalSentence(refusal: ConsoleRefusal, way: StopWay | null = null): string {
   switch (refusal.kind) {
     case "invalid":
       return t("console.refusal.invalid");
     case "verb_refused":
-      return refusedSentence(refusal.reason);
+      return refusedSentence(refusal.reason, way);
     case "class_mismatch":
       return t("console.refusal.classMismatch");
     case "not_running":

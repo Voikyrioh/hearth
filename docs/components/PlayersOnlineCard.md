@@ -7,3 +7,5 @@ La carte « Joueurs connectés » (HRT-291, BR-CONSOLE-011, maquette Connectes) 
 - Props : `state` (`OnlinePlayersState`), `now` (ms), `refreshing`, `compact` (version courte), `linkLabel` (texte du lien vers la console, absent : pas de lien)
 - Événements : `refresh`, `openConsole`
 - Notes : tests `components/molecules/playersOnline.test.ts`.
+
+Emplacement par défaut (`<slot />`) sous les pseudos, avant le lien vers la console (la phrase « Ils seront déconnectés… » de « Vérifiez avant d'appliquer »).

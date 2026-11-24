@@ -37,7 +37,7 @@ const props = defineProps<{
   /** L'adresse que les joueurs utilisent, si l'agent la connaît. */
   address: string | null;
 }>();
-const emit = defineEmits<{ compare: []; hideCompare: [] }>();
+const emit = defineEmits<{ compare: [] }>();
 
 const copier = useCopyText(() => t("mods.players.copied"));
 const view = computed(() => props.state?.view ?? null);
@@ -105,9 +105,8 @@ const compare = computed(() => view.value?.compare ?? null);
           </table>
           <p v-if="retired > 0" class="bm__retired" data-backup-mods-retired>{{ retiredLine(view) }}</p>
           <p class="bm__retired" data-backup-mods-copy-note>{{ copyNote(view) }}</p>
-          <div class="bm__bar">
+          <div v-if="!comparing" class="bm__bar">
             <HButton
-              v-if="!comparing"
               variant="secondary"
               size="sm"
               needs-link
@@ -115,9 +114,6 @@ const compare = computed(() => view.value?.compare ?? null);
               @click="emit('compare')"
             >
               {{ t("backups.mods.compare.button") }}
-            </HButton>
-            <HButton v-else variant="ghost" size="sm" data-backup-mods-hide @click="emit('hideCompare')">
-              {{ t("backups.mods.compare.hide") }}
             </HButton>
           </div>
           <p v-if="copier.state.value === 'failed'" class="bm__retired" role="alert">
@@ -134,6 +130,7 @@ const compare = computed(() => view.value?.compare ?? null);
 <style scoped>
 .bm {
   display: flex;
+  padding-top: var(--space-4);
   flex-direction: column;
   gap: var(--space-3);
   min-width: 0;

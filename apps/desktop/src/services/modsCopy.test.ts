@@ -67,11 +67,11 @@ describe("dépendances et mods que le serveur ne charge pas", () => {
     ]);
   });
 
-  it("un mod incompatible ou en double n'est jamais donné aux joueurs", () => {
+  it("un mod incompatible, en double ou à compléter n'est jamais donné aux joueurs", () => {
     expect(loadsOnServer("incompatible_loader")).toBe(false);
     expect(loadsOnServer("incompatible_minecraft")).toBe(false);
     expect(loadsOnServer("duplicate")).toBe(false);
     expect(loadsOnServer("compatible")).toBe(true);
-    expect(loadsOnServer("to_complete")).toBe(true);
+    expect(loadsOnServer("to_complete")).toBe(false);
   });
 });

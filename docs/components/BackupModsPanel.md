@@ -7,3 +7,5 @@ Les mods d'une sauvegarde, dans sa ligne dépliée de l'onglet Sauvegardes (HRT-
 - Props : `state` (`BackupModsEntry`), `createdAt`, `address`
 - Événements : `compare`, `hideCompare`
 - Notes : tests `pages/ServicesBackupsMods.test.ts`, e2e `e2e/mods.spec.ts`.
+
+Le tableau ne déborde plus de sa carte (largeurs de BackupTable, résumé des mods à la ligne). La comparaison s'affiche à côté, sans bouton quand elle est montrée (plus de « Masquer la comparaison »).

@@ -19,6 +19,7 @@ import {
   sensitiveTitle,
   signedClass,
 } from "@/services/consoleLine";
+import type { StopWay } from "@/services/game";
 
 /** Au plus ce nombre de lignes dans l'échange de la session (le journal du serveur garde le reste). */
 export const MAX_EXCHANGES = 200;
@@ -48,6 +49,8 @@ export function useServiceConsole(
   refresh: () => void,
   /** Reçoit chaque ligne de l'échange à son arrivée (l'onglet la range dans le journal, à son heure). */
   onExchange?: (entry: Exchange) => void,
+  /** Comment la fiche dit que le jeu enregistre son monde à l'arrêt : le refus de `stop` le redit comme tout le reste. */
+  stopWay: () => StopWay | null = () => null,
 ) {
   const action = useServerAction(serverId);
   const now = useNow();
@@ -155,7 +158,7 @@ export function useServiceConsole(
           by: null,
           outcome: "unreachable",
           reply: null,
-          sentence: refusalSentence(reason),
+          sentence: refusalSentence(reason, stopWay()),
         });
         return { kind: "done" };
       }
@@ -167,7 +170,7 @@ export function useServiceConsole(
       ) {
         refresh();
       }
-      refusal.value = refusalSentence(reason);
+      refusal.value = refusalSentence(reason, stopWay());
       return { kind: "refused", refusal: { kind: "other" } };
     } finally {
       sending.value = false;
@@ -187,7 +190,7 @@ export function useServiceConsole(
         by: null,
         outcome: "refused",
         reply: null,
-        sentence: refusedSentence(judgement.reason),
+        sentence: refusedSentence(judgement.reason, stopWay()),
       });
       return;
     }

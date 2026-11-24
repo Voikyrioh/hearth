@@ -13,6 +13,7 @@ import type { ActReport } from "@/composables/useReauth";
 import { t } from "@/i18n";
 import type { ModsBatch } from "@/link";
 import { formatSize } from "@/serviceOps/messages";
+import type { StopWay } from "@/services/game";
 import {
   type ChangeRow,
   spaceMissingText,
@@ -39,6 +40,8 @@ const props = defineProps<{
   consoleOpen: boolean;
   /** Les mods qui empêcheront encore le serveur de démarrer après ce lot (une phrase chacun). */
   blockers: string[];
+  /** Comment la fiche dit que le jeu enregistre son monde à l'arrêt (étape 1) ; `null` : pas lue. */
+  stopWay: StopWay | null;
 }>();
 const emit = defineEmits<{
   back: [];
@@ -119,7 +122,7 @@ const act = useAdminAct({
           <span class="ma__num" aria-hidden="true">{{ index + 1 }}</span>
           <span class="ma__change-text">
             <strong>{{ stepTitle(step) }}</strong>
-            <span class="ma__detail">{{ stepText(step, rows.length, playersKnown) }}</span>
+            <span class="ma__detail">{{ stepText(step, rows.length, playersKnown, stopWay) }}</span>
           </span>
         </li>
       </ol>
@@ -135,10 +138,12 @@ const act = useAdminAct({
       :link-label="consoleOpen ? t('players.openConsole') : undefined"
       @refresh="emit('refreshPlayers')"
       @open-console="emit('openConsole')"
-    />
-    <p v-if="running && playersKnown && players.kind === 'ready' && (players.view.online ?? 0) > 0" class="ma__detail" data-mods-apply-kick>
-      {{ t(consoleOpen ? "mods.apply.kickConsole" : "mods.apply.kick") }}
-    </p>
+    >
+      <!-- Dans la carte, sous les pseudos : ce que ces joueurs vont vivre. -->
+      <p v-if="playersKnown && players.kind === 'ready' && (players.view.online ?? 0) > 0" class="ma__detail" data-mods-apply-kick>
+        {{ t(consoleOpen ? "mods.apply.kickConsole" : "mods.apply.kick") }}
+      </p>
+    </PlayersOnlineCard>
 
     <section class="ma__block" data-mods-apply-duration>
       <h4 class="ma__subtitle">{{ t("mods.apply.durationTitle") }}</h4>
@@ -160,11 +165,11 @@ const act = useAdminAct({
       </Callout>
     
     <div class="ma__bar">
-      <HButton variant="ghost" data-mods-apply-back @click="emit('back')">
-        {{ t("mods.apply.backToList") }}
-      </HButton>
       <HButton type="submit" :disabled="!act.canSend.value" :busy="act.sending.value" data-mods-apply-submit>
         {{ t(running ? "mods.apply.submit" : "mods.apply.submitStopped") }}
+      </HButton>
+      <HButton variant="secondary" data-mods-apply-back @click="emit('back')">
+        {{ t("mods.apply.backToList") }}
       </HButton>
     </div>
     </section>
@@ -272,7 +277,7 @@ const act = useAdminAct({
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: var(--space-3);
 }
 </style>

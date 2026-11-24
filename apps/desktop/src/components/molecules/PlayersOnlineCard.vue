@@ -82,6 +82,7 @@ const readLine = computed(() => {
     <p v-if="readLine && shown?.kind === 'count'" class="players__note" data-players-read>
       {{ readLine }}
     </p>
+    <slot />
     <button
       v-if="linkLabel"
       type="button"
