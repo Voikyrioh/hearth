@@ -1020,8 +1020,8 @@ export const fr = {
     sub: {
       compatible: "{n} compatibles avec {loader} et Minecraft {minecraft}",
       compatibleOne: "1 compatible avec {loader} et Minecraft {minecraft}",
-      incompatible: "{n} incompatibles",
-      incompatibleOne: "{n} incompatible",
+      incompatible: "{n} pas compatibles",
+      incompatibleOne: "{n} pas compatible",
       disabled: "{n} désactivés",
       disabledOne: "{n} désactivé",
       toComplete: "{n} à compléter",
@@ -1063,7 +1063,7 @@ export const fr = {
       compatible: "Compatible",
       unverified: "Non vérifié",
       toComplete: "À compléter",
-      incompatible: "Incompatible",
+      incompatible: "Pas compatible",
       duplicate: "Installé deux fois",
       unrecognized: "Non reconnu",
     },
@@ -1090,6 +1090,7 @@ export const fr = {
         "{name} ne peut pas démarrer ici. Il a besoin du mod {needed}, qui n'est pas installé. Installez {needed} ou désactivez {name}.",
       toComplete:
         "{name} ne peut pas démarrer ici. Il a besoin des mods {needed}, qui ne sont pas installés. Installez-les ou désactivez {name}.",
+      blocking: "{name} empêche le serveur de démarrer. Désactivez-le ou retirez-le.",
       more: "Et {n} autres mods dans le même cas.",
     },
     plugins: {
@@ -1196,6 +1197,8 @@ export const fr = {
       checkFailed: "Le contrôle n'a pas pu se faire. Réessayez dans un instant.",
       depositGone:
         "Un des fichiers n'est plus dans la zone d'attente du serveur. Retirez-le de la liste et déposez-le de nouveau.",
+      rowGone:
+        "N'est plus dans la zone d'attente. Retirez-le de la liste, puis déposez-le de nouveau.",
       depositGoneNamed:
         "{names} n'est plus dans la zone d'attente du serveur. Retirez-le de la liste et déposez-le de nouveau.",
       depositGoneNamedMany:
@@ -1286,10 +1289,18 @@ export const fr = {
         stop: "Hearth demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Les joueurs connectés sont déconnectés.",
         stopUnknown:
           "Hearth demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Les joueurs connectés seront déconnectés.",
+        stopConsole:
+          "Hearth fait d'abord enregistrer le monde par la console du jeu, puis demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Sans confirmation de la console, l'arrêt continue. Les joueurs connectés sont déconnectés.",
+        stopUnknownConsole:
+          "Hearth fait d'abord enregistrer le monde par la console du jeu, puis demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Sans confirmation de la console, l'arrêt continue. Les joueurs connectés seront déconnectés.",
         stopNoSave:
-          "Hearth demande au serveur de s'arrêter. Ce jeu n'enregistre pas son monde en s'arrêtant, et Hearth ne peut pas encore lui demander de l'enregistrer pour cette opération : ce qui est arrivé depuis son dernier enregistrement automatique peut être perdu. Les joueurs connectés sont déconnectés.",
+          "Hearth demande au serveur de s'arrêter. Ce jeu n'enregistre pas son monde en s'arrêtant : ce qui est arrivé depuis son dernier enregistrement automatique peut être perdu. Les joueurs connectés sont déconnectés.",
         stopNoSaveUnknown:
-          "Hearth demande au serveur de s'arrêter. Ce jeu n'enregistre pas son monde en s'arrêtant, et Hearth ne peut pas encore lui demander de l'enregistrer pour cette opération : ce qui est arrivé depuis son dernier enregistrement automatique peut être perdu. Les joueurs connectés seront déconnectés.",
+          "Hearth demande au serveur de s'arrêter. Ce jeu n'enregistre pas son monde en s'arrêtant : ce qui est arrivé depuis son dernier enregistrement automatique peut être perdu. Les joueurs connectés seront déconnectés.",
+        stopNoSaveConsole:
+          "Hearth fait d'abord enregistrer le monde par la console du jeu, puis demande au serveur de s'arrêter. Sans confirmation de la console, l'arrêt continue, et ce qui est arrivé depuis le dernier enregistrement automatique peut être perdu. Les joueurs connectés sont déconnectés.",
+        stopNoSaveUnknownConsole:
+          "Hearth fait d'abord enregistrer le monde par la console du jeu, puis demande au serveur de s'arrêter. Sans confirmation de la console, l'arrêt continue, et ce qui est arrivé depuis le dernier enregistrement automatique peut être perdu. Les joueurs connectés seront déconnectés.",
         stopPlain:
           "Hearth demande au serveur de s'arrêter. Les joueurs connectés sont déconnectés.",
         stopPlainUnknown:
@@ -1366,10 +1377,10 @@ export const fr = {
         "Les mods ne changent pas. Le serveur est relancé s'il tournait, et la sauvegarde déjà faite reste disponible.",
     },
     end: {
-      title: "Les mods sont en place, le serveur est reparti",
+      title: "Les mods sont en place",
       titleStopped: "Les mods sont en place",
       leadRunning: "Le serveur est reparti avec {n} mods activés.",
-      leadStopped: "Les mods sont en place. Le serveur est resté arrêté ({n} mods activés).",
+      leadStopped: "Le serveur est resté arrêté ({n} mods activés).",
       changed: "Ce qui a changé",
       backup: "Sauvegarde faite avant : {note}. Elle reste dans l'onglet Sauvegardes.",
       backupBare: "Une sauvegarde a été faite avant. Elle reste dans l'onglet Sauvegardes.",
@@ -1428,7 +1439,7 @@ export const fr = {
         unknown: "Le mod ne dit rien : en cas de doute, installez-le chez le joueur.",
       },
       unlisted:
-        "Ces mods ne figurent pas dans la liste : le serveur ne peut pas les démarrer, vos joueurs ne pourraient pas se connecter avec eux.",
+        "Ces mods ne figurent pas dans la liste : le serveur ne peut pas les démarrer, vos joueurs ne pourraient pas se connecter avec eux. Désactivez-les ou retirez-les, ou rendez-les compatibles, pour qu'ils y figurent.",
       note: "Hearth lit l'indication « environnement » que chaque mod donne sur lui-même. Il ne peut pas savoir ce qui est vraiment obligatoire : en cas de doute, installez le mod chez le joueur.",
       soonTitle: "Un dossier prêt à copier chez le joueur",
       soon: "Hearth pourra bientôt préparer un seul fichier .zip avec les mods à installer chez eux. Cette version donne la liste.",
@@ -1511,8 +1522,10 @@ export const fr = {
       gone: "Ce serveur n'a plus de console ouverte à Hearth.",
       other: "La commande a été refusée.",
     },
+    backToReview: "Revenir à « Vérifiez avant d'appliquer »",
     quick: {
       title: "Commandes rapides",
+      none: "Ce jeu ne propose pas de commande rapide. Écrivez votre commande dans le champ.",
       fill: "Une commande « à compléter » pose son début dans le champ : vous écrivez la suite, puis vous envoyez.",
     },
     watch: {
@@ -1556,6 +1569,8 @@ export const fr = {
   serviceOps: {
     // La bande « Opérations en cours » (BR-SVC-029) et la carte d'une opération (HRT-84).
     stripTitle: "Opérations en cours",
+    // La console du jeu n'a pas confirmé l'enregistrement du monde : l'arrêt a continué (HRT-292, BR-CONSOLE-012).
+    consoleSaveFailed: "Le monde n'a pas pu être enregistré avant l'arrêt. L'arrêt a continué.",
     stripRegion: "Opérations en cours",
     count: "{n} opérations en cours.",
     countOne: "1 opération en cours.",
@@ -1614,6 +1629,7 @@ export const fr = {
       watch: "Vérification du démarrage",
       stop: "Arrêt du service",
       stopOld: "Arrêt de l'ancien service",
+      consoleSave: "Enregistrement du monde par la console",
       recreate: "Recréation",
       createNew: "Création du nouveau service",
       start: "Démarrage",
@@ -2195,10 +2211,12 @@ export const fr = {
     modeLegend: "Comment sauvegarder",
     modeHot: "Sans arrêter le service (copie à chaud)",
     modeHotText:
-      "Le service continue de tourner pendant la copie. Les données peuvent changer pendant qu'elles sont copiées, et le programme peut garder des données en mémoire. Hearth ne peut pas encore lui demander d'enregistrer avant la copie.",
+      "Le service continue de tourner pendant la copie. Les données peuvent changer pendant qu'elles sont copiées, et le programme peut garder des données en mémoire. Hearth n'enregistre pas le monde avant une copie à chaud : si le jeu a une console, sa commande rapide « Enregistrer le monde » le fait à votre demande.",
     modeStop: "Arrêter, sauvegarder, relancer",
     modeStopText:
-      "Le service sera arrêté puis relancé. Certains programmes n'enregistrent pas leur monde en s'arrêtant : ce qui n'est pas enregistré est perdu. Hearth ne peut pas le savoir.",
+      "Le service sera arrêté puis relancé. Certains programmes n'enregistrent pas leur monde en s'arrêtant : ce qui n'est pas enregistré est perdu.",
+    modeStopTextConsole:
+      "Le service sera arrêté puis relancé. Hearth fait d'abord enregistrer le monde par la console du jeu ; sans confirmation de la console, l'arrêt continue. Certains programmes n'enregistrent pas leur monde en s'arrêtant : ce qui n'est pas enregistré est perdu.",
     modeStopGrace:
       "Le service recevra l'ordre de s'arrêter proprement ; s'il ne s'est pas arrêté au bout de {delay}, il sera coupé de force.",
     modeStopGraceNone:

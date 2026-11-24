@@ -9,6 +9,7 @@ import AdminActDialog from "@/components/organisms/AdminActDialog.vue";
 import type { useModsApply } from "@/composables/useModsApply";
 import { t } from "@/i18n";
 import type { ModsView } from "@/link";
+import { consoleSaveNote } from "@/serviceOps/messages";
 import { dateOf } from "@/services/backups";
 import type { StopWay } from "@/services/game";
 import { countsOf } from "@/services/mods";
@@ -28,6 +29,7 @@ const props = defineProps<{
   running?: boolean;
   /** Comment la fiche dit que le jeu enregistre son monde à l'arrêt (étape 1) ; `null` : pas lue. */
   stopWay?: StopWay | null;
+  consoleSave?: boolean | null;
 }>();
 const emit = defineEmits<{ close: []; players: []; logs: [] }>();
 
@@ -36,6 +38,11 @@ const operation = computed(() => props.apply.operation.value);
 const finished = computed(() => props.apply.finished.value);
 const outcome = computed(() => props.apply.outcome.value);
 const cancelOpen = ref(false);
+/** Le jeu n'a pas confirmé l'enregistrement de son monde avant l'arrêt du lot (HRT-292) : dit, jamais passé sous silence. */
+const unsavedNote = computed(() => {
+  const done = finished.value?.operation ?? operation.value;
+  return done ? consoleSaveNote(done) : null;
+});
 
 const plan = computed(() => stepsFor(launch.value?.running ?? true));
 const states = computed(() =>
@@ -98,7 +105,7 @@ function close() {
         <li v-for="item in states" :key="item.step" :class="['mp__step', `mp__step--${item.state}`]" data-mods-progress-step :data-state="item.state">
           <span class="mp__step-text">
             <strong>{{ stepTitle(item.step) }}</strong>
-            <span class="mp__detail">{{ item.step === "place" ? placeSummary(launch.rows) : stepText(item.step, launch.count, true, stopWay) }}</span>
+            <span class="mp__detail">{{ item.step === "place" ? placeSummary(launch.rows) : stepText(item.step, launch.count, true, stopWay, consoleSave ?? null) }}</span>
           </span>
           <span :class="['mp__state', `mp__state--${item.state}`]">
             <HIcon v-if="item.state === 'done'" name="check" size="sm" />
@@ -138,6 +145,7 @@ function close() {
         <strong class="mp__title">{{ t(launch.running ? "mods.end.title" : "mods.end.titleStopped") }}</strong>
         {{ t(launch.running ? "mods.end.leadRunning" : "mods.end.leadStopped", { n: enabledCount }) }}
       </Callout>
+      <Callout v-if="unsavedNote" tone="warn" data-mods-end-unsaved>{{ unsavedNote }}</Callout>
       <section class="mp__block">
         <h4 class="mp__subtitle">{{ t("mods.end.changed") }}</h4>
         <ul class="mp__list">

@@ -522,6 +522,8 @@ pub struct FicheStopDto {
     pub grace_s: u32,
     pub world_saved: FicheWorldSavedDto,
     pub sequence_tested: bool,
+    /// Hearth enregistre le monde par la console avant l'arrêt (HRT-292).
+    pub console_save: bool,
 }
 
 /// Un réglage posé par la fiche, avec sa raison (BR-JEU-039).
@@ -851,6 +853,7 @@ pub(super) fn stop_dto(view: &StopView) -> FicheStopDto {
         grace_s,
         world_saved,
         sequence_tested,
+        console_save,
     } = view;
     FicheStopDto {
         grace_s: *grace_s,
@@ -861,6 +864,7 @@ pub(super) fn stop_dto(view: &StopView) -> FicheStopDto {
             WorldSavedView::Unknown => FicheWorldSavedDto::Unknown,
         },
         sequence_tested: *sequence_tested,
+        console_save: *console_save,
     }
 }
 

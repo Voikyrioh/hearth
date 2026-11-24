@@ -42,6 +42,7 @@ const props = defineProps<{
   blockers: string[];
   /** Comment la fiche dit que le jeu enregistre son monde à l'arrêt (étape 1) ; `null` : pas lue. */
   stopWay: StopWay | null;
+  consoleSave?: boolean | null;
 }>();
 const emit = defineEmits<{
   back: [];
@@ -122,7 +123,7 @@ const act = useAdminAct({
           <span class="ma__num" aria-hidden="true">{{ index + 1 }}</span>
           <span class="ma__change-text">
             <strong>{{ stepTitle(step) }}</strong>
-            <span class="ma__detail">{{ stepText(step, rows.length, playersKnown, stopWay) }}</span>
+            <span class="ma__detail">{{ stepText(step, rows.length, playersKnown, stopWay, consoleSave ?? null) }}</span>
           </span>
         </li>
       </ol>

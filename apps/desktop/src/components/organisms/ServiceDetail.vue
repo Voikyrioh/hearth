@@ -36,6 +36,7 @@ import { engineLine } from "@/services/mods";
 import { busyText, pilotLock } from "@/services/pilot";
 import { canAct, type RightsGate } from "@/services/rights";
 import type { ServiceTab } from "@/services/tabs";
+import { useModsReviewReturnStore } from "@/stores/modsReviewReturn";
 import { useServersStore } from "@/stores/servers";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import Callout from "../molecules/Callout.vue";
@@ -244,6 +245,21 @@ const removeGuard = router.beforeEach((to, from) => {
 });
 onBeforeUnmount(removeGuard);
 
+// Le retour vers « Vérifiez avant d'appliquer » ne vaut que dans le parcours mods : Mods et Console. Tout autre onglet,
+// ou la fermeture du détail, l'oublie.
+const reviewReturn = useModsReviewReturnStore();
+function forgetReviewReturn() {
+  if (service.value) reviewReturn.forget(props.serverId, service.value.key);
+}
+watch(
+  () => props.tab,
+  (tab, before) => {
+    const inJourney = (id: string) => id === "mods" || id === "console";
+    if (inJourney(before) && !inJourney(tab)) forgetReviewReturn();
+  },
+);
+onBeforeUnmount(forgetReviewReturn);
+
 const tabs = computed(() => [
   { id: "detail" as const, label: t("serviceDetail.tabDetail") },
   ...(hasSettings.value
@@ -430,6 +446,7 @@ const commandNote = computed(() => {
         :console-served="gameConsole"
         :console-open="doors.console.value !== null"
         :stop-way="doors.stopWay.value"
+        :console-save="doors.consoleSave.value"
         @open-console="changeTab('console')"
         @open-logs="changeTab('logs')"
         @engine="engineFromTab = $event"
@@ -458,7 +475,9 @@ const commandNote = computed(() => {
         :gone="gone"
         :last-contact-at="lastContactAt"
         :stop-way="doors.stopWay.value"
+        :back-to-review="reviewReturn.has(serverId, service.key)"
         @refresh="doors.reload()"
+        @back-to-review="changeTab('mods')"
         @start="emit('gesture', service, 'start')"
         @follow="title?.scrollIntoView?.({ block: 'start' })"
       />
@@ -492,6 +511,7 @@ const commandNote = computed(() => {
         :rights-reason-id="reasonId"
         :connected="connected"
         :engine-ready="engineReady"
+        :console-save="doors.consoleSave.value === true"
       />
     </div>
 

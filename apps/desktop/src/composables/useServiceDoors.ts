@@ -2,7 +2,7 @@ import { onBeforeUnmount, ref, watch } from "vue";
 import { readGameOnce } from "@/composables/useGameView";
 import { logUiError } from "@/errors/report";
 import { type ConsoleView, failureOf, getLinkBridge, type ModsGame } from "@/link";
-import { type StopWay, stopWayOf } from "@/services/game";
+import { consoleSaveOf, type StopWay, stopWayOf } from "@/services/game";
 
 /**
  * Les portes des onglets « Mods » et « Console » d'un serveur de jeu (HRT-261, HRT-269, BR-MOD-001, BR-CONSOLE-002) :
@@ -29,6 +29,8 @@ export function useServiceDoors(
   const game = ref<ModsGame | null>(null);
   /** Comment ce jeu enregistre son monde à l'arrêt, d'après sa fiche : la source unique des phrases sur l'enregistrement. */
   const stopWay = ref<StopWay | null>(null);
+  /** Hearth enregistre le monde par la console avant l'arrêt, d'après la fiche (`null` : pas lue). */
+  const consoleSave = ref<boolean | null>(null);
   const console = ref<ConsoleView | null>(null);
   let ticket = 0;
 
@@ -36,6 +38,7 @@ export function useServiceDoors(
     const game = await readGameOnce(serverId(), target);
     if (mine !== ticket) return;
     stopWay.value = game.kind === "found" ? stopWayOf(game.view) : null;
+    consoleSave.value = game.kind === "found" ? consoleSaveOf(game.view) : null;
     if (game.kind !== "found") {
       hasMods.value = false;
       return;
@@ -78,6 +81,7 @@ export function useServiceDoors(
       hasMods.value = false;
       game.value = null;
       stopWay.value = null;
+      consoleSave.value = null;
       console.value = null;
       return;
     }
@@ -94,6 +98,7 @@ export function useServiceDoors(
       hasMods.value = false;
       game.value = null;
       stopWay.value = null;
+      consoleSave.value = null;
       console.value = null;
       void load();
     },
@@ -106,5 +111,5 @@ export function useServiceDoors(
     ticket += 1;
   });
 
-  return { hasMods, game, stopWay, console, reload: load };
+  return { hasMods, game, stopWay, consoleSave, console, reload: load };
 }

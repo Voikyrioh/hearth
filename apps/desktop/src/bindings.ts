@@ -1809,6 +1809,8 @@ export type FicheStopDto = {
 	graceSeconds: number,
 	worldSaved: FicheWorldSavedDto,
 	sequenceTested: boolean,
+	/**  Hearth enregistre le monde par la console avant l'arrêt (HRT-292). */
+	consoleSave: boolean,
 };
 
 /**  Un thème en mots simples (BR-FICHE-041). */

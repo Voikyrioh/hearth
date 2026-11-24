@@ -163,7 +163,7 @@ export function placeSummary(rows: readonly ChangeRow[]): string {
 
 /**
  * Le texte d'une étape. L'étape 1 redit la fiche (`stop.worldSaved`, via `stopWay`) comme la carte « Arrêt du jeu » et la
- * fenêtre « Arrêter » : l'agent ne lance pas la suite d'enregistrement avant l'arrêt d'un lot de mods (HRT-292), donc seul
+ * fenêtre « Arrêter » : l'agent ne lance pas la suite d'enregistrement avant l'arrêt d'un lot de mods, donc seul
  * un jeu qui enregistre son monde à l'arrêt par lui-même (`image`) l'affirme ; pour un autre, la phrase dit que Hearth ne
  * peut pas encore le lui demander ici. Fiche pas lue : aucune affirmation.
  */
@@ -172,13 +172,16 @@ export function stepText(
   count: number,
   playersKnown: boolean,
   way: StopWay | null = null,
+  consoleSave: boolean | null = null,
 ): string {
   switch (step) {
     case "stop": {
       const kicked = playersKnown ? "" : "Unknown";
-      if (way === "image") return t(`mods.apply.stepText.stop${kicked}` as MessageKey);
+      // La fiche dit exactement si Hearth enregistre d'abord par la console (`consoleSave`), jamais « si elle le prévoit ».
+      const console = consoleSave === true ? "Console" : "";
+      if (way === "image") return t(`mods.apply.stepText.stop${kicked}${console}` as MessageKey);
       if (way === null) return t(`mods.apply.stepText.stopPlain${kicked}` as MessageKey);
-      return t(`mods.apply.stepText.stopNoSave${kicked}` as MessageKey);
+      return t(`mods.apply.stepText.stopNoSave${kicked}${console}` as MessageKey);
     }
     case "save":
       return t("mods.apply.stepText.save");
@@ -194,6 +197,8 @@ export function stepText(
 /** L'étape d'affichage où l'opération en est, d'après l'étape de l'agent (`stop`, `copy`, `verify`, `place`, `start`, `watch`). */
 export function currentStep(agentStep: string | null): StepId | null {
   switch (agentStep) {
+    // L'enregistrement du monde par la console fait partie de l'arrêt (HRT-292, BR-CONSOLE-012).
+    case "console_save":
     case "stop":
       return "stop";
     case "copy":

@@ -49,6 +49,8 @@ const props = defineProps<{
   rightsReasonId: string;
   connected: boolean;
   engineReady: boolean;
+  /** Hearth enregistre le monde par la console avant d'arrêter ce jeu (fiche, HRT-292). */
+  consoleSave?: boolean;
 }>();
 
 const flow = useServiceBackups(
@@ -353,6 +355,7 @@ const resultLines = computed<ResultLine[]>(() => {
       :server-id="serverId"
       :preview="flow.preview.value"
       :perform="flow.performCreate"
+      :console-save="consoleSave === true"
       @close="flow.closeCreate()"
       @retry="flow.loadPreview()"
     />

@@ -153,6 +153,8 @@ export interface FicheStop {
   worldSaved: WorldSaved;
   /** La suite d'étapes a été essayée sur la vraie image ; sinon Hearth ne l'envoie pas. */
   sequenceTested: boolean;
+  /** Hearth enregistre le monde par la console du jeu avant de l'arrêter (HRT-292, BR-CONSOLE-012). */
+  consoleSave: boolean;
 }
 
 /** Un réglage posé par la fiche sans que l'utilisateur l'ait choisi (BR-JEU-039). */

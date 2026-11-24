@@ -1,12 +1,3 @@
-<script lang="ts">
-/**
- * Les services dont l'écran « Vérifiez avant d'appliquer » a ouvert la console : en revenant sur l'onglet Mods, le lot
- * reparaît sur cet écran (pas sur la liste), puisque c'est de là qu'on est parti. Tenu hors du composant, qui est détruit
- * au changement d'onglet.
- */
-const cameFromReview = new Set<string>();
-</script>
-
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
 import HButton from "@/components/atoms/HButton.vue";
@@ -48,6 +39,7 @@ import {
 import { changeRows } from "@/services/modsApply";
 import type { RightsGate } from "@/services/rights";
 import { canAct } from "@/services/rights";
+import { useModsReviewReturnStore } from "@/stores/modsReviewReturn";
 import { useServersStore } from "@/stores/servers";
 
 // L'onglet « Mods » d'un serveur Minecraft installé par Hearth (HRT-261, HRT-262, BR-MOD-020 à 033, maquettes Main et
@@ -69,6 +61,8 @@ const props = defineProps<{
   consoleOpen?: boolean;
   /** Comment la fiche dit que le jeu enregistre son monde à l'arrêt (une seule lecture pour tous les écrans) ; `null` : pas lue. */
   stopWay?: StopWay | null;
+  /** Hearth enregistre le monde par la console avant l'arrêt (fiche) ; `null` : pas lue. */
+  consoleSave?: boolean | null;
 }>();
 const emit = defineEmits<{
   addServer: [];
@@ -90,8 +84,9 @@ const deposit = useModsDeposit(
   () => props.service.key,
 );
 /** L'écran montré : la liste, « Ajouter des mods » (dépôt), ou le contrôle des fichiers déposés. */
+const reviewReturn = useModsReviewReturnStore();
 const screen = ref<"list" | "deposit" | "check" | "review" | "progress" | "players">(
-  cameFromReview.delete(`${props.serverId}/${props.service.key}`) && flow.changeCount.value > 0
+  reviewReturn.take(props.serverId, props.service.key) && flow.changeCount.value > 0
     ? "review"
     : "list",
 );
@@ -184,7 +179,7 @@ async function openPlayers() {
 }
 
 function openConsoleFromReview() {
-  cameFromReview.add(`${props.serverId}/${props.service.key}`);
+  reviewReturn.mark(props.serverId, props.service.key);
   emit("openConsole");
 }
 
@@ -376,6 +371,7 @@ function keyOf(item: ModItem): string {
       :now="clock"
       :console-open="consoleOpen === true"
       :stop-way="stopWay ?? null"
+      :console-save="consoleSave ?? null"
       :blockers="blockers"
       @back="screen = 'list'"
       @refresh-players="players.refresh()"
@@ -397,6 +393,7 @@ function keyOf(item: ModItem): string {
       :view="view"
       :running="running"
       :stop-way="stopWay ?? null"
+      :console-save="consoleSave ?? null"
       @close="closeProgress"
       @players="openPlayers"
       @logs="emit('openLogs')"

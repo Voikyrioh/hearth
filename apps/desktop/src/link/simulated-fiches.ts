@@ -102,7 +102,7 @@ export function terraria(): FicheDetail {
       disk: { installBytes: null, evidence: { kind: "unmeasured" } },
     },
     firstStart: { readyTimeoutSeconds: 1800, worldGeneration: true, downloads: [], stages: [] },
-    stop: { graceSeconds: 10, worldSaved: "by_sequence", sequenceTested: true },
+    stop: { graceSeconds: 10, worldSaved: "by_sequence", sequenceTested: true, consoleSave: false },
     imposed: [
       {
         label: "Nom du fichier du monde",
@@ -242,7 +242,12 @@ export function rich(): FicheDetail {
       ],
       stages: ["Téléchargement des fichiers de jeu", "Chargement du monde"],
     },
-    stop: { graceSeconds: 30, worldSaved: "by_image_on_signal", sequenceTested: true },
+    stop: {
+      graceSeconds: 30,
+      worldSaved: "by_image_on_signal",
+      sequenceTested: true,
+      consoleSave: false,
+    },
     imposed: [
       {
         label: "Mode hors ligne",
@@ -735,7 +740,12 @@ export function demoPublished(): FicheDetail[] {
       disk: 1_497_623_985,
       readyTimeoutSeconds: 3600,
       // Comme la vraie fiche (`catalog/minecraft/fiche.toml`) : l'image enregistre le monde sur le signal d'arrêt, 210 s de délai.
-      stop: { graceSeconds: 210, worldSaved: "by_image_on_signal", sequenceTested: false },
+      stop: {
+        graceSeconds: 210,
+        worldSaved: "by_image_on_signal",
+        sequenceTested: false,
+        consoleSave: true,
+      },
       illustration: true,
       // Le moteur du serveur se choisit à l'installation, comme dans la vraie fiche (une variante par moteur).
       variants: [
@@ -788,7 +798,12 @@ export function demoPublished(): FicheDetail[] {
       memory: { min: 4 * GIB, recommended: 6 * GIB, evidence: { kind: "measured" } },
       disk: 4_743_565_597,
       readyTimeoutSeconds: 1800,
-      stop: { graceSeconds: 30, worldSaved: "by_image_on_signal", sequenceTested: true },
+      stop: {
+        graceSeconds: 30,
+        worldSaved: "by_image_on_signal",
+        sequenceTested: true,
+        consoleSave: false,
+      },
       steamAppId: 892970,
     }),
     publishedGame({
@@ -817,7 +832,12 @@ export function demoPublished(): FicheDetail[] {
       },
       disk: 8_946_101_770,
       readyTimeoutSeconds: 3600,
-      stop: { graceSeconds: 30, worldSaved: "by_image_on_signal", sequenceTested: true },
+      stop: {
+        graceSeconds: 30,
+        worldSaved: "by_image_on_signal",
+        sequenceTested: true,
+        consoleSave: false,
+      },
       steamAppId: 1203620,
     }),
   ];

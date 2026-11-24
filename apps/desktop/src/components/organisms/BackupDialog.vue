@@ -41,6 +41,8 @@ const props = defineProps<{
   serverId: string;
   preview: PreviewState;
   perform: (request: BackupRequest, adminPassword: string | null) => Promise<ActReport>;
+  /** Hearth enregistre le monde par la console avant d'arrêter ce jeu : la phrase du mode « Arrêter » le dit exactement. */
+  consoleSave?: boolean;
 }>();
 const emit = defineEmits<{ close: []; retry: [] }>();
 
@@ -147,7 +149,7 @@ function send(adminPassword: string | null): Promise<ActReport> {
           <input v-model="mode" class="bd__radio" type="radio" :name="modeName" value="stop_copy_start" />
           <span class="bd__text">
             <span class="bd__name">{{ t("backups.modeStop") }}</span>
-            <span class="bd__help">{{ t("backups.modeStopText") }}</span>
+            <span class="bd__help">{{ consoleSave ? t("backups.modeStopTextConsole") : t("backups.modeStopText") }}</span>
             <span class="bd__help">{{ graceText(ready) }}</span>
           </span>
         </label>

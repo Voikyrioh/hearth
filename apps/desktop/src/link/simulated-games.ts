@@ -48,7 +48,12 @@ export class SimulatedGames {
       view: {
         fiche: "terraria",
         ficheVersion: 1,
-        stop: { graceSeconds: 10, worldSaved: "by_sequence", sequenceTested: false },
+        stop: {
+          graceSeconds: 10,
+          worldSaved: "by_sequence",
+          sequenceTested: false,
+          consoleSave: false,
+        },
         ports: [{ hostPort: 7777, protocol: "tcp", role: "game", changed: false }],
         hasPassword: password !== null && password !== "",
         publicAddress: null,
@@ -84,7 +89,12 @@ export class SimulatedGames {
         name: detail.card.name,
         ficheVersion: detail.card.version,
         stop: {
-          ...(detail.stop ?? { graceSeconds: 10, worldSaved: "unknown", sequenceTested: false }),
+          ...(detail.stop ?? {
+            graceSeconds: 10,
+            worldSaved: "unknown",
+            sequenceTested: false,
+            consoleSave: false,
+          }),
         },
         ports,
       },
