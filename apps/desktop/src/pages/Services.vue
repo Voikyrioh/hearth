@@ -623,7 +623,7 @@ async function openDocs() {
 
     <ServiceLifecycleDialog
       v-if="server && lifecycle.pending.value"
-      :open="lifecycle.open.value"
+      :open="lifecycle.open.value && !lifecycle.sequenceOpen.value"
       :server-id="server.id"
       :gesture="lifecycle.pending.value.gesture"
       :service="lifecycle.pending.value.service"

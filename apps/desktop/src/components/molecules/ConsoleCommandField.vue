@@ -21,6 +21,8 @@ const props = defineProps<{
   maxChars: number;
   /** « Démarrer » : seulement pour qui peut piloter le service. */
   canStart: boolean;
+  /** Pourquoi la fiche refuse la commande tapée, dit avant l'envoi (BR-CONSOLE-004) ; `null` : pas refusée. */
+  refusedText?: string | null;
 }>();
 const emit = defineEmits<{
   "update:modelValue": [value: string];
@@ -101,7 +103,7 @@ function onInput(event: Event) {
         </button>
       </template>
       <template v-else-if="issue">{{ issue }}</template>
-      <template v-else-if="refused">{{ t("console.field.refused") }}</template>
+      <template v-else-if="refused">{{ refusedText ?? t("console.field.refused") }}</template>
       <template v-else-if="sensitive">{{ t("console.field.sensitive", { verb: sensitive }) }}</template>
       <template v-else>{{ t("console.field.hint", { n: maxChars }) }}</template>
     </p>

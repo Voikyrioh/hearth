@@ -236,6 +236,8 @@
   --backup-detail-col: 224px;
   --backup-path-basis: 224px;
   --backup-mode-min: 144px;
+  /* La colonne « Mods » des sauvegardes ne coupe jamais un mot (« Mods non enregistrés » à 1024 px). */
+  --backup-mods-min: 144px;
 
   /* Mods d'un service (HRT-262) : largeurs fixes des colonnes (le nom prend le reste) et hauteur du journal de la console. */
   --mods-pinned-h: 0px;

@@ -159,7 +159,8 @@ function done() {
       {{ t("mods.check.room", { n: room }) }}
     </p>
     <div class="mc__actions">
-      <HButton variant="primary" :disabled="chosen.length === 0 || overRoom" data-mods-check-continue @click="done()">
+      <!-- Jamais « Continuer avec 0 fichier » : sans fichier retenu, seule « Déposer d'autres fichiers » reste. -->
+      <HButton v-if="chosen.length > 0" variant="primary" :disabled="overRoom" data-mods-check-continue @click="done()">
         {{ t(chosen.length === 1 ? "mods.check.continueOne" : "mods.check.continue", { n: chosen.length }) }}
       </HButton>
       <HButton variant="secondary" data-mods-check-back @click="emit('more')">

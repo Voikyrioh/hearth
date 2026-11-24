@@ -2,6 +2,7 @@
 import { computed, nextTick, ref } from "vue";
 import { safeText } from "@/audit/text";
 import HButton from "@/components/atoms/HButton.vue";
+import HIcon from "@/components/atoms/HIcon.vue";
 import ConsoleCommandField from "@/components/molecules/ConsoleCommandField.vue";
 import DashCard from "@/components/molecules/DashCard.vue";
 import PlayersOnlineCard from "@/components/molecules/PlayersOnlineCard.vue";
@@ -12,6 +13,7 @@ import { useOnlinePlayers } from "@/composables/useOnlinePlayers";
 import { useServiceConsole } from "@/composables/useServiceConsole";
 import { t } from "@/i18n";
 import type { ConsoleView, QuickCommand, ServiceInfo } from "@/link";
+import { refusedSentence } from "@/services/console";
 import type { StopWay } from "@/services/game";
 import { canAct, type RightsGate } from "@/services/rights";
 import { useServiceLogsStore } from "@/stores/serviceLogs";
@@ -33,8 +35,10 @@ const props = defineProps<{
   lastContactAt: number | null;
   /** Comment la fiche dit que le jeu enregistre son monde à l'arrêt ; `null` : pas lue. */
   stopWay?: StopWay | null;
+  /** La console a été ouverte depuis « Vérifiez avant d'appliquer » : le lien de retour est proposé. */
+  backToReview?: boolean;
 }>();
-const emit = defineEmits<{ refresh: []; start: []; follow: [] }>();
+const emit = defineEmits<{ refresh: []; start: []; follow: []; backToReview: [] }>();
 
 const logs = useServiceLogsStore();
 const console_ = useServiceConsole(
@@ -57,6 +61,12 @@ const verbs = computed(() =>
 const blocked = computed(() => console_.block.value !== null);
 const canStart = computed(() => canAct(props.gate));
 
+/** Pourquoi la commande tapée est refusée par la fiche, dit sous le champ AVANT l'envoi (jamais un blocage muet). */
+const refusedNow = computed(() => {
+  const judged = console_.judged.value;
+  return judged?.kind === "refused" ? refusedSentence(judged.reason, props.stopWay ?? null) : null;
+});
+
 const field = ref<InstanceType<typeof ConsoleCommandField> | null>(null);
 
 /** Une commande rapide « à compléter » pose son début : le curseur entre dans le champ, après lui. */
@@ -73,6 +83,17 @@ function refusalText(): string | undefined {
 
 <template>
   <div class="ct" data-console-tab>
+    <HButton
+      v-if="backToReview"
+      variant="ghost"
+      size="sm"
+      class="ct__back"
+      data-console-back-review
+      @click="emit('backToReview')"
+    >
+      <HIcon name="arrow-left" size="sm" />
+      {{ t("console.backToReview") }}
+    </HButton>
     <header class="ct__head">
       <h3 class="ct__title">{{ t("console.title") }}</h3>
       <p class="ct__lead">{{ t("console.lead") }}</p>
@@ -103,6 +124,7 @@ function refusalText(): string | undefined {
           :sending="console_.sending.value"
           :max-chars="console_.maxChars.value"
           :can-start="canStart"
+          :refused-text="refusedNow"
           @send="console_.submit()"
           @start="emit('start')"
           @follow="emit('follow')"
@@ -132,6 +154,9 @@ function refusalText(): string | undefined {
               {{ command.label }}
             </HButton>
           </div>
+          <p v-if="view.quick.length === 0" class="ct__note" data-console-quick-none>
+            {{ t("console.quick.none") }}
+          </p>
           <p v-if="view.quick.some((item) => item.mode === 'fill')" class="ct__note">
             {{ t("console.quick.fill") }}
           </p>
@@ -162,6 +187,10 @@ function refusalText(): string | undefined {
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
+}
+
+.ct__back {
+  align-self: flex-start;
 }
 
 .ct__head {

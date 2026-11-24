@@ -947,11 +947,16 @@ export class SimulatedLinkBridge implements LinkBridge {
       const outcome = this.mods.accept(serverId, key, batch, by);
       // La sauvegarde faite avant le lot existe pour de bon : l'écran de fin la nomme et l'onglet Sauvegardes la liste.
       if (outcome.kind === "accepted") {
+        const before = this.mods.viewOf(serverId, key)?.mods ?? [];
+        const active = before.filter((mod) => mod.place === "active" && mod.enabled).length;
+        const disabled = before.filter((mod) => mod.place === "active" && !mod.enabled).length;
+        const retired = before.filter((mod) => mod.place === "retired").length;
         this.backups.addModsBackup(
           serverId,
           key,
           outcome.backupId,
           `Avant mods, ${new Date().toLocaleDateString("fr-FR")}`,
+          { state: "recorded", active, disabled, retired },
         );
       }
       return outcome;

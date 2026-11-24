@@ -273,9 +273,14 @@ function integrityIcon(backup: BackupInfo): "check" | "alert" | "info" {
   border-bottom: 0;
 }
 
-/* Le résumé des mods passe à la ligne : la liste ne déborde jamais de sa carte. */
+/* Le résumé des mods passe à la ligne entre les mots, jamais au milieu d'un mot (« Mods non enregistrés » reste lisible à
+   1024 px) : la colonne garde la largeur du plus long mot, et un nom très long seulement est coupé. */
+.bk__mods {
+  min-width: var(--backup-mods-min);
+}
+
 .bk__mods-text {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .bk__expand {

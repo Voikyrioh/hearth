@@ -46,7 +46,7 @@ const emit = defineEmits<{ cancelAll: []; review: [] }>();
    l'écran. Le lot et « Vérifier et appliquer » restent à portée sur une longue liste. */
 .bar {
   position: sticky;
-  top: calc(var(--mods-pinned-h) + var(--space-2));
+  top: var(--mods-pinned-h);
   bottom: var(--space-3);
   z-index: var(--z-raised);
   box-shadow: var(--card-edge);

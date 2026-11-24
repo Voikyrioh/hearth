@@ -162,8 +162,11 @@ export function blockingBanner(
         ? t("mods.banner.toCompleteOne", { name, needed: names[0] ?? "" })
         : t("mods.banner.toComplete", { name, needed: joined(names) });
     }
-    default:
+    case "incompatible_minecraft":
       return t("mods.banner.incompatibleMinecraft", { name, minecraft: game.minecraft ?? "?" });
+    default:
+      // Un autre verdict n'empêche pas le démarrage (`isBlocking`) : ce texte ne dit rien de faux sur la cause.
+      return t("mods.banner.blocking", { name });
   }
 }
 

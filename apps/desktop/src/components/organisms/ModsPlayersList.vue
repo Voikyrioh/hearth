@@ -31,7 +31,10 @@ const mods = computed(() =>
       loadsOnServer(mod.verdict.code),
   ),
 );
-/** Les mods activés que le serveur ne peut pas démarrer faute d'un mod dont ils ont besoin : dits ici, jamais donnés. */
+/**
+ * Les mods activés que le serveur ne peut pas démarrer (pas compatible, installé deux fois, dépendance absente) : leur
+ * nom et la raison sont dits ici, jamais donnés aux joueurs (jamais omis en silence).
+ */
 const unlisted = computed(() =>
   props.view.mods
     .filter(
@@ -39,7 +42,7 @@ const unlisted = computed(() =>
         mod.place === "active" &&
         mod.enabled &&
         mod.identity !== null &&
-        mod.verdict.code === "to_complete",
+        !loadsOnServer(mod.verdict.code),
     )
     .map((mod) => blockingBanner(mod, props.view.game, props.view)),
 );

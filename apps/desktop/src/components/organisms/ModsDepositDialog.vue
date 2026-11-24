@@ -39,8 +39,21 @@ onBeforeUnmount(() => {
   stopDrop?.();
 });
 
+/** Les fichiers que le contrôle dit ne plus être dans la zone d'attente : l'erreur se lit sur LEUR ligne. */
+const goneNames = computed(() => {
+  const check = props.deposit.check.value;
+  return check.kind === "refused" && check.refusal.kind === "deposit_unknown"
+    ? new Set(check.gone ?? [])
+    : new Set<string>();
+});
+
+function isGone(item: DepositItem): boolean {
+  return goneNames.value.has(item.name);
+}
+
 function statusOf(item: DepositItem): string {
   if (item.refused !== null) return item.refused;
+  if (isGone(item)) return t("mods.deposit.rowGone");
   const transfer = props.deposit.transferOf(item);
   if (!transfer) return item.sent === true ? t("mods.deposit.sent") : t("mods.deposit.waiting");
   if (transfer.status === "sending") {
@@ -88,7 +101,7 @@ function sizeOf(item: DepositItem): string | null {
     <h3 class="md__title">{{ t("mods.deposit.title") }}</h3>
     <p class="md__lead">{{ t("mods.deposit.lead") }}</p>
 
-    <div class="md__zone" data-mods-deposit-zone>
+    <div :class="['md__zone', { 'md__zone--compact': deposit.items.value.length > 0 }]" data-mods-deposit-zone>
       <HIcon name="upload" class="md__zone-icon" />
       <p class="md__zone-text">{{ t("mods.deposit.zone") }}</p>
       <p class="md__hint">{{ t("mods.deposit.zoneOr") }}</p>
@@ -113,12 +126,12 @@ function sizeOf(item: DepositItem): string | null {
         <li
           v-for="item in deposit.items.value"
           :key="item.path"
-          :class="['md__file', { 'md__file--refused': item.refused !== null }]"
+          :class="['md__file', { 'md__file--refused': item.refused !== null || isGone(item) }]"
           data-mods-deposit-file
         >
           <span class="md__name">{{ item.name }}</span>
           <span v-if="sizeOf(item)" class="md__size">{{ sizeOf(item) }}</span>
-          <span class="md__status" role="status" data-mods-deposit-status>{{ statusOf(item) }}</span>
+          <span class="md__status" :role="isGone(item) ? 'alert' : 'status'" data-mods-deposit-status>{{ statusOf(item) }}</span>
           <HButton variant="ghost" size="sm" data-mods-deposit-remove @click="deposit.remove(item)">
             {{ t("mods.deposit.remove") }}
           </HButton>
@@ -240,6 +253,16 @@ function sizeOf(item: DepositItem): string | null {
   border: var(--border-width) dashed var(--tx-faint);
   border-radius: var(--radius-card);
   background: var(--card);
+}
+
+/* Des fichiers sont déjà choisis : la zone se resserre pour que leur liste reste au-dessus de la ligne de flottaison. */
+.md__zone--compact {
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+}
+
+.md__zone--compact .md__zone-icon {
+  display: none;
 }
 
 .md__files-title {
