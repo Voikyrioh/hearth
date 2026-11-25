@@ -848,11 +848,14 @@ async fn a_game_that_never_answers_holds_the_stop_back_at_most_the_delay_plus_fi
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
     // L'échange pendu est abandonné au délai de la fiche (60 s) + la marge (5 s), pas une seconde de plus.
+    // Le faux jeu mesure de son côté : il voit la coupure quelques millisecondes après l'agent
+    // (65,001 s sur la CI Linux le 25/11), d'où une demi-seconde de tolérance au-dessus de 65 s.
     let durations = b.game.durations();
     assert_eq!(durations.len(), 1, "{durations:?}");
     let cut = durations[0].expect("l'échange est abandonné");
     assert!(
-        cut >= std::time::Duration::from_secs(60) && cut <= std::time::Duration::from_secs(65),
+        cut >= std::time::Duration::from_secs(60)
+            && cut <= std::time::Duration::from_millis(65_500),
         "{cut:?}"
     );
     let snapshot = loop {
