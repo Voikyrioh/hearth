@@ -875,7 +875,9 @@ pub struct Backups {
     /// qu'elles y sont (`BR-BACKUP-027`).
     in_use: Mutex<HashSet<String>>,
     /// La lecture des mods d'un service (HRT-293) : posée par la racine de composition ; sans elle, aucune liste.
-    mods: std::sync::OnceLock<Arc<dyn ModsSnapshot>>,
+    mods: std::sync::OnceLock<std::sync::Weak<dyn ModsSnapshot>>,
+    /// Le même port quand rien d'autre ne le tient en vie (un faux des essais) ; jamais le service des mods réel.
+    mods_kept: std::sync::OnceLock<Arc<dyn ModsSnapshot>>,
 }
 
 /// Une sauvegarde en usage, rendue à la chute du jeton.
@@ -930,6 +932,7 @@ impl Backups {
             verify_gate: Arc::new(AsyncMutex::new(())),
             in_use: Mutex::new(HashSet::new()),
             mods: std::sync::OnceLock::new(),
+            mods_kept: std::sync::OnceLock::new(),
         })
     }
 
@@ -1241,7 +1244,7 @@ impl Backups {
         let rows = self.repo.list(key).await.map_err(internal)?;
         // Un service qui a des mods : chaque sauvegarde dit l'état de sa liste (BR-MOD-035), les anciennes
         // « non enregistrée ». Un service sans mods : aucun champ.
-        let summaries = match self.mods.get() {
+        let summaries = match self.mods_port() {
             Some(port) if port.applicable(key).await => {
                 Some(self.repo.mods_summaries(key).await.map_err(internal)?)
             }
@@ -2541,13 +2544,26 @@ impl Backups {
     }
 
     /// Branche la lecture des mods d'un service (racine de composition, une seule fois).
-    pub fn set_mods_snapshot(&self, snapshot: Arc<dyn ModsSnapshot>) {
-        let _ = self.mods.set(snapshot);
+    ///
+    // FIX:01M8CJ9T4Q6W2XKZ7N3VHBY5PD le service des mods tient les sauvegardes (`ApplyDeps`) : le port est
+    // pris en `Weak`, sinon les deux se tiennent en vie l'un l'autre et la base SQLite ne se ferme jamais.
+    pub fn set_mods_snapshot(&self, snapshot: &Arc<dyn ModsSnapshot>) {
+        let _ = self.mods.set(Arc::downgrade(snapshot));
+    }
+
+    /// Comme `set_mods_snapshot`, mais le port est tenu ici : pour un faux qui ne tient pas les sauvegardes.
+    pub fn keep_mods_snapshot(&self, snapshot: Arc<dyn ModsSnapshot>) {
+        let _ = self.mods.set(Arc::downgrade(&snapshot));
+        let _ = self.mods_kept.set(snapshot);
+    }
+
+    fn mods_port(&self) -> Option<Arc<dyn ModsSnapshot>> {
+        self.mods.get().and_then(std::sync::Weak::upgrade)
     }
 
     /// Lit les mods du service avant la copie (HRT-293). Une lecture qui échoue ne fait jamais échouer la sauvegarde.
     async fn read_mods(&self, job: &Job) {
-        let Some(port) = self.mods.get() else {
+        let Some(port) = self.mods_port() else {
             return;
         };
         let reading = port.read(&job.key).await;
@@ -2610,7 +2626,7 @@ impl Backups {
     ) -> Result<BackupModsView, BackupFailed> {
         let subject = self.subject(key).await?;
         let named = |error| BackupFailed::named(error, &subject.name);
-        let Some(port) = self.mods.get() else {
+        let Some(port) = self.mods_port() else {
             return Err(named(BackupError::ModsNotApplicable));
         };
         if !port.applicable(key).await {

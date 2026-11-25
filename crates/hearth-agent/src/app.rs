@@ -1153,7 +1153,14 @@ pub async fn start_engined(
             timings: engine.backups.timings,
         },
     );
-    backups.set_mods_snapshot(engine.backups.mods.clone().unwrap_or_else(|| mods.clone()));
+    // FIX:01M8CJ9T4Q6W2XKZ7N3VHBY5PD le vrai service des mods est pris en `Weak` (il tient les sauvegardes).
+    match engine.backups.mods.clone() {
+        Some(fake) => backups.keep_mods_snapshot(fake),
+        None => {
+            let real: Arc<dyn crate::application::ports::ModsSnapshot> = mods.clone();
+            backups.set_mods_snapshot(&real);
+        }
+    }
     backups.recover_at_startup().await;
     // Reprendre un monde existant (HRT-105) : les dossiers ouverts aux services, tels que la configuration les écrit.
     let world_import = WorldImport::new(
