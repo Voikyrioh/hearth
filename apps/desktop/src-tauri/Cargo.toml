@@ -30,7 +30,7 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-store = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-updater = "~2.13"
+tauri-plugin-updater = "~2.14"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 specta = "=2.0.0-rc.25"
 specta-typescript = "0.0.12"
