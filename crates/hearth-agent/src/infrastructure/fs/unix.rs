@@ -58,6 +58,12 @@ fn dev_of(stat: &Stat) -> u128 {
     u128::from(stat.st_dev)
 }
 
+/// L'inode, élargi comme `dev_of` : son type change d'une cible à l'autre (une conversion `u64::from` est inutile
+/// sur x86_64 Linux, nécessaire ailleurs).
+fn ino_of(stat: &Stat) -> u128 {
+    u128::from(stat.st_ino)
+}
+
 fn nlink_of(stat: &Stat) -> u128 {
     u128::from(stat.st_nlink)
 }
@@ -407,7 +413,7 @@ impl UnixRoot {
         }
         Ok(FileId {
             dev: u64::try_from(dev_of(&after)).unwrap_or(u64::MAX),
-            ino: u64::from(after.st_ino),
+            ino: u64::try_from(ino_of(&after)).unwrap_or(u64::MAX),
         })
     }
 
@@ -417,7 +423,7 @@ impl UnixRoot {
         let stat = statat(&parent, leaf, AtFlags::SYMLINK_NOFOLLOW).map_err(fs_error)?;
         Ok(FileId {
             dev: u64::try_from(dev_of(&stat)).unwrap_or(u64::MAX),
-            ino: u64::from(stat.st_ino),
+            ino: u64::try_from(ino_of(&stat)).unwrap_or(u64::MAX),
         })
     }
 
