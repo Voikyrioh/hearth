@@ -21,7 +21,8 @@ use rustix::io::Errno;
 
 use super::SERVICES_DIR;
 use crate::application::ports::{
-    DirListing, EntryKind, EntryMeta, Erased, FsError, ListedEntry, Measure, Perms, ReadFile,
+    DirListing, EntryKind, EntryMeta, Erased, FileId, FsError, ListedEntry, Measure, Perms,
+    ReadFile,
 };
 use crate::domain::files::{MAX_DEPTH, RelPath};
 use crate::domain::services::ServiceKey;
@@ -55,6 +56,12 @@ fn fs_error(errno: Errno) -> FsError {
 
 fn dev_of(stat: &Stat) -> u128 {
     u128::from(stat.st_dev)
+}
+
+/// L'inode, élargi comme `dev_of` : son type change d'une cible à l'autre (une conversion `u64::from` est inutile
+/// sur x86_64 Linux, nécessaire ailleurs).
+fn ino_of(stat: &Stat) -> u128 {
+    u128::from(stat.st_ino)
 }
 
 fn nlink_of(stat: &Stat) -> u128 {
@@ -365,6 +372,61 @@ impl UnixRoot {
         Ok(out)
     }
 
+    /// Renomme un fichier ordinaire sans rien remplacer (HRT-258) : chaque parent est ouvert sans suivre de lien ni
+    /// franchir de montage, le fichier est jugé par `lstat` AVANT, puis `renameat2(RENAME_NOREPLACE)`.
+    pub(super) fn rename_no_replace(
+        &self,
+        from: &RelPath,
+        to: &RelPath,
+    ) -> Result<FileId, FsError> {
+        let (from_parent, from_leaf) = self.parent_of(from)?;
+        let (to_parent, to_leaf) = self.parent_of(to)?;
+        let stat = statat(&from_parent, from_leaf, AtFlags::SYMLINK_NOFOLLOW).map_err(fs_error)?;
+        match file_type(&stat) {
+            FileType::RegularFile => {}
+            FileType::Symlink => return Err(FsError::Blocked),
+            _ => return Err(FsError::NotRegular),
+        }
+        renameat_with(
+            &from_parent,
+            from_leaf,
+            &to_parent,
+            to_leaf,
+            RenameFlags::NOREPLACE,
+        )
+        .map_err(fs_error)?;
+        // Les dossiers sont comparés par identité, pas par numéro de descripteur : deux descripteurs ouverts sur le
+        // même dossier ont deux numéros.
+        let same_dir = match (fstat(&from_parent), fstat(&to_parent)) {
+            (Ok(a), Ok(b)) => (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino),
+            _ => false,
+        };
+        fsync(&to_parent).map_err(fs_error)?;
+        if !same_dir {
+            fsync(&from_parent).map_err(fs_error)?;
+        }
+        // L'identité RENDUE est celle relue sur la cible APRÈS le renommage : si un autre fichier a pris la place
+        // entre le jugement et le geste, ce n'est pas celui que l'appelant croit avoir déplacé.
+        let after = statat(&to_parent, to_leaf, AtFlags::SYMLINK_NOFOLLOW).map_err(fs_error)?;
+        if (after.st_dev, after.st_ino) != (stat.st_dev, stat.st_ino) {
+            return Err(FsError::Blocked);
+        }
+        Ok(FileId {
+            dev: u64::try_from(dev_of(&after)).unwrap_or(u64::MAX),
+            ino: u64::try_from(ino_of(&after)).unwrap_or(u64::MAX),
+        })
+    }
+
+    /// L'identité (périphérique, inode) de `rel`, sans suivre de lien.
+    pub(super) fn identity_of(&self, rel: &RelPath) -> Result<FileId, FsError> {
+        let (parent, leaf) = self.parent_of(rel)?;
+        let stat = statat(&parent, leaf, AtFlags::SYMLINK_NOFOLLOW).map_err(fs_error)?;
+        Ok(FileId {
+            dev: u64::try_from(dev_of(&stat)).unwrap_or(u64::MAX),
+            ino: u64::try_from(ino_of(&stat)).unwrap_or(u64::MAX),
+        })
+    }
+
     /// Ce que `lstat` dit de `rel` (la racine si `rel` est vide), sans suivre de lien.
     pub(super) fn stat_rel(&self, rel: &RelPath) -> Result<EntryMeta, FsError> {
         if rel.is_root() {
@@ -534,6 +596,12 @@ struct UnixFile {
 impl Read for UnixFile {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.file.read(buf)
+    }
+}
+
+impl io::Seek for UnixFile {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        io::Seek::seek(&mut self.file, pos)
     }
 }
 

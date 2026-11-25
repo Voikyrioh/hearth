@@ -66,10 +66,15 @@ pub fn parts_supervised(
         deploy: fast_deploy(),
         delete: fast_delete(),
         safe_fs: Some(Arc::new(super::fake_safe_fs::FakeSafeFs::new())),
-        host_paths: None,
+        host_paths: Some(Arc::new(super::fake_host::FakeHostPaths)),
         backups: hearth_agent::app::BackupParts {
             timings: fast_backup(),
             files: Some(Arc::new(super::fake_backup_files::FakeBackupFiles::new())),
+            mods: None,
+            mods_timings: hearth_agent::application::mods::ApplyTimings {
+                poll: std::time::Duration::from_millis(20),
+                steady: std::time::Duration::from_millis(100),
+            },
         },
         transfers: hearth_agent::app::TransferParts {
             timings: fast_transfers(),
@@ -85,6 +90,7 @@ pub fn parts_supervised(
             world_fs: None,
             pack_deposits: None,
             network: None,
+            console: None,
         },
     }
 }

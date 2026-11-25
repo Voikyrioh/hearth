@@ -17,6 +17,8 @@ use super::backups_dto::{
 };
 use super::catalog;
 use super::catalog_dto::{CatalogDto, FicheInstallRequestDto, FicheLinkKind, FicheReadDto};
+use super::console;
+use super::console_dto::{ConsoleOutcome, ConsoleSendOutcome, PlayersOutcome};
 use super::delete;
 use super::delete_dto::{DeleteOutcome, DeletePreviewOutcome, DeleteRequestDto};
 use super::deploy;
@@ -32,6 +34,11 @@ use super::game_settings_dto::{
 use super::game_view;
 use super::game_view_dto::{GameReadDto, GameSecretDto};
 use super::lifecycle::{self, GestureDto, LifecycleOutcome};
+use super::mods;
+use super::mods_dto::{
+    BackupModsOutcome, ModsApplyDto, ModsApplyOutcome, ModsCheckOutcome, ModsOutcome,
+    OperationTailOutcome,
+};
 use super::pack;
 use super::pack_dto::PackCheckOutcome;
 use super::public_address::{self, PublicAddressOutcome};
@@ -252,6 +259,126 @@ pub async fn save_backup_settings(
     let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
     let admin_password = admin_password.map(Secret::new);
     backups::save_settings(link.manager(), &id, &key, settings, admin_password.as_ref()).await
+}
+
+/// La liste des mods d'un serveur Minecraft (`GET /services/{key}/mods`, HRT-260) : une LECTURE ouverte à tout compte.
+/// Un gros serveur se lit en plusieurs fois (`unread`) : l'interface relit.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_mods(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+) -> Result<ModsOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    mods::list(link.manager(), &id, &key).await
+}
+
+/// Juge des dépôts de la zone d'attente contre les mods du service (`POST …/mods/check`) : une CONSULTATION, rien
+/// n'est écrit sur le service. Les identifiants sont ceux des transferts de l'interface.
+#[tauri::command]
+#[specta::specta]
+pub async fn check_mods(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+    deposits: Vec<String>,
+) -> Result<ModsCheckOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    mods::check(link.manager(), &id, &key, &deposits).await
+}
+
+/// Applique un lot de mods (`POST …/mods/apply`, acte `ModsApply`) : un acte d'administration JAMAIS couvert par
+/// l'élévation (le mot de passe à chaque fois, BR-MOD-031). L'agent répond `202` : l'issue arrive par le suivi des
+/// opérations. Jamais rejoué.
+#[tauri::command]
+#[specta::specta]
+pub async fn apply_mods(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+    batch: ModsApplyDto,
+    admin_password: Option<String>,
+) -> Result<ModsApplyOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let admin_password = admin_password.map(Secret::new);
+    mods::apply(link.manager(), &id, &key, batch, admin_password.as_ref()).await
+}
+
+/// La liste des mods d'une sauvegarde (`GET …/backups/{id}/mods`, HRT-294), avec la comparaison aux mods actuels si
+/// `compare` : une lecture.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_backup_mods(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+    backup_id: String,
+    compare: bool,
+) -> Result<BackupModsOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    mods::backup_mods(link.manager(), &id, &key, &backup_id, compare).await
+}
+
+/// Les dernières lignes du journal d'une opération de service et la cause reconnue (`GET /operations/services/{id}/tail`).
+#[tauri::command]
+#[specta::specta]
+pub async fn read_operation_tail(
+    link: Runtime_<'_>,
+    server_id: String,
+    operation_id: String,
+) -> Result<OperationTailOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    mods::tail(link.manager(), &id, &operation_id).await
+}
+
+/// Ce que la console d'un service permet (`GET /services/{key}/console`, HRT-291) : rien n'est envoyé au jeu.
+#[tauri::command]
+#[specta::specta]
+pub async fn describe_console(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+) -> Result<ConsoleOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    console::describe(link.manager(), &id, &key).await
+}
+
+/// Les joueurs connectés d'un service (`GET /services/{key}/players`) : une lecture ouverte à tout compte.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_players(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+) -> Result<PlayersOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    console::players(link.manager(), &id, &key).await
+}
+
+/// Envoie UNE commande à la console du jeu (`POST …/console`, acte `ConsoleCommand`) : le mot de passe suit la classe
+/// (toujours pour une commande sensible) et l'état de confiance. Jamais rejoué ; le texte n'est ni gardé ni tracé.
+#[tauri::command]
+#[specta::specta]
+pub async fn send_console(
+    link: Runtime_<'_>,
+    server_id: String,
+    key: String,
+    command: String,
+    command_class: u8,
+    admin_password: Option<String>,
+) -> Result<ConsoleSendOutcome, LinkFailure> {
+    let id = ServerId::parse(&server_id).map_err(|_| LinkFailure::UnknownServer)?;
+    let admin_password = admin_password.map(Secret::new);
+    console::send(
+        link.manager(),
+        &id,
+        &key,
+        command,
+        command_class,
+        admin_password.as_ref(),
+    )
+    .await
 }
 
 /// Les constats du formulaire de déploiement sur le nom, les ports et l'image (`POST /deployments/check`) : une

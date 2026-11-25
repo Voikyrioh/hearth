@@ -522,6 +522,8 @@ pub struct FicheStopDto {
     pub grace_s: u32,
     pub world_saved: FicheWorldSavedDto,
     pub sequence_tested: bool,
+    /// Hearth enregistre le monde par la console avant l'arrêt (HRT-292).
+    pub console_save: bool,
 }
 
 /// Un réglage posé par la fiche, avec sa raison (BR-JEU-039).
@@ -661,7 +663,7 @@ pub struct FicheWorldImportDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct FicheModsDto {
-    /// `drop_files` ou `drop_pack` ; une voie que ce client ne connaît pas n'est pas montrée.
+    /// `drop_files`, `drop_pack` ou `drop_jars` ; une voie que ce client ne connaît pas n'est pas montrée.
     pub ways: Vec<String>,
     pub pack: Option<FichePackWayDto>,
     /// L'indication de la fiche pour le dossier « Tes mods ».
@@ -689,7 +691,7 @@ fn mods_dto(view: &ModsView) -> FicheModsDto {
         ways: view
             .ways
             .iter()
-            .filter(|way| matches!(way.as_str(), "drop_files" | "drop_pack"))
+            .filter(|way| matches!(way.as_str(), "drop_files" | "drop_pack" | "drop_jars"))
             .cloned()
             .collect(),
         pack: view.pack.as_ref().map(|pack| FichePackWayDto {
@@ -851,6 +853,7 @@ pub(super) fn stop_dto(view: &StopView) -> FicheStopDto {
         grace_s,
         world_saved,
         sequence_tested,
+        console_save,
     } = view;
     FicheStopDto {
         grace_s: *grace_s,
@@ -861,6 +864,7 @@ pub(super) fn stop_dto(view: &StopView) -> FicheStopDto {
             WorldSavedView::Unknown => FicheWorldSavedDto::Unknown,
         },
         sequence_tested: *sequence_tested,
+        console_save: *console_save,
     }
 }
 

@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, useId } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from "vue";
+import { type RouteLocationNormalized, useRouter } from "vue-router";
 import { clip, safeText } from "@/audit/text";
 import BoundedText from "@/components/atoms/BoundedText.vue";
 import HButton from "@/components/atoms/HButton.vue";
 import HIcon from "@/components/atoms/HIcon.vue";
 import HSkeleton from "@/components/atoms/HSkeleton.vue";
+import HSpinner from "@/components/atoms/HSpinner.vue";
 import HTabs from "@/components/atoms/HTabs.vue";
 import { formatDateTime } from "@/composables/format";
 import { useNow } from "@/composables/useNow";
+import { useServiceDoors } from "@/composables/useServiceDoors";
+import { dropKeptBatch, hasKeptBatch } from "@/composables/useServiceMods";
 import { t } from "@/i18n";
 import type { ServiceInfo } from "@/link";
 import { backupsDoor } from "@/services/backups";
@@ -25,12 +29,18 @@ import {
   restartText,
 } from "@/services/detail";
 import { imageLabel, loopBand, portLabel, stateLine } from "@/services/format";
+import { mayBeGame } from "@/services/game";
+import { holdsNavigation } from "@/services/leaveGuard";
 import { type Controls, controlsOf, type Gesture } from "@/services/lifecycle";
+import { engineLine } from "@/services/mods";
 import { busyText, pilotLock } from "@/services/pilot";
 import { canAct, type RightsGate } from "@/services/rights";
+import type { ServiceTab } from "@/services/tabs";
+import { useModsReviewReturnStore } from "@/stores/modsReviewReturn";
 import { useServersStore } from "@/stores/servers";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import Callout from "../molecules/Callout.vue";
+import ConfirmDialog from "../molecules/ConfirmDialog.vue";
 import DashCard from "../molecules/DashCard.vue";
 import DeleteServiceCard from "../molecules/DeleteServiceCard.vue";
 import LifecycleButtons from "../molecules/LifecycleButtons.vue";
@@ -38,10 +48,12 @@ import OperationCard from "../molecules/OperationCard.vue";
 import OriginTags from "../molecules/OriginTags.vue";
 import ServiceStateBadge from "../molecules/ServiceStateBadge.vue";
 import BackupsTab from "./BackupsTab.vue";
+import ConsoleTab from "./ConsoleTab.vue";
 import EnvVarsSection from "./EnvVarsSection.vue";
 import GameCards from "./GameCards.vue";
 import GameSettingsTab from "./GameSettingsTab.vue";
 import LogViewer from "./LogViewer.vue";
+import ModsTab from "./ModsTab.vue";
 
 // Le détail d'un service (HRT-63, BR-SVC-007, 016, 023, 027, 028), à droite de la liste. Les données viennent de la
 // liste déjà chargée (aucune lecture à l'ouverture) ; seules les valeurs des variables se demandent, à part
@@ -60,13 +72,15 @@ const props = defineProps<{
   /** Mettre le focus sur le titre à l'ouverture (ouvert par un geste, jamais par l'adresse). */
   focusTitle: boolean;
   /** L'onglet affiché (dans l'adresse : `&onglet=journaux`, `&onglet=reglages` ou `&onglet=sauvegardes`). */
-  tab: "detail" | "settings" | "backups" | "logs";
+  tab: ServiceTab;
   /** L'agent annonce `game-settings` (`ServiceRights.gameSettings`) : l'onglet « Réglages » peut exister. */
   gameSettings: boolean;
   /** L'agent annonce `service-delete` (`ServiceRights.serviceDelete`) : la carte « Suppression » peut exister (HRT-86). */
   serviceDelete: boolean;
   /** L'agent annonce `service-backups` (`ServiceRights.serviceBackups`) : l'onglet « Sauvegardes » peut exister (HRT-98). */
   serviceBackups: boolean;
+  /** L'agent annonce `game-console` (`ServiceRights.gameConsole`) : la carte des joueurs et l'onglet « Console » peuvent exister (HRT-291, HRT-269). */
+  gameConsole: boolean;
   /** Dernier contact avec le serveur (pour « Vu il y a… » dans les journaux). */
   lastContactAt: number | null;
 }>();
@@ -74,10 +88,11 @@ const emit = defineEmits<{
   back: [];
   openOther: [key: string];
   retryRights: [];
-  "update:tab": [tab: "detail" | "settings" | "backups" | "logs"];
+  "update:tab": [tab: ServiceTab];
   decide: [operation: TrackedOperation];
   gesture: [service: ServiceInfo, gesture: Gesture];
   delete: [service: ServiceInfo];
+  addServer: [];
 }>();
 
 const now = useNow();
@@ -93,6 +108,14 @@ const service = computed<ServiceInfo | null>(() => {
   return null;
 });
 const gone = computed(() => props.opened.kind === "gone");
+/** « Minecraft Java, Fabric, version 1.20.1 » : lu avec les mods, montré à côté du nom quel que soit l'onglet. */
+const engineFromTab = ref<string | null>(null);
+watch(
+  () => service.value?.key,
+  () => {
+    engineFromTab.value = null;
+  },
+);
 
 // L'opération qui tient ce service (HRT-84) : sa carte, et le verrou des boutons de pilotage (BR-SVC-031).
 const operations = useServiceOpsStore();
@@ -106,6 +129,13 @@ const lock = computed(() =>
     : { locked: false, by: null, own: false },
 );
 const allowed = computed(() => canAct(props.gate));
+/** Le suivi d'un changement de mods est dit UNE fois, dans l'onglet Mods : ni carte ni bandeau d'opération au-dessus. */
+const followedInTab = computed(
+  () =>
+    props.tab === "mods" &&
+    ongoing.value?.operation.kind === "mods" &&
+    ongoing.value.operation.decision === null,
+);
 /** Ce que le pilotage montre : les gestes de l'état, bloqués ou non (HRT-65, BR-LIFE-003, 013). */
 const controls = computed<Controls | null>(() =>
   service.value
@@ -156,11 +186,87 @@ const hasBackups = computed(
       .kind === "shown",
 );
 
+// Les onglets « Mods » et « Console » (HRT-261, HRT-269) : lus à l'ouverture pour un service créé par Hearth.
+const doors = useServiceDoors(
+  () => props.serverId,
+  () =>
+    props.connected && !gone.value && service.value !== null && mayBeGame(service.value)
+      ? service.value.key
+      : null,
+  () => props.gameConsole,
+  () => [service.value?.state ?? "", ongoing.value?.operation.kind ?? ""].join("|"),
+);
+const hasMods = computed(() => doors.hasMods.value && service.value !== null);
+/** Le moteur est lu dès l'arrivée sur le service (porte « Mods »), puis tenu à jour par l'onglet Mods quand il est ouvert. */
+const engine = computed(
+  () => engineFromTab.value ?? (doors.game.value ? engineLine(doors.game.value) : null),
+);
+const hasConsole = computed(() => doors.console.value !== null && service.value !== null);
+
+// Un lot de mods non appliqué survit au changement d'onglet (il vit au niveau du service, HRT-262) ; il se perd en quittant
+// le détail (bouton « Retour », Échap, bouton précédent du navigateur, autre service) : la sortie demande confirmation (BR-MOD-025).
+const modsDirty = computed(
+  () => service.value !== null && hasKeptBatch(props.serverId, service.value.key),
+);
+const leaving = ref<{ kind: "back" } | { kind: "route"; to: RouteLocationNormalized } | null>(null);
+
+function changeTab(next: ServiceTab) {
+  emit("update:tab", next);
+}
+
+function leaveDetail() {
+  if (modsDirty.value) {
+    leaving.value = { kind: "back" };
+    return;
+  }
+  emit("back");
+}
+
+function confirmLeave() {
+  const target = leaving.value;
+  leaving.value = null;
+  if (target === null) return;
+  if (service.value) dropKeptBatch(props.serverId, service.value.key);
+  if (target.kind === "route") void router.push(target.to);
+  else emit("back");
+}
+
+// Le bouton précédent du navigateur passe par la même confirmation : la navigation est retenue, puis rejouée si l'on confirme.
+const router = useRouter();
+const removeGuard = router.beforeEach((to, from) => {
+  const context = {
+    dirty: modsDirty.value,
+    confirming: leaving.value !== null,
+    serverGone: servers.byId(props.serverId) === undefined,
+  };
+  if (!holdsNavigation(context, to, from)) return true;
+  leaving.value = { kind: "route", to };
+  return false;
+});
+onBeforeUnmount(removeGuard);
+
+// Le retour vers « Vérifiez avant d'appliquer » ne vaut que dans le parcours mods : Mods et Console. Tout autre onglet,
+// ou la fermeture du détail, l'oublie.
+const reviewReturn = useModsReviewReturnStore();
+function forgetReviewReturn() {
+  if (service.value) reviewReturn.forget(props.serverId, service.value.key);
+}
+watch(
+  () => props.tab,
+  (tab, before) => {
+    const inJourney = (id: string) => id === "mods" || id === "console";
+    if (inJourney(before) && !inJourney(tab)) forgetReviewReturn();
+  },
+);
+onBeforeUnmount(forgetReviewReturn);
+
 const tabs = computed(() => [
   { id: "detail" as const, label: t("serviceDetail.tabDetail") },
   ...(hasSettings.value
     ? [{ id: "settings" as const, label: t("serviceDetail.tabSettings") }]
     : []),
+  ...(hasMods.value ? [{ id: "mods" as const, label: t("mods.tab") }] : []),
+  ...(hasConsole.value ? [{ id: "console" as const, label: t("console.tab") }] : []),
   ...(hasBackups.value ? [{ id: "backups" as const, label: t("serviceDetail.tabBackups") }] : []),
   { id: "logs" as const, label: t("serviceDetail.tabLogs") },
 ]);
@@ -207,16 +313,16 @@ const commandNote = computed(() => {
 
 <template>
   <section
-    :class="['detail', { 'detail--logs': tab === 'logs', 'detail--wide': tab === 'backups' || tab === 'settings' }]"
+    :class="['detail', 'detail--wide', { 'detail--logs': tab === 'logs' }]"
     :aria-label="service ? t('serviceDetail.region', { name: clip(service.name, 80).text }) : t('serviceDetail.unnamed')"
     :aria-busy="opened.kind === 'waiting' ? 'true' : undefined"
     :data-gone="gone ? '' : undefined"
     data-service-detail
-    @keydown.esc="emit('back')"
+    @keydown.esc="leaveDetail()"
   >
     <!-- Reste en haut du volet au défilement : le nom, l'état et « Ce service n'existe plus. » ne sortent jamais de l'écran -->
     <div class="detail__pinned" data-detail-pinned>
-      <HButton variant="ghost" size="sm" data-detail-back @click="emit('back')">
+      <HButton variant="ghost" size="sm" data-detail-back @click="leaveDetail()">
         <HIcon name="arrow-left" size="sm" />
         {{ t("serviceDetail.back") }}
       </HButton>
@@ -247,6 +353,7 @@ const commandNote = computed(() => {
           <h2 :id="titleId" ref="title" class="detail__title" tabindex="-1" data-detail-title>
             <BoundedText :text="shownName" :label="t('serviceDetail.nameLabel')" />
           </h2>
+          <span v-if="engine" class="detail__engine" data-detail-engine>{{ engine }}</span>
           <span class="detail__tags">
             <OriginTags :service="service" part="origin" />
             <OriginTags :service="service" part="details" />
@@ -254,20 +361,34 @@ const commandNote = computed(() => {
         </div>
         <p v-if="!gone" class="detail__state">
           <ServiceStateBadge :state="service.state" />
-          <span v-if="state" class="detail__since">{{ state }}</span>
+          <span v-if="state && !ongoing" class="detail__since">{{ state }}</span>
+          <span v-if="ongoing" class="detail__operation" data-detail-operation>
+            <HSpinner />
+            {{ t("serviceDetail.operationRunning") }}
+          </span>
         </p>
         <p v-if="adopted" class="detail__adopted" data-detail-adopted>{{ adopted }}</p>
       </template>
+
+      <!-- Les onglets restent avec le nom : toujours visibles, au défilement comme à l'ouverture d'un écran de l'onglet -->
+      <HTabs
+        v-if="service"
+        :model-value="tab"
+        :tabs="tabs"
+        :label="t('serviceDetail.sections')"
+        :id-base="idBase"
+        @update:model-value="changeTab($event)"
+      />
     </div>
 
     <header v-if="service" class="detail__head">
       <!-- Une action tient le service : les boutons de pilotage sont désactivés, quel que soit l'état réel (BR-SVC-031) -->
-      <Callout v-if="!gone && lock.locked" tone="info" data-detail-busy>
+      <Callout v-if="!gone && lock.locked && !followedInTab" tone="info" data-detail-busy>
         {{ busyText(lock) }}
         <template v-if="lock.by"> {{ lock.by }}</template>
       </Callout>
       <OperationCard
-        v-if="!gone && ongoing"
+        v-if="!gone && ongoing && !followedInTab"
         :operation="ongoing.operation"
         :name="ongoing.name"
         :detailed="allowed"
@@ -277,17 +398,9 @@ const commandNote = computed(() => {
       />
       <!-- Démarrer, arrêter, redémarrer (HRT-65) : les gestes que l'état offre, la raison écrite dessous si un geste est bloqué -->
       <LifecycleButtons
-        v-if="!gone && tab === 'detail' && controls"
+        v-if="!gone && (tab === 'detail' || tab === 'console') && controls"
         :controls="controls"
         @gesture="emit('gesture', service, $event)"
-      />
-
-      <HTabs
-        :model-value="tab"
-        :tabs="tabs"
-        :label="t('serviceDetail.sections')"
-        :id-base="idBase"
-        @update:model-value="emit('update:tab', $event)"
       />
     </header>
 
@@ -307,9 +420,79 @@ const commandNote = computed(() => {
         :service="service"
         :connected="connected"
         :engine-ready="engineReady"
+        :console-served="hasConsole"
         @restart="emit('gesture', service, 'restart')"
+        @open-console="changeTab('console')"
       />
     </div>
+
+    <!-- L'onglet Mods (HRT-261) : la liste, leur origine, le lot de gestes ; rien n'est écrit avant « Appliquer » -->
+    <div
+      v-if="service && tab === 'mods' && hasMods"
+      :id="`${idBase}-panel-mods`"
+      class="detail__mods"
+      role="tabpanel"
+      :aria-labelledby="`${idBase}-tab-mods`"
+      :aria-hidden="gone ? 'true' : undefined"
+      :inert="gone ? true : undefined"
+      data-detail-mods
+    >
+      <ModsTab
+        :server-id="serverId"
+        :service="service"
+        :gate="gate"
+        :rights-reason-id="reasonId"
+        :connected="connected"
+        :console-served="gameConsole"
+        :console-open="doors.console.value !== null"
+        :stop-way="doors.stopWay.value"
+        :console-save="doors.consoleSave.value"
+        @open-console="changeTab('console')"
+        @open-logs="changeTab('logs')"
+        @engine="engineFromTab = $event"
+        @add-server="emit('addServer')"
+      />
+    </div>
+
+    <!-- L'onglet Console (HRT-269) : le journal, les commandes envoyées d'ici, le champ, les joueurs -->
+    <div
+      v-if="service && tab === 'console' && hasConsole && doors.console.value"
+      :id="`${idBase}-panel-console`"
+      class="detail__console"
+      role="tabpanel"
+      :aria-labelledby="`${idBase}-tab-console`"
+      :aria-hidden="gone ? 'true' : undefined"
+      :inert="gone ? true : undefined"
+      data-detail-console
+    >
+      <ConsoleTab
+        :server-id="serverId"
+        :service="service"
+        :view="doors.console.value"
+        :gate="gate"
+        :connected="connected"
+        :engine-ready="engineReady"
+        :gone="gone"
+        :last-contact-at="lastContactAt"
+        :stop-way="doors.stopWay.value"
+        :back-to-review="reviewReturn.has(serverId, service.key)"
+        @refresh="doors.reload()"
+        @back-to-review="changeTab('mods')"
+        @start="emit('gesture', service, 'start')"
+        @follow="title?.scrollIntoView?.({ block: 'start' })"
+      />
+    </div>
+
+    <ConfirmDialog
+      :open="leaving !== null"
+      :title="t('mods.leave.title')"
+      :message="t('mods.leave.text')"
+      :confirm-label="t('mods.leave.confirm')"
+      :cancel-label="t('mods.leave.stay')"
+      destructive
+      @confirm="confirmLeave"
+      @cancel="leaving = null"
+    />
 
     <!-- L'onglet Sauvegardes (HRT-98) : la liste, l'espace, les éléments ignorés ; l'opération qui court est la carte du haut -->
     <div
@@ -328,6 +511,7 @@ const commandNote = computed(() => {
         :rights-reason-id="reasonId"
         :connected="connected"
         :engine-ready="engineReady"
+        :console-save="doors.consoleSave.value === true"
       />
     </div>
 
@@ -384,6 +568,9 @@ const commandNote = computed(() => {
         :engine-ready="engineReady"
         :gone="gone"
         :supported="gameSettings"
+        :console-served="gameConsole"
+        :console-open="hasConsole"
+        @open-console="changeTab('console')"
         @retry-rights="emit('retryRights')"
       />
 
@@ -559,7 +746,7 @@ const commandNote = computed(() => {
   min-width: 0;
 }
 
-.detail__head > :deep(.tabs) {
+.detail__pinned > :deep(.tabs) {
   align-self: stretch;
 }
 
@@ -600,6 +787,20 @@ const commandNote = computed(() => {
   align-items: center;
   gap: var(--space-2) var(--space-3);
   margin: 0;
+}
+
+.detail__engine {
+  color: var(--tx-secondary);
+  font-size: var(--fs-small);
+}
+
+.detail__operation {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--cool);
+  font-size: var(--fs-small);
+  font-weight: var(--fw-medium);
 }
 
 .detail__since,

@@ -116,6 +116,7 @@ test("HRT-194 : démarrer part sans fenêtre en état normal, le champ revient e
   await expect(page.getByText("Le service robot-discord est en marche.")).toBeVisible();
   // Alerte : le même geste ouvre la fenêtre avec le champ du mot de passe.
   await sim(page, (s) => s.reauth.setTrust("forge", "alert"));
+  await page.locator("[data-detail-back]").click();
   await row(page, "h_robot").click();
   await page.locator('[data-lifecycle-action="stop"]').click();
   const dialog = page.locator("dialog[open]");

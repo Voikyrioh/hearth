@@ -16,6 +16,7 @@ pub mod engine_contract;
 pub mod fake_backup_files;
 pub mod fake_daemon;
 pub mod fake_engine;
+pub mod fake_game_console;
 pub mod fake_host;
 pub mod fake_pack_deposits;
 pub mod fake_random;

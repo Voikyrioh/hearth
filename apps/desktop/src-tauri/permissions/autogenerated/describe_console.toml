@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-describe-console"
+description = "Enables the describe_console command without any pre-configured scope."
+commands.allow = ["describe_console"]
+
+[[permission]]
+identifier = "deny-describe-console"
+description = "Denies the describe_console command without any pre-configured scope."
+commands.deny = ["describe_console"]

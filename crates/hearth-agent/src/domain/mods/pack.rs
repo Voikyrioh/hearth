@@ -38,6 +38,8 @@ pub struct PackEntry<'a> {
     pub path: &'a str,
     pub is_file: bool,
     pub size: u64,
+    /// CRC-32 de l'entrée, si l'archive en porte un (zip).
+    pub crc32: Option<u32>,
 }
 
 /// Ce que Hearth sait dire d'un pack accepté (aucun nom d'entrée n'y figure, sauf les dossiers de premier niveau).
@@ -52,6 +54,41 @@ pub struct PackReport {
     pub modrinth: Option<ModrinthSummary>,
     /// Ce que le pack serveur dit du jeu et de son moteur (HRT-225) ; vide pour un pack Modrinth (l'image lit le pack).
     pub game: PackGame,
+    /// Les `.jar` de `mods` d'un pack serveur (nom de l'alphabet sûr, taille, CRC-32), de quoi inscrire leur origine
+    /// (HRT-256, BR-MOD-033). Vide pour un pack Modrinth. Au plus `MAX_SERVER_MODS`.
+    pub server_mods: Vec<ServerPackMod>,
+}
+
+/// Un `.jar` de `mods/` d'un pack serveur.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerPackMod {
+    pub name: String,
+    pub size: u64,
+    pub crc32: u32,
+}
+
+/// Au plus ce nombre de mods du pack serveur inscrits pour l'origine.
+pub const MAX_SERVER_MODS: usize = 4_096;
+
+/// Les mods d'un pack serveur dont l'origine peut s'inscrire : `mods/<nom>.jar` à la racine du dossier `mods`, nom de
+/// l'alphabet sûr, avec un CRC-32 connu.
+fn server_mods(files: &[&PackEntry<'_>]) -> Vec<ServerPackMod> {
+    files
+        .iter()
+        .filter_map(|entry| {
+            let name = entry.path.strip_prefix("mods/")?;
+            (!name.contains('/')
+                && super::listing::is_active_jar(name)
+                && super::listing::is_safe_file_name(name))
+            .then_some(())?;
+            Some(ServerPackMod {
+                name: name.to_owned(),
+                size: entry.size,
+                crc32: entry.crc32?,
+            })
+        })
+        .take(MAX_SERVER_MODS)
+        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +147,21 @@ pub trait DescriptionReader {
     fn read(&mut self, name: &str) -> Result<Vec<u8>, DescriptionError>;
 }
 
+/// Les fichiers de description d'une archive, lus TOUS en une passe avant le jugement (une lecture de l'archive, pas
+/// une par fichier) : un fichier absent ou illisible se lit comme `Unreadable`. Partagé par le jugement d'un pack et
+/// l'identité d'un jar.
+#[derive(Debug)]
+pub struct PrereadFiles<E>(pub Vec<(&'static str, Result<Vec<u8>, E>)>);
+
+impl<E> DescriptionReader for PrereadFiles<E> {
+    fn read(&mut self, name: &str) -> Result<Vec<u8>, DescriptionError> {
+        match self.0.iter().find(|(known, _)| *known == name) {
+            Some((_, Ok(bytes))) => Ok(bytes.clone()),
+            _ => Err(DescriptionError::Unreadable),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DescriptionError {
     /// Plus gros que 1 Mio, ou illisible : le pack est refusé sans autre détail.
@@ -154,6 +206,7 @@ pub fn judge_pack(
             top_dirs: top_dirs(entries),
             modrinth: Some(modrinth),
             game: PackGame::default(),
+            server_mods: Vec::new(),
         });
     }
 
@@ -168,6 +221,7 @@ pub fn judge_pack(
             top_dirs: top_dirs(entries),
             modrinth: None,
             game: detect(entries, read),
+            server_mods: server_mods(&files),
         });
     }
 
@@ -371,6 +425,7 @@ mod tests {
             path,
             is_file: true,
             size: 10,
+            crc32: None,
         }
     }
 

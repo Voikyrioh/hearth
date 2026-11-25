@@ -22,8 +22,9 @@ use super::loader::{check_text, check_variant_refs};
 use super::memory::{TierId, TierListError, declared_ids, hidden_ids, recommended_gap};
 use super::model::{Fiche, Setting, ValueSpec};
 use super::schema::fiche::{
-    Channel, ChannelKind, Derive, Evidence, FicheFile, FolderRole, MemoryTier, ModWay,
-    PlainEvidence, PortRole, Proof, Publish, Status, Step, StepKind, WorldSaved,
+    Channel, ChannelKind, Derive, Evidence, FicheFile, FolderRole, MemoryTier, ModWay, Mods,
+    PlainEvidence, PortRole, Proof, Publish, QuickMode, RemoteConsoleProtocol, Status, Step,
+    StepKind, WorldSaved,
 };
 use super::schema::settings::{ArgForm, SettingsFile};
 use super::value::{
@@ -469,10 +470,12 @@ pub fn check_fiche_file(file: &FicheFile) -> Result<(), FicheRefusee> {
     check_folders(file)?;
     check_mods(file)?;
     check_no_curseforge(file)?;
+    check_no_remove_old_mods(file)?;
     check_ports(file)?;
     check_channels(file)?;
     check_env_and_secrets(file)?;
     check_remote_console(file)?;
+    check_console_use(file)?;
     check_agreements(file)?;
     check_first_start(file)?;
     check_stop(file)?;
@@ -781,6 +784,7 @@ fn check_mods(file: &FicheFile) -> Result<(), FicheRefusee> {
             "`drop_files` demande un dossier de rôle `mods` écrit par l'agent",
         ));
     }
+    check_mods_jars(file, mods)?;
     let wants_pack = mods.ways.contains(&ModWay::DropPack);
     match (&mods.pack, wants_pack) {
         (None, true) => return Err(incoherent("mods.pack", "`drop_pack` demande `[mods.pack]`")),
@@ -831,6 +835,116 @@ fn check_mods(file: &FicheFile) -> Result<(), FicheRefusee> {
             return Err(refuse(f, at, Motif::ListeDeVariantesVide));
         }
         check_variant_refs(file, f, &at, &genre.variants)?;
+    }
+    Ok(())
+}
+
+/// I-MOD (HRT-253, BR-MOD-001) : `drop_jars` si et seulement si `[mods.jars]` ; le dossier est de rôle `data`,
+/// sauvegardé et inscriptible ; `dir` et `retired_dir` sont deux composants sûrs et différents ; les variantes
+/// existent ; l'arrêt enregistre le monde par le signal (l'opération des mods ne déroule aucune suite d'arrêt).
+fn check_mods_jars(file: &FicheFile, mods: &Mods) -> Result<(), FicheRefusee> {
+    let f = Fichier::Fiche;
+    let incoherent =
+        |at: &str, raison: &'static str| refuse(f, at.to_owned(), Motif::ModsIncoherent { raison });
+    let wants = mods.ways.contains(&ModWay::DropJars);
+    let jars = match (&mods.jars, wants) {
+        (None, true) => {
+            return Err(incoherent("mods.jars", "`drop_jars` demande `[mods.jars]`"));
+        }
+        (Some(_), false) => {
+            return Err(incoherent(
+                "mods.jars",
+                "`[mods.jars]` demande la voie `drop_jars`",
+            ));
+        }
+        (None, false) => return Ok(()),
+        (Some(jars), true) => jars,
+    };
+    let Some(folder) = file.folder.iter().find(|d| d.id == jars.folder) else {
+        return Err(refuse(
+            f,
+            "mods.jars.folder",
+            Motif::DossierInconnu {
+                id: jars.folder.clone(),
+            },
+        ));
+    };
+    if folder.role != FolderRole::Data || !folder.backup || folder.read_only {
+        return Err(incoherent(
+            "mods.jars.folder",
+            "le dossier des mods est un dossier de rôle `data`, sauvegardé et inscriptible",
+        ));
+    }
+    for (at, name) in [
+        ("mods.jars.dir", &jars.dir),
+        ("mods.jars.retired_dir", &jars.retired_dir),
+    ] {
+        if !jars_dir_ok(name) {
+            return Err(refuse(
+                f,
+                at,
+                Motif::IdentifiantInvalide {
+                    ou: "sous-dossier des mods (un seul composant de 1 à 32 caractères a-z, 0-9, tiret)",
+                },
+            ));
+        }
+    }
+    if jars.dir == jars.retired_dir {
+        return Err(incoherent(
+            "mods.jars.retired_dir",
+            "« Mods retirés » est un autre dossier que celui lu par le jeu",
+        ));
+    }
+    check_variant_refs(file, f, "mods.jars.variants", &jars.variants)?;
+    if file.stop.world_saved != WorldSaved::ByImageOnSignal {
+        return Err(incoherent(
+            "stop.world_saved",
+            "une fiche à mods `.jar` enregistre le monde par le signal d'arrêt (`by_image_on_signal`)",
+        ));
+    }
+    Ok(())
+}
+
+/// Un composant de chemin sûr : 1 à 32 caractères `[a-z0-9-]`.
+fn jars_dir_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 32
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// BR-MOD-028 : aucune variable `REMOVE_OLD_MODS` (valeur fixe, variante, variable d'un genre, réglage), car
+/// l'image supprimerait des fichiers du dossier des mods.
+fn check_no_remove_old_mods(file: &FicheFile) -> Result<(), FicheRefusee> {
+    let f = Fichier::Fiche;
+    let forbidden = |name: &str| name.eq_ignore_ascii_case("REMOVE_OLD_MODS");
+    let refused =
+        |at: String, ou: &str| refuse(f, at, Motif::RemoveOldModsInterdit { ou: ou.into() });
+    for (i, env) in file.env.iter().enumerate() {
+        if forbidden(&env.name) {
+            return Err(refused(format!("env[{i}]"), "variable fixe"));
+        }
+    }
+    for (i, variant) in file.variant.iter().enumerate() {
+        for (j, env) in variant.env.iter().enumerate() {
+            if forbidden(&env.name) {
+                return Err(refused(
+                    format!("variant[{i}].env[{j}]"),
+                    "variable d'une variante",
+                ));
+            }
+        }
+    }
+    if let Some(pack) = file.mods.as_ref().and_then(|m| m.pack.as_ref()) {
+        for (i, genre) in pack.genre.iter().enumerate() {
+            if forbidden(&genre.env) {
+                return Err(refused(
+                    format!("mods.pack.genre[{i}]"),
+                    "variable d'un genre de pack",
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -1164,6 +1278,16 @@ fn check_env_and_secrets(file: &FicheFile) -> Result<(), FicheRefusee> {
         if let Some(value) = &env.value {
             fixed_value_ok(&at, value)?;
         }
+        if env.jvm_max_ram && env.value.is_none() {
+            return Err(refuse(
+                f,
+                at,
+                Motif::ChampIncoherent {
+                    champ: "jvm_max_ram".into(),
+                    avec: "(exige une valeur fixe)".into(),
+                },
+            ));
+        }
         if let Some(secret) = &env.secret
             && !file.secret.iter().any(|s| &s.id == secret)
         {
@@ -1224,6 +1348,187 @@ fn check_remote_console(file: &FicheFile) -> Result<(), FicheRefusee> {
             "remote_console.password",
             Motif::ConsoleMotDePasseNonGenere,
         ));
+    }
+    Ok(())
+}
+
+/// I-CON (HRT-267, ADR-0067) : ce que la fiche autorise sur sa console. Seul `source_rcon` est parlé ; les verbes sont
+/// uniques et jamais à la fois refusés et sensibles ; les raisons sont d'une liste fermée ; les textes affichés n'ont
+/// aucun caractère à risque et seul `{joueur}` y est un emplacement ; les littéraux d'envoi sont des littéraux de fiche
+/// de classe libre ; bornes de temps et de nombre.
+fn check_console_use(file: &FicheFile) -> Result<(), FicheRefusee> {
+    // Le chargeur est aussi compilé par `build.rs`, qui n'a pas `hearth-proto` : le jugement de classe d'un littéral est
+    // écrit ici, avec la MÊME règle que `hearth_proto::console::classify` (premier mot, minuscules, sans `minecraft:`).
+    const REASONS: [&str; 3] = ["use_hearth_stop", "use_hearth_restart", "breaks_server"];
+    let f = Fichier::Fiche;
+    let Some(console) = &file.remote_console else {
+        return Ok(());
+    };
+    let Some(usage) = &console.console_use else {
+        return Ok(());
+    };
+    let bad = |chemin: &str, raison: &'static str| {
+        refuse(f, chemin.to_owned(), Motif::ConsoleIncoherente { raison })
+    };
+    if console.protocol != RemoteConsoleProtocol::SourceRcon {
+        return Err(bad(
+            "remote_console.use",
+            "seul le protocole `source_rcon` est parlé par Hearth",
+        ));
+    }
+    if !(2..=30).contains(&usage.reply_timeout_s) {
+        return Err(bad(
+            "remote_console.use.reply_timeout_s",
+            "le délai de réponse est de 2 à 30 secondes",
+        ));
+    }
+    let verb_ok = |verb: &str| {
+        (1..=32).contains(&verb.len())
+            && verb
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+    };
+    let mut seen: Vec<&str> = Vec::new();
+    let mut refused = Vec::new();
+    for (i, entry) in usage.refused.iter().enumerate() {
+        let at = format!("remote_console.use.refused[{i}]");
+        if !verb_ok(&entry.verb) {
+            return Err(bad(
+                &at,
+                "verbe : minuscules, chiffres, `_` et `-`, 32 au plus",
+            ));
+        }
+        if !REASONS.contains(&entry.reason.as_str()) {
+            return Err(bad(
+                &at,
+                "raison inconnue (use_hearth_stop, use_hearth_restart, breaks_server)",
+            ));
+        }
+        if seen.contains(&entry.verb.as_str()) {
+            return Err(bad(&at, "verbe déclaré deux fois"));
+        }
+        seen.push(&entry.verb);
+        refused.push(entry.verb.clone());
+    }
+    let text_ok = |text: &str| {
+        let len = text.chars().count();
+        if !(1..=240).contains(&len) || text.chars().any(is_risky_char) {
+            return false;
+        }
+        // Le seul emplacement permis est `{joueur}`.
+        text.replace("{joueur}", "").find(['{', '}']).is_none()
+    };
+    let mut sensitive = Vec::new();
+    for (i, entry) in usage.sensitive.iter().enumerate() {
+        let at = format!("remote_console.use.sensitive[{i}]");
+        if !verb_ok(&entry.verb) {
+            return Err(bad(
+                &at,
+                "verbe : minuscules, chiffres, `_` et `-`, 32 au plus",
+            ));
+        }
+        if seen.contains(&entry.verb.as_str()) {
+            return Err(bad(
+                &at,
+                "verbe déclaré deux fois, ou à la fois refusé et sensible",
+            ));
+        }
+        seen.push(&entry.verb);
+        if !text_ok(&entry.title) || !text_ok(&entry.sentence) {
+            return Err(bad(
+                &at,
+                "titre et phrase : 1 à 240 caractères, aucun caractère à risque, seul emplacement `{joueur}`",
+            ));
+        }
+        sensitive.push(entry.verb.clone());
+    }
+    let free_literal = |chemin: &str, text: &str, raison: &'static str| {
+        if super::value::order_refusal(text).is_some() {
+            return Err(bad(
+                chemin,
+                "texte envoyé : ASCII imprimable, 64 caractères au plus",
+            ));
+        }
+        let lower = text
+            .trim_start_matches('/')
+            .split(' ')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let verb = lower.strip_prefix("minecraft:").unwrap_or(&lower);
+        // Un verbe à espace de noms (`mod:commande`) est sensible par défaut (`hearth_proto::console::classify`).
+        if refused.iter().any(|v| v == verb)
+            || sensitive.iter().any(|v| v == verb)
+            || verb.contains(':')
+        {
+            return Err(bad(chemin, raison));
+        }
+        Ok(())
+    };
+    if let Some(players) = &usage.players {
+        free_literal(
+            "remote_console.use.players.command",
+            &players.command,
+            "la commande des joueurs doit être de classe libre",
+        )?;
+        if players.reader != "minecraft_list" {
+            return Err(bad(
+                "remote_console.use.players.reader",
+                "lecteur inconnu (minecraft_list)",
+            ));
+        }
+    }
+    if usage.quick.len() > 6 {
+        return Err(bad(
+            "remote_console.use.quick",
+            "6 commandes rapides au plus",
+        ));
+    }
+    let mut quick_ids: Vec<&str> = Vec::new();
+    for (i, quick) in usage.quick.iter().enumerate() {
+        let at = format!("remote_console.use.quick[{i}]");
+        if !verb_ok(&quick.id) || quick_ids.contains(&quick.id.as_str()) {
+            return Err(bad(&at, "identifiant invalide ou déclaré deux fois"));
+        }
+        quick_ids.push(&quick.id);
+        if !text_ok(&quick.label) {
+            return Err(bad(
+                &at,
+                "libellé : 1 à 240 caractères, aucun caractère à risque",
+            ));
+        }
+        if super::value::order_refusal(&quick.text).is_some() {
+            return Err(bad(
+                &at,
+                "texte envoyé : ASCII imprimable, 64 caractères au plus",
+            ));
+        }
+        if quick.mode == QuickMode::Send {
+            free_literal(
+                &at,
+                &quick.text,
+                "une commande rapide envoyée directement doit être de classe libre",
+            )?;
+        }
+    }
+    if let Some(before) = &usage.before_stop {
+        free_literal(
+            "remote_console.use.before_stop.command",
+            &before.command,
+            "la commande d'avant l'arrêt doit être de classe libre",
+        )?;
+        if super::value::order_refusal(&before.expect).is_some() {
+            return Err(bad(
+                "remote_console.use.before_stop.expect",
+                "texte attendu : ASCII imprimable, 64 caractères au plus",
+            ));
+        }
+        if !(5..=120).contains(&before.timeout_s) {
+            return Err(bad(
+                "remote_console.use.before_stop.timeout_s",
+                "le délai d'avant l'arrêt est de 5 à 120 secondes",
+            ));
+        }
     }
     Ok(())
 }
@@ -1713,6 +2018,18 @@ pub fn check_cross(fiche: &Fiche) -> Result<(), FicheRefusee> {
                 at,
                 Motif::IdentifiantInvalide {
                     ou: "nom de variable d'un réglage",
+                },
+            ));
+        }
+        // BR-MOD-028 : aucun réglage n'écrit `REMOVE_OLD_MODS`.
+        if channel.is_some_and(|c| c.kind == ChannelKind::Env)
+            && setting.key.eq_ignore_ascii_case("REMOVE_OLD_MODS")
+        {
+            return Err(refuse(
+                s,
+                at,
+                Motif::RemoveOldModsInterdit {
+                    ou: "réglage".into(),
                 },
             ));
         }

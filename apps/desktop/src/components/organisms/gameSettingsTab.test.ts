@@ -71,7 +71,7 @@ describe("l'onglet", () => {
   it("n'existe que pour un service né d'une fiche, deuxième après « Détail »", async () => {
     const { wrapper } = await open();
     const tabs = wrapper.findAll("[role=tab]").map((tab) => tab.text());
-    expect(tabs).toEqual(["Détail", "Réglages", "Sauvegardes", "Journaux"]);
+    expect(tabs).toEqual(["Vue d'ensemble", "Réglages", "Sauvegardes", "Journaux"]);
     wrapper.unmount();
   });
 
@@ -80,7 +80,7 @@ describe("l'onglet", () => {
     await settle();
     // La liste ne dit pas qu'un service vient d'une fiche : la vue n'est lue qu'à l'ouverture de l'onglet.
     expect(wrapper.findAll("[role=tab]").map((tab) => tab.text())).toEqual([
-      "Détail",
+      "Vue d'ensemble",
       "Réglages",
       "Sauvegardes",
       "Journaux",

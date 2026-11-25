@@ -122,3 +122,43 @@ impl FreeSpace for FakeFreeSpace {
         Ok(self.bytes.load(Ordering::SeqCst))
     }
 }
+
+/// Les chemins de l'hôte sans le plafond de lectures de production : `canonicalize` et `stat` du chemin et de ses
+/// parents, dans le fil de l'appelant (FIX:01M855R2F0XJ3KDBH325R1NR2R : le vrai lecteur partage huit places entre tous
+/// les tests d'un même processus). Les tests qui visent le vrai lecteur règlent `host_paths` eux-mêmes.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FakeHostPaths;
+
+impl hearth_agent::application::ports::HostPaths for FakeHostPaths {
+    fn resolve(&self, path: &str) -> hearth_agent::application::ports::Resolved {
+        use hearth_agent::application::ports::Resolved;
+        let canonical = match std::fs::canonicalize(Path::new(path)) {
+            Ok(canonical) => canonical,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Resolved::Absent,
+            Err(_) => return Resolved::Unreadable,
+        };
+        let mut lineage = Vec::new();
+        for ancestor in canonical.ancestors() {
+            match std::fs::metadata(ancestor) {
+                Ok(meta) => lineage.extend(file_id(&meta)),
+                Err(_) => return Resolved::Unreadable,
+            }
+        }
+        let Some(text) = canonical.to_str() else {
+            return Resolved::Unreadable;
+        };
+        let canonical = text.strip_prefix(r#"\\?\"#).unwrap_or(text).to_owned();
+        Resolved::Found { canonical, lineage }
+    }
+}
+
+#[cfg(unix)]
+fn file_id(meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((meta.dev(), meta.ino()))
+}
+
+#[cfg(not(unix))]
+fn file_id(_meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    None
+}

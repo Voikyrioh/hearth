@@ -14,8 +14,8 @@ use tokio::runtime::Handle;
 
 use crate::application::pack_intake::MAX_PACK_BYTES;
 use crate::application::ports::{
-    AccountRepo, DepositError, DepositFile, DepositId, FsError, Ownership, PackDeposits, Perms,
-    ReadSeek, SafeFs,
+    AccountRepo, DepositError, DepositFile, DepositId, FsError, PackDeposits, Perms, ReadSeek,
+    SafeFs,
 };
 use crate::application::transfers::{DepositZone, TransferError};
 use crate::domain::accounts::Username;
@@ -24,8 +24,8 @@ use crate::domain::services::ServiceKey;
 use crate::domain::transfers::TransferId;
 
 /// Droits du pack rangé : lisible par tous (le conteneur le monte en lecture seule sous son propre compte), écrit par
-/// l'agent seul.
-const PACK_MODE: u32 = 0o644;
+/// l'agent seul. Posés par l'appelant (`PackDeposits::place`) ; ici pour qui range un pack.
+pub const PACK_MODE: u32 = 0o644;
 
 pub struct ZonePackDeposits {
     zone: Arc<dyn DepositZone>,
@@ -107,15 +107,13 @@ impl PackDeposits for ZonePackDeposits {
         service: &ServiceKey,
         rel: &RelPath,
         sha256: &[u8; 32],
+        perms: Perms,
     ) -> Result<(), DepositError> {
         let (transfer, mut reader) = self.take(id, account)?;
         let root = self
             .fs
             .ensure_service_root(service)
             .map_err(|_| DepositError::Io)?;
-        let perms = Ownership::new(0, 0)
-            .and_then(|owner| Perms::new(owner, PACK_MODE))
-            .ok_or(DepositError::Io)?;
         match root.write_stream(rel, &mut reader, perms, MAX_PACK_BYTES, sha256) {
             Ok(_) => {}
             // Ce qui a été lu n'a pas l'empreinte jugée : le fichier a changé, rien n'est rangé.

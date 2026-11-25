@@ -39,6 +39,11 @@ use hearth_proto::api::backups::{
     BackupRequest, BackupSettings, BackupView, BackupsView, BigFile, ESTIMATE_BUDGET_S,
     IgnoredItem, IgnoredView, IgnoredWhy, MAX_LISTED, VerifyResult,
 };
+use hearth_proto::api::mods::{
+    BackupModItem, BackupModPlace, BackupModsCompare, BackupModsCounts, BackupModsGame,
+    BackupModsSummary, BackupModsView, ChangeKindView, EnvironmentView, ModChange, ModIdentityView,
+    ModOrigin, ModsListState,
+};
 use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -47,9 +52,9 @@ use tokio::sync::Mutex as AsyncMutex;
 use super::ports::{
     ArchiveBuilder, ArchiveEnd, AuditSink, BackupArchive, BackupFiles, BackupFsError,
     BackupRemoved, BackupRepo, BackupRow, BackupSink, Clock, ContainerEngine, DiskSpace,
-    EngineError, EntryKind, EntryMeta, Expected, FileStamp, FsError, HostPaths, IdGen, NewBackup,
-    Progress, Published, Publishing, ReadFile, Resolved, SafeFs, ServiceContainers, ServiceIntents,
-    ServiceRoot, VerifyError,
+    EngineError, EntryKind, EntryMeta, Expected, FileStamp, FsError, HostPaths, IdGen, ModsReading,
+    ModsRecord, ModsSnapshot, ModsSummaryRow, NewBackup, Progress, Published, Publishing, ReadFile,
+    Resolved, SafeFs, ServiceContainers, ServiceIntents, ServiceRoot, VerifyError,
 };
 use super::service_lifecycle::reason_of;
 use super::service_ops::{AcceptRequest, AuditDraft, OpError, ServiceOps};
@@ -76,6 +81,7 @@ use crate::domain::backups::space::{
 };
 use crate::domain::backups::{BackupId, archive_dir_name, sha256_hex};
 use crate::domain::files::{MAX_DEPTH, RelPath};
+use crate::domain::mods::backup_list::{self, ManifestFile, RecordedSet};
 use crate::domain::ops::CreatedObject;
 use crate::domain::ops::backup::{ModeVerdict, effective_mode, op_plan, step};
 use crate::domain::ops::{
@@ -87,6 +93,9 @@ use crate::domain::services::delete::{ManagedFolder, split_mounts};
 use crate::domain::services::plan::image_reference;
 use crate::domain::services::spec::{SpecBody, SpecMountKind};
 use crate::domain::services::{EngineState, KeyKind, ServiceKey, ServiceStateKind, TransitionKind};
+
+/// Au plus ce temps pour lire un chemin de la racine des sauvegardes (un partage mort ne bloque pas la requête).
+const PATH_FACTS_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Les durées d'une sauvegarde. Les tests les raccourcissent.
 #[derive(Debug, Clone, Copy)]
@@ -171,6 +180,9 @@ pub enum BackupError {
     Unavailable,
     #[error("sauvegarde inconnue")]
     BackupNotFound,
+    /// Le service n'a pas de liste de mods (fiche sans `[mods.jars]` ou moteur sans mods).
+    #[error("ce service n'a pas de mods")]
+    ModsNotApplicable,
     #[error("sauvegarde en cours d'utilisation")]
     InUse,
     #[error("la clé des secrets est illisible")]
@@ -725,15 +737,30 @@ fn copy_blocking(job: CopyJob) -> CopyOutcome {
 // Le cas d'usage
 // ---------------------------------------------------------------------------------------------
 
+/// L'issue du cœur d'une sauvegarde (`Backups::copy_and_verify`).
+pub(crate) enum CopyVerified {
+    Over(Finish),
+    Halted,
+}
+
 /// Ce que l'exécution décide de son issue.
 #[derive(Debug)]
-struct Finish {
+pub(crate) struct Finish {
     status: OpStatus,
     cause: Option<Cause>,
     note: BackupNote,
 }
 
 impl Finish {
+    /// L'issue que le cœur de la sauvegarde a décidée (HRT-258 : l'opération `mods` la reprend à son compte).
+    pub(crate) fn status(&self) -> OpStatus {
+        self.status
+    }
+
+    pub(crate) fn cause(&self) -> Option<Cause> {
+        self.cause
+    }
+
     fn failed(cause: Cause) -> Self {
         Self {
             status: OpStatus::Failed,
@@ -752,7 +779,7 @@ impl Finish {
 }
 
 /// Tout ce qu'une exécution emporte avec elle. Aucun secret, aucune note en clair.
-struct Job {
+pub(crate) struct Job {
     id: String,
     key: ServiceKey,
     name: String,
@@ -769,6 +796,50 @@ struct Job {
     /// Les conteneurs que CETTE opération a arrêtés (à relancer).
     stopped: Mutex<Vec<String>>,
     forced_stop: AtomicBool,
+    /// La lecture des mods prise AVANT l'arrêt et la copie (HRT-293) ; consommée par la publication.
+    mods_read: Mutex<Option<ModsReading>>,
+}
+
+impl Job {
+    /// L'identifiant de l'opération qui porte cette sauvegarde.
+    pub(crate) fn op_id(&self) -> &str {
+        &self.id
+    }
+
+    pub(crate) fn backup_id(&self) -> &BackupId {
+        &self.backup
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn actor(&self) -> &Actor {
+        &self.actor
+    }
+
+    /// Les conteneurs que l'opération a arrêtés (à relancer).
+    pub(crate) fn stopped_containers(&self) -> Vec<String> {
+        self.stopped
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+/// Ce que la partie synchrone d'un lot de mods a décidé pour sa sauvegarde « Avant mods » (HRT-258).
+pub(crate) struct ModsPrepared {
+    pub(crate) name: String,
+    /// Le service tournait au moment du jugement.
+    pub(crate) running: bool,
+    containers: Vec<String>,
+    grace_s: u32,
+    folders: Vec<ManagedFolder>,
+    rules: IgnoreRules,
+    image: String,
+    note: Option<crate::domain::sealed::SealedBlob>,
+    estimate_bytes: u64,
+    backup: BackupId,
 }
 
 struct Subject {
@@ -803,6 +874,10 @@ pub struct Backups {
     /// Les sauvegardes qu'une opération utilise (création, vérification) : une suppression est refusée tant
     /// qu'elles y sont (`BR-BACKUP-027`).
     in_use: Mutex<HashSet<String>>,
+    /// La lecture des mods d'un service (HRT-293) : posée par la racine de composition ; sans elle, aucune liste.
+    mods: std::sync::OnceLock<std::sync::Weak<dyn ModsSnapshot>>,
+    /// Le même port quand rien d'autre ne le tient en vie (un faux des essais) ; jamais le service des mods réel.
+    mods_kept: std::sync::OnceLock<Arc<dyn ModsSnapshot>>,
 }
 
 /// Une sauvegarde en usage, rendue à la chute du jeton.
@@ -856,6 +931,8 @@ impl Backups {
             estimate_gate: Arc::new(AsyncMutex::new(())),
             verify_gate: Arc::new(AsyncMutex::new(())),
             in_use: Mutex::new(HashSet::new()),
+            mods: std::sync::OnceLock::new(),
+            mods_kept: std::sync::OnceLock::new(),
         })
     }
 
@@ -923,7 +1000,7 @@ impl Backups {
     async fn path_facts(&self, path: &str) -> Option<PathFacts> {
         let paths = Arc::clone(&self.host_paths);
         let path = path.to_owned();
-        tokio::task::spawn_blocking(move || {
+        let work = tokio::task::spawn_blocking(move || {
             let mut remaining: Vec<String> = Vec::new();
             let mut current = path.trim_end_matches('/').to_owned();
             loop {
@@ -950,10 +1027,14 @@ impl Backups {
                     }
                 }
             }
-        })
-        .await
-        .ok()
-        .flatten()
+        });
+        // Un partage réseau mort ne fait pas pendre la requête : au-delà du délai, on ne sait pas (`None`, jamais un feu
+        // vert), comme `fate_now` de la suppression. La lecture bloquée finit seule dans son fil.
+        tokio::time::timeout(PATH_FACTS_TIMEOUT, work)
+            .await
+            .ok()?
+            .ok()
+            .flatten()
     }
 
     /// La racine des sauvegardes chevauche-t-elle un dossier de données ? Jugé sur les chemins canoniques ET sur
@@ -1129,6 +1210,7 @@ impl Backups {
             image: row.image.clone(),
             integrity,
             verified_at: row.verified_at.map(rfc3339),
+            mods: None,
         }
     }
 
@@ -1160,6 +1242,14 @@ impl Backups {
             .await
             .map_err(|e| BackupFailed::named(e, &subject.name))?;
         let rows = self.repo.list(key).await.map_err(internal)?;
+        // Un service qui a des mods : chaque sauvegarde dit l'état de sa liste (BR-MOD-035), les anciennes
+        // « non enregistrée ». Un service sans mods : aucun champ.
+        let summaries = match self.mods_port() {
+            Some(port) if port.applicable(key).await => {
+                Some(self.repo.mods_summaries(key).await.map_err(internal)?)
+            }
+            _ => None,
+        };
         let mut views = Vec::with_capacity(rows.len());
         let mut total = 0_u64;
         let mut opener: Option<Arc<dyn crate::application::ports::SecretSealer>> = None;
@@ -1183,7 +1273,11 @@ impl Backups {
                 }
                 None => None,
             };
-            views.push(Self::view_of(row, integrity, note));
+            let mut view = Self::view_of(row, integrity, note);
+            if let Some(summaries) = &summaries {
+                view.mods = Some(summary_view(summaries.get(row.id.as_str())));
+            }
+            views.push(view);
         }
         let (folders, _) = self.folders_of(key, subject.body.as_ref());
         Ok(BackupsView {
@@ -1314,6 +1408,12 @@ impl Backups {
         };
         let plan =
             op_plan(mode).map_err(|error| named(BackupError::Internal(error.to_string())))?;
+        // HRT-292 : avant l'arrêt de la sauvegarde avec arrêt, le monde est enregistré par la console si la fiche le déclare.
+        let plan = if mode == BackupMode::StopCopyStart {
+            self.ops.plan_before_stop(key, plan).await
+        } else {
+            plan
+        };
         let account = account_of(&actor);
         let op = self
             .ops
@@ -1375,6 +1475,7 @@ impl Backups {
             estimate_bytes: estimate.bytes,
             stopped: Mutex::new(Vec::new()),
             forced_stop: AtomicBool::new(false),
+            mods_read: Mutex::new(None),
         });
         let this = Arc::clone(self);
         let work_job = Arc::clone(&job);
@@ -1390,6 +1491,239 @@ impl Backups {
             operation_id: op,
             backup_id: backup.to_string(),
         })
+    }
+
+    /// La partie synchrone de la sauvegarde « Avant mods » d'un lot (HRT-258, BR-MOD-026) : les mêmes refus que
+    /// `create` (moteur, service adopté ou inconnu, opération en cours, état, racine, dossiers, espace pour la
+    /// sauvegarde PLUS `extra_bytes`, la taille des dépôts), sans rien accepter ni écrire.
+    pub(crate) async fn prepare_for_mods(
+        &self,
+        key: &ServiceKey,
+        extra_bytes: u64,
+    ) -> Result<ModsPrepared, BackupFailed> {
+        self.ops.wait_closed(key).await;
+        let subject = self.subject(key).await?;
+        let named = |error| BackupFailed::named(error, &subject.name);
+        if let Some(busy) = self.busy_of(key) {
+            return Err(named(busy));
+        }
+        let running = is_running(subject.state);
+        if let Some(state) = subject.state
+            && !backable(state)
+        {
+            return Err(named(BackupError::NotBackable(state)));
+        }
+        self.check_root().await.map_err(named)?;
+        let (folders, _) = self.folders_of(key, subject.body.as_ref());
+        if folders.is_empty() {
+            return Err(named(BackupError::NothingToSave));
+        }
+        let rules = self.rules_of(key, Vec::new()).await?;
+        let estimate = self.estimate(key, &folders, &rules).await?;
+        let Some(space) = self.space().await else {
+            return Err(named(BackupError::Unavailable));
+        };
+        if let SpaceVerdict::Refused {
+            needed,
+            free,
+            reserve,
+        } = judge(
+            estimate.bytes.saturating_add(extra_bytes),
+            space.free,
+            space.total,
+        ) {
+            return Err(named(BackupError::NoSpace {
+                needed,
+                free,
+                reserve,
+            }));
+        }
+        let backup = BackupId::parse(&self.ids.new_id()).ok_or_else(|| {
+            BackupFailed::named(
+                BackupError::Internal("identifiant illisible".into()),
+                &subject.name,
+            )
+        })?;
+        let day: String = rfc3339(self.clock.now()).chars().take(10).collect();
+        let sealed = self
+            .seal_note(key, &backup, &format!("Avant mods, {day}"))
+            .await
+            .map_err(named)?;
+        Ok(ModsPrepared {
+            name: subject.name.clone(),
+            running,
+            containers: subject.containers,
+            grace_s: subject.grace_s,
+            folders,
+            rules,
+            image: subject
+                .body
+                .as_ref()
+                .map(|body| image_reference(&body.image))
+                .unwrap_or_default(),
+            note: Some(sealed),
+            estimate_bytes: estimate.bytes,
+            backup,
+        })
+    }
+
+    /// Accepte l'opération `mods` (verrou exclusif du service ET place `heavy_io`) puis la démarre ; rend la tâche de
+    /// sauvegarde que le plan de l'opération porte. Les refus de verrou sont ceux d'une sauvegarde.
+    pub(crate) async fn accept_for_mods(
+        &self,
+        key: &ServiceKey,
+        prepared: ModsPrepared,
+        actor: Actor,
+        op_key: &str,
+        plan: crate::domain::ops::OpPlan,
+    ) -> Result<Arc<Job>, BackupFailed> {
+        let named = |error| BackupFailed::named(error, &prepared.name);
+        let op = self
+            .ops
+            .accept_after_wait(AcceptRequest {
+                op_key: op_key.to_owned(),
+                service: key.clone(),
+                service_name: prepared.name.clone(),
+                kind: OpKind::Mods,
+                account: account_of(&actor),
+                plan,
+                forced: false,
+                reserve_name: None,
+                heavy_io: true,
+            })
+            .await
+            .map_err(|error| match error {
+                OpError::Locked(Refusal::HeavyIoBusy { service }) => {
+                    named(BackupError::HeavyBusy { service })
+                }
+                OpError::Locked(Refusal::ServiceBusy { holder }) => named(BackupError::Busy {
+                    by: self.holder_account(key),
+                    kind: match holder {
+                        Holder::Operation(kind) => kind,
+                        Holder::FileWrites => OpKind::Mods,
+                    },
+                }),
+                OpError::ServiceBusy => named(BackupError::Busy {
+                    by: self.holder_account(key),
+                    kind: OpKind::Mods,
+                }),
+                other => named(BackupError::Internal(other.to_string())),
+            })?;
+        if let Err(error) = self.ops.start(&op).await {
+            journal(
+                self.ops
+                    .finish(&op, OpStatus::Failed, Some(Cause::StepFailed))
+                    .await,
+                "finish",
+            );
+            return Err(named(BackupError::Internal(error.to_string())));
+        }
+        let mode = if prepared.running {
+            BackupMode::StopCopyStart
+        } else {
+            BackupMode::Stopped
+        };
+        Ok(Arc::new(Job {
+            id: op,
+            key: key.clone(),
+            name: prepared.name,
+            actor,
+            backup: prepared.backup,
+            mode,
+            containers: prepared.containers,
+            grace_s: prepared.grace_s,
+            folders: prepared.folders,
+            rules: prepared.rules,
+            image: prepared.image,
+            note: prepared.note,
+            estimate_bytes: prepared.estimate_bytes,
+            stopped: Mutex::new(Vec::new()),
+            forced_stop: AtomicBool::new(false),
+            mods_read: Mutex::new(None),
+        }))
+    }
+
+    /// Les conteneurs consignés d'un service (HRT-259 : le retour d'un lot « à vérifier » les arrête puis les relance).
+    pub(crate) async fn containers_for(&self, key: &ServiceKey) -> Vec<String> {
+        self.containers.of(key).await.unwrap_or_default()
+    }
+
+    /// Un « travail » sans sauvegarde pour le retour d'un lot « à vérifier » (HRT-259) : il porte seulement ce que
+    /// l'arrêt voulu et la relance utilisent (conteneurs, compte). `stopped` : les conteneurs à relancer ensuite.
+    pub(crate) fn revert_job(
+        &self,
+        key: &ServiceKey,
+        op_id: &str,
+        name: &str,
+        account: &str,
+        containers: Vec<String>,
+    ) -> Option<Job> {
+        let backup = BackupId::parse(&self.ids.new_id())?;
+        let actor = Actor::new(
+            crate::domain::accounts::Username::parse(account).ok(),
+            crate::domain::audit::Origin::System,
+        );
+        Some(Job {
+            id: op_id.to_owned(),
+            key: key.clone(),
+            name: name.to_owned(),
+            actor,
+            backup,
+            mode: BackupMode::StopCopyStart,
+            containers: containers.clone(),
+            grace_s: 30,
+            folders: Vec::new(),
+            rules: IgnoreRules::default(),
+            image: String::new(),
+            note: None,
+            estimate_bytes: 0,
+            stopped: Mutex::new(containers),
+            forced_stop: AtomicBool::new(false),
+            mods_read: Mutex::new(None),
+        })
+    }
+
+    /// Lit la liste des mods AVANT l'arrêt et la copie (HRT-293), comme une sauvegarde.
+    pub(crate) async fn read_mods_for(&self, job: &Job) {
+        self.read_mods(job).await;
+    }
+
+    /// Arrête les conteneurs du service (l'étape `stop` de l'opération `mods`) : même code qu'une sauvegarde.
+    pub(crate) async fn stop_for_mods(&self, job: &Job) -> Result<(), Finish> {
+        self.stop_service(job).await
+    }
+
+    /// Arrête de nouveau le service relancé avec de mauvais mods, avant le retour des fichiers (HRT-259) : l'arrêt voulu
+    /// est INSCRIT (base et registre) comme pour le premier arrêt, pour que le service ne passe pas par « En erreur » et
+    /// ne soit pas relancé par sa règle de redémarrage. `false` : un conteneur ne s'est pas arrêté.
+    pub(crate) async fn stop_again_for_mods(&self, job: &Job) -> bool {
+        let context = StopContext {
+            registry: &self.registry,
+            ops: &self.ops,
+            engine: self.engine.as_ref(),
+            intents: self.intents.as_ref(),
+            clock: self.clock.as_ref(),
+        };
+        let request = StopRequest {
+            key: &job.key,
+            operation: &job.id,
+            step: step::STOP,
+            containers: &job.containers,
+            grace_s: job.grace_s,
+            account: account_of(&job.actor),
+            margin: self.context.timings.stop_margin,
+            floor: self.context.timings.stop_floor,
+        };
+        stop_running(&context, &request).await.is_ok()
+    }
+
+    /// Relance ce que l'opération a arrêté (HRT-258) ; `Err` : un conteneur n'est pas reparti.
+    pub(crate) async fn start_for_mods(&self, job: &Job) -> Result<(), ()> {
+        let stopped = job.stopped_containers();
+        if stopped.is_empty() {
+            return Ok(());
+        }
+        self.start_service(job, &stopped).await
     }
 
     fn holder_account(&self, key: &ServiceKey) -> String {
@@ -1464,8 +1798,12 @@ impl Backups {
 
     /// `None` : l'agent s'arrête, rien n'est clos.
     async fn run(&self, job: &Job) -> Option<Finish> {
+        // 0. La liste des mods, lue AVANT l'arrêt (le service tourne encore : lecture seule, aucune minute d'arrêt de
+        // plus) et avant la copie (HRT-293, BR-MOD-034).
+        self.read_mods(job).await;
         // 1. Arrêt, seulement dans ce mode.
         if job.mode == BackupMode::StopCopyStart {
+            self.ops.console_save(&job.id, &job.key).await;
             if let Err(finish) = self.begin(job, step::STOP, &UndoInfo::default()).await {
                 return Some(finish);
             }
@@ -1477,15 +1815,29 @@ impl Backups {
                 return Some(self.finish_after(job, Finish::cancelled()).await);
             }
         }
+        // 2 et 3. La copie puis la vérification (cœur partagé : `copy_and_verify`).
+        let finish = match self.copy_and_verify(job).await {
+            CopyVerified::Halted => return None,
+            CopyVerified::Over(finish) => finish,
+        };
+        Some(self.finish_after(job, finish).await)
+    }
+
+    /// Le cœur d'une sauvegarde, SANS verrou ni arrêt ni relance : crée l'archive, la copie, la publie (ligne
+    /// `ready`), puis la relit (`BR-BACKUP-009`, `010`, `013`, `015`, `025`, `032`). Une autre opération du service
+    /// (HRT-255, `mods` : « Avant mods ») l'appelle une fois son propre verrou pris et son service arrêté ; le
+    /// service est relancé par l'appelant. `Over(finish)` : l'issue à rendre (la partie écrite d'un échec est déjà
+    /// retirée, la relance et le règlement restent à l'appelant) ; `Halted` : l'agent s'arrête.
+    pub(crate) async fn copy_and_verify(&self, job: &Job) -> CopyVerified {
         // 2. La copie.
         let copied = match self.copy(job).await {
-            CopyEnd::Halted => return None,
-            CopyEnd::Over(Err(finish)) => return Some(self.finish_after(job, finish).await),
+            CopyEnd::Halted => return CopyVerified::Halted,
+            CopyEnd::Over(Err(finish)) => return CopyVerified::Over(finish),
             CopyEnd::Over(Ok(copied)) => copied,
         };
         // 3. La vérification.
         if let Err(finish) = self.begin(job, step::VERIFY, &UndoInfo::default()).await {
-            return Some(self.finish_after(job, finish).await);
+            return CopyVerified::Over(finish);
         }
         let verified = self.verify_new(job).await;
         let finish = match verified {
@@ -1500,9 +1852,9 @@ impl Backups {
             Err(Some(finish)) => finish,
             // L'agent s'arrête pendant la relecture : l'opération reste en cours (interrompue au prochain
             // démarrage), l'archive reste publiée, non vérifiée.
-            Err(None) => return None,
+            Err(None) => return CopyVerified::Halted,
         };
-        Some(self.finish_after(job, finish).await)
+        CopyVerified::Over(finish)
     }
 
     /// 4. Relance du service arrêté par cette opération, quelle que soit l'issue (`BR-BACKUP-008`).
@@ -1654,6 +2006,7 @@ impl Backups {
                 ino: ident.1,
                 kind: ObjectKind::PartialArchive,
             }],
+            ..UndoInfo::default()
         };
         if let Err(finish) = self.begin(job, step::COPY, &undo).await {
             self.discard_part(job, ident).await;
@@ -1835,6 +2188,7 @@ impl Backups {
                 return CopyEnd::Over(Err(Finish::failed(Cause::StepFailed)));
             }
         };
+        let mods = self.mods_record(job, &manifest);
         let row = Published {
             archive_bytes: end.bytes,
             archive_mtime_ns: stamp.mtime_ns,
@@ -1845,8 +2199,20 @@ impl Backups {
             skipped,
             manifest_sha256: manifest_sha,
             archive_sha256: end.sha256,
+            mods,
         };
-        match self.repo.mark_ready(&job.backup, &row).await {
+        let mut marked = self.repo.mark_ready(&job.backup, &row).await;
+        if marked.is_err() && row.mods.is_some() {
+            // Lire les mods ne fait JAMAIS échouer une sauvegarde (BR-MOD-034) : une liste que la base refuse
+            // s'abandonne, la sauvegarde se publie sans.
+            tracing::warn!("liste des mods non enregistrée : la sauvegarde se publie sans elle");
+            let without = Published {
+                mods: None,
+                ..row.clone()
+            };
+            marked = self.repo.mark_ready(&job.backup, &without).await;
+        }
+        match marked {
             Ok(true) => {}
             other => {
                 tracing::error!(?other, "sauvegarde publiée mais pas prête au registre");
@@ -2175,6 +2541,130 @@ impl Backups {
             }),
             Checked::Stopped => Err(internal("agent en cours d'arrêt")),
         }
+    }
+
+    /// Branche la lecture des mods d'un service (racine de composition, une seule fois).
+    ///
+    // FIX:01M8CJ9T4Q6W2XKZ7N3VHBY5PD le service des mods tient les sauvegardes (`ApplyDeps`) : le port est
+    // pris en `Weak`, sinon les deux se tiennent en vie l'un l'autre et la base SQLite ne se ferme jamais.
+    pub fn set_mods_snapshot(&self, snapshot: &Arc<dyn ModsSnapshot>) {
+        let _ = self.mods.set(Arc::downgrade(snapshot));
+    }
+
+    /// Comme `set_mods_snapshot`, mais le port est tenu ici : pour un faux qui ne tient pas les sauvegardes.
+    pub fn keep_mods_snapshot(&self, snapshot: Arc<dyn ModsSnapshot>) {
+        let _ = self.mods.set(Arc::downgrade(&snapshot));
+        let _ = self.mods_kept.set(snapshot);
+    }
+
+    fn mods_port(&self) -> Option<Arc<dyn ModsSnapshot>> {
+        self.mods.get().and_then(std::sync::Weak::upgrade)
+    }
+
+    /// Lit les mods du service avant la copie (HRT-293). Une lecture qui échoue ne fait jamais échouer la sauvegarde.
+    async fn read_mods(&self, job: &Job) {
+        let Some(port) = self.mods_port() else {
+            return;
+        };
+        let reading = port.read(&job.key).await;
+        *job.mods_read.lock().unwrap_or_else(PoisonError::into_inner) = Some(reading);
+    }
+
+    /// La liste des mods de cette sauvegarde, recoupée avec le manifeste (la vérité de ce que l'archive contient).
+    /// `None` : service sans mods (aucune ligne).
+    fn mods_record(&self, job: &Job, manifest: &Manifest) -> Option<ModsRecord> {
+        let reading = job
+            .mods_read
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()?;
+        let set = match reading {
+            ModsReading::NotApplicable => return None,
+            ModsReading::Unreadable => RecordedSet::unreadable(),
+            ModsReading::Read(read) => {
+                let root = manifest.roots.iter().find(|r| r.target == read.data_target);
+                let ignored = |root: u32| {
+                    manifest.ignored.iter().any(|item| {
+                        item.root == root
+                            && (item.path == read.dir
+                                || item.path.starts_with(&format!("{}/", read.dir)))
+                    })
+                };
+                match root {
+                    Some(root) if !ignored(root.id) => {
+                        let files: Vec<ManifestFile> = manifest
+                            .entries
+                            .iter()
+                            .filter(|entry| entry.root == root.id && entry.kind == EntryType::File)
+                            .filter_map(|entry| {
+                                Some(ManifestFile {
+                                    path: entry.path.clone(),
+                                    size: entry.size,
+                                    sha256: entry.sha256.clone()?,
+                                })
+                            })
+                            .collect();
+                        backup_list::reconcile(&read.snapshot, &files, &read.dir, &read.retired_dir)
+                    }
+                    _ => RecordedSet::not_in_backup(),
+                }
+            }
+        };
+        Some(ModsRecord {
+            set,
+            at: self.clock.now(),
+        })
+    }
+
+    /// `GET /services/{key}/backups/{id}/mods` (HRT-293, BR-MOD-034 à 036) : la liste des mods d'une sauvegarde et,
+    /// avec `compare`, son écart avec les mods actuels. Lecture seule, jamais journalisée.
+    pub async fn mods_of(
+        &self,
+        key: &ServiceKey,
+        id: &BackupId,
+        compare: bool,
+    ) -> Result<BackupModsView, BackupFailed> {
+        let subject = self.subject(key).await?;
+        let named = |error| BackupFailed::named(error, &subject.name);
+        let Some(port) = self.mods_port() else {
+            return Err(named(BackupError::ModsNotApplicable));
+        };
+        if !port.applicable(key).await {
+            return Err(named(BackupError::ModsNotApplicable));
+        }
+        // La sauvegarde d'un autre service n'existe pas pour celui-ci : jamais de lecture croisée.
+        let row = self.row(id).await?;
+        if row.service_key != *key {
+            return Err(named(BackupError::BackupNotFound));
+        }
+        let Some(record) = self.repo.mods_of(id).await.map_err(internal)? else {
+            return Ok(BackupModsView {
+                state: ModsListState::NotRecorded,
+                recorded_at: None,
+                game: BackupModsGame::default(),
+                counts: BackupModsCounts::default(),
+                mods: Vec::new(),
+                compare: None,
+            });
+        };
+        let compare = if compare {
+            match port.current(key).await {
+                Some(current) => {
+                    let changes = backup_list::compare(&record.set, &current.mods);
+                    Some(BackupModsCompare {
+                        complete: current.unread == 0,
+                        unread: current.unread,
+                        same: changes.is_empty(),
+                        changes: changes.iter().map(change_view).collect(),
+                    })
+                }
+                // La lecture actuelle est bloquée : la liste de la sauvegarde reste rendue, sans comparaison.
+                None => None,
+            }
+        } else {
+            None
+        };
+        Ok(mods_view(&record, compare))
     }
 
     async fn row(&self, id: &BackupId) -> Result<BackupRow, BackupFailed> {
@@ -2548,6 +3038,109 @@ fn cause_of_fs(error: BackupFsError) -> Cause {
 fn journal<T>(result: Result<T, OpError>, what: &'static str) {
     if let Err(error) = result {
         tracing::warn!(%error, write = what, "journal de la sauvegarde non écrit");
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// La liste des mods d'une sauvegarde sur le fil (HRT-293)
+// ---------------------------------------------------------------------------------------------------------------
+
+fn state_view(state: backup_list::SetState) -> ModsListState {
+    match state {
+        backup_list::SetState::Recorded => ModsListState::Recorded,
+        backup_list::SetState::Partial => ModsListState::Partial,
+        backup_list::SetState::Unreadable => ModsListState::Unreadable,
+        backup_list::SetState::NotInBackup => ModsListState::NotInBackup,
+    }
+}
+
+fn summary_view(summary: Option<&ModsSummaryRow>) -> BackupModsSummary {
+    match summary {
+        Some(row) => BackupModsSummary {
+            state: state_view(row.state),
+            active: row.active,
+            disabled: row.disabled,
+            retired: row.retired,
+        },
+        None => BackupModsSummary {
+            state: ModsListState::NotRecorded,
+            active: 0,
+            disabled: 0,
+            retired: 0,
+        },
+    }
+}
+
+fn identity_wire(identity: &backup_list::IdentitySummary) -> ModIdentityView {
+    ModIdentityView {
+        id: identity.mod_id.clone(),
+        name: identity.name.clone(),
+        version: identity.version.clone(),
+        loader: identity.loader.variant_id().to_owned(),
+        minecraft_declared: false,
+        environment: match identity.environment {
+            crate::domain::mods::jar::Environment::Both => EnvironmentView::Both,
+            crate::domain::mods::jar::Environment::ServerOnly => EnvironmentView::Server,
+            crate::domain::mods::jar::Environment::ClientOnly => EnvironmentView::Client,
+            crate::domain::mods::jar::Environment::Unknown => EnvironmentView::Unknown,
+        },
+    }
+}
+
+fn change_view(change: &backup_list::Change) -> ModChange {
+    ModChange {
+        kind: match change.kind {
+            backup_list::ChangeKind::Added => ChangeKindView::Added,
+            backup_list::ChangeKind::Removed => ChangeKindView::Removed,
+            backup_list::ChangeKind::VersionChanged => ChangeKindView::VersionChanged,
+            backup_list::ChangeKind::Enabled => ChangeKindView::Enabled,
+            backup_list::ChangeKind::Disabled => ChangeKindView::Disabled,
+        },
+        id: change.mod_id.clone(),
+        name: change.name.clone(),
+        file: change.file_name.clone(),
+        backup_version: change.backup_version.clone(),
+        current_version: change.current_version.clone(),
+    }
+}
+
+fn mods_view(record: &ModsRecord, compare: Option<BackupModsCompare>) -> BackupModsView {
+    use crate::domain::mods::game_info::Origin;
+    let set = &record.set;
+    BackupModsView {
+        state: state_view(set.state),
+        recorded_at: Some(rfc3339(record.at)),
+        game: BackupModsGame {
+            loader: set.loader.map(|loader| loader.variant_id().to_owned()),
+            minecraft: set.minecraft.clone(),
+        },
+        counts: BackupModsCounts {
+            active: set.active,
+            disabled: set.disabled,
+            retired: set.retired,
+            not_listed: set.not_listed,
+        },
+        mods: set
+            .entries
+            .iter()
+            .map(|entry| BackupModItem {
+                file: entry.file_name.clone(),
+                rank: entry.rank,
+                place: match entry.place {
+                    backup_list::Place::Active => BackupModPlace::Active,
+                    backup_list::Place::Disabled => BackupModPlace::Disabled,
+                    backup_list::Place::Retired => BackupModPlace::Retired,
+                },
+                origin: match entry.origin {
+                    Origin::ModrinthPack => ModOrigin::ModrinthPack,
+                    Origin::Hearth => ModOrigin::Hearth,
+                    Origin::ServerPack => ModOrigin::ServerPack,
+                    Origin::Manual => ModOrigin::Manual,
+                },
+                identity: entry.identity.as_ref().map(identity_wire),
+            })
+            .collect(),
+        compare,
     }
 }
 

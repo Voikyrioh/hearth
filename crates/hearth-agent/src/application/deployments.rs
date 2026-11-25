@@ -59,6 +59,7 @@ use crate::application::ports::Progress;
 use crate::domain::audit::{Actor, ClientName, Outcome, Reason, Target, WorldNote, WorldResult};
 use crate::domain::catalog::loading::schema::fiche::PackGenre;
 use crate::domain::files::RelPath;
+use crate::domain::mods::game_info::OriginRow;
 use crate::domain::ops::{
     Cause, CreatedObject, ObjectKind, ObjectRoot, OpKind, OpStatus, Refusal as LockRefusal,
     UndoInfo,
@@ -70,7 +71,7 @@ use crate::domain::services::deploy::{
 use crate::domain::services::from_fiche::{PackPlacement, ProducedFile};
 use crate::domain::services::plan::{PlanContext, image_reference};
 use crate::domain::services::ports::{Listener, PortWorld, duplicates, suggest, verdict};
-use crate::domain::services::spec::{SecretsAccess, fold_name};
+use crate::domain::services::spec::{SecretsAccess, SpecBody, fold_name};
 use crate::domain::services::{EngineState, RunState, ServiceKey};
 use crate::domain::worlds::COPY_MAX;
 
@@ -388,6 +389,9 @@ pub struct Deployments {
     /// Le jugement et le rangement des packs déposés (HRT-124) : posé une fois par la racine de composition ;
     /// sans lui, une installation qui porte un pack est refusée.
     packs: OnceLock<Arc<PackIntake>>,
+    /// L'origine des mods (HRT-256) : les `.jar` d'un pack serveur s'y inscrivent à l'installation. Sans lui rien
+    /// n'est inscrit (ils sont « ajoutés à la main »), l'installation n'échoue jamais pour cela.
+    mod_origins: OnceLock<Arc<dyn super::ports::ModOrigins>>,
     /// Un seul pack est lu à la fois : lire un pack relit toute l'archive (jusqu'à 4 Gio), donc un compte qui
     /// enchaîne les lectures ne doit pas occuper l'agent.
     pack_gate: Arc<tokio::sync::Semaphore>,
@@ -398,6 +402,8 @@ struct JobPack {
     deposit: DepositId,
     place: PackPlacement,
     sha256: [u8; 32],
+    /// Les `.jar` du pack serveur, dont l'origine s'inscrit une fois le pack rangé (HRT-256, BR-MOD-033).
+    mods: Vec<crate::domain::mods::pack::ServerPackMod>,
 }
 
 /// Les ports du serveur tels que le domaine les juge (`PortWorld`) : le moteur, les sockets en écoute, le port de
@@ -472,6 +478,7 @@ impl Deployments {
             phases,
             world_import,
             packs: OnceLock::new(),
+            mod_origins: OnceLock::new(),
             pack_gate: Arc::new(tokio::sync::Semaphore::new(1)),
         })
     }
@@ -506,6 +513,11 @@ impl Deployments {
         Arc::clone(&self.pack_gate)
             .try_acquire_owned()
             .map_err(|_| DeployError::PackBusy)
+    }
+
+    /// Branche l'inscription de l'origine des mods d'un pack serveur (racine de composition, une seule fois).
+    pub fn set_mod_origins(&self, origins: Arc<dyn super::ports::ModOrigins>) {
+        let _ = self.mod_origins.set(origins);
     }
 
     /// Branche le jugement des packs déposés (racine de composition, une seule fois).
@@ -836,6 +848,7 @@ impl Deployments {
                     deposit: judged.id,
                     place,
                     sha256: judged.sha256,
+                    mods: judged.report.server_mods,
                 }),
                 (None, None) => None,
                 // Un pack jugé sans emplacement (ou l'inverse) ne s'oublie jamais en silence.
@@ -1331,6 +1344,16 @@ impl Deployments {
         Ok(())
     }
 
+    /// La variable des options de la JVM déclarée par la fiche du service (FIX:01M7Q1M71TKSBWVV0C0GTXWWXZ) : lue
+    /// dans la fiche EMBARQUÉE de l'agent, donc un serveur déjà installé la reçoit à sa prochaine recréation, sans
+    /// montée de version de fiche.
+    pub fn jvm_options_env(&self, body: &SpecBody) -> Option<String> {
+        let spec_fiche = body.fiche.as_ref()?;
+        self.installer
+            .fiche(&spec_fiche.id)
+            .and_then(|fiche| fiche.jvm_options_env().map(str::to_owned))
+    }
+
     /// Le plan fermé du conteneur, construit depuis la description relue en base.
     async fn plan_of(
         &self,
@@ -1357,6 +1380,7 @@ impl Deployments {
                 created_by: &job.account,
                 rev: revision.rev,
                 managed_root: &self.context.services_root,
+                jvm_options_env: self.jvm_options_env(&revision.body).as_deref(),
             },
         )
         .map_err(|error| {
@@ -1401,6 +1425,22 @@ impl Deployments {
             Some((pack.deposit.clone(), rel, pack.sha256))
         });
         let wants_pack = job.pack.is_some();
+        let pack_mods: Vec<OriginRow> = job
+            .pack
+            .as_ref()
+            .map(|pack| {
+                pack.mods
+                    .iter()
+                    .map(|file| OriginRow {
+                        file_name: file.name.clone(),
+                        size: file.size,
+                        crc32: Some(file.crc32),
+                        sha256: None,
+                        from_hearth: false,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let account = job.account.clone();
         let deposits = self.packs.get().map(|intake| Arc::clone(intake.deposits()));
         // Les fichiers produits (BR-FICHE-024) : octets, chemin, propriétaire et droits décidés par le domaine.
@@ -1449,8 +1489,11 @@ impl Deployments {
                 let (Some((deposit, rel, sha256)), Some(deposits)) = (&pack, &deposits) else {
                     return Err(());
                 };
+                let pack_perms = Ownership::new(0, 0)
+                    .and_then(|owner| Perms::new(owner, 0o644))
+                    .ok_or(())?;
                 deposits
-                    .place(deposit, &account, &key, rel, sha256)
+                    .place(deposit, &account, &key, rel, sha256, pack_perms)
                     .map_err(|_| ())?;
             }
             Ok(())
@@ -1463,6 +1506,17 @@ impl Deployments {
                     && let Ok(mut held) = world.import.lock()
                 {
                     *held = None;
+                }
+                // L'origine des mods du pack serveur (HRT-256) : une erreur ici n'arrête pas l'installation, ces
+                // mods seraient seulement « ajoutés à la main ».
+                if !pack_mods.is_empty()
+                    && let Some(origins) = self.mod_origins.get()
+                    && origins
+                        .record_server_pack(&job.key, &pack_mods, self.clock.now())
+                        .await
+                        .is_err()
+                {
+                    tracing::warn!("origine des mods du pack non inscrite");
                 }
                 Ok(())
             }
@@ -1556,6 +1610,7 @@ impl Deployments {
                 ino: import.ino,
                 kind: ObjectKind::ImportDir,
             }],
+            ..UndoInfo::default()
         };
         self.begin_with(job, step::WORLD, &undo).await?;
 

@@ -38,6 +38,8 @@ const ALLOWED_NAMERS: &[&str] = &[
     "entrypoint/ws/service_logs.rs",
     "entrypoint/http/accounts.rs",
     "entrypoint/http/auth.rs",
+    // Lecture seule : la route de la console juge la grille de pilotage avec le droit relu.
+    "entrypoint/http/console.rs",
     "entrypoint/http/wire.rs",
     "infrastructure/sqlite/account_repo.rs",
     "infrastructure/sqlite/services_right_repo.rs",

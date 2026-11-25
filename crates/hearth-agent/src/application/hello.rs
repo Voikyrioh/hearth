@@ -4,6 +4,7 @@
 //! (`hearth_proto::api::hello::HelloResponse`) est faite par `entrypoint/http`.
 
 use hearth_proto::api::backups::CAPABILITY_SERVICE_BACKUPS;
+use hearth_proto::api::console::CAPABILITY_GAME_CONSOLE;
 use hearth_proto::api::deploy::CAPABILITY_SERVICE_DEPLOY;
 use hearth_proto::api::game_settings::CAPABILITY_GAME_SETTINGS;
 use hearth_proto::api::service_delete::CAPABILITY_SERVICE_DELETE;
@@ -90,6 +91,8 @@ impl HelloService {
                     // Un pack de mods déposé (HRT-124) : `POST /deployments/pack-check` et `source.pack` de
                     // `POST /deployments`, sur la zone d'attente des transferts.
                     CAPABILITY_GAME_PACKS,
+                    // La console d'un serveur de jeu et les joueurs connectés (HRT-268).
+                    CAPABILITY_GAME_CONSOLE,
                 ],
             },
         }
@@ -152,7 +155,8 @@ mod tests {
                 "service-backups",
                 "world-import",
                 "service-transfers",
-                "game-packs"
+                "game-packs",
+                "game-console"
             ]
         );
     }

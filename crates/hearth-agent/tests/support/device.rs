@@ -380,6 +380,24 @@ pub fn act_of<'a>(
                 digest,
             }
         }
+        // Envoyer une commande à la console (HRT-268) : la clé du chemin, l'empreinte de la ligne et sa classe.
+        ("POST", ["services", key, "console"]) => {
+            hearth_proto::admin_act::AdminAct::console_command(
+                hearth_proto::admin_act::decode_segment(key)
+                    .unwrap_or_else(|| (*key).to_owned())
+                    .into(),
+                &serde_json::from_value(body.clone()).expect("corps de la commande"),
+            )
+        }
+        // Appliquer un lot de mods (HRT-258) : la clé du chemin, le nombre de changements et l'empreinte de leur liste.
+        ("POST", ["services", key, "mods", "apply"]) => {
+            hearth_proto::admin_act::AdminAct::mods_apply(
+                hearth_proto::admin_act::decode_segment(key)
+                    .unwrap_or_else(|| (*key).to_owned())
+                    .into(),
+                &serde_json::from_value(body.clone()).expect("corps du lot de mods"),
+            )
+        }
         // Déposer un fichier dans la zone d'attente (HRT-95) : le dernier nom et la taille du corps, jamais le contenu
         // (une seule fonction, partagée avec l'agent et la liaison cliente : `AdminAct::file_deposit`).
         ("POST", ["deposits"]) => hearth_proto::admin_act::AdminAct::file_deposit(

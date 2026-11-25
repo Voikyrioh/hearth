@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-backup-mods"
+description = "Enables the read_backup_mods command without any pre-configured scope."
+commands.allow = ["read_backup_mods"]
+
+[[permission]]
+identifier = "deny-read-backup-mods"
+description = "Denies the read_backup_mods command without any pre-configured scope."
+commands.deny = ["read_backup_mods"]

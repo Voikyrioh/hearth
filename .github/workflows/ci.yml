@@ -287,7 +287,8 @@ jobs:
   # à l'autre.
   agent-install:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 24/11 : 43,6 min sur main déjà, plus de marge sur un runner lent (45 min coupait le job, sans régression).
+    timeout-minutes: 60
     env:
       HEARTH_XTASK_CACHE: ${{ github.workspace }}/.xtask-cache
     steps:

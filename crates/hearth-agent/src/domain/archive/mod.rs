@@ -66,6 +66,9 @@ pub struct EntryInfo {
     pub kind: EntryKind,
     /// Taille déballée annoncée, confirmée par la lecture réelle quand `verify_data` est vrai.
     pub size: u64,
+    /// CRC-32 de l'entrée déballée (zip seulement : un tar n'en porte pas). Confirmé par la lecture réelle quand
+    /// `verify_data` est vrai (HRT-256 : origine d'un mod du pack serveur).
+    pub crc32: Option<u32>,
 }
 
 /// Résultat de `inspect` : tout ce qu'`extract` et `read_one` ont besoin de croire de l'archive.
@@ -213,6 +216,7 @@ pub fn inspect<R: Read + Seek>(
                     path,
                     kind: entry_kind,
                     size: item.size,
+                    crc32: None,
                 });
             }
             walker.finish(cancel)?;

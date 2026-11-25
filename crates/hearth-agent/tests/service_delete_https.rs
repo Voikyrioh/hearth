@@ -59,6 +59,9 @@ struct Bench {
     lucas: Actor,
     /// Lecture seule AVEC le droit.
     dan: Actor,
+    /// Les lectures lentes (`Topology::delay`) ne commencent que lorsqu'il est levé : le démarrage de l'agent lit
+    /// aussi des chemins, et ne doit pas payer le partage mort.
+    slow_reads: Arc<std::sync::atomic::AtomicBool>,
 }
 
 async fn bench() -> Bench {
@@ -100,6 +103,7 @@ async fn bench_with(change: impl FnOnce(&mut hearth_agent::app::EngineParts)) ->
         bob,
         lucas,
         dan,
+        slow_reads: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     }
 }
 
@@ -559,11 +563,15 @@ struct Topology {
     others: Vec<(&'static str, Resolved)>,
     /// Combien de temps met chaque lecture à répondre (un partage réseau mort).
     delay: Duration,
+    /// Levé par le test quand le partage « meurt » (après le démarrage et le déploiement).
+    slow: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl HostPaths for Topology {
     fn resolve(&self, path: &str) -> Resolved {
-        std::thread::sleep(self.delay);
+        if self.slow.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(self.delay);
+        }
         if path.ends_with(FOLDER) {
             return found(path, &[(1, 100), (1, 50), (1, 10), (1, 2)]);
         }
@@ -587,13 +595,21 @@ async fn bench_over(
     delay: Duration,
     budget: Option<Duration>,
 ) -> Bench {
-    bench_with(move |parts| {
-        parts.host_paths = Some(Arc::new(Topology { others, delay }));
+    let slow = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let shared = Arc::clone(&slow);
+    let mut bench = bench_with(move |parts| {
+        parts.host_paths = Some(Arc::new(Topology {
+            others,
+            delay,
+            slow: shared,
+        }));
         if let Some(budget) = budget {
             parts.delete.resolve_budget = budget;
         }
     })
-    .await
+    .await;
+    bench.slow_reads = slow;
+    bench
 }
 
 /// Un conteneur arrêté, créé hors de Hearth, qui monte `source`.
@@ -705,19 +721,23 @@ async fn a_mount_that_cannot_be_read_keeps_the_folder_as_unverifiable() {
 
 #[tokio::test]
 async fn a_dead_network_share_never_hangs_the_request_the_folder_is_kept() {
-    // Chaque lecture met 3 s ; le budget de lecture est de 300 ms : la fenêtre répond vite, dossier conservé.
+    // Chaque lecture met 20 s ; le budget de lecture est de 300 ms : la fenêtre répond vite, dossier conservé.
+    // Le partage ne meurt qu'après le démarrage et le déploiement (sinon le banc paie 20 s par lecture), et la borne
+    // (10 s) tient d'un runner lent : attendre UNE seule lecture du partage coûterait déjà 20 s.
     let b = bench_over(
         Vec::new(),
-        Duration::from_secs(3),
+        Duration::from_secs(20),
         Some(Duration::from_millis(300)),
     )
     .await;
     let service = b.deploy("web").await;
+    b.slow_reads
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let started = Instant::now();
     let preview = b.preview(service.key.as_str()).await;
     assert_eq!(preview.status, 200, "{}", preview.text);
     assert!(
-        started.elapsed() < Duration::from_millis(2500),
+        started.elapsed() < Duration::from_secs(10),
         "la fenêtre a attendu le partage : {:?}",
         started.elapsed()
     );

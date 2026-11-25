@@ -258,6 +258,10 @@ pub struct BackupParts {
     /// La racine des sauvegardes. `None` : la vraie (`[backups] root`, par défaut `/var/lib/hearth-backups`) ; les
     /// tests y posent un faux en mémoire.
     pub files: Option<Arc<dyn BackupFiles>>,
+    /// La lecture des mods d'un service (HRT-293). `None` : celle de l'agent ; les tests y posent un faux.
+    pub mods: Option<Arc<dyn crate::application::ports::ModsSnapshot>>,
+    /// Les délais de la surveillance d'un lot de mods (HRT-258).
+    pub mods_timings: crate::application::mods::ApplyTimings,
 }
 
 impl BackupParts {
@@ -265,6 +269,8 @@ impl BackupParts {
         Self {
             timings: BackupTimings::production(),
             files: None,
+            mods: None,
+            mods_timings: crate::application::mods::ApplyTimings::production(),
         }
     }
 }
@@ -288,6 +294,8 @@ pub struct CatalogParts {
     pub pack_deposits: Option<Arc<dyn PackDeposits>>,
     /// Les adresses de la machine pour les joueurs (HRT-223). `None` : aucune n'est cherchée (les essais).
     pub network: Option<Arc<dyn crate::application::ports::NetworkAddresses>>,
+    /// Le client de la console des jeux (HRT-268). `None` : le client RCON de l'agent ; les tests y posent un faux jeu.
+    pub console: Option<Arc<dyn crate::application::ports::GameConsole>>,
 }
 
 impl CatalogParts {
@@ -303,6 +311,7 @@ impl CatalogParts {
             network: Some(Arc::new(
                 crate::infrastructure::network::SystemNetwork::new(),
             )),
+            console: None,
         }
     }
 }
@@ -1017,7 +1026,13 @@ pub async fn start_engined(
     let host_paths: Arc<dyn crate::application::ports::HostPaths> = engine
         .host_paths
         .unwrap_or_else(|| Arc::new(crate::infrastructure::host::paths::SystemHostPaths));
-    let deletion_root = match host_paths.resolve(&config.data_dir.to_string_lossy()) {
+    // Lu hors du fil asynchrone : un disque lent ou un partage mort ne fige pas le démarrage (repli : la configuration).
+    let data_dir = config.data_dir.to_string_lossy().into_owned();
+    let resolver = Arc::clone(&host_paths);
+    let resolved = tokio::task::spawn_blocking(move || resolver.resolve(&data_dir))
+        .await
+        .unwrap_or(crate::application::ports::Resolved::Unreadable);
+    let deletion_root = match resolved {
         crate::application::ports::Resolved::Found { canonical, .. } => {
             std::path::Path::new(&canonical)
                 .join(SERVICES_DIR)
@@ -1067,6 +1082,15 @@ pub async fn start_engined(
         let _ = network.external_ip().await;
         game_settings.set_network(network);
     }
+    // Les mods d'un serveur installé (HRT-256) : le volume par `SafeFs`, l'origine des fichiers en base.
+    let mods = Arc::new(crate::application::mods::ModsService::new(
+        foundations.specs.clone(),
+        catalog.clone(),
+        safe_fs.clone(),
+        Arc::new(crate::infrastructure::sqlite::SqliteModOrigins::new(
+            database.pool().clone(),
+        )),
+    ));
     // L'arrêt des serveurs de jeu (HRT-103) : la suite d'étapes de la fiche, déroulée par le cas d'usage de pilotage.
     service_lifecycle.set_game_stop(GameStop::new(
         foundations.specs.clone(),
@@ -1129,6 +1153,14 @@ pub async fn start_engined(
             timings: engine.backups.timings,
         },
     );
+    // FIX:01M8CJ9T4Q6W2XKZ7N3VHBY5PD le vrai service des mods est pris en `Weak` (il tient les sauvegardes).
+    match engine.backups.mods.clone() {
+        Some(fake) => backups.keep_mods_snapshot(fake),
+        None => {
+            let real: Arc<dyn crate::application::ports::ModsSnapshot> = mods.clone();
+            backups.set_mods_snapshot(&real);
+        }
+    }
     backups.recover_at_startup().await;
     // Reprendre un monde existant (HRT-105) : les dossiers ouverts aux services, tels que la configuration les écrit.
     let world_import = WorldImport::new(
@@ -1187,7 +1219,7 @@ pub async fn start_engined(
         },
         catalog.clone(),
         engine.catalog.random.clone(),
-        phases,
+        phases.clone(),
         Some(world_import.clone()),
     );
     // Un pack de mods déposé (HRT-124) : lu dans la zone d'attente des transferts (HRT-95), rangé par le dossier géré
@@ -1201,7 +1233,42 @@ pub async fn start_engined(
                 tokio::runtime::Handle::current(),
             ))
         });
+    mods.set_deposits(pack_deposits.clone());
+    // Appliquer un lot de mods (HRT-258) : la sauvegarde « Avant mods », le journal des opérations, la surveillance du
+    // signe « prêt » (les phases du jeu) et le moteur.
+    mods.set_apply(crate::application::mods::ApplyDeps {
+        backups: backups.clone(),
+        ops: foundations.ops.clone(),
+        phases: phases.clone(),
+        engine: container_engine.clone(),
+        timings: engine.backups.mods_timings,
+    });
+    // La console d'un serveur de jeu et les joueurs connectés (HRT-268) : le client RCON de l'agent parle à l'adresse
+    // privée du conteneur, jamais à un port publié.
+    let console = crate::application::console::ConsoleService::new(
+        foundations.specs.clone(),
+        catalog.clone(),
+        registry.clone(),
+        foundations.ops.clone(),
+        phases.clone(),
+        container_engine.clone(),
+        engine
+            .catalog
+            .console
+            .clone()
+            .unwrap_or_else(|| Arc::new(crate::infrastructure::console::SourceRcon)),
+        game_settings.clone(),
+        services.audit_sink.clone(),
+        adapters.clock.clone(),
+    );
+    // Avant tout arrêt demandé par Hearth, le monde est enregistré par la console si la fiche le déclare (HRT-292).
+    let weak_console: std::sync::Weak<dyn crate::application::ports::BeforeStopSave> =
+        Arc::downgrade(&console) as _;
+    foundations.ops.set_before_stop_save(weak_console);
     deployments.set_pack_intake(Arc::new(PackIntake::new(pack_deposits)));
+    deployments.set_mod_origins(Arc::new(
+        crate::infrastructure::sqlite::SqliteModOrigins::new(database.pool().clone()),
+    ));
     // Modifier un service par recréation (HRT-87) : l'ancien est mis de côté, le nouveau créé depuis la description,
     // l'ancien remis si le nouveau échoue.
     let service_updates = ServiceUpdates::new(
@@ -1244,6 +1311,8 @@ pub async fn start_engined(
         services.trail.clone(),
     ));
     service_ops.set_effects(service_updates.clone());
+    // Le retour d'un lot de mods « à vérifier » (HRT-259) : « Revenir à l'état d'avant » rejoue le journal.
+    service_ops.set_effects(mods.clone());
     // Les réglages passés par une variable ou un argument s'appliquent par la recréation (HRT-266).
     game_settings.set_updates(service_updates.clone());
     let deletion_for_shutdown = service_deletion.clone();
@@ -1271,6 +1340,8 @@ pub async fn start_engined(
         catalog,
         world_import,
         game_settings,
+        mods,
+        console,
         stream,
         erasure_pending: database.erasure_pending(),
     });

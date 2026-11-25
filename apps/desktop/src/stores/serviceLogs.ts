@@ -4,6 +4,7 @@ import { logUiError } from "@/errors/report";
 import { failureOf, getLinkBridge, type LogEnd, type LogMessage, type LogReading } from "@/link";
 import {
   type Entry,
+  exchangeEntry,
   type GapKind,
   LogBuffer,
   lineEntry,
@@ -19,6 +20,7 @@ export type LogsPhase = "idle" | "opening" | "reading" | "ended";
 export type LogsMode = "live" | "auto" | "manual";
 
 import { gapKindOf, type LogsFailure } from "@/logs/view";
+import type { Exchange } from "@/services/console";
 
 export type { LogsFailure };
 
@@ -34,7 +36,8 @@ export interface LogsStatus {
 type Op =
   | { op: "lines"; entries: NewEntry[] }
   | { op: "gap"; gap: GapKind; count: number | null; lost: boolean }
-  | { op: "restart"; at: number | null };
+  | { op: "restart"; at: number | null }
+  | { op: "exchange"; entry: NewEntry };
 
 /**
  * La lecture des journaux d'UN service à la fois (HRT-67, ADR-0040). Ce magasin n'est JAMAIS persisté : les lignes
@@ -118,9 +121,23 @@ export const useServiceLogsStore = defineStore("serviceLogs", () => {
     } else if (op.op === "gap") {
       buffer.append([{ kind: "gap", gap: op.gap, count: op.count }]);
       lostGap = op.lost ? buffer.lastGapId() : null;
+    } else if (op.op === "exchange") {
+      received.value = true;
+      buffer.append([op.entry]);
     } else {
       buffer.append([{ kind: "restart", at: op.at }]);
     }
+  }
+
+  /**
+   * Une commande envoyée depuis l'onglet « Console » et ce qui lui est arrivé : elle prend sa place dans le journal, à
+   * son heure, entre les lignes du serveur. Envoyer une commande pendant une pause reprend le direct (la réponse ne
+   * reste jamais cachée derrière la pause).
+   */
+  function pushExchange(exchange: Exchange): void {
+    if (mode.value !== "live") resume();
+    apply({ op: "exchange", entry: exchangeEntry(exchange) });
+    notifyNow();
   }
 
   /** Une opération arrive : appliquée tout de suite en direct, mise en attente pendant une pause. */
@@ -350,5 +367,6 @@ export const useServiceLogsStore = defineStore("serviceLogs", () => {
     pause,
     resume,
     noteGone,
+    pushExchange,
   };
 });

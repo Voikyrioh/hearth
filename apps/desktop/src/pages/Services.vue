@@ -34,6 +34,7 @@ import { openedService } from "@/services/detail";
 import { shortAge } from "@/services/format";
 import { type Controls, controlsOf } from "@/services/lifecycle";
 import { pilotLock } from "@/services/pilot";
+import { type ServiceTab, TAB_QUERY, tabOfQuery } from "@/services/tabs";
 import { show } from "@/services/view";
 import { type TrackedOperation, useServiceOpsStore } from "@/stores/serviceOps";
 import { useServicesStore } from "@/stores/services";
@@ -70,16 +71,9 @@ const selectedKey = computed(() => {
  * `?onglet=sauvegardes` les sauvegardes (HRT-98), tout autre
  * valeur (ou rien) le détail.
  */
-const TAB_QUERY = { logs: "journaux", settings: "reglages", backups: "sauvegardes" } as const;
-const tab = computed<"detail" | "settings" | "backups" | "logs">(() => {
-  const raw = route.query.onglet;
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  if (value === TAB_QUERY.logs) return "logs";
-  if (value === TAB_QUERY.backups) return "backups";
-  return value === TAB_QUERY.settings ? "settings" : "detail";
-});
+const tab = computed<ServiceTab>(() => tabOfQuery(route.query.onglet));
 
-function setTab(next: "detail" | "settings" | "backups" | "logs") {
+function setTab(next: ServiceTab) {
   const { onglet: _tab, ...rest } = route.query;
   void router.replace({ query: next === "detail" ? rest : { ...rest, onglet: TAB_QUERY[next] } });
 }
@@ -220,8 +214,17 @@ const barShown = computed(
     door.value.kind !== "hidden" &&
     !listEmpty.value &&
     shown.value.kind !== "loading" &&
-    !(opened.value && tab.value === "logs"),
+    !openedAside.value,
 );
+/** Un service ouvert, sur n'importe quel onglet, prend toute la page : ni liste, ni moteur, ni opérations, ni « Ajouter ». */
+const openedAside = computed(() => opened.value !== null);
+/** Les opérations en cours restent dites sur la vue d'ensemble d'un service ouvert (leur « Répondre » est là), pas ailleurs. */
+const operationsShown = computed(() => !openedAside.value || tab.value === "detail");
+/** « Ajouter un serveur de jeu » (onglet Mods d'un moteur sans mods) : le Catalogue. */
+function goCatalogue() {
+  if (server.value) void router.push({ name: "catalogue", params: { id: server.value.id } });
+}
+
 function openDeploy() {
   if (server.value) void router.push({ name: "services-add", params: { id: server.value.id } });
 }
@@ -440,6 +443,7 @@ async function openDocs() {
 
     <template v-else>
       <EnginePanel
+        v-if="!openedAside"
         :engine="engine"
         :counts="counts"
         :is-admin="isAdmin"
@@ -451,6 +455,7 @@ async function openDocs() {
 
       <!-- Les opérations en cours : visibles de tous les comptes (BR-SVC-029) -->
       <OperationsStrip
+        v-if="operationsShown"
         :operations="running"
         :launched-by="launchedByOf"
         :allowed="rights.canAct.value"
@@ -533,6 +538,8 @@ async function openDocs() {
                 'svc__work--logs': opened && tab === 'logs',
                 'svc__work--settings': opened && tab === 'settings',
                 'svc__work--backups': opened && tab === 'backups',
+                'svc__work--mods': opened && tab === 'mods',
+                'svc__work--console': opened && tab === 'console',
                 'svc__work--grey':
                   (list.kind === 'live' && degradedList) || (list.kind === 'stale' && staleList),
               },
@@ -580,6 +587,7 @@ async function openDocs() {
                 :game-settings="rights.gameSettings.value"
                 :service-delete="rights.serviceDelete.value"
                 :service-backups="rights.serviceBackups.value"
+                :game-console="rights.gameConsole.value"
                 @update:tab="setTab"
                 @back="closeDetail"
                 @open-other="openDetail"
@@ -587,6 +595,7 @@ async function openDocs() {
                 @decide="decide"
                 @gesture="lifecycle.request"
                 @delete="removal.request"
+                @add-server="goCatalogue"
               />
             </div>
           </div>
@@ -614,7 +623,7 @@ async function openDocs() {
 
     <ServiceLifecycleDialog
       v-if="server && lifecycle.pending.value"
-      :open="lifecycle.open.value"
+      :open="lifecycle.open.value && !lifecycle.sequenceOpen.value"
       :server-id="server.id"
       :gesture="lifecycle.pending.value.gesture"
       :service="lifecycle.pending.value.service"
@@ -761,17 +770,13 @@ async function openDocs() {
   opacity: var(--opacity-stale);
 }
 
-/* Les réglages passent le détail en pleine largeur, comme les journaux, sans en fixer la hauteur (design 16.1). */
-.svc__work--settings .svc__list {
+/* Un service ouvert passe le détail en pleine largeur, sur tous les onglets (vue d'ensemble, réglages, mods, console,
+   sauvegardes) : même en-tête, même largeur. « Retour à la liste » ramène la liste (design 16.1, HRT-98). */
+.svc__work--open .svc__list {
   display: none;
 }
 
-/* Les sauvegardes aussi : la table a besoin de la largeur (HRT-98). */
-.svc__work--backups .svc__list {
-  display: none;
-}
-
-.svc__work--backups .svc__detail {
+.svc__work--open .svc__detail {
   max-width: none;
 }
 

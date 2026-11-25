@@ -118,7 +118,18 @@ async fn a_complete_deposit_is_read_placed_and_released() {
         let mut read = Vec::new();
         d.open(&i, "ana").unwrap().read_to_end(&mut read).unwrap();
         assert_eq!(read, b"PK-fake-pack-bytes");
-        d.place(&i, "ana", &k, &r, &sha(&read))
+        d.place(
+            &i,
+            "ana",
+            &k,
+            &r,
+            &sha(&read),
+            hearth_agent::application::ports::Perms::new(
+                hearth_agent::application::ports::Ownership::new(0, 0).unwrap(),
+                0o644,
+            )
+            .unwrap(),
+        )
     })
     .await
     .unwrap();
@@ -143,7 +154,7 @@ async fn another_account_or_a_bad_id_finds_nothing_and_nothing_is_placed() {
     let k = key.clone();
     let out = tokio::task::spawn_blocking(move || {
         let id = DepositId::parse(ID).unwrap();
-        let other = d.place(&id, "bob", &k, &rel, &sha(b"x"));
+        let other = d.place(&id, "bob", &k, &rel, &sha(b"x"), perms());
         let not_a_ulid = DepositId::parse("not-a-transfer").unwrap();
         (other, d.open(&not_a_ulid, "ana").err())
     })
@@ -169,7 +180,7 @@ async fn a_pack_that_changed_since_its_judgement_is_not_placed_and_stays_in_the_
     let k = key.clone();
     let result = tokio::task::spawn_blocking(move || {
         let id = DepositId::parse(ID).unwrap();
-        d.place(&id, "ana", &k, &rel, &sha(b"judged bytes"))
+        d.place(&id, "ana", &k, &rel, &sha(b"judged bytes"), perms())
     })
     .await
     .unwrap();
@@ -181,4 +192,12 @@ async fn a_pack_that_changed_since_its_judgement_is_not_placed_and_stays_in_the_
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_empty()
     );
+}
+
+fn perms() -> hearth_agent::application::ports::Perms {
+    hearth_agent::application::ports::Perms::new(
+        hearth_agent::application::ports::Ownership::new(0, 0).unwrap(),
+        0o644,
+    )
+    .unwrap()
 }

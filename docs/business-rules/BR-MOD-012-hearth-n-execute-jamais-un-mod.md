@@ -29,3 +29,4 @@ Hearth ne lance aucun programme d'installation, aucun script d'un pack, et ne d�
 
 ## Historique
 - 2026-11-15 : création (HRT-124).
+- 2026-11-18 : amendée (HRT-254, ADR-0062) : Hearth LIT au plus les fichiers d'identité d'un `.jar` (BR-MOD-022, 1 Mio chacun), comme il lit déjà la description d'un pack ; il n'exécute rien, ne charge aucune classe et n'ouvre aucune archive contenue dans le jar.

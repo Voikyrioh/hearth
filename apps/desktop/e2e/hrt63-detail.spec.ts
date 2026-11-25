@@ -139,6 +139,8 @@ test("états : sans le droit, détail réservé d'un service adopté, moteur mue
     "Réservé aux comptes qui peuvent gérer les services.",
   );
   await expect(page.locator("[data-detail-adopted]")).toContainText("Adopté par claire le");
+  // Un service ouvert prend toute la page : retour à la liste avant d'en ouvrir un autre.
+  await page.locator("[data-detail-back]").click();
   await page.locator("[data-row][data-key='c_web']").click();
   await expect(page.getByRole("button", { name: "Révéler les valeurs" })).toHaveAttribute(
     "aria-disabled",
@@ -161,7 +163,7 @@ test("états : sans le droit, détail réservé d'un service adopté, moteur mue
 });
 
 for (const width of [1280, 1366, 1920] as const) {
-  test(`mise en page à ${width} : liste compacte et détail côte à côte, rien ne déborde ni ne se chevauche`, async ({
+  test(`mise en page à ${width} : le détail prend toute la page, rien ne déborde`, async ({
     page,
   }) => {
     await open(page, width, 900);
@@ -180,12 +182,9 @@ for (const width of [1280, 1366, 1920] as const) {
     });
     expect(overflow).toEqual({ page: 0, content: 0 });
 
-    const list = await box(page, ".svc__list");
     const detail = await box(page, "[data-service-detail]");
-    // Côte à côte : la liste à gauche, le détail à sa droite, sans recouvrement.
-    expect(list.x + list.width).toBeLessThanOrEqual(detail.x + 1);
-    expect(list.width).toBeLessThanOrEqual(418 + 1);
-    expect(detail.width).toBeLessThanOrEqual(960 + 1);
+    // Le détail prend toute la page, sur tous les onglets : la liste n'est plus à côté.
+    await expect(page.locator(".svc__list")).toBeHidden();
     expect(detail.x + detail.width).toBeLessThanOrEqual(width);
     // Aucun enfant du détail ne dépasse la boîte du détail.
     const spill = await page.evaluate(() => {
@@ -198,8 +197,6 @@ for (const width of [1280, 1366, 1920] as const) {
       }).length;
     });
     expect(spill).toBe(0);
-    // La liste compacte garde ses colonnes lisibles : l'image passe sous le nom.
-    await expect(page.locator(".table__th--image").first()).toBeHidden();
     // Aucun bouton coupé.
     const cut = await page.evaluate(
       () =>

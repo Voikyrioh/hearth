@@ -64,6 +64,7 @@ function emptyBackup(id: string, patch: Partial<BackupInfo>): BackupInfo {
     image: "ghcr.io/example/terraria:1.4.4",
     integrity: "verified",
     verifiedAt: "2026-11-13T21:07:00Z",
+    mods: null,
     ...patch,
   };
 }
@@ -119,6 +120,32 @@ export class SimulatedBackups {
         emptyBackup(patch.id ?? `01SIMBK${String(this.nextId++).padStart(6, "0")}`, patch),
       ),
     );
+  }
+
+  /** La sauvegarde que l'agent fait avant un lot de mods : elle rejoint la liste du service, sous le nom que l'opération rend. */
+  /**
+   * La sauvegarde « Avant mods » : faite APRÈS l'arrêt du serveur (mode « Arrêter, sauvegarder, relancer », jamais « à
+   * chaud ») et avec la liste des mods d'avant (BR-MOD-034, 035).
+   */
+  addModsBackup(
+    serverId: string,
+    key: string,
+    id: string,
+    note: string,
+    mods: BackupInfo["mods"] = null,
+  ): void {
+    const created = new Date().toISOString();
+    const slot = this.slot(serverId, key);
+    const entry = emptyBackup(id, {
+      createdAt: created,
+      note,
+      mode: "stop_copy_start",
+      flags: [],
+      mods,
+      integrity: "verified",
+      verifiedAt: created,
+    });
+    this.lists.set(slot, [entry, ...(this.lists.get(slot) ?? [])]);
   }
 
   setPreview(serverId: string, key: string, preview: Partial<BackupPreview>): void {

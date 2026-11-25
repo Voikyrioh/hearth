@@ -13,10 +13,21 @@ const props = withDefaults(
     modelValue: boolean;
     disabled?: boolean;
     busy?: boolean;
+    /** Le geste est préparé, pas encore appliqué : l'interrupteur est en pointillé, d'une autre couleur que l'actif. */
+    pending?: boolean;
     needsLink?: NeedsLink;
     hint?: string;
+    /** L'`id` d'un texte écrit ailleurs qui dit pourquoi l'interrupteur est inactif (le droit, `ServiceRightReason`). */
+    describedBy?: string;
   }>(),
-  { disabled: false, busy: false, needsLink: undefined, hint: undefined },
+  {
+    disabled: false,
+    busy: false,
+    pending: false,
+    needsLink: undefined,
+    hint: undefined,
+    describedBy: undefined,
+  },
 );
 
 const emit = defineEmits<{ "update:modelValue": [value: boolean] }>();
@@ -38,11 +49,11 @@ function onClick() {
         v-bind="$attrs"
         type="button"
         role="switch"
-        :class="['toggle', { 'toggle--on': modelValue, 'toggle--busy': busy }]"
+        :class="['toggle', { 'toggle--on': modelValue, 'toggle--busy': busy, 'toggle--pending': pending }]"
         :aria-checked="modelValue"
         :aria-disabled="inert ? 'true' : undefined"
         :aria-busy="busy ? 'true' : undefined"
-        :aria-describedby="describedby"
+        :aria-describedby="[describedby, props.describedBy].filter(Boolean).join(' ') || undefined"
         @click="onClick"
       >
         <span class="toggle__knob" />
@@ -70,6 +81,12 @@ function onClick() {
   background: var(--ac);
 }
 
+.toggle--pending {
+  border-style: dashed;
+  border-color: var(--cool);
+  background: var(--cool-tint);
+}
+
 .toggle--busy {
   cursor: progress;
 }
@@ -88,5 +105,10 @@ function onClick() {
 .toggle--on .toggle__knob {
   background: var(--on-ac);
   transform: translateX(var(--toggle-travel));
+}
+
+.toggle--pending .toggle__knob,
+.toggle--pending.toggle--on .toggle__knob {
+  background: var(--cool);
 }
 </style>

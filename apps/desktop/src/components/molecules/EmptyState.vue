@@ -7,7 +7,7 @@ withDefaults(
   defineProps<{
     title: string;
     text: string;
-    heading?: "h1" | "h2";
+    heading?: "h1" | "h2" | "h3";
     illustration?: IllustrationName;
     size?: "md" | "lg";
   }>(),

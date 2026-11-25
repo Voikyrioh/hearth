@@ -356,6 +356,7 @@ async fn the_terraria_fiche_starts_takes_a_setting_stops_by_its_orders_and_keeps
             created_by: "fiche-live",
             rev: 1,
             managed_root: &managed_root,
+            jvm_options_env: None,
         },
     )
     .expect("plan");

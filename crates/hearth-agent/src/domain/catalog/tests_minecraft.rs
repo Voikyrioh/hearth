@@ -167,6 +167,8 @@ fn prominence_ii_the_server_pack_with_fabric_reaches_the_image_as_the_image_expe
         env(&draft, "JVM_XX_OPTS").as_deref(),
         Some("-XX:MaxRAMPercentage=75")
     );
+    // FIX:01M7Q1M71TKSBWVV0C0GTXWWXZ : la fiche déclare la variable qui reçoit la limite de mémoire.
+    assert_eq!(fiche.jvm_options_env(), Some("JVM_XX_OPTS"));
     // Arrêt propre : l'image reçoit le signal, attend l'enregistrement du monde ; le moteur attend plus longtemps.
     assert_eq!(env(&draft, "STOP_DURATION").as_deref(), Some("180"));
     assert_eq!(fiche.file.stop.world_saved, WorldSaved::ByImageOnSignal);
@@ -298,5 +300,9 @@ fn the_fiche_exposes_no_player_identity_and_no_curseforge_key() {
         assert!(!setting.key.starts_with("CF_"), "{}", setting.id);
     }
     let mods = fiche.file.mods.as_ref().expect("voies de mods");
-    assert_eq!(mods.ways.len(), 1, "seul le dépôt d'un pack est offert");
+    assert_eq!(
+        mods.ways.len(),
+        2,
+        "le dépôt d'un pack et celui de fichiers .jar"
+    );
 }

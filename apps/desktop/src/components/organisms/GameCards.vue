@@ -4,8 +4,11 @@ import GameAddressCard from "@/components/molecules/GameAddressCard.vue";
 import GamePasswordCard from "@/components/molecules/GamePasswordCard.vue";
 import GamePortsCard from "@/components/molecules/GamePortsCard.vue";
 import GameStopCard from "@/components/molecules/GameStopCard.vue";
+import PlayersOnlineCard from "@/components/molecules/PlayersOnlineCard.vue";
 import PublicAddressDialog from "@/components/organisms/PublicAddressDialog.vue";
 import { useGameView } from "@/composables/useGameView";
+import { useNow } from "@/composables/useNow";
+import { useOnlinePlayers } from "@/composables/useOnlinePlayers";
 import type { ActReport } from "@/composables/useReauth";
 import { useServerAction } from "@/composables/useServerAction";
 import { t } from "@/i18n";
@@ -33,8 +36,12 @@ const props = defineProps<{
   gone: boolean;
   /** L'agent sert les fonctions de jeu (`game-settings` annoncée) : sinon la vue n'est même pas demandée. */
   supported: boolean;
+  /** L'agent annonce `game-console` : la carte des joueurs connectés peut exister (HRT-291). */
+  consoleServed: boolean;
+  /** L'onglet « Console » existe : « Écrire aux joueurs dans la console » est proposé (HRT-291). */
+  consoleOpen?: boolean;
 }>();
-const emit = defineEmits<{ retryRights: [] }>();
+const emit = defineEmits<{ retryRights: []; openConsole: [] }>();
 
 const servers = useServersStore();
 const candidate = computed(
@@ -52,6 +59,14 @@ const game = useGameView(
 );
 
 const view = game.view;
+
+// Les joueurs connectés (HRT-291, BR-CONSOLE-011) : lus seulement pour un serveur de jeu dont l'agent parle à la console,
+// relus toutes les 30 secondes tant que la vue d'ensemble est ouverte. Sans console parlée : aucune carte.
+const clock = useNow();
+const players = useOnlinePlayers(
+  () => props.serverId,
+  () => (props.consoleServed && view.value ? props.service.key : null),
+);
 const toasts = useToastsStore();
 const action = useServerAction(() => props.serverId);
 
@@ -117,6 +132,14 @@ const stopped = computed(
 
 <template>
   <template v-if="view">
+    <PlayersOnlineCard
+      :state="players.state.value"
+      :now="clock"
+      :refreshing="players.refreshing.value"
+      :link-label="consoleOpen ? t('players.writeToPlayers') : undefined"
+      @refresh="players.refresh()"
+      @open-console="emit('openConsole')"
+    />
     <GameAddressCard
       :addresses="addresses"
       :stopped="stopped"

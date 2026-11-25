@@ -44,6 +44,9 @@ Trois choses atteignent le programme d'un jeu depuis Hearth : sa ligne de comman
 - Un service adopté, ou piloté par une unité du système, n'est jamais examiné : aucun ordre (`BR-JEU-001`).
 - Non fait ici : le signal d'arrêt de la fiche n'est pas posé à la création du conteneur (le plan fermé n'a pas ce champ) ; l'essai du canal sur la vraie image est le test `engine_real.rs` du job `engine`.
 
+## Avenant : la console distante est parlée dans les limites de l'ADR-0067 (HRT-267, HRT-268)
+Le point 8 (« Hearth ne se connecte pas à la console dans ce format ») est REMPLACÉ : quand la fiche déclare `[remote_console.use]`, l'agent se connecte à l'adresse IPv4 PRIVÉE du conteneur du service sur le réseau du moteur (`ContainerEngine::private_address`, lecture seule), au port conteneur de la console, avec le secret généré et scellé du service (descellé pour UN échange, jamais en argument, trace, erreur ni journal). Le point 4 est amendé : un texte saisi par un compte peut maintenant atteindre le jeu, mais PAR LA CONSOLE seulement (acte `ConsoleCommand` `0x30`, classe jugée par l'agent sur la politique de la fiche, mot de passe selon la classe) ; l'entrée standard (`send_stdin_line`) reste réservée aux littéraux de fiche, aucune route ne la porte. Le point 9 est INCHANGÉ : aucune commande n'est exécutée dans un conteneur (`rcon-cli` et `mc-send-to-console` restent écartés ; la garde `i4_the_engine_port_has_no_function_that_runs_a_command_in_a_container` ne bouge pas). Alternatives toujours rejetées : publier la console sur la boucle locale, lancer l'outil de l'image. Nouvelle garde : `GameConsole` n'est atteint que par `application/console.rs`.
+
 ## Quand NE PAS l'appliquer / limites
 - Un texte libre (nom de serveur avec des espaces) ne passe pas par un argument : par une variable ou un fichier, ou il est `not_exposed`.
 - Un arrêt qui ne passe pas par Hearth (redémarrage du serveur) n'envoie aucun ordre (`JEU-010`).

@@ -27,6 +27,7 @@ export const LABEL_KEYS: Record<OperationKind, MessageKey> = {
   backup: "serviceOps.label.backup",
   restore: "serviceOps.label.restore",
   world_import: "serviceOps.label.worldImport",
+  mods: "serviceOps.label.mods",
   unknown: "serviceOps.label.unknown",
 };
 
@@ -41,6 +42,7 @@ const SUBJECT_KEYS: Record<OperationKind, MessageKey> = {
   backup: "serviceOps.subject.backup",
   restore: "serviceOps.subject.restore",
   world_import: "serviceOps.subject.worldImport",
+  mods: "serviceOps.subject.mods",
   unknown: "serviceOps.subject.unknown",
 };
 
@@ -61,7 +63,9 @@ const STEP_KEYS: Record<string, MessageKey> = {
   erase: "serviceOps.steps.erase",
   remove_container: "serviceOps.steps.removeContainer",
   forget: "serviceOps.steps.forget",
+  place: "serviceOps.steps.place",
   save_world: "game.sequence.saveWorld",
+  console_save: "serviceOps.steps.consoleSave",
 };
 
 /** Le texte d'un statut EN COURS ; un statut définitif n'en a pas (son issue se dit par `outcomeText`). */
@@ -281,8 +285,30 @@ function backupOutcome(
   }
 }
 
+/**
+ * La note d'un enregistrement non confirmé (HRT-292, BR-CONSOLE-012) : l'étape `console_save` s'est close en échec, le jeu
+ * n'a pas confirmé que son monde était enregistré, et l'arrêt a continué. `null` : pas d'étape, ou confirmée.
+ */
+export function consoleSaveNote(operation: ServiceOperation): string | null {
+  const failed = operation.steps.some(
+    (row) => row.step === "console_save" && row.state === "failed",
+  );
+  return failed ? t("serviceOps.consoleSaveFailed") : null;
+}
+
 /** L'issue d'une opération terminée : sa phrase et son ton, ou `null` si elle ne l'est pas. */
 export function outcomeOf(
+  operation: ServiceOperation,
+  name: string,
+): { message: string; tone: OutcomeTone } | null {
+  const outcome = outcomeWithoutNote(operation, name);
+  const note = operation.status === "succeeded" ? consoleSaveNote(operation) : null;
+  if (!outcome || note === null) return outcome;
+  // L'arrêt a eu lieu, mais le monde n'a pas été confirmé enregistré : le succès ne se dit pas sans le dire.
+  return { message: `${outcome.message} ${note}`, tone: "warn" };
+}
+
+function outcomeWithoutNote(
   operation: ServiceOperation,
   name: string,
 ): { message: string; tone: OutcomeTone } | null {

@@ -214,6 +214,15 @@ pub trait ContainerEngine: Send + Sync {
     /// Le texte de la ligne n'est ni tracé ni gardé.
     async fn send_stdin_line(&self, id: &str, line: &FicheLiteral) -> Result<(), EngineError>;
 
+    /// L'adresse IPv4 d'un conteneur dans son réseau `bridge` (ou un réseau défini par l'utilisateur en pilote
+    /// `bridge`), seulement si elle est dans une plage privée (RFC 1918) et que le conteneur n'est pas en réseau
+    /// `host` : sinon `None` (HRT-267, ADR-0067 D2). Lecture seule : l'inspection est fraîche à chaque appel (un
+    /// redémarrage change l'adresse). Aucun port publié n'est jamais utilisé pour parler à la console. Par défaut :
+    /// `None` (un moteur qui ne sait pas la dire).
+    async fn private_address(&self, _id: &str) -> Result<Option<std::net::Ipv4Addr>, EngineError> {
+        Ok(None)
+    }
+
     /// L'image `dépôt:version` est-elle déjà sur le serveur (HRT-68, BR-DEPLOY-018) ? Si oui, elle est
     /// utilisée telle quelle, sans interroger le registre.
     async fn image_present(&self, image: &str) -> Result<bool, EngineError>;

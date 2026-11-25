@@ -11,3 +11,5 @@ Fenêtre de formulaire : `<dialog>` natif ouvert par `showModal()` (piège à fo
 - HRT-69 : `wide` (640 px, jeton `--wide-dialog-width`) pour un récapitulatif qui défile, titre et boutons collants.
 - HRT-69 : slot `actions` (remplace les boutons par défaut : une progression n'a ni envoi ni annulation à elle), `submitLabel` facultatif, attributs de l'appelant (`data-…`) posés sur le `<dialog>`.
 - Revue UX du 2026-10-24 : `submitReason` (constat 13) écrit à gauche des boutons pourquoi l'envoi est inactif (lu par le bouton, `aria-describedby`) ; la zone qui défile est remise en haut à l'ouverture (constat 15).
+
+`quietReason` : la raison du bouton inactif reste pour les lecteurs d'écran seulement quand le champ du mot de passe la dit déjà.

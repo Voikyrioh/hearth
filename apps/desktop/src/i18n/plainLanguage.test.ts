@@ -18,7 +18,10 @@ describe("textes d'exemple neutres", () => {
   };
   walk(fr);
   it.each([/forge/i, /192\.168\.1\.20/, /voiky/i])("aucun texte ne contient %s", (pattern) => {
-    // « CurseForge » est le nom d'une plateforme de mods (HRT-125), pas celui de la machine de Voiky.
-    expect(strings.filter((text) => pattern.test(text.replaceAll("CurseForge", "")))).toEqual([]);
+    // « CurseForge » est le nom d'une plateforme de mods (HRT-125), « Forge » et « NeoForge » ceux de moteurs de mods
+    // (HRT-261) : pas celui de la machine de Voiky, qui s'écrit en minuscules.
+    expect(
+      strings.filter((text) => pattern.test(text.replaceAll(/(Curse|Neo)?Forge/g, ""))),
+    ).toEqual([]);
   });
 });

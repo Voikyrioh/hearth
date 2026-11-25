@@ -5,7 +5,7 @@ titre: Sans console, tout ce qui est faisable est livré et chaque fonction qui 
 statut: active
 invariant: false
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-installer-serveur-de-jeu.md (BR-FICHE-051), HRT-109
-maj: 2026-10-24
+maj: 2026-11-23
 ---
 
 # BR-FICHE-051
@@ -13,10 +13,13 @@ maj: 2026-10-24
 ## Règle
 Sous « Ce qui attend la console » (repliée), une ligne par fonction que le jeu offre par sa console et que Hearth n'offre pas encore : le bouton n'est pas caché, il est présent et inactif, avec « Cette fonction attend la console de Hearth, qui n'est pas encore livrée. » suivi du contournement. Trois fonctions valent pour tout jeu et sont écrites dans le client : appliquer un réglage sans redémarrer, voir qui est connecté, écrire à tous les joueurs. Celles qui sont propres à un jeu (bannir, régler l'heure, enregistrer le monde à la demande) ne peuvent pas être écrites dans un client sans règle de jeu : elles viendront de la fiche.
 
+Amendée par HRT-269 (BR-CONSOLE-002) : pour un serveur dont l'agent parle à la console (capacité `game-console`, fiche qui l'ouvre), « Voir qui est connecté » et « Écrire à tous les joueurs » sont livrés (carte des joueurs, onglet Console) et quittent la section, qui ne garde que « Appliquer un réglage sans redémarrer » et dit où trouver le reste, avec « Ouvrir la console ». Les autres jeux gardent la section inchangée.
+
 ## Application (code)
-- `apps/desktop/src/components/molecules/ConsoleWaitSection.vue`
+- `apps/desktop/src/components/molecules/ConsoleWaitSection.vue` (prop `served`)
 
 ## Vérification
+- `apps/desktop/src/components/molecules/consoleWait.test.ts`
 - `apps/desktop/src/components/organisms/gameSettingsTab.test.ts::le fichier brut, la console et les autres réglages`
 
 ## Cas limites
@@ -27,3 +30,4 @@ BR-FICHE-057
 
 ## Historique
 - 2026-10-24 — création (HRT-109).
+- 2026-11-23 — amendée (HRT-269) : section réduite pour un serveur à console parlée.

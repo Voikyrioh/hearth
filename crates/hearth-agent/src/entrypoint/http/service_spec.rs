@@ -207,7 +207,10 @@ pub async fn tail(
         .read(id, viewer_of(&session))
         .await
         .map_err(access_error)?;
-    let found = state.service_updates.tail(id);
+    let found = state
+        .service_updates
+        .tail(id)
+        .or_else(|| state.mods.tail(id));
     found.map(Json).ok_or_else(|| {
         ApiError::new(
             ErrorCode::OperationNotFound,

@@ -290,6 +290,38 @@ export const commands = {
 	 */
 	saveBackupSettings: (serverId: string, key: string, settings: BackupSettingsDto, adminPassword: string | null) => typedError<BackupSettingsOutcome, LinkFailure>(__TAURI_INVOKE("save_backup_settings", { serverId, key, settings, adminPassword })),
 	/**
+	 *  La liste des mods d'un serveur Minecraft (`GET /services/{key}/mods`, HRT-260) : une LECTURE ouverte à tout compte.
+	 *  Un gros serveur se lit en plusieurs fois (`unread`) : l'interface relit.
+	 */
+	listMods: (serverId: string, key: string) => typedError<ModsOutcome, LinkFailure>(__TAURI_INVOKE("list_mods", { serverId, key })),
+	/**
+	 *  Juge des dépôts de la zone d'attente contre les mods du service (`POST …/mods/check`) : une CONSULTATION, rien
+	 *  n'est écrit sur le service. Les identifiants sont ceux des transferts de l'interface.
+	 */
+	checkMods: (serverId: string, key: string, deposits: string[]) => typedError<ModsCheckOutcome, LinkFailure>(__TAURI_INVOKE("check_mods", { serverId, key, deposits })),
+	/**
+	 *  Applique un lot de mods (`POST …/mods/apply`, acte `ModsApply`) : un acte d'administration JAMAIS couvert par
+	 *  l'élévation (le mot de passe à chaque fois, BR-MOD-031). L'agent répond `202` : l'issue arrive par le suivi des
+	 *  opérations. Jamais rejoué.
+	 */
+	applyMods: (serverId: string, key: string, batch: ModsApplyDto, adminPassword: string | null) => typedError<ModsApplyOutcome, LinkFailure>(__TAURI_INVOKE("apply_mods", { serverId, key, batch, adminPassword })),
+	/**
+	 *  La liste des mods d'une sauvegarde (`GET …/backups/{id}/mods`, HRT-294), avec la comparaison aux mods actuels si
+	 *  `compare` : une lecture.
+	 */
+	readBackupMods: (serverId: string, key: string, backupId: string, compare: boolean) => typedError<BackupModsOutcome, LinkFailure>(__TAURI_INVOKE("read_backup_mods", { serverId, key, backupId, compare })),
+	/**  Les dernières lignes du journal d'une opération de service et la cause reconnue (`GET /operations/services/{id}/tail`). */
+	readOperationTail: (serverId: string, operationId: string) => typedError<OperationTailOutcome, LinkFailure>(__TAURI_INVOKE("read_operation_tail", { serverId, operationId })),
+	/**  Ce que la console d'un service permet (`GET /services/{key}/console`, HRT-291) : rien n'est envoyé au jeu. */
+	describeConsole: (serverId: string, key: string) => typedError<ConsoleOutcome, LinkFailure>(__TAURI_INVOKE("describe_console", { serverId, key })),
+	/**  Les joueurs connectés d'un service (`GET /services/{key}/players`) : une lecture ouverte à tout compte. */
+	readPlayers: (serverId: string, key: string) => typedError<PlayersOutcome, LinkFailure>(__TAURI_INVOKE("read_players", { serverId, key })),
+	/**
+	 *  Envoie UNE commande à la console du jeu (`POST …/console`, acte `ConsoleCommand`) : le mot de passe suit la classe
+	 *  (toujours pour une commande sensible) et l'état de confiance. Jamais rejoué ; le texte n'est ni gardé ni tracé.
+	 */
+	sendConsole: (serverId: string, key: string, command: string, commandClass: number, adminPassword: string | null) => typedError<ConsoleSendOutcome, LinkFailure>(__TAURI_INVOKE("send_console", { serverId, key, command, commandClass, adminPassword })),
+	/**
 	 *  Les constats du formulaire de déploiement sur le nom, les ports et l'image (`POST /deployments/check`) : une
 	 *  CONSULTATION, ni suivi ni journal (BR-DEPLOY-033), jamais un secret. Hors « Connecté » : `NotConnected`.
 	 */
@@ -394,6 +426,17 @@ export const commands = {
 	pickDepositFile: () => typedError<{
 	path: string,
 } | null, LinkFailure>(__TAURI_INVOKE("pick_deposit_file")),
+	/**
+	 *  La boîte « Ouvrir » du système avec plusieurs fichiers (les mods d'un lot, HRT-262) : les chemins choisis, ou rien si
+	 *  le compte annule la boîte. Le contenu des fichiers ne passe jamais par la page.
+	 */
+	pickDepositFiles: () => typedError<DepositSourceDto[], LinkFailure>(__TAURI_INVOKE("pick_deposit_files")),
+	/**
+	 *  L'empreinte SHA-256 (hexadécimal, minuscules) d'un fichier local choisi par la boîte « Ouvrir » : l'agent la compare à
+	 *  celle qu'il lit dans la zone d'attente avant de poser un mod (BR-MOD-022). Lue par morceaux sur un fil bloquant ; un
+	 *  fichier illisible rend `None` (jamais une empreinte devinée).
+	 */
+	fileSha256: (source: DepositSourceDto) => typedError<string | null, LinkFailure>(__TAURI_INVOKE("file_sha256", { source })),
 	/**
 	 *  Ouvre un dépôt dans la zone d'attente de l'agent (`POST /deposits`, acte `FileWrite`) puis envoie le fichier en
 	 *  tâche de fond. `admin_password` : le mot de passe de confirmation selon l'état de l'élévation. Jamais rejoué : un
@@ -551,7 +594,13 @@ export type AdminActKindDto = "account_create" | "account_role" | "account_passw
  */
 "service_update" | 
 /**  Déposer un fichier dans la zone d'attente de l'agent (HRT-96, BR-FILES-023) : couvert par l'élévation de cinq minutes. */
-"file_write";
+"file_write" | 
+/**  Appliquer un lot de mods (HRT-258, BR-MOD-031) : le mot de passe à chaque fois, jamais couvert par l'élévation. */
+"mods_apply" | 
+/**  Envoyer une commande libre à la console d'un jeu (HRT-268, BR-CONSOLE-005) : un acte de pilotage. */
+"console_command_free" | 
+/**  Envoyer une commande sensible à la console d'un jeu : le mot de passe à chaque fois, dans tous les états. */
+"console_command_sensitive";
 
 /**  Qui a adopté un service, et quand (HRT-79). */
 export type AdoptionDto = {
@@ -835,8 +884,59 @@ export type BackupFlagDto = "hot" | "maybe_inconsistent" | "forced_stop" | "befo
 /**  L'état d'intégrité d'une sauvegarde (BR-BACKUP-013). */
 export type BackupIntegrityDto = "verified" | "corrupt" | "unchecked" | "missing" | "unknown";
 
+/**  Un fichier de la sauvegarde. */
+export type BackupModItemDto = {
+	file: string | null,
+	rank: number,
+	/**  `active`, `disabled`, `retired` ou `unknown`. */
+	place: string,
+	origin: string,
+	identity: ModIdentityDto | null,
+};
+
 /**  Comment la copie est faite (BR-BACKUP-006). */
 export type BackupModeDto = "stopped" | "hot" | "stop_copy_start" | "unknown";
+
+export type BackupModsCompareDto = {
+	complete: boolean,
+	unread: number,
+	same: boolean,
+	changes: ModChangeDto[],
+};
+
+export type BackupModsCountsDto = {
+	active: number,
+	disabled: number,
+	retired: number,
+	notListed: number,
+};
+
+/**  La liste des mods d'une sauvegarde. */
+export type BackupModsDto = {
+	/**  `recorded`, `partial`, `unreadable`, `not_in_backup`, `not_recorded` ou `unknown`. */
+	state: string,
+	recordedAt: string | null,
+	game: BackupModsGameDto,
+	counts: BackupModsCountsDto,
+	mods: BackupModItemDto[],
+	compare: BackupModsCompareDto | null,
+};
+
+/**  Le moteur et la version de Minecraft du serveur au moment de la sauvegarde. */
+export type BackupModsGameDto = {
+	loader: string | null,
+	minecraft: string | null,
+};
+
+export type BackupModsOutcome = { kind: "ready"; view: BackupModsDto } | { kind: "refused"; refusal: ModsReadRefusal };
+
+/**  Le résumé joint à chaque sauvegarde de la liste. */
+export type BackupModsSummaryDto = {
+	state: string,
+	active: number,
+	disabled: number,
+	retired: number,
+};
 
 /**  De quoi bâtir la fenêtre de création. */
 export type BackupPreviewDto = {
@@ -920,6 +1020,8 @@ export type BackupViewDto = {
 	image: string,
 	integrity: BackupIntegrityDto,
 	verifiedAt: string | null,
+	/**  Le résumé de la liste des mods de cette sauvegarde (HRT-294) : absent pour un service sans mods. */
+	mods: BackupModsSummaryDto | null,
 };
 
 /**  La liste des sauvegardes : prête, ou refusée par son code. */
@@ -986,6 +1088,64 @@ export type CatalogDto = {
 };
 
 export type ChangeActionDto = "set" | "unset" | "reset" | "from_import";
+
+export type ConsoleLimitsDto = {
+	maxChars: number,
+	perMinute: number,
+	replyTimeoutS: number,
+};
+
+export type ConsoleOutcome = { kind: "ready"; view: ConsoleViewDto } | { kind: "refused"; refusal: ConsoleReadRefusal };
+
+export type ConsolePolicyDto = {
+	refused: RefusedVerbDto[],
+	sensitive: SensitiveVerbDto[],
+};
+
+/**  Pourquoi l'agent n'a pas donné une lecture de la console ou des joueurs. Sans texte. */
+export type ConsoleReadRefusal = { kind: "service_not_found" } | { kind: "other" };
+
+/**  Pourquoi l'agent a refusé une commande. Sans texte : l'interface choisit les phrases d'après `kind`. */
+export type ConsoleRefusal = { kind: "wrong_password" } | { kind: "password_required" } | { kind: "too_many_attempts"; retry_after_s: number } | { kind: "busy" } | { kind: "service_not_found" } | { kind: "service_adopted" } | 
+/**  La fiche n'ouvre pas la console à Hearth. */
+{ kind: "not_available" } | 
+/**  Forme refusée : `empty`, `too_long` ou `control_char`. */
+{ kind: "invalid"; reason: string | null } | 
+/**  Verbe refusé : `use_hearth_stop`, `use_hearth_restart` ou `breaks_server`. */
+{ kind: "verb_refused"; reason: string | null } | 
+/**  La classe signée n'est pas celle que l'agent juge : mettre Hearth à jour. */
+{ kind: "class_mismatch" } | { kind: "not_running" } | { kind: "starting" } | 
+/**  Une opération exclusive tient le service. */
+{ kind: "operation_in_progress" } | { kind: "rate_limited"; retry_after_s: number | null } | 
+/**  La console du jeu n'a pas pu être jointe. */
+{ kind: "unreachable" } | { kind: "other" };
+
+/**  La réponse du jeu à une commande : du texte hostile, jamais montré par `Debug`. */
+export type ConsoleReplyDto = {
+	/**  `answered`, `empty`, `no_answer` ou `unknown`. */
+	outcome: string,
+	reply: string | null,
+	truncated: boolean,
+};
+
+/**
+ *  L'issue d'une commande : répondue, refusée, ou résultat inconnu (le lien est tombé avant la réponse : la commande a
+ *  peut-être été exécutée, elle n'est jamais renvoyée).
+ */
+export type ConsoleSendOutcome = { kind: "replied"; reply: ConsoleReplyDto } | { kind: "refused"; refusal: ConsoleRefusal } | { kind: "unknown"; opId: string };
+
+/**  Ce que la console permet maintenant. */
+export type ConsoleViewDto = {
+	available: boolean,
+	/**  `adopted`, `no_console`, `protocol_unsupported` ou `unknown` ; absent si la console est ouverte. */
+	unavailableReason: string | null,
+	/**  `ready`, `starting`, `stopped`, `busy` ou `unknown`. */
+	state: string,
+	canWrite: boolean,
+	policy: ConsolePolicyDto,
+	quick: QuickCommandDto[],
+	limits: ConsoleLimitsDto | null,
+};
 
 export type CpuInfoDto = {
 	model: string,
@@ -1542,7 +1702,7 @@ export type FicheMemoryNeedDto = {
 
 /**  Les voies de mods d'une fiche (HRT-124), dans l'ordre où l'écran les montre. */
 export type FicheModsDto = {
-	/**  `drop_files` ou `drop_pack` ; une voie que ce client ne connaît pas n'est pas montrée. */
+	/**  `drop_files`, `drop_pack` ou `drop_jars` ; une voie que ce client ne connaît pas n'est pas montrée. */
 	ways: string[],
 	pack: FichePackWayDto | null,
 	/**  L'indication de la fiche pour le dossier « Tes mods ». */
@@ -1649,6 +1809,8 @@ export type FicheStopDto = {
 	graceSeconds: number,
 	worldSaved: FicheWorldSavedDto,
 	sequenceTested: boolean,
+	/**  Hearth enregistre le monde par la console avant l'arrêt (HRT-292). */
+	consoleSave: boolean,
 };
 
 /**  Un thème en mots simples (BR-FICHE-041). */
@@ -2011,6 +2173,80 @@ export type MetricsEvent = {
 	levels: LevelsDto,
 };
 
+/**  Un ajout du lot : le dépôt contrôlé, son empreinte et le fichier qu'il remplace. */
+export type ModAddDto = {
+	deposit: string,
+	sha256: string,
+	replace: string | null,
+};
+
+/**  Un écart entre la sauvegarde et les mods actuels. */
+export type ModChangeDto = {
+	/**  `added`, `removed`, `version_changed`, `enabled`, `disabled` ou `unknown`. */
+	kind: string,
+	id: string | null,
+	name: string | null,
+	file: string | null,
+	backupVersion: string | null,
+	currentVersion: string | null,
+};
+
+/**  Le jugement d'un dépôt. */
+export type ModCheckFileDto = {
+	deposit: string,
+	/**  `add`, `replace`, `refused` ou `unknown`. */
+	outcome: string,
+	identity: ModIdentityDto | null,
+	targetFile: string | null,
+	replaces: ModReplacesDto | null,
+	verdict: ModVerdictDto | null,
+	/**  Pour un refus : `MOD_UNRECOGNIZED`, `MOD_TOO_LARGE`, `MOD_INCOMPATIBLE_LOADER`, etc. */
+	refusal: string | null,
+	refusalValues: RefusalValuesDto | null,
+};
+
+/**  Ce que le mod dit de lui-même. */
+export type ModIdentityDto = {
+	id: string,
+	name: string | null,
+	version: string | null,
+	loader: string,
+	minecraftDeclared: boolean,
+	/**  `both`, `server`, `client` ou `unknown`. */
+	environment: string,
+};
+
+/**  Un fichier du dossier des mods ou de « Mods retirés ». */
+export type ModItemDto = {
+	file: string | null,
+	rank: number,
+	/**  `active`, `retired` ou `unknown`. */
+	place: string,
+	enabled: boolean,
+	/**  `server_pack`, `hearth`, `modrinth_pack`, `manual` ou `unknown`. */
+	origin: string,
+	readableName: boolean,
+	identity: ModIdentityDto | null,
+	verdict: ModVerdictDto,
+};
+
+/**  Le fichier qu'un dépôt remplace. */
+export type ModReplacesDto = {
+	file: string,
+	version: string | null,
+};
+
+/**  Le verdict de compatibilité d'un mod. */
+export type ModVerdictDto = {
+	/**
+	 *  `compatible`, `unverified`, `to_complete`, `incompatible_loader`, `incompatible_minecraft`, `duplicate`,
+	 *  `unrecognized` ou `unknown`.
+	 */
+	code: string,
+	missing: string[],
+	neededBy: string[],
+};
+
 /**  Ce qu'un pack Modrinth dit de lui-même (textes nettoyés et bornés par l'agent). */
 export type ModrinthPackDto = {
 	name: string,
@@ -2023,6 +2259,74 @@ export type ModrinthPackDto = {
 	downloads: number,
 	/**  Les hôtes de ces téléchargements. */
 	hosts: string[],
+};
+
+/**  Le lot à appliquer. */
+export type ModsApplyDto = {
+	add: ModAddDto[],
+	retire: string[],
+	restore: string[],
+	disable: string[],
+	enable: string[],
+};
+
+/**
+ *  L'issue de l'application : acceptée (l'opération court à l'arrière-plan), refusée, ou résultat inconnu (le lien
+ *  est tombé avant la réponse : jamais rejoué).
+ */
+export type ModsApplyOutcome = { kind: "accepted"; operationId: string; backupId: string } | { kind: "refused"; refusal: ModsApplyRefusal } | { kind: "unknown"; opId: string };
+
+/**  Pourquoi l'agent a refusé l'application d'un lot. Sans texte. */
+export type ModsApplyRefusal = 
+/**  Un refus commun aux actes de service : mot de passe, verrou, espace, moteur (comme une sauvegarde). */
+{ kind: "common"; refusal: BackupRefusal } | 
+/**
+ *  Un refus propre aux mods : `MODS_BATCH_INVALID`, `MOD_REFUSED`, `MOD_FILE_MISSING`, `MOD_IN_MODRINTH_PACK`,
+ *  `MOD_ALREADY_ACTIVE`, `MOD_NAME_TAKEN`, `MODS_FOLDER_BLOCKED`, `DEPOSIT_UNKNOWN`, `MODS_NOT_APPLICABLE`,
+ *  `NOT_A_GAME_SERVICE`. `deposit` et `reason` : le dépôt et le code d'un `MOD_REFUSED`.
+ */
+{ kind: "mod"; code: string; deposit: string | null; reason: string | null };
+
+export type ModsCheckDto = {
+	files: ModCheckFileDto[],
+};
+
+export type ModsCheckOutcome = { kind: "ready"; view: ModsCheckDto } | { kind: "refused"; refusal: ModsReadRefusal };
+
+/**  Le jeu tel que l'agent le comprend pour juger les mods. */
+export type ModsGameDto = {
+	loader: string | null,
+	minecraft: string | null,
+	/**  `setting`, `log`, `modrinth_manifest` ou `unknown`. */
+	minecraftFrom: string,
+	updatesEveryStart: boolean,
+	/**  `none`, `server_pack`, `modrinth_pack` ou `unknown`. */
+	pack: string,
+};
+
+export type ModsOutcome = { kind: "ready"; view: ModsViewDto } | { kind: "refused"; refusal: ModsReadRefusal };
+
+/**  Pourquoi l'agent n'a pas donné une lecture des mods (liste, contrôle, liste d'une sauvegarde). Sans texte. */
+export type ModsReadRefusal = 
+/**  Clé inconnue, ou service qui n'est pas un serveur de jeu créé par Hearth. */
+{ kind: "service_not_found" } | { kind: "service_adopted" } | 
+/**  Le moteur du serveur ne charge pas de mods (BR-MOD-030). */
+{ kind: "not_applicable" } | 
+/**  Un dépôt du contrôle n'existe pas ou n'est plus dans la zone d'attente. */
+{ kind: "deposit_unknown" } | 
+/**  Le dossier des mods est un lien ou n'est pas un dossier. */
+{ kind: "folder_blocked" } | 
+/**  La sauvegarde n'existe pas pour ce service. */
+{ kind: "backup_not_found" } | { kind: "other" };
+
+/**  La liste des mods d'un service. */
+export type ModsViewDto = {
+	/**  `mods`, `no_mods`, `plugins`, `no_way` ou `unknown`. */
+	applicable: string,
+	game: ModsGameDto,
+	mods: ModItemDto[],
+	unread: number,
+	truncated: boolean,
 };
 
 export type MountDto = {
@@ -2098,9 +2402,23 @@ export type OperationEventDto = {
 	outcome: OutcomeDto,
 };
 
-export type OperationKindDto = "start" | "stop" | "restart" | "deploy" | "update" | "delete" | "resources" | "backup" | "restore" | "world_import" | "unknown";
+export type OperationKindDto = "start" | "stop" | "restart" | "deploy" | "update" | "delete" | "resources" | "backup" | "restore" | "world_import" | 
+/**  Appliquer un lot de mods (HRT-258). */
+"mods" | "unknown";
 
 export type OperationStatusDto = "accepted" | "running" | "awaiting_decision" | "cancelling" | "cancelled" | "rolling_back" | "rolled_back" | "succeeded" | "failed" | "interrupted" | "needs_attention" | "unknown";
+
+/**
+ *  Les dernières lignes du journal d'une opération et, si l'agent la reconnaît, la cause et sa phrase en clair. Les
+ *  lignes sont du texte du jeu : jamais interprétées, jamais tracées (`Debug` ne les montre pas).
+ */
+export type OperationTailDto = {
+	lines: string[],
+	reason: string | null,
+	sentence: string | null,
+};
+
+export type OperationTailOutcome = { kind: "ready"; tail: OperationTailDto } | { kind: "refused"; refusal: ModsReadRefusal };
 
 export type OriginDto = "hearth" | "external" | "unknown";
 
@@ -2164,6 +2482,20 @@ export type PasswordNeedDto = "no" | "unless_elevated" | "yes";
 
 export type PasswordRuleDto = "required" | "min_length" | "digit" | "lowercase" | "uppercase" | "contains_username";
 
+export type PlayersOutcome = { kind: "ready"; view: PlayersViewDto } | { kind: "refused"; refusal: ConsoleReadRefusal };
+
+/**  Les joueurs connectés. Les pseudos sont du texte du jeu : `Debug` ne les montre pas. */
+export type PlayersViewDto = {
+	/**  `ok`, `stopped`, `starting`, `unavailable`, `no_console` ou `unknown`. */
+	state: string,
+	online: number | null,
+	max: number | null,
+	names: string[] | null,
+	hiddenNames: number,
+	moreNames: number,
+	readAt: string | null,
+};
+
 /**
  *  Le constat sur un port du serveur. `holder` : le service, le programme, ou le conteneur non adopté (son nom,
  *  à défaut son image : BR-ADOPT-022, HRT-214), selon `status`.
@@ -2216,6 +2548,15 @@ export type PublicAddressRefusal = { kind: "wrong_password" } | { kind: "passwor
 /**  L'agent refuse la forme de l'adresse. */
 { kind: "invalid" } | { kind: "other" };
 
+/**  Une commande rapide de la fiche. */
+export type QuickCommandDto = {
+	id: string,
+	label: string,
+	text: string,
+	/**  `send` ou `fill`. */
+	mode: string,
+};
+
 export type ReasonDto = "no_session" | "expired" | "stored_password_refused" | "user_disconnected" | "revoked" | 
 /**  Fin de session pour un motif que cette version ne connaît pas (agent plus récent). */
 "ended";
@@ -2261,10 +2602,24 @@ export type ReauthStateDto = {
 	trust: TrustLevelDto | null,
 };
 
+/**  Les valeurs d'un refus de moteur ou de version. */
+export type RefusalValuesDto = {
+	loader: string | null,
+	serverLoader: string | null,
+	serverMinecraft: string | null,
+};
+
 /**  Une fiche que l'agent a écartée : son dossier et l'invariant violé, jamais un contenu. */
 export type RefusedFicheDto = {
 	dir: string,
 	invariant: string,
+};
+
+/**  Un verbe que Hearth n'envoie jamais. */
+export type RefusedVerbDto = {
+	verb: string,
+	/**  `use_hearth_stop`, `use_hearth_restart` ou `breaks_server`. */
+	reason: string,
 };
 
 export type RestartDto = "unless_stopped" | "always" | "on_failure" | "none" | "supervisor" | "unknown";
@@ -2352,6 +2707,15 @@ export type SecurityEvent = {
  *  d'avant l'alerte et le mode attaque : l'agent répond `404`).
  */
 export type SecurityRead = { kind: "known"; snapshot: SecurityEvent } | { kind: "unsupported" };
+
+/**  Un verbe sensible, avec les mots du jeu pour dire pourquoi le mot de passe est demandé. */
+export type SensitiveVerbDto = {
+	verb: string,
+	title: string,
+	sentence: string,
+	/**  `first_arg` ou `none`. */
+	target: string,
+};
 
 /**  Un serveur du carnet, sans secret. */
 export type ServerDto = {
@@ -2442,6 +2806,8 @@ export type ServiceRightsDto = {
 	serviceDelete: boolean,
 	/**  L'agent annonce `service-backups` (HRT-97) : seul cas où l'onglet « Sauvegardes » peut exister (HRT-98). */
 	serviceBackups: boolean,
+	/**  L'agent annonce `game-console` (HRT-268) : seul cas où l'onglet « Console » et la carte des joueurs peuvent exister. */
+	gameConsole: boolean,
 	account: string,
 };
 

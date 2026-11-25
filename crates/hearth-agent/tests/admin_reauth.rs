@@ -129,6 +129,16 @@ enum Spec {
     Deposit {
         body: Value,
     },
+    /// Appliquer un lot de mods (HRT-258) : le nombre de changements et l'empreinte de leur liste sont signés.
+    ModsApply {
+        key: String,
+        body: Value,
+    },
+    /// Envoyer une commande à la console d'un serveur de jeu (HRT-268) : l'empreinte de la ligne et sa classe sont signées.
+    Console {
+        key: String,
+        body: Value,
+    },
 }
 
 fn role_wire(role: RoleName) -> &'static str {
@@ -212,6 +222,14 @@ impl Spec {
                 }
             }
             Self::BackupDelete { id } => AdminAct::BackupDelete { target: id },
+            Self::ModsApply { key, body } => AdminAct::mods_apply(
+                key.as_str().into(),
+                &serde_json::from_value(body.clone()).expect("corps du lot"),
+            ),
+            Self::Console { key, body } => AdminAct::console_command(
+                key.as_str().into(),
+                &serde_json::from_value(body.clone()).expect("corps de la commande"),
+            ),
             Self::Deposit { body } => {
                 let request: hearth_proto::api::transfers::DepositRequest =
                     serde_json::from_value(body.clone()).expect("corps du dépôt");
@@ -324,6 +342,16 @@ impl Spec {
             ),
             Self::BackupDelete { id } => (Method::DELETE, format!("/backups/{id}"), json!({})),
             Self::Deposit { body } => (Method::POST, "/deposits".to_owned(), body.clone()),
+            Self::ModsApply { key, body } => (
+                Method::POST,
+                format!("/services/{key}/mods/apply"),
+                body.clone(),
+            ),
+            Self::Console { key, body } => (
+                Method::POST,
+                format!("/services/{key}/console"),
+                body.clone(),
+            ),
             Self::BackupSettings { key, body } => (
                 Method::PUT,
                 format!("/services/{key}/backup-settings"),
@@ -534,6 +562,50 @@ impl Spec {
             Self::BackupDelete { .. } => vec![Self::BackupDelete {
                 id: "01J9ZY0G3Q8M2K6W4T7V5N1B9X".into(),
             }],
+            // La clé du service, l'empreinte de la ligne normalisée et sa classe sont signées ; jamais le texte.
+            Self::Console { key, body } => {
+                let changed = |command: &str, class: u64| {
+                    let mut other = body.clone();
+                    other["command"] = json!(command);
+                    other["class"] = json!(class);
+                    Self::Console {
+                        key: key.clone(),
+                        body: other,
+                    }
+                };
+                vec![
+                    Self::Console {
+                        key: "h_01JZ0000000000000000000098".into(),
+                        body: body.clone(),
+                    },
+                    changed("time set night", 1),
+                    changed("time set day", 2),
+                ]
+            }
+            // La clé du service, le nombre de changements et l'empreinte de leur liste (chacun préfixé de son genre) sont
+            // signés ; jamais un nom de fichier.
+            Self::ModsApply { key, body } => {
+                let changed = |change: &dyn Fn(&mut Value)| {
+                    let mut other = body.clone();
+                    change(&mut other);
+                    Self::ModsApply {
+                        key: key.clone(),
+                        body: other,
+                    }
+                };
+                vec![
+                    Self::ModsApply {
+                        key: "h_01JZ0000000000000000000098".into(),
+                        body: body.clone(),
+                    },
+                    changed(&|b| b["retire"] = json!(["autre.jar"])),
+                    changed(&|b| {
+                        b["retire"] = json!([]);
+                        b["disable"] = json!(["old.jar"]);
+                    }),
+                    changed(&|b| b["retire"] = json!(["old.jar", "autre.jar"])),
+                ]
+            }
             // Le dernier nom du fichier et sa taille sont signés.
             Self::Deposit { body } => {
                 let changed = |change: &dyn Fn(&mut Value)| {
@@ -838,6 +910,33 @@ impl Bench {
                     body: json!({ "name": "pack.zip", "size": 4096 }),
                 }
             }
+            ActKind::ModsApply => {
+                // Un serveur Minecraft Fabric qui monte `/data`, un mod à retirer : aucun dépôt à passer.
+                self.env.grant_services("marie").await;
+                let key = self.mods_service().await;
+                Spec::ModsApply {
+                    key,
+                    body: json!({ "retire": ["old.jar"] }),
+                }
+            }
+            ActKind::ConsoleCommand => {
+                // Un serveur Minecraft en marche dont la console répond (faux jeu) : une commande libre.
+                self.env.grant_services("marie").await;
+                let n = self
+                    .services
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let key = support::game::minecraft_console_service(
+                    &self.env,
+                    &self.engine,
+                    &self.state.services,
+                    n,
+                )
+                .await;
+                Spec::Console {
+                    key: key.as_str().to_owned(),
+                    body: json!({ "command": "time set day", "class": 1 }),
+                }
+            }
             ActKind::BackupSettings => {
                 let key = self.backup_service().await;
                 Spec::BackupSettings {
@@ -1001,6 +1100,27 @@ impl Bench {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         key
+    }
+
+    /// Un serveur Minecraft Fabric à mods, arrêté, avec un mod `old.jar` dans `data/mods` (HRT-258).
+    async fn mods_service(&self) -> String {
+        let n = self
+            .services
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let key = support::game::minecraft_mods_service(
+            &self.env,
+            &self.deploy.safe_fs,
+            n,
+            "fabric",
+            "1.20.1",
+        )
+        .await;
+        self.deploy.safe_fs.seed_file(
+            &key,
+            "data/mods/old.jar",
+            b"PK-un-jar-que-seul-le-nom-interesse",
+        );
+        key.as_str().to_owned()
     }
 
     /// Un serveur de jeu installé depuis la fiche de Terraria, avec son fichier de réglages vide (HRT-108).
@@ -1220,6 +1340,7 @@ async fn every_admin_act_with_a_valid_confirmation_succeeds_and_leaves_one_succe
                 | ActKind::ServiceUpdate
                 | ActKind::ServiceDelete
                 | ActKind::BackupCreate
+                | ActKind::ModsApply
         ) {
             // Démarrer, arrêter, redémarrer répondent `202` (HRT-64), comme déployer (HRT-68) : leur entrée
             // réussie est écrite à la fin de l'action, à l'arrière-plan.
@@ -1324,7 +1445,10 @@ async fn a_proof_for_another_act_target_account_session_or_replayed_is_refused_a
         // comparaison est prise une fois finie.
         if matches!(
             kind,
-            ActKind::ServiceDelete | ActKind::ServiceUpdate | ActKind::BackupCreate
+            ActKind::ServiceDelete
+                | ActKind::ServiceUpdate
+                | ActKind::BackupCreate
+                | ActKind::ModsApply
         ) {
             let started = std::time::Instant::now();
             loop {

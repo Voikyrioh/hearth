@@ -321,6 +321,7 @@ async fn writes_out_of_order_or_outside_the_plan_are_refused() {
             ino: 1,
             kind: ObjectKind::PartialArchive,
         }],
+        ..UndoInfo::default()
     };
     assert!(matches!(
         env.ops.intent(&id, "create_new", &escaping).await,
@@ -546,6 +547,9 @@ impl UnitOfWork for SlowTx {
     }
     fn audit(&mut self) -> &mut dyn hearth_agent::application::ports::AuditTx {
         self.inner.audit()
+    }
+    fn mod_origins(&mut self) -> &mut dyn hearth_agent::application::ports::ModOriginsTx {
+        self.inner.mod_origins()
     }
     async fn commit(self: Box<Self>) -> Result<(), StoreError> {
         let this = *self;
@@ -1281,6 +1285,7 @@ async fn only_what_the_operation_created_is_removed_and_only_if_it_is_still_that
             "archive",
             &UndoInfo {
                 created: vec![object(&partial, "01J.tar.gz.part")],
+                ..UndoInfo::default()
             },
         )
         .await
@@ -1298,6 +1303,7 @@ async fn only_what_the_operation_created_is_removed_and_only_if_it_is_still_that
             "archive",
             &UndoInfo {
                 created: vec![stale],
+                ..UndoInfo::default()
             },
         )
         .await

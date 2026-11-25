@@ -61,6 +61,14 @@ pub fn agent_serves_service_backups(capabilities: &[String]) -> bool {
         .any(|capability| capability == CAPABILITY_SERVICE_BACKUPS)
 }
 
+/// L'agent parle-t-il à la console d'un serveur de jeu (capacité `game-console`, HRT-268) ? Sinon le client ne montre
+/// ni l'onglet « Console » ni la carte des joueurs connectés : un agent d'avant refuserait les routes.
+pub fn agent_serves_game_console(capabilities: &[String]) -> bool {
+    capabilities
+        .iter()
+        .any(|capability| capability == hearth_proto::api::console::CAPABILITY_GAME_CONSOLE)
+}
+
 /// Les sujets à demander à un agent : les mesures, la fin de session et la mise à jour de l'agent
 /// toujours ; le journal d'activité si le client le veut ; les services seulement si l'agent les sert.
 pub fn subscription_topics(capabilities: &[String], audit: bool) -> Vec<Topic> {

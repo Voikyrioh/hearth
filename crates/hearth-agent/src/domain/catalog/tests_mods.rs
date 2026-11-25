@@ -285,3 +285,229 @@ fn a_packs_folder_is_read_only_and_never_saved_with_or_without_a_mods_block() {
     );
     assert!(matches!(refused(&saved), Motif::ModsIncoherent { .. }));
 }
+
+// ---- Les mods `.jar` d'un serveur installé (HRT-253, BR-MOD-001, BR-MOD-028) -------------------------------------
+
+const DATA_FOLDER: &str = "[[folder]]\nid = \"data\"\nrole = \"data\"\ntarget = \"/data\"\nread_only = false\nbackup = true\n\n";
+const JARS_BLOCK: &str = "[mods]\nways = [\"drop_jars\"]\n\n[mods.jars]\nfolder = \"data\"\ndir = \"mods\"\nretired_dir = \"mods-retires\"\nvariants = [\"java\"]\n";
+
+/// La fiche riche avec un dossier `data` (sauvegardé, inscriptible) et le bloc `[mods.jars]`.
+fn jars_fiche() -> String {
+    let with_folder = replace(
+        RICH_FICHE,
+        "[[folder]]\nid = \"mods\"",
+        &format!("{DATA_FOLDER}[[folder]]\nid = \"mods\""),
+    );
+    format!("{with_folder}\n{JARS_BLOCK}\n")
+}
+
+/// `jars_fiche` avec un arrêt qui enregistre le monde par le signal (la suite d'arrêt de la fiche riche est retirée).
+fn jars_fiche_saving_on_signal() -> String {
+    let text = jars_fiche();
+    let from = text.find("[stop.sequence]").expect("suite d'arrêt");
+    let to = text.find("[save]").expect("[save]");
+    let without = format!("{}{}", &text[..from], &text[to..]);
+    replace(
+        &without,
+        "world_saved = \"by_sequence\"",
+        "world_saved = \"by_image_on_signal\"",
+    )
+}
+
+#[test]
+fn a_fiche_declares_the_jars_it_takes_and_where_they_go() {
+    let fiche = load_rich(&jars_fiche_saving_on_signal()).expect("fiche");
+    let mods = fiche.file.mods.expect("mods");
+    assert_eq!(mods.ways, vec![ModWay::DropJars]);
+    let jars = mods.jars.expect("jars");
+    assert_eq!(
+        (
+            jars.folder.as_str(),
+            jars.dir.as_str(),
+            jars.retired_dir.as_str()
+        ),
+        ("data", "mods", "mods-retires")
+    );
+    assert_eq!(jars.variants, vec!["java".to_owned()]);
+}
+
+#[test]
+fn the_jars_block_is_all_or_nothing_and_points_at_a_saved_writable_data_folder() {
+    let ok = jars_fiche_saving_on_signal();
+    let incoherent = |text: &str| matches!(refused(text), Motif::ModsIncoherent { .. });
+    // La voie sans le bloc, et le bloc sans la voie.
+    assert!(incoherent(&replace(
+        &ok,
+        "[mods.jars]\nfolder = \"data\"\ndir = \"mods\"\nretired_dir = \"mods-retires\"\nvariants = [\"java\"]\n",
+        ""
+    )));
+    assert!(incoherent(&replace(
+        &ok,
+        "ways = [\"drop_jars\"]",
+        "ways = [\"drop_files\"]"
+    )));
+    // Le dossier : rôle `data`, sauvegardé, inscriptible.
+    for (from, to) in [
+        (
+            "role = \"data\"\ntarget = \"/data\"",
+            "role = \"config\"\ntarget = \"/data\"",
+        ),
+        (
+            "target = \"/data\"\nread_only = false",
+            "target = \"/data\"\nread_only = true",
+        ),
+        (
+            "target = \"/data\"\nread_only = false\nbackup = true",
+            "target = \"/data\"\nread_only = false\nbackup = false",
+        ),
+    ] {
+        assert!(incoherent(&replace(&ok, from, to)), "{to}");
+    }
+    assert!(matches!(
+        refused(&replace(&ok, "folder = \"data\"", "folder = \"nope\"")),
+        Motif::DossierInconnu { .. }
+    ));
+    // Les sous-dossiers : un composant sûr, et deux dossiers différents.
+    let too_long = "a".repeat(33);
+    for bad in ["../mods", "a/b", "Mods", "", "mods retires", &too_long] {
+        assert!(
+            matches!(
+                refused(&replace(&ok, "dir = \"mods\"", &format!("dir = \"{bad}\""))),
+                Motif::IdentifiantInvalide { .. }
+            ),
+            "dir {bad}"
+        );
+        assert!(
+            matches!(
+                refused(&replace(
+                    &ok,
+                    "retired_dir = \"mods-retires\"",
+                    &format!("retired_dir = \"{bad}\"")
+                )),
+                Motif::IdentifiantInvalide { .. }
+            ),
+            "retired_dir {bad}"
+        );
+    }
+    assert!(incoherent(&replace(
+        &ok,
+        "retired_dir = \"mods-retires\"",
+        "retired_dir = \"mods\""
+    )));
+    // Variante inconnue ou liste vide.
+    assert!(matches!(
+        refused(&replace(
+            &ok,
+            "variants = [\"java\"]",
+            "variants = [\"nope\"]"
+        )),
+        Motif::ReferenceInconnue { .. }
+    ));
+    assert!(matches!(
+        refused(&replace(&ok, "variants = [\"java\"]", "variants = []")),
+        Motif::ListeDeVariantesVide
+    ));
+    // Un champ hors liste (chemin libre).
+    assert!(
+        load_rich(&replace(
+            &ok,
+            "dir = \"mods\"\n",
+            "dir = \"mods\"\npath = \"/etc\"\n"
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn a_fiche_with_jars_must_save_the_world_on_the_stop_signal() {
+    assert!(load_rich(&jars_fiche_saving_on_signal()).is_ok());
+    // La fiche riche arrête par une suite d'étapes : refusée avec des mods `.jar`.
+    assert!(matches!(
+        refused(&jars_fiche()),
+        Motif::ModsIncoherent { .. }
+    ));
+}
+
+#[test]
+fn br_mod_028_no_fiche_writes_remove_old_mods() {
+    let at = |ou: &str| Motif::RemoveOldModsInterdit { ou: ou.into() };
+    let ok = rich_with(MODS_BLOCK);
+    let puid = "[[env]]\nname = \"PUID\"";
+    let with_env = |name: &str| {
+        replace(
+            &ok,
+            puid,
+            &format!("[[env]]\nname = \"{name}\"\nvalue = \"TRUE\"\n\n{puid}"),
+        )
+    };
+    assert_eq!(refused(&with_env("REMOVE_OLD_MODS")), at("variable fixe"));
+    assert_eq!(refused(&with_env("remove_old_mods")), at("variable fixe"));
+    assert_eq!(
+        refused(&replace(
+            &ok,
+            "name = \"EDITION\"",
+            "name = \"REMOVE_OLD_MODS\""
+        )),
+        at("variable d'une variante")
+    );
+    assert_eq!(
+        refused(&replace(
+            &ok,
+            "env = \"MODRINTH_MODPACK\"",
+            "env = \"REMOVE_OLD_MODS\""
+        )),
+        at("variable d'un genre de pack")
+    );
+    let setting = format!(
+        "{RICH_SETTINGS}\n[[setting]]\nid = \"rom\"\nkey = \"REMOVE_OLD_MODS\"\nchannel = \"env\"\ntheme = \"game\"\nlevel = \"advanced\"\nlabel = \"Réglage\"\nhelp = \"Aide.\"\ntype = \"text\"\ncharset = \"line\"\nmax_len = 40\nchange = \"anytime\"\nsource = \"partial\"\n"
+    );
+    match load_texts(RICH_FICHE, &setting) {
+        Err(refusal) => assert_eq!(refusal.motif, at("réglage")),
+        Ok(_) => panic!("réglage REMOVE_OLD_MODS accepté"),
+    }
+}
+
+#[test]
+fn no_embedded_fiche_writes_remove_old_mods_and_minecraft_declares_its_jars() {
+    let (fiches, refusees) = load_all();
+    assert!(refusees.is_empty(), "fiche refusée");
+    for fiche in &fiches {
+        let file = &fiche.file;
+        let id = file.id.as_str();
+        for env in &file.env {
+            assert!(!env.name.eq_ignore_ascii_case("REMOVE_OLD_MODS"), "{id}");
+        }
+        for variant in &file.variant {
+            for env in &variant.env {
+                assert!(!env.name.eq_ignore_ascii_case("REMOVE_OLD_MODS"), "{id}");
+            }
+        }
+        for setting in &fiche.settings {
+            assert!(!setting.key.eq_ignore_ascii_case("REMOVE_OLD_MODS"), "{id}");
+        }
+    }
+    let minecraft = fiches
+        .iter()
+        .find(|f| f.id() == "minecraft")
+        .expect("minecraft");
+    assert_eq!(minecraft.file.version, 5);
+    let mods = minecraft.file.mods.as_ref().expect("mods");
+    assert!(mods.ways.contains(&ModWay::DropJars));
+    let jars = mods.jars.as_ref().expect("jars");
+    assert_eq!(
+        (
+            jars.folder.as_str(),
+            jars.dir.as_str(),
+            jars.retired_dir.as_str()
+        ),
+        ("data", "mods", "mods-retires")
+    );
+    assert_eq!(
+        jars.variants,
+        ["fabric", "quilt", "forge", "neoforge", "modrinth"]
+    );
+    // Vanilla, Paper et Purpur ne prennent pas de mods `.jar` (BR-MOD-030).
+    for variant in ["vanilla", "paper", "purpur"] {
+        assert!(!jars.variants.iter().any(|v| v == variant), "{variant}");
+    }
+}

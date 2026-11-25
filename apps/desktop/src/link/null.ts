@@ -157,6 +157,30 @@ export class NullLinkBridge implements LinkBridge {
   async readDeletePreview(): Promise<never> {
     return this.unavailable();
   }
+  async readMods(): Promise<never> {
+    return this.unavailable();
+  }
+  async checkMods(): Promise<never> {
+    return this.unavailable();
+  }
+  async applyMods(): Promise<never> {
+    return this.unavailable();
+  }
+  async readBackupMods(): Promise<never> {
+    return this.unavailable();
+  }
+  async readOperationTail(): Promise<never> {
+    return this.unavailable();
+  }
+  async describeConsole(): Promise<never> {
+    return this.unavailable();
+  }
+  async readPlayers(): Promise<never> {
+    return this.unavailable();
+  }
+  async sendConsole(): Promise<never> {
+    return this.unavailable();
+  }
   async readBackups(): Promise<never> {
     return this.unavailable();
   }
@@ -176,6 +200,15 @@ export class NullLinkBridge implements LinkBridge {
     return this.unavailable();
   }
   async deleteService(): Promise<never> {
+    return this.unavailable();
+  }
+  async onFilesDropped(): Promise<Unsubscribe> {
+    return () => {};
+  }
+  async pickDepositFiles(): Promise<never> {
+    return this.unavailable();
+  }
+  async fileSha256(): Promise<never> {
     return this.unavailable();
   }
   async pickDepositFile(): Promise<never> {

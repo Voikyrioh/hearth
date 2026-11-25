@@ -19,6 +19,7 @@ import HSpinner from "../atoms/HSpinner.vue";
 import HTag from "../atoms/HTag.vue";
 import Callout from "../molecules/Callout.vue";
 import EmptyState from "../molecules/EmptyState.vue";
+import LogExchangeRow from "../molecules/LogExchangeRow.vue";
 import LogMarker from "../molecules/LogMarker.vue";
 import LogSearch from "../molecules/LogSearch.vue";
 
@@ -44,6 +45,8 @@ const props = defineProps<{
   gone: boolean;
   /** Le service n'existe pas encore (« Déploiement en cours »). */
   deploying: boolean;
+  /** Le journal est vide : une phrase discrète au lieu du grand état vide (l'onglet « Console » a déjà son titre). */
+  quietEmpty?: boolean;
 }>();
 
 const store = useServiceLogsStore();
@@ -160,7 +163,9 @@ async function settle(): Promise<void> {
     const host = rowsEl.value;
     if (!host) return;
     let changed = false;
-    for (const element of host.querySelectorAll<HTMLElement>("[data-log-row], [data-log-marker]")) {
+    for (const element of host.querySelectorAll<HTMLElement>(
+      "[data-log-row], [data-log-marker], [data-log-exchange]",
+    )) {
       const id = Number(element.dataset.entry);
       const height = element.getBoundingClientRect().height;
       if (!(height > 0) || !Number.isFinite(id)) continue;
@@ -313,7 +318,7 @@ const lines = computed(() => {
 });
 const hasLines = computed(() => {
   void store.version;
-  return store.entries().some((entry) => entry.kind === "line");
+  return store.entries().some((entry) => entry.kind === "line" || entry.kind === "exchange");
 });
 
 const notice = computed(() =>
@@ -678,6 +683,14 @@ const retrying = computed(() => store.phase === "opening");
                 :text="gapText(row.entry.gap, row.entry.count)"
                 :data-entry="row.entry.id"
               />
+              <LogExchangeRow
+                v-else-if="row.entry.kind === 'exchange'"
+                :entry="row.entry"
+                :query="query"
+                :active="row.entry.id === activeId"
+                :current="row.entry.id === currentMatchId"
+                @click="activeId = row.entry.id"
+              />
               <div
                 v-else
                 :class="[
@@ -729,8 +742,9 @@ const retrying = computed(() => store.phase === "opening");
             >
           </div>
         </div>
+        <p v-if="empty && quietEmpty" class="quiet" data-logs-empty>{{ t("logs.emptyQuiet") }}</p>
         <EmptyState
-          v-if="empty"
+          v-else-if="empty"
           class="empty"
           :title="t('logs.emptyTitle')"
           :text="t('logs.emptyText')"
@@ -970,6 +984,15 @@ const retrying = computed(() => store.phase === "opening");
 .empty {
   position: absolute;
   inset: 0;
+}
+
+.quiet {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  color: var(--tx-secondary);
+  pointer-events: none;
 }
 
 .frame__float {

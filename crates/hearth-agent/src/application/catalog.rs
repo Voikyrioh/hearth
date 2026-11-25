@@ -26,6 +26,7 @@ use crate::domain::catalog::loading::schema::fiche::{
     Protocol, Publish, Status, WorldSaved,
 };
 use crate::domain::catalog::loading::schema::settings::{ItemCharset, Level, SecretKind};
+use crate::domain::catalog::stop_plan::saves_by_console_before_stop;
 
 /// Une fiche écartée au chargement : son dossier et l'invariant violé.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -289,6 +290,7 @@ pub(crate) fn stop_view(fiche: &Fiche) -> StopView {
             .sequence
             .as_ref()
             .is_some_and(|sequence| sequence.status == Proof::Tested),
+        console_save: saves_by_console_before_stop(fiche),
     }
 }
 
@@ -477,6 +479,7 @@ fn mods_view(fiche: &Fiche) -> Option<ModsView> {
         .map(|way| match way {
             ModWay::DropFiles => "drop_files".to_owned(),
             ModWay::DropPack => "drop_pack".to_owned(),
+            ModWay::DropJars => "drop_jars".to_owned(),
         })
         .collect();
     let pack = mods.pack.as_ref().map(|pack| PackWayView {
@@ -842,6 +845,10 @@ mod tests {
             stop.sequence_tested,
             "la suite a été essayée sur la vraie image (HRT-114)"
         );
+        assert!(
+            !stop.console_save,
+            "Terraria ne déclare aucun enregistrement par la console (HRT-292)"
+        );
         // Chaque port dit comment il se relie au port du serveur et pour quelles variantes il existe.
         assert!(
             terraria
@@ -1003,5 +1010,15 @@ mod tests {
         assert_eq!(view.refused.len(), 1);
         assert_eq!(view.refused[0].invariant, "I2");
         assert_eq!(catalog.detail("nope"), Err(CatalogError::Unknown));
+    }
+
+    /// HRT-292 : la vue de l'arrêt dit exactement si Hearth enregistre par la console avant l'arrêt.
+    #[test]
+    fn the_stop_view_says_exactly_whether_hearth_saves_by_the_console() {
+        let catalog = CatalogService::embedded(true);
+        let minecraft = catalog.fiche("minecraft").expect("minecraft");
+        assert!(stop_view(minecraft).console_save);
+        let terraria = catalog.fiche("terraria").expect("terraria");
+        assert!(!stop_view(terraria).console_save);
     }
 }

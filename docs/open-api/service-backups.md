@@ -36,6 +36,27 @@ Jamais couvert par l'élévation (le mot de passe à chaque fois). Cible signée
 
 Les éléments ignorés du service (`BR-BACKUP-003`). Cible signée : la clé du service. Paramètres signés : le nombre d'éléments et l'empreinte de leur liste (`BackupSettings::act_digest`), jamais un chemin. Corps (`BackupSettings`) : `ignored[]` (éléments ajoutés), `included[]` (ignorés par défaut que le compte fait entrer dans les sauvegardes). Réponse `200` : la liste enregistrée. Journal : `service.backup.settings`, avec les nombres. Erreurs : `422 VALIDATION_ERROR` (`items`).
 
+## `GET /api/v1/services/{key}/backups/{id}/mods` (HRT-293)
+
+Le même accès que la liste des sauvegardes (tout compte authentifié), lecture seule, jamais journalisée (`BR-BACKUP-032`). Paramètre facultatif `compare=current`. Règles `BR-MOD-034`, `BR-MOD-035`, `BR-MOD-036`.
+
+```json
+{
+  "state": "recorded | partial | unreadable | not_in_backup | not_recorded",
+  "recorded_at": "2026-11-17T21:32:04Z",
+  "game": { "loader": "fabric", "minecraft": "1.20.1" },
+  "counts": { "active": 5, "disabled": 1, "retired": 2, "not_listed": 0 },
+  "mods": [{ "file": "lithium-0.11.1.jar", "rank": 3, "place": "active | disabled | retired", "origin": "server_pack | hearth | modrinth_pack | manual",
+             "identity": { "id": "lithium", "name": "Lithium", "version": "0.11.1", "loader": "fabric", "minecraft_declared": false, "environment": "server" } }],
+  "compare": { "complete": true, "unread": 0, "same": false,
+               "changes": [{ "kind": "added | removed | version_changed | enabled | disabled", "id": "lithium", "name": "Lithium", "file": "lithium-0.11.2.jar", "backup_version": "0.11.1", "current_version": "0.11.2" }] }
+}
+```
+
+`identity` absente : « non reconnu dans cette sauvegarde » (empreinte différente de celle lue, jar non lu à temps, fiche illisible). `file` absent : nom hors de l'alphabet sûr, montré par son rang. `compare` absent sans `compare=current`, ou quand la lecture actuelle est bloquée. `not_recorded` : sauvegarde d'avant la 0.2.2, `mods` vide. `GET /services/{key}/backups` ajoute à chaque sauvegarde d'un service à mods un champ `mods` (`state`, `active`, `disabled`, `retired`), absent pour un service sans mods. `identity.minecraft_declared` est toujours faux ici (la plage n'est pas gardée par sauvegarde).
+
+Erreurs : `404 SERVICE_NOT_FOUND`, `404 BACKUP_NOT_FOUND` (inconnue, ou d'un autre service : jamais de lecture croisée), `409 MODS_NOT_APPLICABLE` (fiche sans `[mods.jars]` ou moteur sans mods), `409 SERVICE_ADOPTED`, `500 INTERNAL_ERROR`.
+
 ## Code
 
 `entrypoint/http/backups.rs`, `application/backups.rs` (`Backups`), `domain/backups/`, `domain/ops/backup.rs`, `infrastructure/{backup_archive,backup_files}.rs`, `infrastructure/sqlite/backups_repo.rs`, migration `0017`.

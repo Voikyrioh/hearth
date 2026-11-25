@@ -281,6 +281,18 @@ pub enum Target {
         service: ClientName,
         note: BackupNote,
     },
+    /// Un lot de mods appliqué à un serveur de jeu, réussi ou non (HRT-258, BR-MOD-025) : le nom du service, des NOMBRES
+    /// et les noms de fichiers de l'alphabet SÛR (jamais une valeur lue dans un jar, un chemin, une ligne du jeu).
+    ServiceMods {
+        service: ClientName,
+        summary: ModsSummary,
+    },
+    /// Une commande envoyée (ou refusée) à la console d'un serveur de jeu (HRT-268, BR-CONSOLE-009) : le nom du
+    /// service et un résumé de la commande, SANS son texte ni la réponse du jeu : le type n'a pas de champ pour eux.
+    ServiceConsole {
+        service: ClientName,
+        note: ConsoleNote,
+    },
     /// Une fiche visée par une demande refusée avant de connaître le service (fiche inconnue, empreinte
     /// changée, contrat non accepté...) : son identifiant, nettoyé et borné.
     Fiche(ClientName),
@@ -351,6 +363,111 @@ pub enum BackupNote {
     Settings { ignored: u32, included: u32 },
     /// Rien à dire (un refus, un échec avant tout geste).
     Nothing,
+}
+
+/// Ce qu'un lot de mods a changé : des nombres, et les noms sûrs des fichiers (au plus [`ModsSummary::MAX_NAMES`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModsSummary {
+    pub added: u32,
+    pub replaced: u32,
+    pub retired: u32,
+    pub restored: u32,
+    pub disabled: u32,
+    pub enabled: u32,
+    /// Noms de l'alphabet sûr des fichiers touchés ; un autre nom n'y entre jamais.
+    pub names: Vec<String>,
+}
+
+impl ModsSummary {
+    pub const MAX_NAMES: usize = 16;
+
+    /// Ajoute un nom s'il est de l'alphabet sûr et s'il reste de la place.
+    pub fn name(&mut self, name: &str) {
+        if self.names.len() < Self::MAX_NAMES
+            && crate::domain::mods::listing::is_safe_file_name(name)
+        {
+            self.names.push(name.to_owned());
+        }
+    }
+}
+
+/// Ce que le journal garde d'une commande de console (BR-CONSOLE-009) : le verbe (premier mot normalisé, s'il passe
+/// `[a-z0-9_:-]{1,32}`, sinon `other`), la classe, le joueur visé d'un verbe sensible (seulement s'il a la forme d'un
+/// pseudo), la longueur et l'issue. **Jamais le reste du texte ni la réponse.**
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsoleNote {
+    verb: String,
+    sensitive: bool,
+    target: Option<String>,
+    chars: u32,
+    issue: ConsoleIssue,
+}
+
+/// L'issue inscrite au journal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsoleIssue {
+    Answered,
+    Empty,
+    NoAnswer,
+    Unreachable,
+    /// Le verbe est refusé par la fiche : rien n'est parti.
+    Refused,
+}
+
+impl ConsoleIssue {
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Answered => "answered",
+            Self::Empty => "empty",
+            Self::NoAnswer => "no_answer",
+            Self::Unreachable => "unreachable",
+            Self::Refused => "refused",
+        }
+    }
+}
+
+impl ConsoleNote {
+    /// Un joueur désigné n'entre que s'il a la forme d'un pseudo (`\.?[A-Za-z0-9_]{1,16}`).
+    pub fn new(
+        verb: &str,
+        sensitive: bool,
+        target: Option<&str>,
+        chars: usize,
+        issue: ConsoleIssue,
+    ) -> Self {
+        let verb_ok = (1..=32).contains(&verb.len())
+            && verb.chars().all(|c| {
+                c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | ':' | '-')
+            });
+        let target = target.filter(|name| {
+            let body = name.strip_prefix('.').unwrap_or(name);
+            sensitive
+                && (1..=16).contains(&body.len())
+                && body.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        });
+        Self {
+            verb: if verb_ok { verb } else { "other" }.to_owned(),
+            sensitive,
+            target: target.map(str::to_owned),
+            chars: u32::try_from(chars).unwrap_or(u32::MAX),
+            issue,
+        }
+    }
+
+    fn text(&self) -> String {
+        let class = match (&self.target, self.sensitive) {
+            (Some(target), true) => format!("sensible, {target}"),
+            (None, true) => "sensible".to_owned(),
+            (_, false) => "libre".to_owned(),
+        };
+        format!(
+            "{} ({class}), {} caractère{}, {}",
+            self.verb,
+            self.chars,
+            if self.chars > 1 { "s" } else { "" },
+            self.issue.code()
+        )
+    }
 }
 
 fn size_text(bytes: u64) -> String {
@@ -794,6 +911,34 @@ impl Target {
                 }
                 Some(text)
             }
+            Self::ServiceMods { service, summary } => {
+                let mut text = format!(
+                    "service {}, mods : {} ajouté{}, {} remplacé{}, {} retiré{}, {} remis, {} désactivé{}, {} réactivé{}",
+                    service.as_str(),
+                    summary.added,
+                    if summary.added > 1 { "s" } else { "" },
+                    summary.replaced,
+                    if summary.replaced > 1 { "s" } else { "" },
+                    summary.retired,
+                    if summary.retired > 1 { "s" } else { "" },
+                    summary.restored,
+                    summary.disabled,
+                    if summary.disabled > 1 { "s" } else { "" },
+                    summary.enabled,
+                    if summary.enabled > 1 { "s" } else { "" },
+                );
+                if !summary.names.is_empty() {
+                    text.push_str(" (");
+                    text.push_str(&summary.names.join(", "));
+                    text.push(')');
+                }
+                Some(text)
+            }
+            Self::ServiceConsole { service, note } => Some(format!(
+                "service {}, console : {}",
+                service.as_str(),
+                note.text()
+            )),
             Self::Fiche(fiche) => Some(format!("fiche {}", fiche.as_str())),
             Self::FicheRefused { dir, invariant } => {
                 Some(format!("fiche {} ({})", dir.as_str(), invariant.as_str()))

@@ -12,11 +12,13 @@ mod audit_sink;
 mod backup_archive;
 mod backup_files;
 mod backup_repo;
+mod before_stop_save;
 mod boot_info;
 mod clock;
 mod container_engine;
 mod device_repo;
 mod fingerprint;
+mod game_console;
 mod game_settings_repo;
 mod gpu_probe;
 mod host_environment;
@@ -29,6 +31,8 @@ mod install_host;
 mod known_address_repo;
 mod login_attempt_repo;
 mod machine_info;
+mod mod_origins;
+mod mods_snapshot;
 mod monotonic_clock;
 mod network;
 mod op_journal;
@@ -71,7 +75,10 @@ pub use backup_files::{
     BackupFiles, BackupFsError, BackupSink, DiskSpace, Expected, FileIdent, FileStamp,
     Removed as BackupRemoved,
 };
-pub use backup_repo::{BackupRepo, BackupRow, NewBackup, Published, Publishing};
+pub use backup_repo::{
+    BackupRepo, BackupRow, ModsRecord, ModsSummaryRow, NewBackup, Published, Publishing,
+};
+pub use before_stop_save::BeforeStopSave;
 pub use boot_info::BootInfo;
 pub use clock::Clock;
 pub use container_engine::{
@@ -80,6 +87,7 @@ pub use container_engine::{
 };
 pub use device_repo::{DeviceRepo, DeviceTx};
 pub use fingerprint::{FingerprintSecretError, FingerprintSecretStore, RequestFingerprinter};
+pub use game_console::{ConsoleBudget, ConsoleError, ConsoleReply, GameConsole, MAX_REPLY_BYTES};
 pub use game_settings_repo::{GameSettingsRepo, NewSettings, SettingsStoreError, StoredSettings};
 pub use gpu_probe::GpuProbe;
 pub use host_environment::{HostDescription, HostEnvironment};
@@ -95,6 +103,8 @@ pub use install_host::{
 pub use known_address_repo::{KnownAddressRepo, KnownAddressTx};
 pub use login_attempt_repo::{LoginAttemptRepo, LoginAttemptTx};
 pub use machine_info::MachineInfo;
+pub use mod_origins::{HearthFile, MAX_ORIGIN_ROWS, ModOrigins, ModOriginsTx};
+pub use mods_snapshot::{CurrentMods, ModsRead, ModsReading, ModsSnapshot};
 pub use monotonic_clock::MonotonicClock;
 pub use network::NetworkAddresses;
 pub use op_journal::{
@@ -106,8 +116,8 @@ pub use pack_deposits::{DepositError, DepositFile, DepositId, PackDeposits};
 pub use password_hasher::{HashError, PasswordHasher};
 pub use proof::{ChallengeCrypto, CryptoError, ProofVerifier};
 pub use safe_fs::{
-    DirListing, EntryKind, EntryMeta, Erased, FsError, ListedEntry, Measure, Ownership, Perms,
-    ReadFile, SafeFs, ServiceRoot,
+    DirListing, EntryKind, EntryMeta, Erased, FileId, FsError, ListedEntry, Measure, Ownership,
+    Perms, ReadFile, SafeFs, ServiceRoot,
 };
 pub use secret_random::{RandomError, SecretRandom};
 pub use secret_sealer::{

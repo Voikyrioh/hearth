@@ -9,6 +9,7 @@ use std::io::{Read, Seek};
 
 use thiserror::Error;
 
+use super::safe_fs::Perms;
 use crate::domain::files::RelPath;
 use crate::domain::services::ServiceKey;
 
@@ -56,8 +57,9 @@ pub trait PackDeposits: Send + Sync {
 
     /// Range le dépôt dans le dossier géré du service sous `rel` (un nom FIXE choisi par Hearth) en UN geste
     /// atomique, sans remplacer ce qui existe, et CONSOMME le dépôt. L'adaptateur revérifie que le fichier a
-    /// l'empreinte SHA-256 jugée (`Changed` sinon, rien n'est rangé). Le fichier rangé est lisible par tous
-    /// et inscriptible par l'agent seul (le conteneur le monte en lecture seule).
+    /// l'empreinte SHA-256 jugée (`Changed` sinon, rien n'est rangé). Le fichier rangé a le propriétaire et les droits
+    /// que l'appelant donne (`perms` : un pack, lisible par tous et inscriptible par l'agent seul ; un mod, le
+    /// propriétaire de la fiche en `0644`, HRT-258).
     fn place(
         &self,
         id: &DepositId,
@@ -65,6 +67,7 @@ pub trait PackDeposits: Send + Sync {
         service: &ServiceKey,
         rel: &RelPath,
         sha256: &[u8; 32],
+        perms: Perms,
     ) -> Result<(), DepositError>;
 
     /// Retire le dépôt (pack refusé, BR-MOD-016 : « retiré de la zone d'attente aussitôt »). Idempotent.

@@ -7,3 +7,4 @@ Molécule · `apps/desktop/src/components/molecules/ConsoleWaitSection.vue`
 - Props : aucune
 - Événements et slots : aucun
 - Notes : Tests : `components/organisms/gameSettingsTab.test.ts`.
+- HRT-269 : prop `served` (l'agent parle à la console de ce jeu) : la section ne garde que « Appliquer un réglage sans redémarrer » et dit « Ouvrir la console » (événement `openConsole`). Test `components/molecules/consoleWait.test.ts`.

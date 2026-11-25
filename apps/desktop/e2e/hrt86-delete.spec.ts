@@ -101,6 +101,7 @@ test("la carte « Suppression » du détail, hors du menu de la ligne ; un servi
   await row(page, "h_terraria").click();
   await expect(page.locator("[data-detail-delete]")).toContainText("Supprimer ce service");
   await shoot(page.locator("[data-service-detail]"), page, "delete-carte-detail");
+  await page.locator("[data-detail-back]").click();
   await row(page, "c_vieux").click();
   await expect(page.locator("[data-delete-open]")).toHaveCount(0);
   await expect(page.locator("[data-delete-adopted]")).toContainText(

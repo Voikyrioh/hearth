@@ -125,6 +125,22 @@ fn act_of(kind: AdminActKindDto, role: Option<RoleDto>) -> AdminAct<'static> {
             name: "".into(),
             size: 0,
         },
+        // Mods et console : le genre (et la classe) seul décide, ni la cible ni le corps ne comptent.
+        AdminActKindDto::ModsApply => AdminAct::ModsApply {
+            target: "".into(),
+            count: 0,
+            digest: [0; hearth_proto::admin_act::FINGERPRINT_LEN],
+        },
+        AdminActKindDto::ConsoleCommandFree => AdminAct::ConsoleCommand {
+            target: "".into(),
+            digest: [0; hearth_proto::admin_act::FINGERPRINT_LEN],
+            class: hearth_proto::api::console::CLASS_FREE,
+        },
+        AdminActKindDto::ConsoleCommandSensitive => AdminAct::ConsoleCommand {
+            target: "".into(),
+            digest: [0; hearth_proto::admin_act::FINGERPRINT_LEN],
+            class: hearth_proto::api::console::CLASS_SENSITIVE,
+        },
         AdminActKindDto::ServiceStart => AdminAct::ServiceStart { target: "".into() },
         AdminActKindDto::ServiceStop => AdminAct::ServiceStop { target: "".into() },
         AdminActKindDto::ServiceRestart => AdminAct::ServiceRestart { target: "".into() },
@@ -234,6 +250,10 @@ mod tests {
                 (Kind::BackupDelete, None, Yes),
                 // Déposer un fichier : la table de l'élévation (BR-FILES-023).
                 (Kind::FileWrite, None, UnlessElevated),
+                // Appliquer un lot de mods : jamais couvert par l'élévation (BR-MOD-031).
+                (Kind::ModsApply, None, Yes),
+                // Une commande sensible de console : le mot de passe à chaque fois (BR-CONSOLE-005).
+                (Kind::ConsoleCommandSensitive, None, Yes),
                 // Enregistrer les réglages d'un jeu : la table de l'élévation (HRT-108, ADR-0051).
                 (Kind::GameSettingsSave, None, UnlessElevated),
             ] {
@@ -250,6 +270,8 @@ mod tests {
             Kind::ServiceStop,
             Kind::ServiceRestart,
             Kind::OperationDecide,
+            // Une commande libre de console se juge comme un acte de pilotage (BR-CONSOLE-005).
+            Kind::ConsoleCommandFree,
         ] {
             assert_eq!(password_need_of(kind, None, Some(Normal)), No, "{kind:?}");
             assert_eq!(

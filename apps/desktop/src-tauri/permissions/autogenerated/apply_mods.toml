@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-apply-mods"
+description = "Enables the apply_mods command without any pre-configured scope."
+commands.allow = ["apply_mods"]
+
+[[permission]]
+identifier = "deny-apply-mods"
+description = "Denies the apply_mods command without any pre-configured scope."
+commands.deny = ["apply_mods"]

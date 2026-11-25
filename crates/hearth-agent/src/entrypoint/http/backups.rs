@@ -37,7 +37,7 @@ use crate::domain::services::{ServiceKey, ServiceStateKind};
 use crate::entrypoint::services_wire;
 
 /// Le refus d'un geste de sauvegarde, avec le service visé quand il est publié.
-pub struct BackupFailure(ApiError, Option<Target>);
+pub struct BackupFailure(pub(super) ApiError, pub(super) Option<Target>);
 
 impl IntoResponse for BackupFailure {
     fn into_response(self) -> Response {
@@ -49,7 +49,7 @@ impl IntoResponse for BackupFailure {
     }
 }
 
-fn failure(failed: BackupFailed) -> BackupFailure {
+pub(super) fn failure(failed: BackupFailed) -> BackupFailure {
     let target = failed
         .name
         .as_deref()
@@ -58,7 +58,7 @@ fn failure(failed: BackupFailed) -> BackupFailure {
     BackupFailure(backup_error(failed.error), target)
 }
 
-fn backup_error(error: BackupError) -> ApiError {
+pub(super) fn backup_error(error: BackupError) -> ApiError {
     match error {
         BackupError::EngineUnavailable(engine) => ApiError(ErrorBody::with_details(
             ErrorCode::EngineUnavailable,
@@ -133,6 +133,9 @@ fn backup_error(error: BackupError) -> ApiError {
             "Les sauvegardes ne sont pas disponibles sur ce serveur.",
             serde_json::json!({ "reason": "backups_root_unavailable" }),
         )),
+        BackupError::ModsNotApplicable => {
+            ApiError::new(ErrorCode::ModsNotApplicable, "Ce service n'a pas de mods.")
+        }
         BackupError::BackupNotFound => {
             ApiError::new(ErrorCode::BackupNotFound, "Cette sauvegarde n'existe pas.")
         }
@@ -237,6 +240,30 @@ pub async fn settings(
     state
         .backups
         .set_settings(&key, settings, actor)
+        .await
+        .map(Json)
+        .map_err(failure)
+}
+
+/// Le paramètre facultatif de la liste des mods : compare=current.
+#[derive(serde::Deserialize)]
+pub struct ModsQuery {
+    compare: Option<String>,
+}
+
+/// `GET /api/v1/services/{key}/backups/{id}/mods` (HRT-293) : la liste des mods d'une sauvegarde, et avec
+/// `compare=current` son écart avec les mods actuels. Une consultation, sans journal.
+pub async fn mods(
+    State(state): State<AppState>,
+    Path((key, id)): Path<(String, String)>,
+    axum::extract::Query(query): axum::extract::Query<ModsQuery>,
+) -> Result<Json<hearth_proto::api::mods::BackupModsView>, BackupFailure> {
+    let key = ServiceKey::parse(&key).ok_or_else(unknown_service)?;
+    let id = BackupId::parse(&id).ok_or_else(unknown_backup)?;
+    let compare = query.compare.as_deref() == Some("current");
+    state
+        .backups
+        .mods_of(&key, &id, compare)
         .await
         .map(Json)
         .map_err(failure)

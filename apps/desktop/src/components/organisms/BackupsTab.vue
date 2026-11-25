@@ -12,10 +12,12 @@ import BackupDialog from "@/components/organisms/BackupDialog.vue";
 import BackupTable from "@/components/organisms/BackupTable.vue";
 import DeleteBackupDialog from "@/components/organisms/DeleteBackupDialog.vue";
 import IgnoredItemsDialog from "@/components/organisms/IgnoredItemsDialog.vue";
+import { useBackupMods } from "@/composables/useBackupMods";
 import { useServiceBackups } from "@/composables/useServiceBackups";
 import { t } from "@/i18n";
 import type { BackupInfo, ServiceInfo } from "@/link";
 import { formatSize } from "@/serviceOps/messages";
+import { MODS_LEGEND } from "@/services/backupMods";
 import {
   blockedReason,
   dataRoots,
@@ -47,6 +49,8 @@ const props = defineProps<{
   rightsReasonId: string;
   connected: boolean;
   engineReady: boolean;
+  /** Hearth enregistre le monde par la console avant d'arrêter ce jeu (fiche, HRT-292). */
+  consoleSave?: boolean;
 }>();
 
 const flow = useServiceBackups(
@@ -56,6 +60,10 @@ const flow = useServiceBackups(
 );
 
 const reasonId = useId();
+const mods = useBackupMods(
+  () => props.serverId,
+  () => props.service.key,
+);
 const view = computed(() => (flow.list.value.kind === "ready" ? flow.list.value.view : null));
 const backups = computed<readonly BackupInfo[]>(() => view.value?.backups ?? []);
 const shownName = computed(() => safeText(props.service.name));
@@ -324,9 +332,19 @@ const resultLines = computed<ResultLine[]>(() => {
           :notes="flow.verifyNotes.value"
           :can-write="canWrite"
           :rights-reason-id="rightsReasonId"
+          :mods-states="mods.states.value"
+          :mods-address="mods.address.value"
           @verify="flow.verify($event)"
           @remove="flow.requestDelete($event)"
+          @mods-open="mods.open($event.id)"
+          @mods-close="mods.close($event.id)"
+          @mods-compare="mods.compare($event.id)"
         />
+        <ul v-if="backups.some((backup) => backup.mods)" class="bt__legend" data-backups-mods-legend>
+          <li v-for="entry in MODS_LEGEND" :key="entry.term">
+            <strong>{{ t(entry.term) }}</strong> : {{ t(entry.text) }}
+          </li>
+        </ul>
       </template>
     </template>
 
@@ -337,6 +355,7 @@ const resultLines = computed<ResultLine[]>(() => {
       :server-id="serverId"
       :preview="flow.preview.value"
       :perform="flow.performCreate"
+      :console-save="consoleSave === true"
       @close="flow.closeCreate()"
       @retry="flow.loadPreview()"
     />
@@ -404,6 +423,17 @@ const resultLines = computed<ResultLine[]>(() => {
 }
 
 .bt__reason,
+.bt__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  padding: 0;
+  color: var(--tx-secondary);
+  font-size: var(--fs-small);
+  list-style: none;
+}
+
 .bt__soft {
   margin: 0;
   color: var(--tx-secondary);

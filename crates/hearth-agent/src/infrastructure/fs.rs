@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[cfg(unix)]
-use crate::application::ports::{DirListing, EntryMeta, Erased, Measure, Perms, ReadFile};
+use crate::application::ports::{DirListing, EntryMeta, Erased, FileId, Measure, Perms, ReadFile};
 use crate::application::ports::{FsError, SafeFs, ServiceRoot};
 #[cfg(unix)]
 use crate::domain::files::RelPath;
@@ -151,5 +151,13 @@ impl ServiceRoot for unix::UnixRoot {
 
     fn read_link(&self, rel: &RelPath) -> Result<String, FsError> {
         self.link_target(rel)
+    }
+
+    fn rename_noreplace(&self, from: &RelPath, to: &RelPath) -> Result<FileId, FsError> {
+        self.rename_no_replace(from, to)
+    }
+
+    fn identify(&self, rel: &RelPath) -> Result<FileId, FsError> {
+        self.identity_of(rel)
     }
 }

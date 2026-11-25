@@ -514,6 +514,38 @@ impl ContainerEngine for BollardEngine {
         inspect_with(&docker, id).await
     }
 
+    async fn private_address(&self, id: &str) -> Result<Option<std::net::Ipv4Addr>, EngineError> {
+        let docker = self.inner.docker().await?;
+        let options = InspectContainerOptionsBuilder::default()
+            .size(false)
+            .build();
+        match docker.inspect_container(id, Some(options)).await {
+            Ok(response) => {
+                let mode = response
+                    .host_config
+                    .as_ref()
+                    .and_then(|host| host.network_mode.as_deref());
+                let networks: Vec<(String, String)> = response
+                    .network_settings
+                    .as_ref()
+                    .and_then(|settings| settings.networks.as_ref())
+                    .map(|map| {
+                        map.iter()
+                            .filter_map(|(name, endpoint)| {
+                                Some((name.clone(), endpoint.ip_address.clone()?))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Ok(private_address_of(mode, &networks))
+            }
+            Err(error) => match translate(&error) {
+                EngineError::NotFound => Ok(None),
+                other => Err(other),
+            },
+        }
+    }
+
     async fn env(&self, id: &str) -> Result<Option<Vec<EnvEntry>>, EngineError> {
         let docker = self.inner.docker().await?;
         let options = InspectContainerOptionsBuilder::default()
@@ -873,6 +905,87 @@ fn create_body(plan: &ContainerPlan) -> ContainerCreateBody {
         stop_timeout: plan.stop_grace_s.map(i64::from),
         host_config: Some(host_config),
         ..ContainerCreateBody::default()
+    }
+}
+
+/// L'adresse privée d'un conteneur d'après son mode réseau et ses réseaux `(nom, adresse)` : jamais en réseau `host`,
+/// seulement une adresse IPv4 privée (RFC 1918), le réseau `bridge` d'abord puis les autres par nom.
+pub(super) fn private_address_of(
+    network_mode: Option<&str>,
+    networks: &[(String, String)],
+) -> Option<std::net::Ipv4Addr> {
+    if network_mode == Some("host") {
+        return None;
+    }
+    let mut sorted: Vec<&(String, String)> = networks.iter().collect();
+    sorted.sort_by_key(|(name, _)| (name != "bridge", name.clone()));
+    sorted
+        .into_iter()
+        .filter_map(|(_, address)| address.parse::<std::net::Ipv4Addr>().ok())
+        .find(std::net::Ipv4Addr::is_private)
+}
+
+#[cfg(test)]
+mod private_address_tests {
+    use super::private_address_of;
+    use std::net::Ipv4Addr;
+
+    fn nets(list: &[(&str, &str)]) -> Vec<(String, String)> {
+        list.iter()
+            .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn a_private_address_on_a_bridge_network_is_the_answer() {
+        assert_eq!(
+            private_address_of(Some("default"), &nets(&[("bridge", "172.17.0.5")])),
+            Some(Ipv4Addr::new(172, 17, 0, 5))
+        );
+        // Le réseau `bridge` d'abord, puis les autres par nom.
+        assert_eq!(
+            private_address_of(
+                None,
+                &nets(&[
+                    ("zeta", "10.0.0.9"),
+                    ("bridge", "172.17.0.5"),
+                    ("alpha", "192.168.1.4")
+                ])
+            ),
+            Some(Ipv4Addr::new(172, 17, 0, 5))
+        );
+        assert_eq!(
+            private_address_of(
+                None,
+                &nets(&[("zeta", "10.0.0.9"), ("alpha", "192.168.1.4")])
+            ),
+            Some(Ipv4Addr::new(192, 168, 1, 4))
+        );
+    }
+
+    #[test]
+    fn the_host_network_a_public_address_or_nothing_is_none() {
+        assert_eq!(
+            private_address_of(Some("host"), &nets(&[("host", "172.17.0.5")])),
+            None
+        );
+        assert_eq!(
+            private_address_of(None, &nets(&[("bridge", "8.8.8.8")])),
+            None
+        );
+        assert_eq!(
+            private_address_of(None, &nets(&[("bridge", "fe80::1"), ("x", "")])),
+            None
+        );
+        assert_eq!(private_address_of(None, &[]), None);
+        // Une adresse locale à la boucle ou à la liaison n'est pas privée au sens de la RFC 1918.
+        assert_eq!(
+            private_address_of(
+                None,
+                &nets(&[("bridge", "127.0.0.1"), ("b", "169.254.1.1")])
+            ),
+            None
+        );
     }
 }
 

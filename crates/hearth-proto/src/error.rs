@@ -111,6 +111,45 @@ pub enum ErrorCode {
     /// jeu (HRT-109). Distinct de `SERVICE_NOT_FOUND` (clé mal formée) et de `NOT_FOUND` (route qu'un agent plus
     /// ancien ne sert pas) : le client sait ainsi s'il montre l'onglet « Réglages ».
     NotAGameService,
+    /// `data/mods` ou `data/mods-retires` est un lien ou n'est pas un dossier : la liste des mods n'est pas lue (HRT-256, BR-MOD-020).
+    ModsFolderBlocked,
+    /// Le lot de mods à contrôler est vide, de plus de 8 dépôts ou répète un dépôt (HRT-257).
+    ModsBatchInvalid,
+    /// Un dépôt du lot est refusé au rejugement de l'acceptation (HRT-258, `details.deposit`, `details.refusal` : un code
+    /// de refus de `POST /mods/check`).
+    ModRefused,
+    /// Un nom de `retire` est absent de `mods`, ou de `restore` absent de `mods-retires`, ou de `disable`/`enable` absent
+    /// dans le bon état (HRT-258).
+    ModFileMissing,
+    /// Retrait, remplacement ou désactivation d'un mod listé par le manifeste du pack Modrinth (HRT-258).
+    ModInModrinthPack,
+    /// Réactivation alors qu'un autre fichier actif porte le même identifiant (HRT-258).
+    ModAlreadyActive,
+    /// Le nom d'arrivée d'une désactivation ou d'une réactivation est déjà pris (HRT-258).
+    ModNameTaken,
+    /// Aucun dépôt complet de ce compte sous cet identifiant (HRT-257) : jamais reçu, déjà consommé, périmé ou d'un autre compte.
+    DepositUnknown,
+    /// Le moteur de ce serveur ne charge pas de mods `.jar` (HRT-257, BR-MOD-030).
+    ModsNotApplicable,
+    /// La console de ce service n'est pas ouverte à Hearth : la fiche ne déclare pas `[remote_console.use]`, ou son
+    /// protocole n'est pas parlé (HRT-268, BR-CONSOLE-001).
+    ConsoleNotAvailable,
+    /// La ligne n'a pas la forme d'une commande (`details.reason` : `empty`, `too_long`, `control_char`, `risky_char`)
+    /// (HRT-268, BR-CONSOLE-003).
+    ConsoleCommandInvalid,
+    /// Le verbe est refusé par la fiche (`details.reason` : `use_hearth_stop`, `use_hearth_restart`, `breaks_server`)
+    /// (HRT-268, BR-CONSOLE-004).
+    ConsoleCommandRefused,
+    /// La classe signée n'est pas celle que l'agent juge : client périmé (HRT-268, BR-CONSOLE-005).
+    ConsoleClassMismatch,
+    /// Plus de 20 commandes par minute sur ce service (`details.retry_after_s`) (HRT-268, BR-CONSOLE-008).
+    ConsoleRateLimited,
+    /// La console est injoignable : pas d'adresse privée, connexion ou authentification refusée (HRT-268, BR-CONSOLE-007).
+    ConsoleUnreachable,
+    /// Le service est arrêté : la console n'écoute pas (HRT-268, BR-CONSOLE-006).
+    ServiceNotRunning,
+    /// Le service démarre : le jeu n'est pas encore prêt (HRT-268, BR-CONSOLE-006).
+    ServiceStarting,
     /// Une opération tient déjà ce service (`details.by`, `details.kind`).
     ServiceBusy,
     /// Le service est déjà dans l'état demandé (`details.state`).
@@ -175,6 +214,7 @@ impl ErrorCode {
             | Self::NotAGameService
             | Self::OperationNotFound
             | Self::PackUnknown
+            | Self::DepositUnknown
             | Self::BackupNotFound => 404,
             Self::MethodNotAllowed => 405,
             Self::PayloadTooLarge => 413,
@@ -186,6 +226,10 @@ impl ErrorCode {
             | Self::PostNotRecognized
             | Self::SpecConflict
             | Self::ServiceAdopted
+            | Self::ConsoleNotAvailable
+            | Self::ServiceNotRunning
+            | Self::ServiceStarting
+            | Self::ModsNotApplicable
             | Self::NameBeingDeleted
             | Self::LimitRefusedLive
             | Self::LimitsChanged
@@ -223,11 +267,22 @@ impl ErrorCode {
             | Self::LimitsRequired
             | Self::AgreementRequired
             | Self::PackRefused
+            | Self::ModsFolderBlocked
+            | Self::ModsBatchInvalid
+            | Self::ModRefused
+            | Self::ModFileMissing
+            | Self::ModInModrinthPack
+            | Self::ModAlreadyActive
+            | Self::ModNameTaken
+            | Self::ConsoleCommandInvalid
+            | Self::ConsoleCommandRefused
+            | Self::ConsoleClassMismatch
             | Self::SettingsFileUnreadable
             | Self::SettingRefused => 422,
             Self::Busy | Self::EngineUnavailable => 503,
             Self::IncompatibleVersion => 426,
-            Self::TooManyAttempts | Self::TransferLimit => 429,
+            Self::TooManyAttempts | Self::TransferLimit | Self::ConsoleRateLimited => 429,
+            Self::ConsoleUnreachable => 502,
             Self::TransferExpired => 410,
             Self::NoSpace => 507,
             // `Unknown` n'existe qu'à la lecture : l'agent ne l'émet jamais, un statut 500 si on le demande.
@@ -400,7 +455,7 @@ mod tests {
         assert_eq!(ErrorCode::Unknown.or_from_status(200), ErrorCode::Unknown);
     }
 
-    const ALL: [(ErrorCode, &str, u16); 72] = [
+    const ALL: [(ErrorCode, &str, u16); 89] = [
         (ErrorCode::Unauthenticated, "UNAUTHENTICATED", 401),
         (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS", 401),
         (ErrorCode::UsernameTaken, "USERNAME_TAKEN", 409),
@@ -460,6 +515,35 @@ mod tests {
         (ErrorCode::EngineUnavailable, "ENGINE_UNAVAILABLE", 503),
         (ErrorCode::ServiceNotFound, "SERVICE_NOT_FOUND", 404),
         (ErrorCode::NotAGameService, "NOT_A_GAME_SERVICE", 404),
+        (ErrorCode::ModsFolderBlocked, "MODS_FOLDER_BLOCKED", 422),
+        (ErrorCode::ModsBatchInvalid, "MODS_BATCH_INVALID", 422),
+        (ErrorCode::ModRefused, "MOD_REFUSED", 422),
+        (ErrorCode::ModFileMissing, "MOD_FILE_MISSING", 422),
+        (ErrorCode::ModInModrinthPack, "MOD_IN_MODRINTH_PACK", 422),
+        (ErrorCode::ModAlreadyActive, "MOD_ALREADY_ACTIVE", 422),
+        (ErrorCode::ModNameTaken, "MOD_NAME_TAKEN", 422),
+        (ErrorCode::DepositUnknown, "DEPOSIT_UNKNOWN", 404),
+        (ErrorCode::ModsNotApplicable, "MODS_NOT_APPLICABLE", 409),
+        (ErrorCode::ConsoleNotAvailable, "CONSOLE_NOT_AVAILABLE", 409),
+        (
+            ErrorCode::ConsoleCommandInvalid,
+            "CONSOLE_COMMAND_INVALID",
+            422,
+        ),
+        (
+            ErrorCode::ConsoleCommandRefused,
+            "CONSOLE_COMMAND_REFUSED",
+            422,
+        ),
+        (
+            ErrorCode::ConsoleClassMismatch,
+            "CONSOLE_CLASS_MISMATCH",
+            422,
+        ),
+        (ErrorCode::ConsoleRateLimited, "CONSOLE_RATE_LIMITED", 429),
+        (ErrorCode::ConsoleUnreachable, "CONSOLE_UNREACHABLE", 502),
+        (ErrorCode::ServiceNotRunning, "SERVICE_NOT_RUNNING", 409),
+        (ErrorCode::ServiceStarting, "SERVICE_STARTING", 409),
         (ErrorCode::ServiceBusy, "SERVICE_BUSY", 409),
         (
             ErrorCode::ServiceAlreadyInState,

@@ -153,6 +153,8 @@ export interface FicheStop {
   worldSaved: WorldSaved;
   /** La suite d'étapes a été essayée sur la vraie image ; sinon Hearth ne l'envoie pas. */
   sequenceTested: boolean;
+  /** Hearth enregistre le monde par la console du jeu avant de l'arrêter (HRT-292, BR-CONSOLE-012). */
+  consoleSave: boolean;
 }
 
 /** Un réglage posé par la fiche sans que l'utilisateur l'ait choisi (BR-JEU-039). */
@@ -248,7 +250,7 @@ export interface FichePackGenre {
 
 /** Les voies de mods d'une fiche (BR-MOD-001) : une voie que ce client ne connaît pas n'est pas montrée. */
 export interface FicheMods {
-  ways: ("drop_files" | "drop_pack")[];
+  ways: ("drop_files" | "drop_pack" | "drop_jars")[];
   /** Les genres de pack que la fiche prend, quand elle offre le dépôt d'un pack. */
   packGenres: FichePackGenre[];
   filesHint: string | null;
@@ -334,7 +336,8 @@ function toSetting(dto: FicheSettingDto): FicheSetting {
 
 function toMods(dto: FicheModsDto): FicheMods {
   const ways = dto.ways.filter(
-    (way): way is "drop_files" | "drop_pack" => way === "drop_files" || way === "drop_pack",
+    (way): way is "drop_files" | "drop_pack" | "drop_jars" =>
+      way === "drop_files" || way === "drop_pack" || way === "drop_jars",
   );
   const genres = (dto.pack?.genres ?? []).filter(
     (genre): genre is FichePackGenre =>

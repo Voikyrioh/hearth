@@ -179,6 +179,17 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::IncompatibleVersion
         | ErrorCode::TooManyAttempts
         | ErrorCode::MethodNotAllowed => None,
+        // La console (HRT-268, BR-CONSOLE-009) : un refus de forme, d'état, de classe ou de débit n'est pas inscrit (un
+        // refus de route ordinaire) ; le verbe refusé et la console injoignable sont écrits PAR le cas d'usage, avec
+        // le résumé de la commande, jamais deux fois.
+        ErrorCode::ConsoleNotAvailable
+        | ErrorCode::ConsoleCommandInvalid
+        | ErrorCode::ConsoleCommandRefused
+        | ErrorCode::ConsoleClassMismatch
+        | ErrorCode::ConsoleRateLimited
+        | ErrorCode::ConsoleUnreachable
+        | ErrorCode::ServiceNotRunning
+        | ErrorCode::ServiceStarting => None,
         // Codes du lot « déploiements, lots suivants » (HRT-83) : aucune route ne les rend encore, mais chacun
         // est CLASSÉ ici (un journal d'activité retient un refus ou un échec d'un geste de service). Raison
         // existante la plus proche ; la route qui les rendra peut en préciser une plus fine.
@@ -214,12 +225,21 @@ fn failure_of(mark: ErrorMark) -> Option<Outcome> {
         | ErrorCode::LimitsRequired // limites obligatoires absentes
         | ErrorCode::SettingsFileUnreadable // fichier de réglages que le format ne sait pas découper
         | ErrorCode::PackRefused // pack déposé refusé (HRT-124)
+        | ErrorCode::ModsFolderBlocked // dossier des mods qui est un lien (HRT-256)
+        | ErrorCode::ModsBatchInvalid // lot de mods vide, trop gros ou répété (HRT-257)
+        | ErrorCode::ModsNotApplicable // moteur sans mods (HRT-257)
+        | ErrorCode::ModRefused // dépôt refusé au rejugement (HRT-258)
+        | ErrorCode::ModFileMissing // fichier absent du dossier visé (HRT-258)
+        | ErrorCode::ModInModrinthPack // mod du pack Modrinth (HRT-258)
+        | ErrorCode::ModAlreadyActive // identifiant déjà actif (HRT-258)
+        | ErrorCode::ModNameTaken // nom d'arrivée pris (HRT-258)
         | ErrorCode::SettingRefused => Some(Outcome::Failed(Reason::Validation)), // valeur de réglage refusée
         // Ressource inexistante.
         ErrorCode::ServiceNotFound // service inconnu
         | ErrorCode::NotAGameService // service qui n'est pas un serveur de jeu créé depuis une fiche
         | ErrorCode::OperationNotFound // opération inconnue, ou sur un service que le compte ne voit pas
         | ErrorCode::PackUnknown // pack déposé inconnu (HRT-124)
+        | ErrorCode::DepositUnknown // dépôt de mod inconnu (HRT-257)
         | ErrorCode::IllustrationAbsent // fiche listée sans illustration (HRT-238, lecture ouverte, jamais consignée)
         | ErrorCode::BackupNotFound => Some(Outcome::Failed(Reason::NotFound)), // sauvegarde inconnue
         // Installer depuis une fiche (HRT-101, BR-FICHE-032) : une cause typée par refus.

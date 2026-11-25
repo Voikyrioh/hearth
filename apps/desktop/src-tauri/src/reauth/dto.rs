@@ -80,6 +80,12 @@ pub enum AdminActKindDto {
     ServiceUpdate,
     /// Déposer un fichier dans la zone d'attente de l'agent (HRT-96, BR-FILES-023) : couvert par l'élévation de cinq minutes.
     FileWrite,
+    /// Appliquer un lot de mods (HRT-258, BR-MOD-031) : le mot de passe à chaque fois, jamais couvert par l'élévation.
+    ModsApply,
+    /// Envoyer une commande libre à la console d'un jeu (HRT-268, BR-CONSOLE-005) : un acte de pilotage.
+    ConsoleCommandFree,
+    /// Envoyer une commande sensible à la console d'un jeu : le mot de passe à chaque fois, dans tous les états.
+    ConsoleCommandSensitive,
 }
 
 /// L'état de confiance du compte que l'agent annonce (HRT-194, BR-TRUST-052) : de lui dépend si piloter un

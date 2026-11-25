@@ -5,13 +5,13 @@ titre: Une console distante est déclarée, son mot de passe est un secret gén�
 statut: active
 invariant: true
 source: contexts/hearth/conceptions/2026-10-13-fonctionnelle-serveur-de-jeu-au-quotidien.md (BR-JEU-040), contexts/hearth/conceptions/2026-10-13-technique-fiches-de-jeu.md, HRT-113
-maj: 2026-10-13
+maj: 2026-11-18
 ---
 
 # BR-JEU-040 — Une console distante est déclarée, son mot de passe est un secret généré, son port n'est jamais publié
 
 ## Règle
-`[remote_console]` désigne un port de rôle `remote_console` (`publish = "never"` obligatoire, sans exception : `ConsolePubliee`) et un secret `[[secret]]` généré par l'agent (24 à 64 caractères alphanumériques, tiré par l'appelant, vérifié par `translate`). Le mot de passe est écrit par une variable ou un réglage imposé, sinon la fiche est refusée. Le brouillon de service ne contient jamais le port de la console. Hearth ne s'y connecte pas dans ce format (ADR-0052).
+`[remote_console]` désigne un port de rôle `remote_console` (`publish = "never"` obligatoire, sans exception : `ConsolePubliee`) et un secret `[[secret]]` généré par l'agent (24 à 64 caractères alphanumériques, tiré par l'appelant, vérifié par `translate`). Le mot de passe est écrit par une variable ou un réglage imposé, sinon la fiche est refusée. Le brouillon de service ne contient jamais le port de la console. Hearth ne s'y connecte que si la fiche l'y autorise par `[remote_console.use]` (HRT-267, ADR-0067, BR-CONSOLE-001) : par l'adresse privée du conteneur, jamais par un port publié ; le port reste `publish = "never"`.
 
 ## Application (code)
 - `crates/hearth-agent/src/domain/catalog/loading/invariants.rs::{check_ports, check_remote_console, check_cross}`
@@ -29,4 +29,5 @@ maj: 2026-10-13
 - BR-FICHE-007, BR-JEU-039
 
 ## Historique
+- 2026-11-18 : amendée (HRT-267) : la connexion de Hearth est possible quand la fiche déclare `[remote_console.use]` ; le port n'est toujours jamais publié.
 - 2026-10-13 — création (HRT-113, format de fiche version 2, domaine pur).

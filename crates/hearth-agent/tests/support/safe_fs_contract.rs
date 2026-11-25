@@ -101,6 +101,55 @@ pub fn run(fs: &dyn SafeFs, uid: u32, gid: u32) {
         Some(FsError::NotRegular)
     );
 
+    // Renommer sans remplacer (HRT-258) : le fichier part sous son nouveau nom, intact, avec la même identité ; une
+    // cible qui existe est refusée sans rien toucher ; un dossier n'est pas un fichier ordinaire ; une source absente
+    // est dite absente.
+    root.mkdir(&rel("mods"), dir).unwrap();
+    root.mkdir(&rel("mods-retires"), dir).unwrap();
+    root.write_atomic(&rel("mods/a.jar"), b"jar-a", file)
+        .unwrap();
+    root.write_atomic(&rel("mods/b.jar"), b"jar-b", file)
+        .unwrap();
+    let before = root.identify(&rel("mods/a.jar")).unwrap();
+    let moved = root
+        .rename_noreplace(&rel("mods/a.jar"), &rel("mods-retires/a.jar"))
+        .unwrap();
+    assert_eq!(
+        moved, before,
+        "le renommage rend l'identité du fichier déplacé"
+    );
+    assert_eq!(root.identify(&rel("mods-retires/a.jar")).unwrap(), before);
+    assert_eq!(root.identify(&rel("mods/a.jar")), Err(FsError::NotFound));
+    assert_eq!(
+        root.read_bounded(&rel("mods-retires/a.jar"), 16).unwrap(),
+        b"jar-a"
+    );
+    assert_eq!(
+        root.rename_noreplace(&rel("mods/b.jar"), &rel("mods-retires/a.jar")),
+        Err(FsError::Io(std::io::ErrorKind::AlreadyExists))
+    );
+    assert_eq!(root.read_bounded(&rel("mods/b.jar"), 16).unwrap(), b"jar-b");
+    assert_eq!(
+        root.read_bounded(&rel("mods-retires/a.jar"), 16).unwrap(),
+        b"jar-a"
+    );
+    assert_eq!(
+        root.rename_noreplace(&rel("mods/absent.jar"), &rel("mods/x.jar")),
+        Err(FsError::NotFound)
+    );
+    assert_eq!(
+        root.rename_noreplace(&rel("mods"), &rel("mods-2")),
+        Err(FsError::NotRegular)
+    );
+    // Renommer dans le même dossier (désactiver) puis revenir.
+    root.rename_noreplace(&rel("mods/b.jar"), &rel("mods/b.jar.disabled"))
+        .unwrap();
+    root.rename_noreplace(&rel("mods/b.jar.disabled"), &rel("mods/b.jar"))
+        .unwrap();
+    assert_eq!(root.read_bounded(&rel("mods/b.jar"), 16).unwrap(), b"jar-b");
+    root.remove_tree(&rel("mods")).unwrap();
+    root.remove_tree(&rel("mods-retires")).unwrap();
+
     // Retrait : un arbre, jamais la racine, une cible absente est dite absente.
     assert_eq!(root.remove_tree(&RelPath::root()), Err(FsError::Refused));
     root.remove_tree(&rel("world")).unwrap();

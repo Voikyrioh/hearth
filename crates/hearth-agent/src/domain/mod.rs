@@ -7,6 +7,7 @@ pub mod audit;
 pub mod backups;
 pub mod catalog;
 pub mod compat;
+pub mod console;
 pub mod eviction;
 pub mod files;
 pub mod fingerprint_secret;

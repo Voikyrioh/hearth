@@ -54,6 +54,8 @@ pub enum OperationKind {
     Backup,
     Restore,
     WorldImport,
+    /// Appliquer un lot de mods (HRT-258).
+    Mods,
     /// Un genre que ce client ne connaît pas.
     #[serde(other)]
     Unknown,

@@ -70,7 +70,7 @@ test("un envoi apparaît, avance en octets, continue quand on quitte l'écran et
   await sim(page, (s, arg) => s.transfers.advance((arg as { id: string }).id, 250 * 1024 * 1024), {
     id,
   });
-  await expect(row.locator("[data-transfer-progress]")).toHaveText("250 Mio sur 600 Mio");
+  await expect(row.locator("[data-transfer-progress]")).toHaveText("250 Mo sur 600 Mo");
   await shoot(page.locator("[data-transfers-strip]"), page, "hrt96-envoi");
 
   // Quitter l'écran : l'envoi continue et le panneau le retrouve ailleurs.
@@ -85,7 +85,7 @@ test("un envoi apparaît, avance en octets, continue quand on quitte l'écran et
     { timeout: 10_000 },
   );
   await expect(page.locator(`[data-transfer="${id}"] [data-transfer-progress]`)).toHaveText(
-    "600 Mio sur 600 Mio",
+    "600 Mo sur 600 Mo",
   );
   await page.locator(`[data-transfer="${id}"] [data-transfer-dismiss]`).click();
   await expect(page.locator("[data-transfers-strip]")).toHaveCount(0);
@@ -110,11 +110,11 @@ test("une coupure laisse « Reprendre l'envoi » : rien ne repart seul, un bouto
   // Rien ne repart seul : après plusieurs relectures, l'envoi est toujours interrompu et n'a pas avancé.
   await page.waitForTimeout(2500);
   await expect(row).toHaveAttribute("data-status", "interrupted");
-  await expect(row.locator("[data-transfer-progress]")).toHaveText("100 Mio sur 600 Mio");
+  await expect(row.locator("[data-transfer-progress]")).toHaveText("100 Mo sur 600 Mo");
   await shoot(page.locator("[data-transfers-strip]"), page, "hrt96-coupure");
   await resume.click();
   await expect(row).toHaveAttribute("data-status", "sending");
-  await expect(row.locator("[data-transfer-progress]")).toHaveText("100 Mio sur 600 Mio");
+  await expect(row.locator("[data-transfer-progress]")).toHaveText("100 Mo sur 600 Mo");
 });
 
 test("le manque de place dit ce qui manque, l'envoi reste reprenable, annuler retire la partie reçue", async ({
@@ -135,7 +135,7 @@ test("le manque de place dit ce qui manque, l'envoi reste reprenable, annuler re
     { id },
   );
   await expect(row.locator("[data-transfer-status]")).toHaveText(
-    "Il manque 3 Gio sur le disque pour écrire ce fichier. Il resterait 512 Mio de libre.",
+    "Il manque 3 Go sur le disque pour écrire ce fichier. Il resterait 512 Mo de libre.",
     { timeout: 10_000 },
   );
   await expect(row.locator("[data-transfer-resume]")).toBeVisible();

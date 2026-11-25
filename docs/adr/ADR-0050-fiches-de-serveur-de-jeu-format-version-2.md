@@ -62,6 +62,9 @@ Règle de publication (`BR-RES-038`) : une fiche `published` porte `memory.recom
 
 Mise en œuvre : `loading/memory.rs` (`memory_tiers`, `recommended_gap`), `invariants.rs::check_memory_tiers`. Premier usage servi : « Recommandé » ; les autres crans sont servis dès que la fiche leur donne un chiffre fondé. Servir les crans dans la réponse du catalogue et du service installé reste à faire : HRT-181 (hors domaine pur).
 
+## Avenant : `[remote_console.use]` (HRT-267, ADR-0067)
+Le format 2 reste inchangé ; `[remote_console]` gagne un bloc OPTIONNEL `[remote_console.use]` qui autorise Hearth à parler à la console déclarée et porte tout ce qui est propre au jeu : `reply_timeout_s` (2 à 30), `refused` (verbe et raison d'une liste fermée : `use_hearth_stop`, `use_hearth_restart`, `breaks_server`), `[[sensitive]]` (verbe, titre et phrase de confirmation à un seul emplacement `{joueur}`, `target` = `first_arg` ou `none`), `[players]` (commande et lecteur d'une liste fermée : `minecraft_list`), `[[quick]]` (6 au plus, `send` seulement pour une commande libre), `[before_stop]` (HRT-292). Invariants du chargeur (I-CON) : seulement avec `protocol = "source_rcon"` ; verbes `[a-z0-9_-]{1,32}` uniques, aucun à la fois refusé et sensible ; textes sans caractère à risque ; littéraux de fiche en ASCII imprimable de 64 caractères au plus ; la commande des joueurs, les commandes rapides `send` et celle d'avant l'arrêt sont de classe libre. Le port reste `publish = "never"` (I7 inchangé). La fiche Minecraft passe en version 5 avec ce bloc. Voir ADR-0067 et BR-CONSOLE-001, 003, 004, 011.
+
 ## Quand NE PAS l'appliquer / limites
 - Le format borne ce que Hearth demande au moteur, pas ce que l'image fait une fois lancée ni ce qu'elle télécharge.
 - Un service adopté n'a ni fiche ni réglages (`FICHE-054`).

@@ -182,6 +182,11 @@ impl FicheInstaller {
         }
     }
 
+    /// La fiche embarquée de l'agent qui porte cet identifiant.
+    pub fn fiche(&self, id: &str) -> Option<&crate::domain::catalog::loading::model::Fiche> {
+        self.catalog.fiche(id)
+    }
+
     /// Juge la demande. `machine` et `free_disk` absents (le moteur ne les a pas dits) : rien n'est opposé, comme
     /// pour une image à la main.
     pub fn prepare(

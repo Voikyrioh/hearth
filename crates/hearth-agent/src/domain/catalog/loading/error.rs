@@ -108,6 +108,11 @@ pub enum Motif {
     CurseForgeInterdit {
         ou: String,
     },
+    /// La variable `REMOVE_OLD_MODS` de l'image supprime des fichiers du dossier des mods : Hearth ne supprime
+    /// jamais un mod, donc aucune fiche ne l'écrit (BR-MOD-028).
+    RemoveOldModsInterdit {
+        ou: String,
+    },
     // ---- I8 : un contrat ne s'accepte que par un geste ----------------------------------------
     ContratAccepteDAvance {
         ou: String,
@@ -226,7 +231,8 @@ impl Motif {
             | PublieeSansEmpreinte
             | PortReserve { .. }
             | PortEnDouble { .. }
-            | CurseForgeInterdit { .. } => "I1",
+            | CurseForgeInterdit { .. }
+            | RemoveOldModsInterdit { .. } => "I1",
             CheminInvalide { .. } | CibleEnDouble | DossierInconnu { .. } => "I2",
             ArgumentNonLitteral
             | SecretEnArgument
@@ -312,6 +318,7 @@ impl Motif {
             IdentifiantEnDouble { genre, id } => format!("{genre} `{id}` déclaré deux fois"),
             CleEnDouble { canal, cle } => format!("la clé `{cle}` est réglée deux fois dans le canal `{canal}`"),
             ListeDeVariantesVide => "`only_variants` est vide : pour toutes les variantes, omettez le champ".into(),
+            RemoveOldModsInterdit { ou } => format!("la variable `REMOVE_OLD_MODS` supprime des mods : Hearth n'en supprime jamais ({ou}, BR-MOD-028)"),
             ModsIncoherent { raison } => format!("bloc `[mods]` incohérent : {raison}"),
             ReferenceInconnue { genre, id } => format!("{genre} `{id}` introuvable"),
             TropDEssentiels { trouve } => format!("{trouve} réglages `essential` pour 8 au plus (BR-FICHE-038)"),

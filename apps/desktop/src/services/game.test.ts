@@ -24,6 +24,7 @@ const stop = (patch: Partial<FicheStop> = {}): FicheStop => ({
   graceSeconds: 30,
   worldSaved: "by_sequence",
   sequenceTested: true,
+  consoleSave: false,
   ...patch,
 });
 const view = (patch: Partial<FicheStop> = {}): GameView => ({

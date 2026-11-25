@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ServiceOperation } from "@/link";
 import {
+  consoleSaveNote,
   formatSize,
   launchedBy,
   operationTitle,
@@ -117,5 +118,31 @@ describe("les textes d'une opération", () => {
       statusText(op({ status: "rolling_back" })),
     ];
     for (const sentence of sentences) expect(sentence).not.toContain("—");
+  });
+});
+
+describe("l'enregistrement du monde par la console, non confirmé (HRT-292)", () => {
+  const failed = [
+    { step: "console_save", state: "failed" as const },
+    { step: "stop", state: "done" as const },
+  ];
+
+  it("une note fixe, seulement quand l'étape s'est close en échec", () => {
+    expect(consoleSaveNote(op({ steps: failed }))).toBe(
+      "Le monde n'a pas pu être enregistré avant l'arrêt. L'arrêt a continué.",
+    );
+    expect(consoleSaveNote(op({ steps: [{ step: "console_save", state: "done" }] }))).toBeNull();
+    expect(consoleSaveNote(op())).toBeNull();
+  });
+
+  it("l'issue d'un arrêt réussi la dit, sans changer l'issue d'un arrêt confirmé", () => {
+    const stopped = op({ kind: "stop", status: "succeeded", steps: failed });
+    expect(outcomeText(stopped, "Prominence")).toContain("L'arrêt a continué.");
+    const confirmed = op({
+      kind: "stop",
+      status: "succeeded",
+      steps: [{ step: "console_save", state: "done" }],
+    });
+    expect(outcomeText(confirmed, "Prominence")).not.toContain("n'a pas pu être enregistré");
   });
 });

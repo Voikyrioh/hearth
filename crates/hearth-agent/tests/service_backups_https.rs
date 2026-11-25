@@ -23,12 +23,15 @@ use hearth_proto::api::backups::{
     BackupsView, VerifyResult,
 };
 use hearth_proto::api::deploy::DeployAccepted;
-use hearth_proto::api::service_ops::{OperationCause, OperationStatus, OperationView};
+use hearth_proto::api::service_ops::{
+    OperationCause, OperationStatus, OperationView, StepStateView,
+};
 use serde_json::{Value, json};
 use support::device::Actor;
 use support::engine::{fast_timings, parts_supervised};
 use support::fake_backup_files::FakeBackupFiles;
 use support::fake_engine::{Call, FakeEngine, PullScript};
+use support::fake_game_console::FakeGameConsole;
 use support::fake_host::{FakeFreeSpace, FakeHostPorts};
 use support::fake_safe_fs::FakeSafeFs;
 use support::fake_supervisor::FakeSupervisor;
@@ -449,6 +452,82 @@ async fn stopping_to_copy_stops_with_the_service_delay_copies_then_restarts_what
     assert_eq!(intents, 0);
     let view = b.list(service.key.as_str()).await;
     assert_eq!(view.backups[0].mode, BackupMode::StopCopyStart);
+    b.agent.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Enregistrer le monde par la console avant l'arrêt d'une copie à froid (HRT-292, BR-CONSOLE-012)
+// ---------------------------------------------------------------------------------------------
+
+/// Un banc dont le jeu parle par la console, et un serveur Minecraft en marche posé sans installation.
+async fn bench_minecraft() -> (Bench, Arc<FakeGameConsole>, ServiceKey) {
+    let game = FakeGameConsole::new();
+    let wired = game.clone();
+    let b = bench_with(move |parts| parts.catalog.console = Some(wired)).await;
+    game.watch_engine(b.engine.clone());
+    let key =
+        support::game::minecraft_console_service(&b.env, &b.engine, &b.agent.services(), 1).await;
+    b.safe_fs
+        .seed_file(&key, "data/world/level.dat", b"le monde");
+    (b, game, key)
+}
+
+fn state_of<'a>(operation: &'a OperationView, step: &str) -> Option<&'a StepStateView> {
+    operation
+        .steps
+        .iter()
+        .find(|s| s.step == step)
+        .map(|s| &s.state)
+}
+
+#[tokio::test]
+async fn a_running_minecraft_saves_by_the_console_before_the_stop_of_a_cold_copy() {
+    let (b, game, key) = bench_minecraft().await;
+    game.answer("save-all flush", "Saved the game");
+    let (_, operation) = b
+        .made(key.as_str(), json!({ "mode": "stop_copy_start" }))
+        .await;
+    assert_eq!(
+        steps(&operation),
+        ["console_save", "stop", "copy", "verify", "start"],
+        "{operation:?}"
+    );
+    assert_eq!(
+        state_of(&operation, "console_save"),
+        Some(&StepStateView::Done)
+    );
+    let received = game.received();
+    assert_eq!(received.len(), 1, "{received:?}");
+    assert_eq!(received[0].line, "save-all flush");
+    assert_eq!(received[0].stops_seen, 0, "la ligne part AVANT l'arrêt");
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_mute_game_never_prevents_the_cold_copy_from_succeeding() {
+    let (b, game, key) = bench_minecraft().await;
+    game.fail(
+        "save-all flush",
+        hearth_agent::application::ports::ConsoleError::NoAnswer,
+    );
+    let (_, operation) = b
+        .made(key.as_str(), json!({ "mode": "stop_copy_start" }))
+        .await;
+    assert_eq!(
+        state_of(&operation, "console_save"),
+        Some(&StepStateView::Failed)
+    );
+    assert_eq!(state_of(&operation, "copy"), Some(&StepStateView::Done));
+    assert_eq!(b.list(key.as_str()).await.backups.len(), 1);
+    b.agent.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_hot_copy_never_asks_the_game_to_save() {
+    let (b, game, key) = bench_minecraft().await;
+    let (_, operation) = b.made(key.as_str(), json!({ "mode": "hot" })).await;
+    assert_eq!(state_of(&operation, "console_save"), None);
+    assert!(game.lines().is_empty());
     b.agent.shutdown().await;
 }
 
@@ -1317,6 +1396,7 @@ async fn the_registry_lists_writing_lines_apart_and_keeps_published_ones() {
                 skipped: 3,
                 manifest_sha256: "ab".repeat(32),
                 archive_sha256: "cd".repeat(32),
+                mods: None,
             }
         )
         .await
@@ -1433,4 +1513,352 @@ async fn an_agent_cut_between_writing_and_ready_removes_its_own_files_and_nothin
     );
     assert_eq!(b.files.content(&dir, "notes.txt"), Some(b"a moi".to_vec()));
     second.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// La liste des mods de chaque sauvegarde (HRT-293, BR-MOD-034 a 036)
+// ---------------------------------------------------------------------------------------------
+
+mod mods_list {
+    use std::sync::Mutex;
+
+    use async_trait::async_trait;
+    use hearth_agent::application::ports::{CurrentMods, ModsRead, ModsReading, ModsSnapshot};
+    use hearth_agent::domain::mods::backup_list::{
+        CurrentMod, IdentitySummary, Place, Snapshot, SnapshotFile,
+    };
+    use hearth_agent::domain::mods::game_info::Origin;
+    use hearth_agent::domain::mods::jar::{Environment, JarLoader};
+    use hearth_proto::api::mods::{BackupModsView, ChangeKindView, ModOrigin, ModsListState};
+
+    use super::*;
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        ring::digest::digest(&ring::digest::SHA256, bytes)
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    fn identity(id: &str, version: &str) -> IdentitySummary {
+        IdentitySummary {
+            mod_id: id.to_owned(),
+            name: Some(id.to_owned()),
+            version: Some(version.to_owned()),
+            loader: JarLoader::Fabric,
+            environment: Environment::Both,
+        }
+    }
+
+    /// Une lecture des mods scriptee : ce qu'elle rend, et le nombre d'appels au moteur au moment de la lecture.
+    struct FakeMods {
+        reading: Mutex<ModsReading>,
+        current: Mutex<Option<CurrentMods>>,
+        applicable: bool,
+        engine: Mutex<Option<Arc<FakeEngine>>>,
+        calls_at_read: Mutex<Vec<usize>>,
+    }
+
+    #[async_trait]
+    impl ModsSnapshot for FakeMods {
+        async fn applicable(&self, _: &ServiceKey) -> bool {
+            self.applicable
+        }
+
+        async fn read(&self, _: &ServiceKey) -> ModsReading {
+            let calls = self
+                .engine
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map_or(0, |engine| engine.calls().len());
+            self.calls_at_read.lock().unwrap().push(calls);
+            self.reading.lock().unwrap().clone()
+        }
+
+        async fn current(&self, _: &ServiceKey) -> Option<CurrentMods> {
+            self.current.lock().unwrap().clone()
+        }
+    }
+
+    fn fake(reading: ModsReading, applicable: bool) -> Arc<FakeMods> {
+        Arc::new(FakeMods {
+            reading: Mutex::new(reading),
+            current: Mutex::new(None),
+            applicable,
+            engine: Mutex::new(None),
+            calls_at_read: Mutex::new(Vec::new()),
+        })
+    }
+
+    fn read_of(files: Vec<SnapshotFile>) -> ModsReading {
+        ModsReading::Read(ModsRead {
+            dir: "mods".into(),
+            retired_dir: "mods-retires".into(),
+            data_target: root(),
+            snapshot: Snapshot {
+                loader: Some(JarLoader::Fabric),
+                minecraft: Some("1.20.1".into()),
+                files,
+            },
+        })
+    }
+
+    fn seen(name: &str, bytes: &[u8], id: &str) -> SnapshotFile {
+        SnapshotFile {
+            name: name.to_owned(),
+            retired: false,
+            size: bytes.len() as u64,
+            sha256: Some(sha256_hex(bytes)),
+            identity: Some(identity(id, "1.0.0")),
+            origin: Origin::Hearth,
+            unread: false,
+        }
+    }
+
+    async fn bench_mods(mods: &Arc<FakeMods>) -> Bench {
+        let port: Arc<dyn ModsSnapshot> = mods.clone();
+        let b = bench_with(|parts| parts.backups.mods = Some(port)).await;
+        *mods.engine.lock().unwrap() = Some(b.engine.clone());
+        b
+    }
+
+    async fn mods_view(b: &Bench, key: &str, id: &str, query: &str) -> Wire {
+        b.agent
+            .request("GET", &format!("/services/{key}/backups/{id}/mods{query}"))
+            .token(&b.lucas.token)
+            .send()
+            .await
+    }
+
+    #[tokio::test]
+    async fn a_backup_records_the_mods_read_before_the_stop_matched_against_what_the_archive_holds()
+    {
+        let mods = fake(ModsReading::Unreadable, true);
+        let b = bench_mods(&mods).await;
+        let service = b.deploy("web").await;
+        let seed = |rel: &str, bytes: &[u8]| {
+            b.safe_fs
+                .seed_file(&service.key, &format!("{FOLDER}/{rel}"), bytes);
+        };
+        seed("mods/a.jar", b"contenu-a");
+        seed("mods/changed.jar", b"apres-la-lecture");
+        seed("mods/off.jar.disabled", b"contenu-off");
+        seed("mods-retires/old.jar", b"contenu-old");
+        let mut off = seen("off.jar.disabled", b"contenu-off", "off");
+        off.origin = Origin::Manual;
+        let mut old = seen("old.jar", b"contenu-old", "old");
+        old.retired = true;
+        *mods.reading.lock().unwrap() = read_of(vec![
+            seen("a.jar", b"contenu-a", "a"),
+            // Lu avec un autre contenu que celui qui a ete copie.
+            seen("changed.jar", b"avant-la-lecture", "changed"),
+            // Disparu pendant la copie : jamais dans la liste.
+            seen("gone.jar", b"contenu-gone", "gone"),
+            off,
+            old,
+        ]);
+        let calls_before = b.engine.calls().len();
+        let (accepted, _) = b
+            .made(service.key.as_str(), json!({ "mode": "stop_copy_start" }))
+            .await;
+        // La lecture a eu lieu AVANT l'etape d'arret : aucun appel au moteur depuis le debut de l'operation.
+        assert_eq!(*mods.calls_at_read.lock().unwrap(), vec![calls_before]);
+        let reply = mods_view(&b, service.key.as_str(), &accepted.backup_id, "").await;
+        assert_eq!(reply.status, 200, "{}", reply.text);
+        let view: BackupModsView = serde_json::from_value(reply.body).unwrap();
+        assert_eq!(view.state, ModsListState::Recorded);
+        assert_eq!(view.game.minecraft.as_deref(), Some("1.20.1"));
+        assert_eq!(
+            (
+                view.counts.active,
+                view.counts.disabled,
+                view.counts.retired
+            ),
+            (2, 1, 1)
+        );
+        assert_eq!(view.mods.len(), 4, "{:?}", view.mods);
+        let by_file = |name: &str| {
+            view.mods
+                .iter()
+                .find(|m| m.file.as_deref() == Some(name))
+                .unwrap_or_else(|| panic!("{name} absent : {:?}", view.mods))
+        };
+        assert_eq!(by_file("a.jar").identity.as_ref().unwrap().id, "a");
+        assert_eq!(by_file("a.jar").origin, ModOrigin::Hearth);
+        // Empreinte differente de celle lue : sans identite, origine a la main.
+        assert!(by_file("changed.jar").identity.is_none());
+        assert_eq!(by_file("changed.jar").origin, ModOrigin::Manual);
+        assert!(
+            view.mods
+                .iter()
+                .all(|m| m.file.as_deref() != Some("gone.jar"))
+        );
+        // Le resume suit la liste des sauvegardes.
+        let list = b.list(service.key.as_str()).await;
+        let summary = list.backups[0].mods.as_ref().expect("resume");
+        assert_eq!(summary.state, ModsListState::Recorded);
+        assert_eq!(
+            (summary.active, summary.disabled, summary.retired),
+            (2, 1, 1)
+        );
+        b.agent.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_failed_read_never_fails_the_backup_and_a_service_without_mods_has_no_field() {
+        let mods = fake(ModsReading::Unreadable, true);
+        let b = bench_mods(&mods).await;
+        let service = b.deploy("web").await;
+        let (accepted, operation) = b.made(service.key.as_str(), json!({ "mode": "hot" })).await;
+        assert_eq!(operation.status, OperationStatus::Succeeded);
+        let view: BackupModsView = serde_json::from_value(
+            mods_view(&b, service.key.as_str(), &accepted.backup_id, "")
+                .await
+                .body,
+        )
+        .unwrap();
+        assert_eq!(view.state, ModsListState::Unreadable);
+        assert!(view.mods.is_empty());
+        b.agent.shutdown().await;
+
+        let without = fake(ModsReading::NotApplicable, false);
+        let b = bench_mods(&without).await;
+        let service = b.deploy("web").await;
+        let (accepted, _) = b.made(service.key.as_str(), json!({ "mode": "hot" })).await;
+        let list = b.list(service.key.as_str()).await;
+        assert!(list.backups[0].mods.is_none());
+        let reply = mods_view(&b, service.key.as_str(), &accepted.backup_id, "").await;
+        assert_eq!(reply.status, 409, "{}", reply.text);
+        assert_eq!(code(&reply), "MODS_NOT_APPLICABLE");
+        // Aucune ligne n'a ete ecrite.
+        let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM backup_mod_sets")
+            .fetch_one(b.env.db.pool())
+            .await
+            .unwrap();
+        assert_eq!(rows, 0);
+        b.agent.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn an_old_backup_has_no_list_a_new_one_has_it_and_deleting_the_backup_deletes_the_list() {
+        let mods = fake(read_of(vec![]), true);
+        let b = bench_mods(&mods).await;
+        let service = b.deploy("web").await;
+        b.safe_fs
+            .seed_file(&service.key, &format!("{FOLDER}/mods/a.jar"), b"contenu-a");
+        *mods.reading.lock().unwrap() = read_of(vec![seen("a.jar", b"contenu-a", "a")]);
+        // Une sauvegarde d'avant la 0.2.2 : sa liste n'est pas enregistree.
+        let (first, _) = b.made(service.key.as_str(), json!({ "mode": "hot" })).await;
+        sqlx::query("DELETE FROM backup_mod_sets")
+            .execute(b.env.db.pool())
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM backup_mod_entries")
+            .execute(b.env.db.pool())
+            .await
+            .unwrap();
+        let view: BackupModsView = serde_json::from_value(
+            mods_view(&b, service.key.as_str(), &first.backup_id, "")
+                .await
+                .body,
+        )
+        .unwrap();
+        assert_eq!(view.state, ModsListState::NotRecorded);
+        assert!(view.mods.is_empty() && view.recorded_at.is_none());
+        let list = b.list(service.key.as_str()).await;
+        assert_eq!(
+            list.backups[0].mods.as_ref().unwrap().state,
+            ModsListState::NotRecorded
+        );
+        // Une nouvelle sauvegarde a sa liste ; la supprimer retire la liste dans la foulee.
+        let (second, _) = b.made(service.key.as_str(), json!({ "mode": "hot" })).await;
+        let count = |table: &'static str| {
+            let pool = b.env.db.pool().clone();
+            async move {
+                let sql = match table {
+                    "backup_mod_sets" => "SELECT COUNT(*) FROM backup_mod_sets",
+                    _ => "SELECT COUNT(*) FROM backup_mod_entries",
+                };
+                sqlx::query_scalar::<_, i64>(sql)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+        assert_eq!(count("backup_mod_sets").await, 1);
+        assert_eq!(count("backup_mod_entries").await, 1);
+        assert_eq!(b.delete(&second.backup_id).await.status, 200);
+        assert_eq!(count("backup_mod_sets").await, 0);
+        assert_eq!(count("backup_mod_entries").await, 0);
+        // La sauvegarde d'un autre service n'existe pas pour celui-ci.
+        let other = b.deploy("autre").await;
+        let reply = mods_view(&b, other.key.as_str(), &first.backup_id, "").await;
+        assert_eq!(reply.status, 404, "{}", reply.text);
+        assert_eq!(code(&reply), "BACKUP_NOT_FOUND");
+        b.agent.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn the_comparison_with_the_current_mods_is_computed_by_the_agent_and_says_when_it_is_partial()
+     {
+        let mods = fake(read_of(vec![]), true);
+        let b = bench_mods(&mods).await;
+        let service = b.deploy("web").await;
+        b.safe_fs
+            .seed_file(&service.key, &format!("{FOLDER}/mods/a.jar"), b"contenu-a");
+        b.safe_fs
+            .seed_file(&service.key, &format!("{FOLDER}/mods/b.jar"), b"contenu-b");
+        *mods.reading.lock().unwrap() = read_of(vec![
+            seen("a.jar", b"contenu-a", "a"),
+            seen("b.jar", b"contenu-b", "b"),
+        ]);
+        let (made, _) = b.made(service.key.as_str(), json!({ "mode": "hot" })).await;
+        let current = |id: &str, version: &str, file: &str, place: Place| CurrentMod {
+            file_name: Some(file.to_owned()),
+            place,
+            identity: Some(identity(id, version)),
+        };
+        *mods.current.lock().unwrap() = Some(CurrentMods {
+            mods: vec![
+                current("a", "2.0.0", "a-2.jar", Place::Active),
+                current("c", "1.0.0", "c.jar", Place::Active),
+            ],
+            unread: 2,
+        });
+        let reply = mods_view(
+            &b,
+            service.key.as_str(),
+            &made.backup_id,
+            "?compare=current",
+        )
+        .await;
+        assert_eq!(reply.status, 200, "{}", reply.text);
+        let view: BackupModsView = serde_json::from_value(reply.body).unwrap();
+        let compare = view.compare.expect("comparaison");
+        assert!(!compare.complete && compare.unread == 2 && !compare.same);
+        let kinds: Vec<_> = compare
+            .changes
+            .iter()
+            .map(|c| (c.kind, c.id.clone()))
+            .collect();
+        assert!(kinds.contains(&(ChangeKindView::VersionChanged, Some("a".into()))));
+        assert!(kinds.contains(&(ChangeKindView::Removed, Some("b".into()))));
+        assert!(kinds.contains(&(ChangeKindView::Added, Some("c".into()))));
+        // Sans `compare=current`, aucune comparaison ; lecture actuelle impossible : la liste reste rendue.
+        let plain = mods_view(&b, service.key.as_str(), &made.backup_id, "").await;
+        assert!(plain.body.get("compare").is_none(), "{}", plain.text);
+        *mods.current.lock().unwrap() = None;
+        let blocked = mods_view(
+            &b,
+            service.key.as_str(),
+            &made.backup_id,
+            "?compare=current",
+        )
+        .await;
+        assert_eq!(blocked.status, 200);
+        assert!(blocked.body.get("compare").is_none());
+        b.agent.shutdown().await;
+    }
 }

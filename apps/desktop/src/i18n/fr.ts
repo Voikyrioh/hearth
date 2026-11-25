@@ -1007,9 +1007,570 @@ export const fr = {
   },
   // Le détail d'un service (HRT-63, BR-SVC-007 à 009, 016, 023, 027, 028). Textes de la spec `voir-les-services` et du
   // design du lot 1, mot pour mot ; les autres sont marqués « hors spec ».
+  // Les mods d'un serveur Minecraft installé (HRT-261 à HRT-264, BR-MOD-020 à 033).
+  mods: {
+    tab: "Mods",
+    loaderUnknown: "Moteur inconnu",
+    unreadableName: "Fichier au nom illisible n° {rank}",
+    and: "et",
+    heading: "{installed} mods installés, {enabled} activés",
+    headingOne: "1 mod installé, {enabled} activé",
+    headingNone: "Aucun mod installé",
+    subheadingNone: "Ce serveur n'a aucun mod.",
+    sub: {
+      compatible: "{n} compatibles avec {loader} et Minecraft {minecraft}",
+      compatibleOne: "1 compatible avec {loader} et Minecraft {minecraft}",
+      incompatible: "{n} pas compatibles",
+      incompatibleOne: "{n} pas compatible",
+      disabled: "{n} désactivés",
+      disabledOne: "{n} désactivé",
+      toComplete: "{n} à compléter",
+      toCompleteOne: "{n} à compléter",
+      unverified: "{n} non vérifiés",
+      unverifiedOne: "{n} non vérifié",
+      restart: "Les changements demandent un redémarrage du serveur.",
+    },
+    engine: { java: "Minecraft Java", version: "version {minecraft}" },
+    versionLine: "Version de Minecraft du serveur : {minecraft} ({source}).",
+    versionLineBare: "Version de Minecraft du serveur : {minecraft}.",
+    versionUnknown:
+      "Hearth ne connaît pas encore la version de Minecraft de ce serveur : démarrez-le une fois.",
+    versionSource: {
+      setting: "choisie pour ce serveur",
+      log: "lue dans le journal du serveur",
+      modrinth: "lue dans le pack Modrinth",
+    },
+    note: {
+      latest:
+        "Ce serveur prend la dernière version de Minecraft à chaque démarrage : elle peut changer au prochain démarrage et rendre des mods incompatibles.",
+      modrinth:
+        "Les mods du pack Modrinth reviennent à chaque démarrage : Hearth ne les retire pas.",
+    },
+    origin: {
+      serverPack: "Pack d'origine",
+      hearth: "Ajouté avec Hearth",
+      modrinthPack: "Pack Modrinth",
+      manual: "Ajouté à la main",
+      unknown: "Origine inconnue",
+    },
+    legend: {
+      serverPack: "installé par le pack choisi à l'installation.",
+      hearth: "déposé depuis cet onglet.",
+      modrinthPack: "remis par le pack à chaque démarrage.",
+      manual: "posé sur le serveur hors de Hearth.",
+    },
+    verdict: {
+      compatible: "Compatible",
+      unverified: "Non vérifié",
+      toComplete: "À compléter",
+      incompatible: "Pas compatible",
+      duplicate: "Installé deux fois",
+      unrecognized: "Non reconnu",
+    },
+    state: { retired: "Retiré", disabled: "Désactivé" },
+    sentence: {
+      unverified: "Hearth ne sait pas si ce mod va avec la version de Minecraft de ce serveur.",
+      unverifiedServer:
+        "Hearth ne connaît pas encore la version de Minecraft de ce serveur : démarrez-le une fois.",
+      toCompleteOne: "Ce mod a besoin du mod {name}, qui n'est pas installé.",
+      toComplete: "Ce mod a besoin des mods {names}, qui ne sont pas installés.",
+      incompatibleLoader: "Ce mod n'est pas compatible avec {loader}.",
+      incompatibleMinecraft: "Ce mod n'est pas compatible avec Minecraft {minecraft}.",
+      duplicate: "Le mod {name} est installé deux fois : le jeu refuse de démarrer.",
+      unrecognized: "Hearth ne lit pas la fiche d'identité de ce fichier.",
+    },
+    banner: {
+      duplicate:
+        "Le mod {name} est installé deux fois et le serveur ne peut pas démarrer. Retirez ou désactivez l'un des deux fichiers.",
+      incompatibleLoader:
+        "{name} ne peut pas démarrer ici. Il n'est pas compatible avec {loader}. Désactivez-le ou retirez-le.",
+      incompatibleMinecraft:
+        "{name} ne peut pas démarrer ici. Il n'est pas compatible avec Minecraft {minecraft}. Désactivez-le ou retirez-le.",
+      toCompleteOne:
+        "{name} ne peut pas démarrer ici. Il a besoin du mod {needed}, qui n'est pas installé. Installez {needed} ou désactivez {name}.",
+      toComplete:
+        "{name} ne peut pas démarrer ici. Il a besoin des mods {needed}, qui ne sont pas installés. Installez-les ou désactivez {name}.",
+      blocking: "{name} empêche le serveur de démarrer. Désactivez-le ou retirez-le.",
+      more: "Et {n} autres mods dans le même cas.",
+    },
+    plugins: {
+      title: "Ce serveur utilise des plugins, pas des mods",
+      text: "Ce moteur charge des plugins. Hearth ne les gère pas pour l'instant : vous pouvez les déposer vous-même dans le dossier du serveur.",
+    },
+    noMods: {
+      title: "Ce serveur n'a pas de mods",
+      text: "Le jeu officiel ne charge aucun mod, et le moteur d'un serveur ne change pas après son installation. Pour jouer avec des mods, ajoutez un nouveau serveur Minecraft avec Fabric, Forge, NeoForge ou Quilt.",
+    },
+    noWay: {
+      title: "Hearth ne gère pas les mods de ce serveur",
+      text: "Ce jeu n'offre pas de voie pour ajouter des mods depuis Hearth.",
+    },
+    addServer: "Ajouter un serveur de jeu",
+    add: "Ajouter des mods",
+    reading: "Lecture des mods en cours",
+    readingText: "{n} mods ne sont pas encore lus. La liste se complète toute seule.",
+    readingTextOne: "1 mod n'est pas encore lu. La liste se complète toute seule.",
+    truncated: "Le dossier compte plus de 1 024 fichiers : les suivants ne sont pas listés.",
+    failed: "Hearth n'a pas pu lire les mods de ce serveur.",
+    retry: "Réessayer",
+    gone: "Ce service n'existe plus ou n'est pas un serveur de jeu créé par Hearth.",
+    folderBlocked:
+      "Le dossier des mods est un lien ou n'est pas un dossier : Hearth ne le lit pas.",
+    table: {
+      label: "Mods du serveur",
+      mod: "Mod",
+      version: "Version",
+      loader: "Moteur",
+      target: "Minecraft visé",
+      state: "État",
+      origin: "Origine",
+      enabled: "Activé",
+      action: "Action",
+      retired: "Mods retirés",
+    },
+    targetUnknown: "Non indiquée",
+    targetOther: "Autre version",
+    retire: "Retirer",
+    restore: "Remettre",
+    undo: "Annuler",
+    switchLabel: "{name} activé",
+    reason: {
+      unreadableName: "Le nom de ce fichier contient des caractères que Hearth ne manipule pas.",
+      modrinth: "Ce mod fait partie du pack Modrinth : le serveur le remet à chaque démarrage.",
+      alreadyActive: "Ce mod est déjà actif dans une autre version : désactivez-la d'abord.",
+    },
+    pending: {
+      disable: "Sera désactivé au prochain redémarrage",
+      enable: "Sera réactivé au prochain redémarrage",
+      retire: "Sera mis de côté au prochain redémarrage",
+      restore: "Sera remis au prochain redémarrage",
+      add: "Sera ajouté au prochain redémarrage",
+      replace: "Remplacera {file} au prochain redémarrage",
+      replacedBy: "Sera remplacé par la version {version} au prochain redémarrage",
+    },
+    dependents: {
+      one: "Le mod {name} a besoin de celui-ci.",
+      many: "Les mods {names} ont besoin de celui-ci.",
+    },
+    bar: {
+      one: "1 changement prêt",
+      many: "{n} changements prêts",
+      text: " : rien n'est fait tant que vous n'avez pas appliqué.",
+      textNamed: " : {sentence}. Rien n'est fait tant que vous n'avez pas appliqué.",
+      will: {
+        add: "{name} sera ajouté",
+        replace: "{name} sera remplacé par la version {to}",
+        retire: "{name} sera mis de côté",
+        restore: "{name} sera remis",
+        disable: "{name} sera désactivé",
+        enable: "{name} sera réactivé",
+      },
+      cancelAll: "Tout annuler",
+      apply: "Vérifier et appliquer",
+      unread: "Attendez la fin de la lecture des mods avant d'appliquer.",
+    },
+    help: "Désactiver laisse le fichier à sa place : le jeu ne le charge plus, vous le réactivez quand vous voulez. Retirer le met de côté dans « Mods retirés ». Les deux s'appliquent avec le redémarrage, comme un ajout.",
+    warning:
+      "Un mod est un programme écrit par quelqu'un d'autre. Il tourne avec les droits du serveur de jeu. Hearth lit la fiche d'identité de chaque mod et ne le vérifie pas plus loin.",
+    deposit: {
+      back: "Retour à la liste des mods",
+      title: "Ajouter des mods",
+      lead: "Choisissez les fichiers de mods que vous avez téléchargés. Hearth les contrôle avant de toucher au serveur : rien n'est écrit tant que vous n'avez pas appliqué.",
+      zone: "Glissez vos fichiers .jar ici",
+      zoneOr: "ou",
+      choose: "Choisir des fichiers",
+      only: "Seuls les fichiers .jar sont acceptés. Vous pouvez en déposer 8 à la fois au plus.",
+      count: "{n} fichiers déposés",
+      countOne: "1 fichier déposé",
+      remove: "Retirer de la liste",
+      waiting: "En attente de votre confirmation",
+      sending: "Envoi en cours",
+      sendingPercent: "Envoi en cours, {percent} %",
+      sent: "Envoyé",
+      notJar: "{name} n'est pas un fichier .jar : il n'a pas été ajouté.",
+      tooMany: "Un lot compte 8 fichiers au plus : {name} n'a pas été ajouté.",
+      unreadable: "Hearth n'a pas pu lire {name} : il n'a pas été ajouté.",
+      needsGesture:
+        "L'envoi de {names} est interrompu ou a échoué : reprenez-le depuis la carte Transferts, ou retirez le fichier de la liste.",
+      check: "Contrôler les fichiers",
+      checkNote: "Le contrôle commence quand tous les envois sont terminés.",
+      checkFailed: "Le contrôle n'a pas pu se faire. Réessayez dans un instant.",
+      depositGone:
+        "Un des fichiers n'est plus dans la zone d'attente du serveur. Retirez-le de la liste et déposez-le de nouveau.",
+      rowGone:
+        "N'est plus dans la zone d'attente. Retirez-le de la liste, puis déposez-le de nouveau.",
+      depositGoneNamed:
+        "{names} n'est plus dans la zone d'attente du serveur. Retirez-le de la liste et déposez-le de nouveau.",
+      depositGoneNamedMany:
+        "{names} ne sont plus dans la zone d'attente du serveur. Retirez-les de la liste et déposez-les de nouveau.",
+      send: "Envoyer les fichiers",
+      sendTitle: "Envoyer les fichiers",
+      sendSubmit: "Envoyer",
+      sendLater: "Plus tard",
+      sendHelp:
+        "Hearth envoie {n} fichier(s) dans la zone d'attente du serveur. Rien n'est écrit dans les mods avant que vous appliquiez.",
+    },
+    checkTitle: {
+      lead: "Contrôle terminé : {parts}",
+      ready: "{n} fichiers prêts",
+      readyOne: "1 fichier prêt",
+      review: "{n} fichiers à revoir",
+      reviewOne: "1 fichier à revoir",
+    },
+    check: {
+      lead: "Hearth a comparé chaque mod au moteur de votre serveur ({loader}) et à sa version de Minecraft ({minecraft}). Rien n'a encore été modifié.",
+      replace: "Remplacer {old} {oldVersion} par la version {newVersion}",
+      depositMissing: "Déposer le mod {names}",
+      drop: "Retirer de la liste",
+      more: "Déposer d'autres fichiers",
+      continue: "Continuer avec {n} fichiers",
+      continueOne: "Continuer avec 1 fichier",
+      retiredVersion:
+        "Une autre version de ce mod ({version}) est dans « Mods retirés ». Elle y reste : rien n'est remis.",
+      retired:
+        "Une autre version de ce mod est dans « Mods retirés ». Elle y reste : rien n'est remis.",
+      room: "Le lot peut encore recevoir {n} ajouts : décochez des remplacements ou retirez des fichiers.",
+    },
+    checkSentence: {
+      add: "Fait pour {loader} et Minecraft {minecraft}, comme votre serveur. Il sera ajouté.",
+      replace:
+        "Fait pour {loader} et Minecraft {minecraft}. Il existe déjà dans une autre version : cochez la case pour la remplacer, sinon ce fichier est laissé de côté.",
+      unverified:
+        "Hearth ne peut pas vérifier la version de Minecraft de ce mod. Il sera ajouté, et si le serveur ne démarre pas, Hearth remettra les mods d'avant.",
+      unverifiedReplace:
+        "Hearth ne peut pas vérifier la version de Minecraft de ce mod. Il existe déjà dans une autre version : cochez la case pour la remplacer, sinon ce fichier est laissé de côté.",
+      toComplete:
+        "Ce mod a besoin du mod {names}, qui n'est pas installé. Sans lui, le serveur risque de ne pas démarrer : dans ce cas, Hearth remettra les mods d'avant. Déposez aussi ce mod.",
+    },
+    refusal: {
+      unrecognized:
+        "Hearth ne lit pas la fiche d'identité de ce fichier : ce n'est pas un mod qu'il sait juger.",
+      archive: "Ce fichier n'est pas une archive que Hearth accepte de lire.",
+      tooLarge: "Ce fichier dépasse 256 Mo : Hearth ne le prend pas.",
+      loader:
+        "Ce fichier est fait pour {mod}. Votre serveur utilise {server}, qui ne sait pas le charger. Cherchez la version pour {server} de ce mod.",
+      minecraft:
+        "Ce mod n'est pas compatible avec Minecraft {minecraft}. Cherchez la version qui va avec votre serveur.",
+      duplicate:
+        "Deux fichiers de ce lot sont le même mod : aucun des deux n'est retenu. Gardez-en un seul.",
+      nameTaken: "Un fichier de ce nom existe déjà dans le dossier des mods.",
+      modrinth:
+        "Ce mod fait partie du pack Modrinth : le serveur le remettrait à chaque démarrage.",
+      sameVersion: "Ce mod est déjà installé dans cette version.",
+      other: "Hearth refuse ce fichier.",
+    },
+    apply: {
+      title: "Vérifiez avant d'appliquer",
+      lead: "Minecraft ne charge pas un mod en cours de partie : le serveur doit redémarrer. Hearth s'en occupe et vous dit tout ce qui va se passer, dans l'ordre.",
+      blockersTitle: "Ces mods empêcheront encore le serveur de démarrer",
+      changes: "Ce qui va changer",
+      order: "Dans cet ordre",
+      stopped:
+        "Le serveur est arrêté : il le reste. Hearth fait seulement la sauvegarde et la mise en place.",
+      add: "Ajout de {name}",
+      addDetail: "Nouveau mod.",
+      replace: "{name} {from} devient {to}",
+      replaceDetail: "L'ancien fichier est mis de côté, vous pourrez le remettre.",
+      retire: "Retrait de {name}",
+      retireDetail: "Le fichier est mis de côté dans le dossier « Mods retirés ».",
+      restore: "Remise de {name}",
+      restoreDetail: "Le fichier revient dans les mods du serveur.",
+      disable: "Désactivation de {name}",
+      disableDetail: "Le fichier reste en place, le jeu ne le charge plus.",
+      enable: "Réactivation de {name}",
+      enableDetail: "Le jeu charge de nouveau ce fichier.",
+      step: {
+        stop: "Arrêt du serveur",
+        save: "Sauvegarde du monde",
+        place: "Mise en place des mods",
+        start: "Redémarrage",
+      },
+      stepText: {
+        stop: "Hearth demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Les joueurs connectés sont déconnectés.",
+        stopUnknown:
+          "Hearth demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Les joueurs connectés seront déconnectés.",
+        stopConsole:
+          "Hearth fait d'abord enregistrer le monde par la console du jeu, puis demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Sans confirmation de la console, l'arrêt continue. Les joueurs connectés sont déconnectés.",
+        stopUnknownConsole:
+          "Hearth fait d'abord enregistrer le monde par la console du jeu, puis demande au serveur de s'arrêter, et le jeu enregistre son monde en s'arrêtant. Sans confirmation de la console, l'arrêt continue. Les joueurs connectés seront déconnectés.",
+        stopNoSave:
+          "Hearth demande au serveur de s'arrêter. Ce jeu n'enregistre pas son monde en s'arrêtant : ce qui est arrivé depuis son dernier enregistrement automatique peut être perdu. Les joueurs connectés sont déconnectés.",
+        stopNoSaveUnknown:
+          "Hearth demande au serveur de s'arrêter. Ce jeu n'enregistre pas son monde en s'arrêtant : ce qui est arrivé depuis son dernier enregistrement automatique peut être perdu. Les joueurs connectés seront déconnectés.",
+        stopNoSaveConsole:
+          "Hearth fait d'abord enregistrer le monde par la console du jeu, puis demande au serveur de s'arrêter. Sans confirmation de la console, l'arrêt continue, et ce qui est arrivé depuis le dernier enregistrement automatique peut être perdu. Les joueurs connectés sont déconnectés.",
+        stopNoSaveUnknownConsole:
+          "Hearth fait d'abord enregistrer le monde par la console du jeu, puis demande au serveur de s'arrêter. Sans confirmation de la console, l'arrêt continue, et ce qui est arrivé depuis le dernier enregistrement automatique peut être perdu. Les joueurs connectés seront déconnectés.",
+        stopPlain:
+          "Hearth demande au serveur de s'arrêter. Les joueurs connectés sont déconnectés.",
+        stopPlainUnknown:
+          "Hearth demande au serveur de s'arrêter. Les joueurs connectés seront déconnectés.",
+        save: "Une copie de tout le dossier du serveur, avant la moindre modification.",
+        placeOne: "Le changement ci-dessus.",
+        place: "Les {n} changements ci-dessus.",
+        start: "Le premier démarrage avec de nouveaux mods peut durer plusieurs minutes.",
+      },
+      kick: "Ils seront déconnectés à l'étape 1.",
+      kickConsole: "Ils seront déconnectés à l'étape 1. Prévenez-les depuis la console si besoin.",
+      durationTitle: "Durée et retour en arrière",
+      estimating: "Estimation de la sauvegarde",
+      duration: "La durée dépend de la taille du monde : la sauvegarde copie environ {size}.",
+      durationBare:
+        "La durée dépend de la taille du monde : la sauvegarde copie tout le dossier du serveur.",
+      revert:
+        "Si le serveur ne démarre pas avec ces mods, Hearth remet tout seul les mods d'avant et relance le serveur. Votre monde, lui, est protégé par la sauvegarde.",
+      noSpace:
+        "Il manque {missing} d'espace pour la sauvegarde. Rien n'est arrêté ni modifié : libérez de la place, puis revenez ici.",
+      confirm: "Confirmer",
+      passwordHelp:
+        "Le mot de passe est demandé à chaque fois : appliquer des mods change ce que le serveur exécute.",
+      backToList: "Revenir à la liste",
+      submit: "Appliquer et redémarrer",
+      submitStopped: "Appliquer",
+      unknown:
+        "Le résultat n'est pas connu : le lien est tombé avant la réponse. Hearth ne renvoie jamais un lot tout seul. Regardez l'état du serveur et son journal d'activité avant de réessayer.",
+      refused: {
+        batch:
+          "Le lot ne peut pas être appliqué : il compte 1 à 64 changements, dont 8 ajouts au plus, chaque fichier une seule fois.",
+        refused: "Un des fichiers déposés n'est plus accepté. Reprenez le contrôle des fichiers.",
+        fileMissing:
+          "Un des fichiers du lot n'est plus dans le bon dossier. Relisez la liste, puis recommencez.",
+        modrinth:
+          "Un mod du pack Modrinth ne se retire, ne se remplace et ne se désactive pas : le serveur le remettrait au démarrage.",
+        alreadyActive: "Un autre fichier actif porte déjà ce mod. Désactivez-le d'abord.",
+        nameTaken: "Le nom d'arrivée d'un des fichiers est déjà pris dans le dossier des mods.",
+        depositUnknown:
+          "Un des fichiers déposés n'est plus dans la zone d'attente du serveur. Déposez-le de nouveau.",
+        notApplicable: "Le moteur de ce serveur ne charge pas de mods.",
+        busy: "Une opération est déjà en cours sur ce serveur.",
+        other: "L'application du lot a été refusée.",
+      },
+    },
+    summary: {
+      add: "{n} ajouts",
+      addOne: "1 ajout",
+      replace: "{n} remplacements",
+      replaceOne: "1 remplacement",
+      retire: "{n} retraits",
+      retireOne: "1 retrait",
+      restore: "{n} remises",
+      restoreOne: "1 remise",
+      disable: "{n} désactivations",
+      disableOne: "1 désactivation",
+      enable: "{n} réactivations",
+      enableOne: "1 réactivation",
+      plain: "{text}.",
+      withRetired: "{text}. Les fichiers retirés sont mis de côté.",
+    },
+    progress: {
+      title: "Mise en place des mods",
+      lead: "Étape {n} sur {total}. Vous pouvez quitter cette page : Hearth continue sur le serveur et le journal d'activité garde la trace.",
+      meter: "Étape {n} sur {total}",
+      state: { done: "Terminé", running: "En cours", waiting: "En attente" },
+      cancel: "Annuler l'opération",
+      cancelNote:
+        "Annuler est possible jusqu'au début de la mise en place : les mods restent alors ceux d'avant.",
+      cancelTitle: "Annuler la mise en place des mods ?",
+      cancelSubmit: "Annuler l'opération",
+      cancelKeep: "Continuer l'opération",
+      cancelHelp:
+        "Les mods ne changent pas. Le serveur est relancé s'il tournait, et la sauvegarde déjà faite reste disponible.",
+    },
+    end: {
+      title: "Les mods sont en place",
+      titleStopped: "Les mods sont en place",
+      leadRunning: "Le serveur est reparti avec {n} mods activés.",
+      leadStopped: "Le serveur est resté arrêté ({n} mods activés).",
+      changed: "Ce qui a changé",
+      backup: "Sauvegarde faite avant : {note}. Elle reste dans l'onglet Sauvegardes.",
+      backupBare: "Une sauvegarde a été faite avant. Elle reste dans l'onglet Sauvegardes.",
+      playersTitle: "Pensez à vos joueurs",
+      playersText:
+        "Pour se connecter, vos joueurs doivent avoir les mêmes mods que le serveur : le même moteur et la même version de Minecraft. Ce n'est pas le cas de tous les mods : certains ne servent que sur le serveur.",
+      playersList: "Voir ce que vos joueurs doivent installer",
+      close: "Fermer",
+    },
+    fail: {
+      title: "Le serveur n'a pas démarré avec ces mods",
+      titleFailed: "La mise en place des mods a échoué",
+      revertedRunning: "Hearth a remis les mods d'avant : le serveur est reparti avec eux.",
+      revertedStopped:
+        "Hearth a remis les mods d'avant. Le serveur est arrêté : démarrez-le quand vous voulez.",
+      failedRunning:
+        "Hearth a défait ce qui avait été fait : les mods sont ceux d'avant, et le serveur est reparti avec eux.",
+      failedStopped:
+        "Hearth a défait ce qui avait été fait : les mods sont ceux d'avant. Le serveur est arrêté : démarrez-le quand vous voulez.",
+      says: "Ce que dit le serveur",
+      inClear: "En clair : {sentence}",
+      backup: "Votre monde n'a pas été touché ; la sauvegarde « {note} » reste disponible.",
+      backupBare: "Votre monde n'a pas été touché ; la sauvegarde faite avant reste disponible.",
+      logs: "Voir le journal du serveur",
+    },
+    cancelled: {
+      title: "L'opération a été annulée",
+      text: "Les mods n'ont pas changé. Le serveur est relancé s'il tournait.",
+    },
+    attention: {
+      title: "L'état des mods est à vérifier",
+      text: "Hearth n'a pas pu finir la mise en place. Vérifiez le serveur sur la machine, puis répondez dans la carte de l'opération, en haut de cette page.",
+    },
+    players: {
+      title: "Ce que vos joueurs doivent installer",
+      lead: "Chacun doit lancer Minecraft {minecraft} avec {loader} et ces mods. Un mod « serveur seulement » n'est pas à installer chez eux.",
+      copy: "Copier la liste",
+      copiedButton: "Liste copiée",
+      copied: "La liste des mods est copiée.",
+      copyHint: "Vous l'envoyez à vos joueurs, avec l'adresse du serveur.",
+      copyFailed:
+        "Hearth n'a pas pu copier la liste : sélectionnez le tableau et copiez-le à la main.",
+      address: "Adresse du serveur : {address}",
+      copyAddress: "Adresse du serveur : {address}",
+      copyLine: "{name} {version} ({loader}, Minecraft {minecraft})",
+      where: "Chez les joueurs",
+      why: "Pourquoi",
+      both: "Aussi chez les joueurs",
+      serverOnly: "Serveur seulement",
+      reason: {
+        server: "Le mod dit qu'il n'agit que sur le serveur.",
+        both: "Le mod le dit : il se charge des deux côtés.",
+        needed:
+          "Un autre mod de la liste a besoin de celui-ci : installez-le aussi chez les joueurs.",
+        client: "Le mod dit qu'il se charge chez le joueur.",
+        unknown: "Le mod ne dit rien : en cas de doute, installez-le chez le joueur.",
+      },
+      unlisted:
+        "Ces mods ne figurent pas dans la liste : le serveur ne peut pas les démarrer, vos joueurs ne pourraient pas se connecter avec eux. Désactivez-les ou retirez-les, ou rendez-les compatibles, pour qu'ils y figurent.",
+      note: "Hearth lit l'indication « environnement » que chaque mod donne sur lui-même. Il ne peut pas savoir ce qui est vraiment obligatoire : en cas de doute, installez le mod chez le joueur.",
+      soonTitle: "Un dossier prêt à copier chez le joueur",
+      soon: "Hearth pourra bientôt préparer un seul fichier .zip avec les mods à installer chez eux. Cette version donne la liste.",
+    },
+    leave: {
+      title: "Quitter sans appliquer ?",
+      text: "Les changements préparés ne sont pas gardés : ils seront perdus si vous quittez ce serveur.",
+      confirm: "Quitter sans appliquer",
+      stay: "Rester ici",
+    },
+  },
+  // La console d'un serveur de jeu (HRT-269, BR-CONSOLE-002 à 010).
+  console: {
+    tab: "Console",
+    title: "Console du jeu",
+    lead: "Ce que le serveur écrit, et les commandes que vous lui envoyez. Une commande part vers le jeu telle quelle : le jeu la comprend, Hearth ne la modifie pas.",
+    unknown:
+      "Le résultat n'est pas connu : le lien est tombé avant la réponse. La commande a peut-être été exécutée : regardez le journal avant de la renvoyer. Hearth ne renvoie jamais une commande tout seul.",
+    field: {
+      label: "Commande",
+      send: "Envoyer",
+      start: "Démarrer",
+      follow: "Voir le suivi",
+      hint: "Une seule ligne, {n} caractères au plus. La commande part telle que vous l'écrivez.",
+      refused:
+        "Hearth n'enverra pas cette commande : la phrase qui suivra dit quoi faire à la place.",
+      sensitive:
+        "« {verb} » demande votre mot de passe : Hearth vous le redemande à chaque commande de ce genre.",
+    },
+    issue: {
+      empty: "Écrivez une commande.",
+      tooLong: "{n} caractères au plus.",
+      oneLine: "Une seule ligne à la fois.",
+      control: "Ce caractère ne peut pas être envoyé.",
+    },
+    block: {
+      stopped: "Le serveur est arrêté.",
+      stoppedHelp: "Démarrez le serveur pour écrire dans sa console.",
+      starting: "Le serveur démarre.",
+      startingHelp:
+        "La console répond quand le serveur est prêt. Un gros pack peut prendre plusieurs minutes.",
+      busy: "Une opération est en cours sur ce serveur.",
+      busyHelp: "La console revient à la fin de l'opération.",
+      readonly: "La console est en lecture seule.",
+      readonlyHelp:
+        "Vous lisez la console. Écrire dedans demande le droit de gérer les services, donné par un administrateur.",
+      rate: "Trop de commandes d'un coup.",
+      rateHelp:
+        "Vingt commandes en une minute, c'est la limite. Vous pourrez envoyer celle-ci dans {n} secondes.",
+      unavailable: "La console n'est pas ouverte.",
+      unavailableHelp: "Hearth ne parle pas à la console de ce serveur.",
+    },
+    refused: {
+      stop: "Commande non envoyée. Pour arrêter le serveur, utilisez le bouton « Arrêter » : le jeu enregistre alors son monde, et le serveur ne repart pas tout seul.",
+      stopSequence:
+        "Commande non envoyée. Pour arrêter le serveur, utilisez le bouton « Arrêter » : Hearth demande alors au jeu d'enregistrer son monde, et le serveur ne repart pas tout seul.",
+      stopAsk:
+        "Commande non envoyée. Pour arrêter le serveur, utilisez le bouton « Arrêter » : ce jeu n'enregistre pas son monde en s'arrêtant et Hearth ne peut pas encore le lui demander, vous choisirez alors d'arrêter quand même ou d'annuler. Le serveur ne repart pas tout seul.",
+      stopPlain:
+        "Commande non envoyée. Pour arrêter le serveur, utilisez le bouton « Arrêter » de Hearth : le serveur ne repart pas tout seul.",
+      restart:
+        "Commande non envoyée. Pour redémarrer le serveur, utilisez le bouton « Redémarrer » de Hearth.",
+      breaks:
+        "Commande non envoyée. Cette commande recharge le serveur à chaud et peut le casser : redémarrez-le plutôt.",
+      other: "Commande non envoyée : Hearth ne l'envoie pas à ce jeu.",
+    },
+    reply: {
+      empty: "Commande envoyée. Le jeu n'a rien répondu.",
+      noAnswer:
+        "Le jeu n'a pas répondu en 10 secondes. La commande a peut-être été exécutée : regardez le journal avant de la renvoyer.",
+      unknown:
+        "Le résultat n'est pas connu : le lien est tombé avant la réponse. Regardez le journal avant de renvoyer la commande.",
+      truncated: "Réponse coupée : la suite est dans le journal du serveur.",
+      unreachable: "Hearth n'a pas pu joindre la console du jeu.",
+    },
+    refusal: {
+      invalid: "Cette ligne n'est pas une commande que Hearth peut envoyer.",
+      classMismatch:
+        "Hearth n'est pas à jour pour juger cette commande : mettez le client à jour, puis réessayez.",
+      gone: "Ce serveur n'a plus de console ouverte à Hearth.",
+      other: "La commande a été refusée.",
+    },
+    backToReview: "Revenir à « Vérifiez avant d'appliquer »",
+    quick: {
+      title: "Commandes rapides",
+      none: "Ce jeu ne propose pas de commande rapide. Écrivez votre commande dans le champ.",
+      fill: "Une commande « à compléter » pose son début dans le champ : vous écrivez la suite, puis vous envoyez.",
+    },
+    watch: {
+      title: "Ce que Hearth surveille",
+      sensitive: "Les commandes {verbs} demandent votre mot de passe à chaque fois.",
+      stop: "Arrêter ou relancer le serveur : par les boutons de Hearth, jamais par la console.",
+      journal: "Chaque commande est inscrite au journal d'activité.",
+    },
+    confirm: {
+      freeTitle: "Envoyer cette commande ?",
+      send: "Envoyer la commande",
+      cancel: "Annuler",
+      eachTime: "Demandé à chaque commande de ce genre, même si vous venez de le taper.",
+      modTitle: "Envoyer une commande d'un mod ?",
+      modSentence:
+        "Hearth ne sait pas ce que fait cette commande : elle vient d'un mod. Confirmez avec votre mot de passe pour l'envoyer au serveur.",
+      trust:
+        "Votre mot de passe est demandé pour cette commande, comme pour démarrer ou arrêter le serveur.",
+    },
+  },
+  // Les joueurs connectés d'un serveur de jeu (HRT-291, BR-CONSOLE-011).
+  players: {
+    title: "Joueurs connectés",
+    refresh: "Relire les joueurs connectés",
+    reading: "Lecture des joueurs connectés",
+    outOf: "sur {max} places",
+    nobody: "Personne n'est connecté",
+    places: "{max} places",
+    more: "et {n} autres joueurs",
+    hidden: "{n} pseudos ne sont pas affichés.",
+    read: "Lu dans la console du jeu il y a {age}, relu toutes les 30 s tant que cette page est ouverte.",
+    readShort: "Lu dans la console il y a {age}.",
+    ageSeconds: "{n} s",
+    ageMinutes: "{n} min",
+    stopped: "Personne n'est connecté : le serveur est arrêté.",
+    starting: "Le nombre de joueurs s'affiche quand le serveur est prêt.",
+    unavailable: "Hearth n'a pas pu lire les joueurs connectés.",
+    writeToPlayers: "Écrire aux joueurs dans la console",
+    openConsole: "Ouvrir la console",
+  },
   serviceOps: {
     // La bande « Opérations en cours » (BR-SVC-029) et la carte d'une opération (HRT-84).
     stripTitle: "Opérations en cours",
+    // La console du jeu n'a pas confirmé l'enregistrement du monde : l'arrêt a continué (HRT-292, BR-CONSOLE-012).
+    consoleSaveFailed: "Le monde n'a pas pu être enregistré avant l'arrêt. L'arrêt a continué.",
     stripRegion: "Opérations en cours",
     count: "{n} opérations en cours.",
     countOne: "1 opération en cours.",
@@ -1037,6 +1598,7 @@ export const fr = {
       backup: "Sauvegarde de {name}",
       restore: "Restauration de {name}",
       worldImport: "Reprise d'un monde dans {name}",
+      mods: "Changement des mods de {name}",
       unknown: "Opération sur {name}",
     },
     // Le sujet d'une phrase d'issue, avec le nom du service (genre neutre : « a réussi », « a échoué »).
@@ -1051,6 +1613,7 @@ export const fr = {
       backup: "La sauvegarde de {name}",
       restore: "La restauration de {name}",
       worldImport: "La reprise du monde de {name}",
+      mods: "Le changement des mods de {name}",
       unknown: "L'opération sur {name}",
     },
     // L'effacement des données d'un service : sans le droit de gérer les services, aucun chemin ni progression.
@@ -1066,6 +1629,7 @@ export const fr = {
       watch: "Vérification du démarrage",
       stop: "Arrêt du service",
       stopOld: "Arrêt de l'ancien service",
+      consoleSave: "Enregistrement du monde par la console",
       recreate: "Recréation",
       createNew: "Création du nouveau service",
       start: "Démarrage",
@@ -1075,6 +1639,7 @@ export const fr = {
       erase: "Effacement",
       removeContainer: "Suppression du service",
       forget: "Effacement de la configuration",
+      place: "Mise en place des mods",
     },
     status: {
       accepted: "L'opération attend son départ.",
@@ -1514,6 +2079,78 @@ export const fr = {
     colSize: "Taille",
     colMode: "Mode",
     colState: "État",
+    colMods: "Mods",
+    mods: {
+      active: "{n} actifs",
+      activeOne: "{n} actif",
+      disabled: "{n} désactivés",
+      disabledOne: "{n} désactivé",
+      notRecorded: "Mods non enregistrés",
+      unreadable: "Mods illisibles",
+      notInBackup: "Mods non sauvegardés",
+      unknown: "Inconnue",
+      reading: "Lecture des mods de la sauvegarde",
+      failed: "Hearth n'a pas pu lire les mods de cette sauvegarde.",
+      refused:
+        "Les mods de cette sauvegarde ne sont pas lisibles : la sauvegarde n'existe plus pour ce serveur.",
+      engine: "Au moment de la sauvegarde : {loader}, Minecraft {minecraft}.",
+      unrecognized: "Non reconnu dans cette sauvegarde",
+      title: "Mods de cette sauvegarde",
+      retired: "Mods retirés : {n} ({names}, dans « Mods retirés »).",
+      retiredBare: "Mods retirés : {n}.",
+      copyNote:
+        "« Copier la liste » copie les {n} mods activés, avec le moteur, la version de Minecraft et l'adresse du serveur.",
+      copyNoteOne:
+        "« Copier la liste » copie le mod activé, avec le moteur, la version de Minecraft et l'adresse du serveur.",
+      legend: {
+        notRecorded: "sauvegarde faite avant que Hearth enregistre les mods.",
+        unreadable: "la sauvegarde a réussi, mais Hearth n'a pas pu lire ses mods.",
+        notInBackup: "le dossier des mods est ignoré par les sauvegardes.",
+      },
+      copyTitle: "Mods de la sauvegarde du {date}",
+      place: {
+        active: "Activé",
+        disabled: "Désactivé",
+        retired: "Retiré",
+        unknown: "État inconnu",
+      },
+      sentence: {
+        partial:
+          "Cette liste est partielle : des fichiers n'ont pas pu être lus à temps, ils sont montrés sans nom de mod.",
+        unreadable:
+          "Liste des mods illisible pour cette sauvegarde. La sauvegarde, elle, est bonne.",
+        notInBackup: "Les mods ne sont pas dans cette sauvegarde : le dossier mods est ignoré.",
+        notRecorded:
+          "Liste des mods non enregistrée : cette sauvegarde a été faite avant que Hearth enregistre les mods.",
+        unknown: "Hearth ne sait pas lire la liste des mods de cette sauvegarde.",
+      },
+      compare: {
+        button: "Comparer avec les mods actuels",
+        hide: "Masquer la comparaison",
+        reading: "Comparaison en cours",
+        same: "Les mods actuels sont les mêmes que dans cette sauvegarde.",
+        partial: "Comparaison partielle : {n} mods ne sont pas encore lus.",
+        partialOne: "Comparaison partielle : 1 mod n'est pas encore lu.",
+        title: "Comparer avec les mods actuels",
+        intro:
+          "Depuis cette sauvegarde, {n} changements sur le serveur. Rien n'est modifié par cette comparaison.",
+        introOne:
+          "Depuis cette sauvegarde, 1 changement sur le serveur. Rien n'est modifié par cette comparaison.",
+        prepared:
+          "Les changements préparés dans l'onglet Mods et pas encore appliqués ne comptent pas : ils ne sont pas encore sur le serveur.",
+        added: "Ajouté depuis",
+        removed: "Retiré depuis",
+        versionChanged: "Version changée",
+        enabled: "Activé depuis",
+        disabled: "Désactivé depuis",
+        addedLine: "{mod}. Il n'était pas dans cette sauvegarde.",
+        removedLine: "{mod} était dans cette sauvegarde, il n'est plus dans les mods actifs.",
+        enabledLine: "{mod} était désactivé dans la sauvegarde, il est activé aujourd'hui.",
+        disabledLine: "{mod} était activé dans la sauvegarde, il est désactivé aujourd'hui.",
+        unknownLine: "{mod} a changé depuis cette sauvegarde.",
+        versionLine: "{name} : {backup} dans la sauvegarde, {current} aujourd'hui.",
+      },
+    },
     colActions: "Actions",
     noNote: "Aucune note",
     sizeDetail: "{data} de données · {count} fichiers",
@@ -1574,10 +2211,12 @@ export const fr = {
     modeLegend: "Comment sauvegarder",
     modeHot: "Sans arrêter le service (copie à chaud)",
     modeHotText:
-      "Le service continue de tourner pendant la copie. Les données peuvent changer pendant qu'elles sont copiées, et le programme peut garder des données en mémoire. Hearth ne peut pas encore lui demander d'enregistrer avant la copie.",
+      "Le service continue de tourner pendant la copie. Les données peuvent changer pendant qu'elles sont copiées, et le programme peut garder des données en mémoire. Hearth n'enregistre pas le monde avant une copie à chaud : si le jeu a une console, sa commande rapide « Enregistrer le monde » le fait à votre demande.",
     modeStop: "Arrêter, sauvegarder, relancer",
     modeStopText:
-      "Le service sera arrêté puis relancé. Certains programmes n'enregistrent pas leur monde en s'arrêtant : ce qui n'est pas enregistré est perdu. Hearth ne peut pas le savoir.",
+      "Le service sera arrêté puis relancé. Certains programmes n'enregistrent pas leur monde en s'arrêtant : ce qui n'est pas enregistré est perdu.",
+    modeStopTextConsole:
+      "Le service sera arrêté puis relancé. Hearth fait d'abord enregistrer le monde par la console du jeu ; sans confirmation de la console, l'arrêt continue. Certains programmes n'enregistrent pas leur monde en s'arrêtant : ce qui n'est pas enregistré est perdu.",
     modeStopGrace:
       "Le service recevra l'ordre de s'arrêter proprement ; s'il ne s'est pas arrêté au bout de {delay}, il sera coupé de force.",
     modeStopGraceNone:
@@ -1783,10 +2422,11 @@ export const fr = {
     },
   },
   serviceDetail: {
+    operationRunning: "Opération en cours",
     back: "Retour à la liste",
     region: "Détail du service {name}",
     sections: "Sections du service",
-    tabDetail: "Détail",
+    tabDetail: "Vue d'ensemble",
     tabLogs: "Journaux",
     tabSettings: "Réglages",
     tabBackups: "Sauvegardes",
@@ -1881,7 +2521,7 @@ export const fr = {
   // Journaux d'un service (HRT-67). Les textes marqués « Hors spec » n'ont pas de formulation validée : à faire valider.
   logs: {
     notice:
-      "Les journaux affichent tout ce que le programme écrit, secrets compris. Ne les partage pas sans les relire.",
+      "Les journaux affichent tout ce que le programme écrit, secrets compris. Ne les partagez pas sans les relire.",
     region: "Journaux de {name}",
     regionHint:
       "Flèches haut et bas : ligne précédente ou suivante. Début et Fin : première et dernière ligne.",
@@ -1940,6 +2580,7 @@ export const fr = {
     activeLineText: "Ligne du {time} : {text}",
     emptyTitle: "Ce service n'a encore rien écrit",
     emptyText: "Les lignes apparaîtront ici dès que le programme en écrira.",
+    emptyQuiet: "Le serveur n'a encore rien écrit. Ses lignes et vos commandes apparaîtront ici.",
     stoppedBanner:
       "Ce service est arrêté. Aucune nouvelle ligne n'arrivera tant qu'il ne redémarre pas.",
     stoppedCode: "S'est arrêté avec le {code} il y a {age}.",
@@ -2935,6 +3576,8 @@ export const fr = {
     consoleTitle: "Ce qui attend la console",
     consoleLead: "Cette fonction attend la console de Hearth, qui n'est pas encore livrée.",
     consoleSoon: "Bientôt",
+    consoleServed:
+      "Voir qui est connecté, écrire aux joueurs, bannir ou régler l'heure se font maintenant dans l'onglet Console.",
     consoleApply: "Appliquer un réglage sans redémarrer",
     consoleApplyWay: "Enregistrez le réglage, puis redémarrez le service.",
     consoleWho: "Voir qui est connecté",
@@ -3018,7 +3661,7 @@ export const fr = {
     announceInterrupted: "L'envoi de {name} est interrompu.",
     announceNoSpace:
       "{name} n'a pas pu être envoyé : le serveur manque de place. Libérez de la place, puis réessayez.",
-    units: { byte: "o", kib: "Kio", mib: "Mio", gib: "Gio" },
+    units: { byte: "o", kib: "Ko", mib: "Mo", gib: "Go" },
     status: {
       sending: "Envoi en cours.",
       interrupted: "Envoi interrompu. Reprenez l'envoi quand le lien est revenu.",

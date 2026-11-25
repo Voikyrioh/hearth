@@ -21,15 +21,15 @@ use super::audit::{AuditTrail, Pending};
 use super::closing_gates::ClosingGates;
 pub use super::closing_gates::ClosingGuard;
 use super::ports::{
-    Clock, CreatedObjects, DecisionOffer, IdGen, JournalError, NewOp, OpJournal, OpRecord,
-    Progress, RemoveOutcome, ServiceObserver, StepGuard, Store, StoreError,
+    BeforeStopSave, Clock, CreatedObjects, DecisionOffer, IdGen, JournalError, NewOp, OpJournal,
+    OpRecord, Progress, RemoveOutcome, ServiceObserver, StepGuard, Store, StoreError,
 };
 use crate::domain::audit::{Actor, AuditAction, AuditEvent, Outcome, Target};
 use crate::domain::ops::{
-    CancelVerdict, Cause, Choice, ChoiceRefused, LockTable, Observed, OpKind, OpPlan, OpStatus,
-    OpSummary, OpsIndex, Refusal, StepName, StepRecord, StepState, UndoInfo, apply_choice,
-    cancel_verdict, cleanup_on_cancel, decision_expired, decision_expiry, latest_state, recover,
-    recover_unreadable_journal,
+    CONSOLE_SAVE, CancelVerdict, Cause, Choice, ChoiceRefused, LockTable, Observed, OpKind, OpPlan,
+    OpStatus, OpSummary, OpsIndex, Refusal, StepName, StepRecord, StepState, UndoInfo,
+    apply_choice, cancel_verdict, cleanup_on_cancel, decision_expired, decision_expiry,
+    latest_state, recover, recover_unreadable_journal,
 };
 use crate::domain::services::key::ServiceKey;
 use crate::domain::services::spec::fold_name;
@@ -137,6 +137,14 @@ impl From<StoreError> for OpError {
     }
 }
 
+/// Les fichiers qu'une opération `mods` a posés et qui sont encore là : leurs origines `hearth` s'écrivent avec la
+/// clôture de l'opération (HRT-258).
+#[derive(Debug, Clone)]
+pub struct PostedMods {
+    pub service: ServiceKey,
+    pub files: Vec<crate::application::ports::HearthFile>,
+}
+
 /// Une opération à accepter.
 pub struct AcceptRequest {
     pub op_key: String,
@@ -221,6 +229,8 @@ pub struct ServiceOps {
     /// transaction de l'opération (jamais regroupée : ce n'est pas un refus répété, BR-AUDIT-007).
     store: Arc<dyn Store>,
     trail: Arc<AuditTrail>,
+    /// L'enregistrement par la console avant un arrêt (HRT-292), branché après la construction de la console.
+    before_stop: std::sync::OnceLock<std::sync::Weak<dyn BeforeStopSave>>,
 }
 
 /// Un événement du journal d'activité sans sa date : la date est celle de la transaction qui l'écrit avec
@@ -268,6 +278,58 @@ impl ServiceOps {
             gates: Arc::new(ClosingGates::default()),
             store,
             trail,
+            before_stop: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Une référence faible : la console tient déjà `ServiceOps` (pas de cycle d'`Arc`).
+    pub fn set_before_stop_save(&self, saver: std::sync::Weak<dyn BeforeStopSave>) {
+        let _ = self.before_stop.set(saver);
+    }
+
+    /// Le plan d'une opération qui ARRÊTE le service, avec l'étape `console_save` en tête si la fiche déclare
+    /// `before_stop` (HRT-292). Un plan sans arrêt ne passe pas par ici.
+    pub async fn plan_before_stop(&self, key: &ServiceKey, plan: OpPlan) -> OpPlan {
+        let Some(saver) = self.before_stop.get().and_then(std::sync::Weak::upgrade) else {
+            return plan;
+        };
+        if !saver.declares(key).await {
+            return plan;
+        }
+        match plan.clone().with_console_save() {
+            Ok(with) => with,
+            Err(error) => {
+                tracing::warn!(%error, "étape console_save non ajoutée au plan");
+                plan
+            }
+        }
+    }
+
+    /// L'étape `console_save` d'une opération qui arrête un service : seulement si son plan la porte. Jamais bloquante
+    /// (la console tient dans le délai de la fiche), jamais rejouée (non destructive, `recover` ne la rejoue pas).
+    /// `done` = confirmé, `failed` = non confirmé ; l'arrêt continue dans les deux cas.
+    pub async fn console_save(&self, id: &str, key: &ServiceKey) {
+        let Some(saver) = self.before_stop.get().and_then(std::sync::Weak::upgrade) else {
+            return;
+        };
+        if self.step_of(id, CONSOLE_SAVE).await.is_err() {
+            return;
+        }
+        if self
+            .intent(id, CONSOLE_SAVE, &UndoInfo::default())
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let confirmed = saver.save(key).await;
+        let written = if confirmed {
+            self.done(id, CONSOLE_SAVE, &UndoInfo::default()).await
+        } else {
+            self.failed(id, CONSOLE_SAVE).await
+        };
+        if let Err(error) = written {
+            tracing::warn!(%error, "journal de l'enregistrement avant l'arrêt non écrit");
         }
     }
 
@@ -581,6 +643,12 @@ impl ServiceOps {
             .await
     }
 
+    /// Écrit qu'UN mouvement d'un geste a été défait (le retour d'un lot, mouvement par mouvement) : plusieurs
+    /// lignes `undone` peuvent se suivre, la dernière sans mouvement clôt l'étape.
+    pub async fn undone_move(&self, id: &str, step: &str, undo: &UndoInfo) -> Result<u32, OpError> {
+        self.close_step(id, step, StepState::Undone, undo).await
+    }
+
     async fn close_step(
         &self,
         id: &str,
@@ -597,12 +665,13 @@ impl ServiceOps {
         }
         if destructive {
             let records = self.journal.steps(id).await?;
-            let expected = if state == StepState::Undone {
-                StepState::Done
-            } else {
-                StepState::Intent
+            let latest = latest_state(&records, &name);
+            let allowed = match state {
+                // Un retour mouvement par mouvement écrit plusieurs `undone` de suite.
+                StepState::Undone => matches!(latest, Some(StepState::Done | StepState::Undone)),
+                _ => latest == Some(StepState::Intent),
             };
-            if latest_state(&records, &name) != Some(expected) {
+            if !allowed {
                 return Err(OpError::OutOfOrder);
             }
         }
@@ -706,17 +775,31 @@ impl ServiceOps {
         cause: Option<Cause>,
         draft: Option<AuditDraft>,
     ) -> Result<(), OpError> {
+        self.finish_with_origins(id, to, cause, draft, None).await
+    }
+
+    /// Comme `finish_with`, avec les origines `hearth` des mods posés par une opération `mods`, écrites dans la MÊME
+    /// transaction (HRT-258, BR-MOD-033) : l'issue, son entrée du journal et les origines passent ensemble ou pas du
+    /// tout. Si la clôture échoue, la seconde tentative n'écrit ni entrée ni origine.
+    pub async fn finish_with_origins(
+        &self,
+        id: &str,
+        to: OpStatus,
+        cause: Option<Cause>,
+        draft: Option<AuditDraft>,
+        origins: Option<&PostedMods>,
+    ) -> Result<(), OpError> {
         if !to.is_terminal() {
             return Err(OpError::IllegalTransition);
         }
-        match self.close(id, to, cause, draft.as_ref()).await {
-            Err(OpError::Storage(error)) if draft.is_some() => {
+        match self.close(id, to, cause, draft.as_ref(), origins).await {
+            Err(OpError::Storage(error)) if draft.is_some() || origins.is_some() => {
                 tracing::error!(
                     %error,
                     operation = id,
                     "clôture en échec (entrée du journal d'activité ou transition) : nouvelle tentative sans entrée"
                 );
-                self.close(id, to, cause, None).await
+                self.close(id, to, cause, None, None).await
             }
             other => other,
         }
@@ -729,6 +812,7 @@ impl ServiceOps {
         to: OpStatus,
         cause: Option<Cause>,
         draft: Option<&AuditDraft>,
+        origins: Option<&PostedMods>,
     ) -> Result<(), OpError> {
         // FIX:01M5P0Q3T8ZK6V2R9XH4DWB7NC : la porte du service, tenue jusqu'à la fin de la publication.
         let service = self
@@ -754,6 +838,13 @@ impl ServiceOps {
         let mut pending = Pending::default();
         if let Some(draft) = draft {
             pending.record(&mut *tx, draft.event(now)).await?;
+        }
+        if let Some(posted) = origins
+            && !posted.files.is_empty()
+        {
+            tx.mod_origins()
+                .record_hearth(&posted.service, &posted.files, now)
+                .await?;
         }
         tx.commit().await?;
         pending.publish(&self.trail);

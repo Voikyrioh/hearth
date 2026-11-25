@@ -236,6 +236,7 @@ export class SimulatedAccounts {
       gameSettings: known && !this.withoutGameSettings.has(server.id),
       serviceDelete: known && !this.withoutServiceDelete.has(server.id),
       serviceBackups: known && !this.withoutServiceBackups.has(server.id),
+      gameConsole: known,
       account: me?.username ?? server.username.toLowerCase(),
     };
   }

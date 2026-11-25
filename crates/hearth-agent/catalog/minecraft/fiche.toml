@@ -11,7 +11,7 @@
 
 format = 2
 id = "minecraft"
-version = 4
+version = 5
 family = "minecraft"
 name = "Minecraft Java"
 summary = "Le serveur de Minecraft Java : officiel, Paper, Purpur, Fabric, Quilt, Forge ou NeoForge, avec ou sans pack de mods."
@@ -169,7 +169,8 @@ name = "GID"
 owner = "gid"
 
 # Le tas de la JVM suit la limite de mémoire du service : `MEMORY` vide laisse la JVM calculer son tas, et
-# `MaxRAMPercentage` le fixe à 75 % de la limite (le reste sert aux mémoires hors tas). Documentation de l'image :
+# `MaxRAMPercentage` le fixe à 75 % de la limite (le reste sert aux mémoires hors tas). La limite est donnée à la
+# JVM par l'agent (`MaxRAM`, voir plus bas) : la détection de conteneur de la JVM n'est pas fiable. Documentation de l'image :
 # « To let the JVM calculate heap size automatically, unset MEMORY with an empty value ». C'est donc le curseur de
 # mémoire de l'installation qui règle Minecraft, jamais un chiffre de la fiche. Vérifié par le banc d'essai réel : avec
 # 10 Gio, le serveur du pack occupe 7,6 Gio (tas de 7,5 Gio au plus).
@@ -177,9 +178,12 @@ owner = "gid"
 name = "MEMORY"
 value = ""
 
+# Sur certains noyaux (6.18), la JVM ne lit pas la limite du conteneur et prendrait 75 % de la mémoire de l'HÔTE :
+# l'agent ajoute donc lui-même `-XX:MaxRAM=<limite du service en octets>` à cette variable (`jvm_max_ram`).
 [[env]]
 name = "JVM_XX_OPTS"
 value = "-XX:MaxRAMPercentage=75"
+jvm_max_ram = true
 
 # Attente de l'enregistrement du monde à l'arrêt : un gros monde ou un gros pack demande du temps (60 s par défaut).
 [[env]]
@@ -205,6 +209,121 @@ protocol = "source_rcon"
 port = "rcon"
 password = "rcon"
 
+# Ce que Hearth peut faire de la console (HRT-267, ADR-0067) : tout ce qui est propre au jeu est ici. Les verbes refusés
+# se demandent autrement ; les verbes sensibles exigent le mot de passe ; les commandes rapides sont celles de l'écran.
+[remote_console.use]
+reply_timeout_s = 10
+refused = [
+  { verb = "stop",    reason = "use_hearth_stop" },
+  { verb = "restart", reason = "use_hearth_restart" },
+  { verb = "reload",  reason = "breaks_server" },
+]
+
+[[remote_console.use.sensitive]]
+verb = "op"
+title = "Donner les droits d'opérateur à {joueur} ?"
+sentence = "Un opérateur peut taper toutes les commandes du jeu depuis sa partie : changer le mode de jeu, bannir, donner des objets, modifier le monde. Il garde ces droits jusqu'à ce que vous les retiriez."
+target = "first_arg"
+
+[[remote_console.use.sensitive]]
+verb = "deop"
+title = "Retirer les droits d'opérateur à {joueur} ?"
+sentence = "{joueur} ne pourra plus taper les commandes réservées aux opérateurs. Vous pourrez les lui redonner plus tard."
+target = "first_arg"
+
+[[remote_console.use.sensitive]]
+verb = "ban"
+title = "Bannir {joueur} ?"
+sentence = "{joueur} ne pourra plus se connecter à ce serveur tant que vous ne l'aurez pas gracié. S'il est connecté, il est expulsé."
+target = "first_arg"
+
+[[remote_console.use.sensitive]]
+verb = "ban-ip"
+title = "Bannir cette adresse ?"
+sentence = "Plus aucun joueur ne pourra se connecter depuis cette adresse, quel que soit son pseudo, tant que vous ne l'aurez pas graciée."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "pardon"
+title = "Gracier {joueur} ?"
+sentence = "{joueur} pourra de nouveau se connecter à ce serveur."
+target = "first_arg"
+
+[[remote_console.use.sensitive]]
+verb = "pardon-ip"
+title = "Gracier cette adresse ?"
+sentence = "Les joueurs de cette adresse pourront de nouveau se connecter à ce serveur."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "kick"
+title = "Expulser {joueur} ?"
+sentence = "{joueur} est déconnecté tout de suite. Il peut se reconnecter aussitôt, sauf s'il est banni."
+target = "first_arg"
+
+[[remote_console.use.sensitive]]
+verb = "whitelist"
+title = "Changer la liste blanche ?"
+sentence = "La liste blanche décide qui peut entrer sur le serveur quand elle est activée. Un mauvais réglage peut fermer la porte à tout le monde ou l'ouvrir à n'importe qui."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "save-off"
+title = "Arrêter l'enregistrement automatique ?"
+sentence = "Tant que l'enregistrement n'est pas rallumé, le monde n'est plus écrit sur le disque : un arrêt brutal fait perdre tout ce qui s'est passé depuis. Pensez à taper save-on."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "execute"
+title = "Exécuter une commande composée ?"
+sentence = "La commande execute peut lancer n'importe quelle autre commande à la place d'un joueur, d'un lieu ou d'une entité. Hearth ne peut pas savoir ce qu'elle fera."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "function"
+title = "Lancer une fonction ?"
+sentence = "Une fonction exécute une suite de commandes écrite à l'avance. Hearth ne peut pas savoir ce qu'elle fera : elle peut donner des droits, changer le monde ou bannir des joueurs."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "schedule"
+title = "Programmer une fonction pour plus tard ?"
+sentence = "Une fonction programmée se lancera seule, plus tard, sans que personne ne la tape. Hearth ne peut pas savoir ce qu'elle fera."
+target = "none"
+
+[[remote_console.use.sensitive]]
+verb = "datapack"
+title = "Changer les packs de données ?"
+sentence = "Un pack de données ajoute ou retire des fonctions et des règles du jeu, qui peuvent lancer des commandes seules. Un mauvais réglage peut abîmer le monde."
+target = "none"
+
+[remote_console.use.players]
+command = "list"
+reader = "minecraft_list"
+
+[[remote_console.use.quick]]
+id = "save"
+label = "Enregistrer le monde"
+text = "save-all"
+mode = "send"
+
+[[remote_console.use.quick]]
+id = "day"
+label = "Mettre le jour"
+text = "time set day"
+mode = "send"
+
+[[remote_console.use.quick]]
+id = "say"
+label = "Écrire un message à tous"
+text = "say"
+mode = "fill"
+
+[remote_console.use.before_stop]
+command = "save-all flush"
+expect = "Saved the game"
+timeout_s = 60
+
 [[agreement]]
 id = "eula"
 title = "Contrat de licence de Minecraft (EULA)"
@@ -217,10 +336,19 @@ key = "EULA"
 accepted_value = "TRUE"
 
 [mods]
-ways = ["drop_pack"]
+ways = ["drop_pack", "drop_jars"]
 
 [mods.pack]
 folder = "packs"
+
+# Les mods `.jar` d'un serveur installé (HRT-253, ADR-0062) : le jeu lit `/data/mods`, Hearth y pose et y renomme des
+# fichiers (jamais de suppression) ; « Mods retirés » (`/data/mods-retires`) n'est jamais lu par le jeu. L'arrêt simple
+# enregistre le monde (`by_image_on_signal`). Vanilla, Paper et Purpur ne prennent pas de mods `.jar` (BR-MOD-030).
+[mods.jars]
+folder = "data"
+dir = "mods"
+retired_dir = "mods-retires"
+variants = ["fabric", "quilt", "forge", "neoforge", "modrinth"]
 
 # Un pack serveur (`.zip`, `mods` et `config` à la racine) : `GENERIC_PACK`, avec un moteur à mods.
 [[mods.pack.genre]]

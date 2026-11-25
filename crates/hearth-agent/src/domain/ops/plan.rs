@@ -14,6 +14,10 @@ use time::OffsetDateTime;
 
 /// Nombre maximal d'étapes d'un plan.
 pub const MAX_STEPS: usize = 32;
+/// L'étape qui précède un arrêt demandé par Hearth quand la fiche déclare `[remote_console.use.before_stop]`
+/// (HRT-292, BR-CONSOLE-012) : jamais destructive, jamais rejouée par `recover`. Terminée (`done`) = enregistrement
+/// confirmé ; en échec (`failed`) = enregistrement non confirmé, l'arrêt continue.
+pub const CONSOLE_SAVE: &str = "console_save";
 /// Longueur maximale du nom d'une étape.
 pub const MAX_STEP_CHARS: usize = 40;
 /// Nombre maximal d'objets créés nommés par une ligne du journal.
@@ -109,6 +113,20 @@ impl OpPlan {
 
     pub fn steps(&self) -> &[PlannedStep] {
         &self.steps
+    }
+
+    /// Ce plan, avec l'étape non destructive `console_save` EN TÊTE (HRT-292). Déjà présente : rien ne change.
+    pub fn with_console_save(self) -> Result<Self, PlanError> {
+        let name = StepName::parse(CONSOLE_SAVE).ok_or(PlanError::StepName)?;
+        if self.step(&name).is_some() {
+            return Ok(self);
+        }
+        let mut steps = vec![PlannedStep {
+            name,
+            destructive: false,
+        }];
+        steps.extend(self.steps);
+        Self::new(steps, self.no_return)
     }
 
     pub fn no_return(&self) -> Option<&StepName> {
@@ -219,18 +237,69 @@ impl CreatedObject {
     }
 }
 
+/// Le genre d'un mouvement de fichier d'une opération `mods` (HRT-258, Q-T6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MoveKind {
+    /// `mods/x.jar` vers `mods-retires/` (retrait, ou ancien fichier d'un remplacement).
+    Retired,
+    /// `mods/x.jar` vers `mods/x.jar.disabled`.
+    Disabled,
+    /// `mods/x.jar.disabled` vers `mods/x.jar`.
+    Enabled,
+    /// `mods-retires/x.jar` vers `mods/`.
+    Restored,
+    /// Un fichier posé par l'opération (`from` vide) : le défaire, c'est le mettre dans `mods-retires`.
+    Placed,
+}
+
+/// Un mouvement de fichier, écrit au journal AVANT le geste (sans inode : il n'est pas encore connu pour un fichier
+/// posé) puis APRÈS (avec l'inode). Les chemins sont relatifs à la RACINE DU SERVICE (`data/mods/x.jar`), sans `..`.
+/// L'inode sert au retour : un fichier remplacé entre-temps n'est jamais déplacé à sa place.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FileMove {
+    pub kind: MoveKind,
+    /// Chemin d'origine (vide pour `Placed`).
+    pub from: String,
+    pub to: String,
+    pub dev: u64,
+    pub ino: u64,
+}
+
+impl FileMove {
+    fn is_well_formed(&self) -> bool {
+        let part = |text: &str| {
+            !text.is_empty()
+                && text.chars().count() <= MAX_OBJECT_PATH_CHARS
+                && !text.starts_with('/')
+                && !text.contains(['\\', ':'])
+                && !text.chars().any(char::is_control)
+                && text
+                    .split('/')
+                    .all(|part| !part.is_empty() && part != "." && part != "..")
+        };
+        part(&self.to)
+            && (self.kind == MoveKind::Placed && self.from.is_empty() || part(&self.from))
+    }
+}
+
 /// Ce qu'il faut pour défaire, et ce que l'étape a créé. Jamais de secret. Les champs qui s'ajouteront
 /// (ancien nom d'un conteneur, dossier échangé) seront facultatifs.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UndoInfo {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub created: Vec<CreatedObject>,
+    /// Les mouvements de fichiers d'une opération `mods` (HRT-258) : un par ligne du journal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub moves: Vec<FileMove>,
 }
 
 impl UndoInfo {
     pub fn is_well_formed(&self) -> bool {
         self.created.len() <= MAX_CREATED_PER_ROW
             && self.created.iter().all(CreatedObject::is_well_formed)
+            && self.moves.len() <= MAX_CREATED_PER_ROW
+            && self.moves.iter().all(FileMove::is_well_formed)
     }
 
     /// Relit un `undo_json` stocké ; un texte illisible ou qui nomme un chemin hors règle est refusé,
@@ -279,6 +348,27 @@ mod tests {
             name: name(text),
             destructive,
         }
+    }
+
+    #[test]
+    fn the_console_save_step_is_first_never_destructive_and_added_once() {
+        let plan = OpPlan::new(
+            vec![
+                step("stop", false),
+                step("copy", false),
+                step("place", true),
+            ],
+            Some(name("place")),
+        )
+        .unwrap()
+        .with_console_save()
+        .unwrap();
+        let names: Vec<_> = plan.steps().iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["console_save", "stop", "copy", "place"]);
+        assert!(!plan.step(&name(CONSOLE_SAVE)).unwrap().destructive);
+        assert_eq!(plan.no_return().map(StepName::as_str), Some("place"));
+        let twice = plan.clone().with_console_save().unwrap();
+        assert_eq!(twice, plan);
     }
 
     #[test]
@@ -404,6 +494,7 @@ mod tests {
     fn a_doubtful_undo_line_is_refused_whole() {
         let ok = UndoInfo {
             created: vec![object("a/b")],
+            ..UndoInfo::default()
         };
         assert_eq!(UndoInfo::from_json(&ok.to_json()), Some(ok));
         assert_eq!(UndoInfo::from_json("{}"), Some(UndoInfo::default()));

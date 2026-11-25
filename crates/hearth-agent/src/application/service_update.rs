@@ -532,9 +532,11 @@ impl ServiceUpdates {
     /// `GET /operations/services/{id}/tail` : les dernières lignes du nouveau service qui n'a pas démarré
     /// (`BR-EDIT-020`), gardées 24 heures en mémoire. `None` : aucune.
     pub fn tail(&self, operation_id: &str) -> Option<OperationTail> {
-        self.tails
-            .read(operation_id)
-            .map(|lines| OperationTail { lines })
+        self.tails.read(operation_id).map(|lines| OperationTail {
+            lines,
+            reason: None,
+            sentence: None,
+        })
     }
 
     // -----------------------------------------------------------------------------------------
@@ -732,6 +734,12 @@ impl ServiceUpdates {
             op_plan(shape)
         }
         .map_err(|error| named(UpdateError::Internal(error.to_string())))?;
+        // HRT-292 : un jeu qui tourne enregistre son monde par la console avant l'arrêt de l'ancien conteneur.
+        let plan = if !settings_only && shape.had_container && shape.was_running {
+            self.ops.plan_before_stop(key, plan).await
+        } else {
+            plan
+        };
         let old_managed: Vec<&str> = subject
             .body
             .mounts
@@ -947,6 +955,7 @@ impl ServiceUpdates {
         let was_running = job.shape.was_running;
         if job.shape.had_container {
             if was_running {
+                self.ops.console_save(&job.id, &job.key).await;
                 if let Err(finish) = self.begin(job, step::STOP_OLD).await {
                     return finish;
                 }
@@ -1361,6 +1370,7 @@ impl ServiceUpdates {
                 created_by: &job.account,
                 rev: revision.rev,
                 managed_root: &self.context.services_root,
+                jvm_options_env: self.deployments.jvm_options_env(&revision.body).as_deref(),
             },
         )
         .map_err(|error| {

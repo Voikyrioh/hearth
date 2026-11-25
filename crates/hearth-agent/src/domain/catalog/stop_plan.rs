@@ -9,7 +9,9 @@
 //! - six étapes au plus, 20 minutes au plus, délai d'arrêt de 10 à 600 secondes (vérifié au chargement, I9).
 
 use super::loading::model::Fiche;
-use super::loading::schema::fiche::{Proof, Step, StepKind, StopSignal, WorldSaved};
+use super::loading::schema::fiche::{
+    Proof, RemoteConsoleProtocol, Step, StepKind, StopSignal, WorldSaved,
+};
 use super::loading::value::order_refusal;
 
 /// Un ordre écrit sur l'entrée standard d'un service : un littéral de la fiche (1 à 64 caractères ASCII imprimables,
@@ -219,6 +221,23 @@ pub fn declares_orders(fiche: &Fiche) -> bool {
     let save = fiche.file.save.iter().flat_map(|save| save.step.iter());
     stop.chain(save)
         .any(|step| matches!(step.kind, StepKind::StdinLine))
+}
+
+/// HRT-292, BR-CONSOLE-012 : Hearth enregistre-t-il le monde PAR LA CONSOLE avant d'arrêter ce jeu ? Vrai seulement si
+/// la fiche déclare `[remote_console.use.before_stop]`, parle un protocole que Hearth sait parler (Source RCON) et
+/// désigne un port qu'elle déclare : la même réponse pour la vue de la fiche et pour l'étape du plan, jamais « si la
+/// fiche le prévoit ».
+pub fn saves_by_console_before_stop(fiche: &Fiche) -> bool {
+    let Some(console) = &fiche.file.remote_console else {
+        return false;
+    };
+    let declares = console
+        .console_use
+        .as_ref()
+        .is_some_and(|usage| usage.before_stop.is_some());
+    declares
+        && console.protocol == RemoteConsoleProtocol::SourceRcon
+        && fiche.file.port.iter().any(|port| port.id == console.port)
 }
 
 /// Le signe « prêt » n'est cru que s'il est `tested`.

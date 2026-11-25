@@ -85,6 +85,8 @@ async function page_wait(dialog: Locator) {
 }
 
 const row = (page: Page, key: string) => page.locator(`[data-row][data-key="${key}"]`);
+/** Un service ouvert prend toute la page : pour en ouvrir un autre, on revient d'abord à la liste. */
+const back = (page: Page) => page.locator("[data-detail-back]").click();
 
 test("les quatre cartes d'un serveur de jeu, aucune pour un service adopté", async ({ page }) => {
   await open(page);
@@ -94,9 +96,11 @@ test("les quatre cartes d'un serveur de jeu, aucune pour un service adopté", as
   await expect(page.locator("[data-game-password]")).toContainText("Révéler le mot de passe");
   await expect(page.locator("[data-game-stop]")).toContainText("Délai d'arrêt : 30 secondes");
   await shoot(page.locator("[data-service-detail]"), page, "game-cartes");
+  await back(page);
   await row(page, "c_vieux").click();
   await expect(page.locator("[data-game-address]")).toHaveCount(0);
   await expect(page.locator("[data-game-password]")).toHaveCount(0);
+  await back(page);
   await row(page, "h_robot").click();
   await expect(page.locator("[data-game-address]")).toHaveCount(0);
 });
@@ -110,7 +114,9 @@ test("le mot de passe se révèle, se remasque et ne reste nulle part", async ({
   await expect(card.locator("[data-game-password-value]")).toHaveText(GAME_PASSWORD);
   await expect(card).toContainText("Mot de passe visible");
   await shoot(card, page, "game-mot-de-passe-visible");
+  await back(page);
   await row(page, "h_robot").click();
+  await back(page);
   await row(page, "h_terraria").click();
   await expect(page.locator("[data-game-password]")).not.toContainText(GAME_PASSWORD);
 });

@@ -34,6 +34,23 @@ export function stopWay(stop: FicheStop): StopWay {
   return "ask";
 }
 
+/**
+ * Le discours sur l'enregistrement du monde tient en UNE lecture, celle de la fiche (`stop.worldSaved`) : la carte « Arrêt du
+ * jeu », la fenêtre « Arrêter », le refus d'une commande `stop` dans la console et l'étape 1 de « Vérifiez avant d'appliquer »
+ * partent tous de `stopWay`. `null` : la fiche n'est pas (encore) lue, aucun de ces écrans n'affirme rien.
+ */
+export function stopWayOf(view: Pick<GameView, "stop"> | null | undefined): StopWay | null {
+  return view ? stopWay(view.stop) : null;
+}
+
+/**
+ * Hearth enregistre-t-il le monde par la console avant d'arrêter ce jeu (HRT-292, BR-CONSOLE-012) ? La réponse est celle de
+ * l'agent (`stop.consoleSave`), jamais une supposition. `null` : la fiche n'est pas (encore) lue.
+ */
+export function consoleSaveOf(view: Pick<GameView, "stop"> | null | undefined): boolean | null {
+  return view ? view.stop.consoleSave : null;
+}
+
 /** Le nom du jeu pour une phrase : texte du serveur rendu inoffensif. */
 export function gameName(view: Pick<GameView, "name">): string {
   return safeText(view.name);

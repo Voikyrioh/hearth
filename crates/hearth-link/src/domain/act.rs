@@ -272,6 +272,22 @@ fn build<'a>(
                 serde_json::from_value(body.cloned().ok_or(Unreadable)?).map_err(|_| Unreadable)?;
             AdminAct::file_deposit(&request)
         }
+        // Appliquer un lot de mods (HRT-258) : la clé du service est la cible ; le nombre de changements et l'empreinte de
+        // leur liste, jamais un nom de fichier (une seule fonction, partagée avec l'agent : `AdminAct::mods_apply`).
+        ActKind::ModsApply => {
+            let request: hearth_proto::api::mods::ModsApplyRequest =
+                serde_json::from_value(body.cloned().ok_or(Unreadable)?).map_err(|_| Unreadable)?;
+            AdminAct::mods_apply(id, &request)
+        }
+        // Envoyer une commande à la console d'un jeu (HRT-268) : la clé du service est la cible ; l'empreinte de la ligne
+        // normalisée et sa classe, jamais le texte (une seule fonction, partagée avec l'agent :
+        // `AdminAct::console_command`). Une ligne hors forme ne se signe pas.
+        ActKind::ConsoleCommand => {
+            let request: hearth_proto::api::console::ConsoleRequest =
+                serde_json::from_value(body.cloned().ok_or(Unreadable)?).map_err(|_| Unreadable)?;
+            request.line().map_err(|_| Unreadable)?;
+            AdminAct::console_command(id, &request)
+        }
         // Supprimer une sauvegarde : l'identifiant, lu du chemin ; aucun paramètre.
         ActKind::BackupDelete => AdminAct::BackupDelete { target: id_ref()? },
         // Régler les éléments ignorés : la clé du service est la cible ; le nombre d'éléments et l'empreinte de
@@ -344,6 +360,8 @@ mod tests {
             }),
             "/services/{key}/spec" => json!({ "base_rev": 2, "tag": "1.2", "repull": false }),
             "/deposits" => json!({ "name": "pack.zip", "size": 1_048_576 }),
+            "/services/{key}/mods/apply" => json!({ "retire": ["old.jar"] }),
+            "/services/{key}/console" => json!({ "command": "time set day", "class": 1 }),
             "/deployments" => {
                 json!({ "name": "web", "image": "nginx", "env": [{ "name": "A", "value": "v" }] })
             }

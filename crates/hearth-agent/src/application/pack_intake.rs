@@ -12,9 +12,7 @@ use thiserror::Error;
 
 use super::ports::{DepositError, DepositFile, DepositId, PackDeposits};
 use crate::domain::archive::{self, ArchiveLimits, ArchiveRefusal, EntryKind, GIB, Inspection};
-use crate::domain::mods::pack::{
-    DescriptionError, DescriptionReader, PackEntry, PackRefusal, PackReport, judge_pack,
-};
+use crate::domain::mods::pack::{PackEntry, PackRefusal, PackReport, PrereadFiles, judge_pack};
 
 /// Taille maximale d'un pack (BR-MOD-008) : 4 Gio.
 pub const MAX_PACK_BYTES: u64 = 4 * GIB;
@@ -66,6 +64,17 @@ pub fn pack_limits() -> ArchiveLimits {
     limits
 }
 
+/// Les bornes de lecture d'un `.jar` de mod (HRT-254, BR-MOD-022) : 256 Mio le fichier, 1 Gio déballé, 65 536
+/// entrées ; le reste (profondeur, taux de compression, vérification des sommes) est celui de l'ADR-0055.
+#[allow(clippy::field_reassign_with_default)] // `verify_data` n'est pas constructible hors du module `archive`
+pub fn jar_limits() -> ArchiveLimits {
+    let mut limits = ArchiveLimits::default();
+    limits.max_file_size = 256 << 20;
+    limits.max_unpacked = 1 << 30;
+    limits.max_entries = 65_536;
+    limits
+}
+
 pub struct PackIntake {
     deposits: Arc<dyn PackDeposits>,
 }
@@ -81,26 +90,15 @@ const DESCRIPTIONS: [&str; 5] = [
 
 /// Les descriptions du pack, lues TOUTES en une passe avant le jugement : l'empreinte de l'archive n'est revérifiée
 /// qu'une fois par jugement, pas une fois par fichier lu (HRT-225).
-struct Descriptions(Vec<(&'static str, Result<Vec<u8>, ArchiveRefusal>)>);
+type Descriptions = PrereadFiles<ArchiveRefusal>;
 
-impl Descriptions {
-    fn read_all(
-        file: &mut Box<dyn DepositFile>,
-        inspection: &Inspection,
-        limits: &ArchiveLimits,
-    ) -> Result<Self, ArchiveRefusal> {
-        let found = archive::read_many(file, inspection, &DESCRIPTIONS, limits, &|| false)?;
-        Ok(Self(DESCRIPTIONS.into_iter().zip(found).collect()))
-    }
-}
-
-impl DescriptionReader for Descriptions {
-    fn read(&mut self, name: &str) -> Result<Vec<u8>, DescriptionError> {
-        match self.0.iter().find(|(known, _)| *known == name) {
-            Some((_, Ok(bytes))) => Ok(bytes.clone()),
-            _ => Err(DescriptionError::Unreadable),
-        }
-    }
+fn read_all_descriptions(
+    file: &mut Box<dyn DepositFile>,
+    inspection: &Inspection,
+    limits: &ArchiveLimits,
+) -> Result<Descriptions, ArchiveRefusal> {
+    let found = archive::read_many(file, inspection, &DESCRIPTIONS, limits, &|| false)?;
+    Ok(PrereadFiles(DESCRIPTIONS.into_iter().zip(found).collect()))
 }
 
 impl PackIntake {
@@ -143,10 +141,11 @@ impl PackIntake {
                 path: entry.path.as_str(),
                 is_file: entry.kind == EntryKind::File,
                 size: entry.size,
+                crc32: entry.crc32,
             })
             .collect();
         let mut descriptions =
-            Descriptions::read_all(file, &inspection, &limits).map_err(PackError::Archive)?;
+            read_all_descriptions(file, &inspection, &limits).map_err(PackError::Archive)?;
         let report = judge_pack(&entries, &mut descriptions).map_err(PackError::Refused)?;
         let size = file_len(file)?;
         Ok(JudgedPack {
@@ -211,6 +210,7 @@ mod tests {
             _: &ServiceKey,
             _: &RelPath,
             _: &[u8; 32],
+            _: crate::application::ports::Perms,
         ) -> Result<(), DepositError> {
             Err(DepositError::Io)
         }
@@ -327,5 +327,13 @@ mod tests {
     #[test]
     fn the_pack_size_limit_is_four_gib() {
         assert_eq!(pack_limits().max_file_size, 4 * GIB);
+    }
+
+    #[test]
+    fn the_jar_limits_are_256_mib_one_gib_and_65536_entries() {
+        let limits = jar_limits();
+        assert_eq!(limits.max_file_size, 256 << 20);
+        assert_eq!(limits.max_unpacked, GIB);
+        assert_eq!(limits.max_entries, 65_536);
     }
 }

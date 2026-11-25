@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use flate2::Crc;
 use hearth_agent::application::ports::{
-    DepositError, DepositFile, DepositId, Ownership, PackDeposits, Perms, SafeFs,
+    DepositError, DepositFile, DepositId, PackDeposits, Perms, SafeFs,
 };
 use hearth_agent::domain::files::RelPath;
 use hearth_agent::domain::services::ServiceKey;
@@ -77,6 +77,7 @@ impl PackDeposits for FakePackDeposits {
         service: &ServiceKey,
         rel: &RelPath,
         sha256: &[u8; 32],
+        perms: Perms,
     ) -> Result<(), DepositError> {
         let key = (account.to_owned(), id.as_str().to_owned());
         let bytes = self
@@ -93,7 +94,6 @@ impl PackDeposits for FakePackDeposits {
             .safe_fs
             .ensure_service_root(service)
             .map_err(|_| DepositError::Io)?;
-        let perms = Perms::new(Ownership::new(0, 0).expect("propriétaire"), 0o644).expect("droits");
         root.write_atomic(rel, &bytes, perms)
             .map_err(|_| DepositError::Io)?;
         self.lock().files.remove(&key);

@@ -106,6 +106,12 @@ pub fn recover(
     if states.contains(&StepState::Failed) {
         return attention(Cause::StepFailed);
     }
+    // Un lot de mods (HRT-259) : l'état est celui des FICHIERS du dossier des mods, que le moteur ne dit pas. Une
+    // mise en place commencée (une ligne de `place`, même `done`) n'est jamais jugée cohérente : « à vérifier », avec
+    // « Revenir à l'état d'avant » (rejoue le journal) et « J'ai vérifié ».
+    if kind == OpKind::Mods {
+        return attention(Cause::StateUnknown);
+    }
     match observed {
         Observed::Coherent(ConfigSide::Before) => interrupted(Cause::RunsWithPrevious),
         Observed::Coherent(ConfigSide::After) => interrupted(Cause::RunsWithNew),
@@ -227,6 +233,108 @@ mod tests {
     }
 
     use StepState::{Done, Failed, Intent, Undone};
+
+    /// Un lot de mods : le plan réel de l'opération.
+    fn mods_plan() -> OpPlan {
+        crate::domain::ops::mods::op_plan(true).unwrap()
+    }
+
+    #[test]
+    fn a_batch_of_mods_killed_before_the_placement_is_interrupted_and_its_partial_backup_is_removed()
+     {
+        let plan = mods_plan();
+        let mut copy = row(2, "copy", StepState::Intent);
+        copy.undo = UndoInfo {
+            created: vec![CreatedObject {
+                root: ObjectRoot::Backups,
+                rel: "h_x/01J.tar.gz.part".into(),
+                dev: 1,
+                ino: 2,
+                kind: ObjectKind::PartialArchive,
+            }],
+            ..UndoInfo::default()
+        };
+        for rows in [
+            vec![],
+            vec![row(1, "stop", StepState::Done)],
+            vec![row(1, "stop", StepState::Done), copy.clone()],
+            vec![
+                row(1, "stop", StepState::Done),
+                row(2, "copy", StepState::Done),
+                row(3, "verify", StepState::Done),
+            ],
+        ] {
+            let recovery = recover(
+                OpKind::Mods,
+                &plan,
+                &rows,
+                Observed::Coherent(ConfigSide::Before),
+            );
+            assert_eq!(recovery.status, OpStatus::Interrupted, "{rows:?}");
+            assert!(!recovery.keeps_lock);
+        }
+        let recovery = recover(
+            OpKind::Mods,
+            &plan,
+            &[row(1, "stop", StepState::Done), copy],
+            Observed::Unreadable,
+        );
+        assert_eq!(
+            recovery.cleanup.len(),
+            1,
+            "la partie de sauvegarde part, par son inode"
+        );
+    }
+
+    #[test]
+    fn a_batch_of_mods_killed_during_or_after_the_placement_needs_attention_whatever_the_engine_says()
+     {
+        let plan = mods_plan();
+        let upto_place = |state| {
+            vec![
+                row(1, "stop", StepState::Done),
+                row(2, "copy", StepState::Done),
+                row(3, "verify", StepState::Done),
+                row(4, "place", state),
+            ]
+        };
+        let cases = [
+            // Au milieu d'un mouvement : l'intention est la dernière ligne de `place`.
+            upto_place(StepState::Intent),
+            // Entre deux mouvements, ou après le dernier : `place` est `done`.
+            upto_place(StepState::Done),
+            // Après la mise en place : relance puis surveillance.
+            {
+                let mut rows = upto_place(StepState::Done);
+                rows.push(row(5, "start", StepState::Done));
+                rows.push(row(6, "watch", StepState::Intent));
+                rows
+            },
+        ];
+        for rows in cases {
+            for observed in [
+                Observed::Coherent(ConfigSide::Before),
+                Observed::Coherent(ConfigSide::After),
+                Observed::Ambiguous,
+                Observed::Unreadable,
+            ] {
+                let recovery = recover(OpKind::Mods, &plan, &rows, observed);
+                assert_eq!(
+                    recovery.status,
+                    OpStatus::NeedsAttention,
+                    "{rows:?} {observed:?}"
+                );
+                assert!(recovery.keeps_lock);
+                assert_eq!(
+                    recovery.choices,
+                    vec![
+                        crate::domain::ops::Choice::Revert,
+                        crate::domain::ops::Choice::Verified
+                    ]
+                );
+            }
+        }
+    }
 
     #[test]
     fn the_table_of_the_design() {
@@ -491,5 +599,109 @@ mod tests {
         // Les autres genres gardent leur cause : « non exécuté ».
         let delete = recover(OpKind::Delete, &plan, &[], Observed::Unreadable);
         assert_eq!(delete.cause, Cause::NotExecuted);
+    }
+
+    /// HRT-292, BR-CONSOLE-012 : l'enregistrement avant l'arrêt n'est jamais rejoué, quelle que soit la ligne où
+    /// l'opération a été coupée.
+    #[test]
+    fn a_cut_console_save_is_interrupted_and_never_replayed() {
+        let plan = OpPlan::new(
+            vec![
+                PlannedStep {
+                    name: name("console_save"),
+                    destructive: false,
+                },
+                PlannedStep {
+                    name: name("stop"),
+                    destructive: false,
+                },
+            ],
+            None,
+        )
+        .unwrap();
+        for rows in [
+            vec![row(1, "console_save", Intent)],
+            vec![row(1, "console_save", Done)],
+            vec![row(1, "console_save", Failed)],
+        ] {
+            let recovery = recover(OpKind::Stop, &plan, &rows, Observed::Unreadable);
+            assert_eq!(recovery.status, OpStatus::Interrupted);
+            assert!(!recovery.keeps_lock);
+            assert!(recovery.choices.is_empty());
+        }
+    }
+
+    /// HRT-292, BR-CONSOLE-012 : une étape `console_save` close en échec (jeu muet) ne change pas la reprise d'un lot de
+    /// mods ni d'une sauvegarde à froid, ligne par ligne, qu'une étape destructive soit close ou non.
+    #[test]
+    fn a_failed_console_save_changes_no_classification_of_a_mods_or_backup_operation() {
+        use hearth_proto::api::backups::BackupMode;
+        let backup = crate::domain::ops::backup::op_plan(BackupMode::StopCopyStart).unwrap();
+        type Cut<'a> = Vec<(&'a str, StepState)>;
+        let cases: Vec<(OpKind, OpPlan, Cut)> = vec![
+            (
+                OpKind::Mods,
+                mods_plan(),
+                vec![
+                    ("stop", Done),
+                    ("copy", Done),
+                    ("verify", Done),
+                    ("place", Intent),
+                ],
+            ),
+            (
+                OpKind::Mods,
+                mods_plan(),
+                vec![
+                    ("stop", Done),
+                    ("copy", Done),
+                    ("verify", Done),
+                    ("place", Done),
+                ],
+            ),
+            (OpKind::Mods, mods_plan(), vec![("stop", Intent)]),
+            (
+                OpKind::Backup,
+                backup.clone(),
+                vec![("stop", Done), ("copy", Intent)],
+            ),
+            (
+                OpKind::Backup,
+                backup,
+                vec![
+                    ("stop", Done),
+                    ("copy", Done),
+                    ("verify", Done),
+                    ("start", Intent),
+                ],
+            ),
+        ];
+        for (kind, plan, steps) in cases {
+            let with_save = plan.clone().with_console_save().unwrap();
+            let bare: Vec<StepRecord> = steps
+                .iter()
+                .zip(1..)
+                .map(|((step, state), seq)| row(seq, step, *state))
+                .collect();
+            let mut saved = vec![row(1, "console_save", Failed)];
+            saved.extend(
+                steps
+                    .iter()
+                    .zip(2..)
+                    .map(|((step, state), seq)| row(seq, step, *state)),
+            );
+            for observed in [
+                Observed::Coherent(ConfigSide::Before),
+                Observed::Coherent(ConfigSide::After),
+                Observed::Ambiguous,
+                Observed::Unreadable,
+            ] {
+                assert_eq!(
+                    recover(kind, &with_save, &saved, observed),
+                    recover(kind, &plan, &bare, observed),
+                    "{kind:?} {steps:?} {observed:?}"
+                );
+            }
+        }
     }
 }

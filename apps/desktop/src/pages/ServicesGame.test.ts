@@ -35,6 +35,7 @@ const SEQUENCE: GameView["stop"] = {
   graceSeconds: 30,
   worldSaved: "by_sequence",
   sequenceTested: true,
+  consoleSave: false,
 };
 
 async function open(
@@ -498,6 +499,7 @@ describe("la confirmation d'un arrêt reprend la phrase de la fiche (BR-JEU-004,
       graceSeconds: 120,
       worldSaved: "by_image_on_signal",
       sequenceTested: false,
+      consoleSave: false,
     });
     await stop(wrapper);
     expect(dialogText()).toContain(
@@ -507,7 +509,11 @@ describe("la confirmation d'un arrêt reprend la phrase de la fiche (BR-JEU-004,
   });
 
   it("suite non essayée : Hearth ne peut pas demander à enregistrer", async () => {
-    const { wrapper } = await open(undefined, { ...SEQUENCE, sequenceTested: false });
+    const { wrapper } = await open(undefined, {
+      ...SEQUENCE,
+      sequenceTested: false,
+      consoleSave: false,
+    });
     await stop(wrapper);
     expect(dialogText()).toContain(
       "Hearth ne peut pas demander à Terraria d'enregistrer son monde.",
@@ -632,6 +638,7 @@ describe("la séquence « Sauvegarde du monde » puis « Arrêt » (BR-JEU-003, 
       graceSeconds: 120,
       worldSaved: "by_image_on_signal",
       sequenceTested: false,
+      consoleSave: false,
     });
     await stop(wrapper);
     await confirmDialog("Arrêter le service", OWN);
@@ -686,7 +693,7 @@ describe("la séquence « Sauvegarde du monde » puis « Arrêt » (BR-JEU-003, 
 });
 
 describe("la décision quand la confirmation manque (BR-JEU-006, BR-JEU-007)", () => {
-  const UNTESTED: GameView["stop"] = { ...SEQUENCE, sequenceTested: false };
+  const UNTESTED: GameView["stop"] = { ...SEQUENCE, sequenceTested: false, consoleSave: false };
 
   async function ask() {
     const opened = await open(undefined, UNTESTED);

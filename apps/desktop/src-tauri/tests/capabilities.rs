@@ -410,6 +410,33 @@ const EXPECTED: &[(&str, &str)] = &[
         "serverId: string, key: string, backup: BackupRequestDto, adminPassword: string | null",
     ),
     ("verifyBackup", "serverId: string, backupId: string"),
+    // HRT-253 à HRT-269 (0.2.2) : mods Minecraft, console et liste des mods d'une sauvegarde. Relu le 24/11/2026
+    // (Voiky). Les dépôts sont des identifiants de transfert ; `fileSha256` lit un fichier choisi par la boîte « Ouvrir »
+    // ou déposé, jamais un chemin saisi. EXCEPTION VOULUE : `sendConsole.command` est le texte tapé dans la console,
+    // envoyé tel quel : c'est l'objet même de la console. L'agent le classe (`commandClass` validé 1 ou 2 par la
+    // coquille), une commande sensible exige le mot de passe, le texte n'est ni gardé ni tracé.
+    ("listMods", "serverId: string, key: string"),
+    (
+        "checkMods",
+        "serverId: string, key: string, deposits: string[]",
+    ),
+    (
+        "applyMods",
+        "serverId: string, key: string, batch: ModsApplyDto, adminPassword: string | null",
+    ),
+    (
+        "readBackupMods",
+        "serverId: string, key: string, backupId: string, compare: boolean",
+    ),
+    ("describeConsole", "serverId: string, key: string"),
+    ("readPlayers", "serverId: string, key: string"),
+    (
+        "sendConsole",
+        "serverId: string, key: string, command: string, commandClass: number, adminPassword: string | null",
+    ),
+    ("readOperationTail", "serverId: string, operationId: string"),
+    ("fileSha256", "source: DepositSourceDto"),
+    ("pickDepositFiles", ""),
     (
         "deleteBackup",
         "serverId: string, backupId: string, adminPassword: string | null",
@@ -503,6 +530,9 @@ const ADMIN_COMMANDS: &[(&str, &str)] = &[
     ("setPublicAddress", "adminPassword"),
     ("saveGameSettings", "adminPassword"),
     ("cancelServiceOperation", "adminPassword"),
+    // 0.2.2 : appliquer un lot de mods (acte 0x20) et envoyer une commande de console (acte 0x30).
+    ("applyMods", "adminPassword"),
+    ("sendConsole", "adminPassword"),
 ];
 
 /// Les commandes qui ne modifient RIEN chez l'agent : lectures, réglages locaux, abonnements.
@@ -586,6 +616,16 @@ const NOT_AN_ADMIN_ACT: &[&str] = &[
     "resumeTransfer",
     "cancelTransfer",
     "dismissTransfer",
+    // 0.2.2 : lectures des mods, de la console et des joueurs ; `checkMods` est une consultation (aucune écriture) ;
+    // `fileSha256` et `pickDepositFiles` sont locaux au poste.
+    "listMods",
+    "checkMods",
+    "readBackupMods",
+    "describeConsole",
+    "readPlayers",
+    "readOperationTail",
+    "fileSha256",
+    "pickDepositFiles",
 ];
 
 /// Toute commande exposée est soit un acte d'administration de la liste fermée (avec son mot de passe de

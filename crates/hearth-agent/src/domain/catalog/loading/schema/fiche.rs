@@ -330,6 +330,10 @@ pub struct EnvVar {
     pub secret: Option<String>,
     pub owner: Option<OwnerKind>,
     pub when: Option<When>,
+    /// Cette variable porte les options de la JVM : quand le service a une limite de mémoire, l'agent y ajoute
+    /// `-XX:MaxRAM=<limite en octets>` (FIX:01M7Q1M71TKSBWVV0C0GTXWWXZ). Exige une valeur fixe.
+    #[serde(default)]
+    pub jvm_max_ram: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -360,13 +364,102 @@ pub enum RemoteConsoleProtocol {
     TelnetLine,
 }
 
-/// Console distante déclarée. Hearth ne s'y connecte pas dans ce format (ADR-0052, point 8).
+/// Console distante déclarée. Hearth ne s'y connecte que si `[remote_console.use]` l'y autorise (HRT-267, ADR-0067).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteConsole {
     pub protocol: RemoteConsoleProtocol,
     pub port: String,
     pub password: String,
+    /// Ce que Hearth peut faire de cette console : tout ce qui est propre au jeu (verbes refusés, sensibles, joueurs,
+    /// commandes rapides) vit ici, jamais dans le client ni dans l'agent.
+    #[serde(default, rename = "use")]
+    pub console_use: Option<RemoteConsoleUse>,
+}
+
+fn default_reply_timeout_s() -> u32 {
+    10
+}
+
+/// `[remote_console.use]` : l'autorisation de Hearth de parler à la console, et ce qui est propre au jeu.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteConsoleUse {
+    #[serde(default = "default_reply_timeout_s")]
+    pub reply_timeout_s: u32,
+    #[serde(default)]
+    pub refused: Vec<RefusedVerb>,
+    #[serde(default)]
+    pub sensitive: Vec<SensitiveVerb>,
+    #[serde(default)]
+    pub players: Option<PlayersCommand>,
+    #[serde(default)]
+    pub quick: Vec<QuickCommand>,
+    #[serde(default)]
+    pub before_stop: Option<BeforeStop>,
+}
+
+/// Un verbe que Hearth n'envoie jamais, avec la raison (liste fermée : `use_hearth_stop`, `use_hearth_restart`,
+/// `breaks_server`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RefusedVerb {
+    pub verb: String,
+    pub reason: String,
+}
+
+/// Quel argument de la commande est pris pour `{joueur}` et pour le journal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SensitiveTarget {
+    FirstArg,
+    None,
+}
+
+/// Un verbe sensible : le mot de passe est exigé, la fenêtre dit pourquoi avec les mots du jeu.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SensitiveVerb {
+    pub verb: String,
+    pub title: String,
+    pub sentence: String,
+    pub target: SensitiveTarget,
+}
+
+/// La commande qui liste les joueurs et le lecteur de sa réponse (liste fermée : `minecraft_list`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlayersCommand {
+    pub command: String,
+    pub reader: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuickMode {
+    /// Envoyée telle quelle.
+    Send,
+    /// Posée dans le champ de saisie, à compléter.
+    Fill,
+}
+
+/// Une commande rapide proposée par l'écran.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuickCommand {
+    pub id: String,
+    pub label: String,
+    pub text: String,
+    pub mode: QuickMode,
+}
+
+/// L'ordre à envoyer avant un arrêt demandé par Hearth, et la réponse attendue (HRT-292).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BeforeStop {
+    pub command: String,
+    pub expect: String,
+    pub timeout_s: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -683,11 +776,15 @@ pub struct Migration {
 /// `fetch_by_agent` arrivent avec leurs tickets (HRT-126) ; une valeur inconnue est refusée au chargement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)] // les noms de la fiche (`drop_files`, `drop_pack`, `drop_jars`)
 pub enum ModWay {
     /// Fichiers déposés dans le dossier de rôle `mods`.
     DropFiles,
     /// Un pack déposé (`[mods.pack]`).
     DropPack,
+    /// Des fichiers `.jar` posés un à un dans le dossier des mods d'un dossier de rôle `data` (`[mods.jars]`,
+    /// HRT-253, ADR-0062).
+    DropJars,
 }
 
 /// Genre de pack, reconnu par le CONTENU de l'archive, jamais par son nom (BR-MOD-007). Aucun genre
@@ -722,4 +819,17 @@ pub struct PackWay {
 pub struct Mods {
     pub ways: Vec<ModWay>,
     pub pack: Option<PackWay>,
+    pub jars: Option<ModsJars>,
+}
+
+/// Les mods `.jar` d'un serveur installé (HRT-253, BR-MOD-001) : le dossier de rôle `data` qui les contient, le
+/// sous-dossier lu par le jeu, le sous-dossier « Mods retirés » (jamais lu par le jeu) et les variantes (moteurs)
+/// qui les prennent. Aucun chemin libre : `dir` et `retired_dir` sont un seul composant.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModsJars {
+    pub folder: String,
+    pub dir: String,
+    pub retired_dir: String,
+    pub variants: Vec<String>,
 }
